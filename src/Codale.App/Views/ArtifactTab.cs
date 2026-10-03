@@ -308,6 +308,7 @@ public sealed partial class ArtifactTab : UserControl
         {
             // A missing image must not leave the previous artifact's picture behind.
             _image.Source = null;
+            _markdown.BasePath = artifact.SourcePath is { } source ? System.IO.Path.GetDirectoryName(source) : null;
             _markdown.Markdown = artifact.IsImage ? "_The image file is no longer available._" : ReadMarkdown(artifact);
         }
     }

@@ -239,14 +239,37 @@ public sealed class MarkdownParserTests
     }
 
     [Fact]
-    public void Links_render_and_images_become_their_alt_text()
+    public void Links_render_and_images_parse_as_images()
     {
         var blocks = MarkdownParser.Parse("see [the docs](https://example.com/a?b=c) and ![a pic](https://example.com/x.png)");
 
         var paragraph = Assert.IsType<MarkdownBlock.Paragraph>(blocks[0]);
 
         Assert.True(paragraph.Content[1] is MarkdownInline.Link { Url: "https://example.com/a?b=c" });
-        Assert.True(paragraph.Content[3] is MarkdownInline.Link { Url: "https://example.com/x.png" });
+        Assert.True(paragraph.Content[3] is MarkdownInline.Image
+        {
+            Url: "https://example.com/x.png",
+            Content: [MarkdownInline.Text { Value: "a pic" }],
+        });
+    }
+
+    [Fact]
+    public void An_image_alt_line_parses_its_own_inlines()
+    {
+        var blocks = MarkdownParser.Parse("![a **bold** pic](img/shot.png)");
+
+        var paragraph = Assert.IsType<MarkdownBlock.Paragraph>(blocks.Single());
+
+        Assert.True(paragraph.Content.Single() is MarkdownInline.Image
+        {
+            Url: "img/shot.png",
+            Content:
+            [
+                MarkdownInline.Text { Value: "a " },
+                MarkdownInline.Emphasis { Strong: true, Content: [MarkdownInline.Text { Value: "bold" }] },
+                MarkdownInline.Text { Value: " pic" },
+            ],
+        });
     }
 
     [Fact]

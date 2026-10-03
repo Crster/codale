@@ -48,7 +48,7 @@ public enum TableAlignment
     Right,
 }
 
-/// <summary>The inline shapes inside a block: styled runs, code spans, and links.</summary>
+/// <summary>The inline shapes inside a block: styled runs, code spans, links, and images.</summary>
 public abstract record MarkdownInline
 {
     public sealed record Text(string Value) : MarkdownInline;
@@ -60,8 +60,14 @@ public abstract record MarkdownInline
 
     public sealed record Strike(IReadOnlyList<MarkdownInline> Content) : MarkdownInline;
 
-    /// <summary>A [label](url) link; images render as their alt text.</summary>
+    /// <summary>A [label](url) link.</summary>
     public sealed record Link(IReadOnlyList<MarkdownInline> Content, string Url) : MarkdownInline;
+
+    /// <summary>
+    /// An ![alt](url) image. The view resolves local paths and data URIs; remote URLs stay
+    /// links, so agent-authored text cannot make the transcript phone home.
+    /// </summary>
+    public sealed record Image(IReadOnlyList<MarkdownInline> Content, string Url) : MarkdownInline;
 }
 
 /// <summary>
@@ -673,9 +679,8 @@ public static class MarkdownParser
                     break;
 
                 case '!' when i + 1 < text.Length && text[i + 1] == '[' && ParseLink(text, i + 1) is { } image:
-                    // Images render as their alt text; the transcript never loads them.
                     Flush();
-                    inlines.Add(new MarkdownInline.Link(ParseInlines(image.Label, depth + 1), image.Url));
+                    inlines.Add(new MarkdownInline.Image(ParseInlines(image.Label, depth + 1), image.Url));
                     i = image.Next;
                     break;
 

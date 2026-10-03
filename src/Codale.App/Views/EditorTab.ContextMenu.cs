@@ -153,6 +153,7 @@ public sealed partial class EditorTab
                 _previewing = !_previewing;
                 if (_previewing)
                 {
+                    MarkdownPreview.BasePath = ViewModel.FilePath is { } file ? Path.GetDirectoryName(file) : null;
                     MarkdownPreview.Markdown = FileEditor.GetText();
                 }
 

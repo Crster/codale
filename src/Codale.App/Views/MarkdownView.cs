@@ -7,8 +7,10 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Shapes;
 
+using Windows.Storage.Streams;
 using Windows.UI;
 
 namespace Codale.App.Views;
@@ -25,6 +27,10 @@ namespace Codale.App.Views;
 public sealed class MarkdownView : StackPanel
 {
     private static readonly FontFamily CodeFont = new("Cascadia Mono, Consolas");
+
+    /// <summary>Largest accepted data: URI payload, base64 characters; a screenshot fits,
+    /// a paste that would wedge the stream does not.</summary>
+    private const int MaxDataImageBase64 = 12 * 1024 * 1024;
 
     /// <summary>While a reply streams, deltas land many times a second; this debounces
     /// the rebuild so each frame parses at most once.</summary>
@@ -100,6 +106,19 @@ public sealed class MarkdownView : StackPanel
         set => SetValue(BaseFontSizeProperty, value);
     }
 
+    public static readonly DependencyProperty BasePathProperty = DependencyProperty.Register(
+        nameof(BasePath),
+        typeof(string),
+        typeof(MarkdownView),
+        new PropertyMetadata(null, OnMarkdownChanged));
+
+    /// <summary>The folder relative image paths resolve against; null leaves them unresolved.</summary>
+    public string? BasePath
+    {
+        get => (string?)GetValue(BasePathProperty);
+        set => SetValue(BasePathProperty, value);
+    }
+
     private static void OnMarkdownChanged(DependencyObject sender, DependencyPropertyChangedEventArgs e)
     {
         if (sender is MarkdownView view)
@@ -142,7 +161,7 @@ public sealed class MarkdownView : StackPanel
                     break;
 
                 case MarkdownBlock.Paragraph paragraph:
-                    into.Add(Prose(paragraph.Content, size, (0, 0, 0, 2)));
+                    AddWithImages(into, paragraph.Content, size, content => Prose(content, size, (0, 0, 0, 2)));
                     break;
 
                 case MarkdownBlock.ListItem item:
@@ -522,9 +541,238 @@ public sealed class MarkdownView : StackPanel
                     into.Add(hyperlink);
                     break;
                 }
+
+                case MarkdownInline.Image image:
+                    // A table cell, list row or heading cannot host the Image control; the
+                    // alt text stays as the link it came from instead of vanishing.
+                    into.Add(ImageFallbackLink(image, size));
+                    break;
             }
         }
     }
+
+    /// <summary>
+    /// Prose is a TextBlock, which cannot host the Image control an image inline needs,
+    /// so a paragraph that mixes words and pictures splits at every picture. One that must
+    /// not load (a remote URL) falls back into the prose as linked alt text instead.
+    /// </summary>
+    private void AddWithImages(UIElementCollection into, IReadOnlyList<MarkdownInline> content, double size, Func<IReadOnlyList<MarkdownInline>, TextBlock> prose)
+    {
+        var pending = new List<MarkdownInline>();
+
+        void Flush()
+        {
+            if (pending.Count > 0)
+            {
+                into.Add(prose(pending));
+                pending.Clear();
+            }
+        }
+
+        foreach (var inline in content)
+        {
+            if (inline is MarkdownInline.Image image && ImageFrame(image, size, into) is { } frame)
+            {
+                Flush();
+                into.Add(frame);
+            }
+            else
+            {
+                pending.Add(inline);
+            }
+        }
+
+        Flush();
+    }
+
+    /// <summary>
+    /// The Image for an ![alt](url) inline, or null when the URL should not load: remote
+    /// images stay links, because agent-written markdown must not be able to make the
+    /// transcript phone home. An image that fails to decode swaps to linked alt text.
+    /// </summary>
+    private Microsoft.UI.Xaml.Controls.Image? ImageFrame(MarkdownInline.Image image, double size, UIElementCollection into)
+    {
+        if (LocalImageSource(image.Url) is not { } source)
+        {
+            return null;
+        }
+
+        var frame = new Microsoft.UI.Xaml.Controls.Image
+        {
+            Stretch = Stretch.Uniform,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            MaxHeight = 320,
+            Margin = new Thickness(0, 2, 0, 4),
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(frame, InlineText(image.Content));
+
+        if (source.Bytes is { } bytes)
+        {
+            _ = LoadDataImageAsync(frame, bytes, into, image, size);
+        }
+        else
+        {
+            frame.ImageFailed += (_, _) => ReplaceImage(into, frame, AltTextBlock(ImageFallbackLink(image, size), size));
+            frame.Source = new BitmapImage(new Uri(source.Path));
+        }
+
+        return frame;
+    }
+
+    /// <summary>
+    /// Where an image URL lands on disk — an absolute or document-relative path, a file:
+    /// URI, or a data: URI's bytes — or null when it should not render as a picture.
+    /// </summary>
+    private (string Path, byte[]? Bytes)? LocalImageSource(string url)
+    {
+        if (url.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            return DataImageBytes(url) is { } bytes ? (url, bytes) : null;
+        }
+
+        if (url.StartsWith("http:", StringComparison.OrdinalIgnoreCase) || url.StartsWith("https:", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        string path;
+        if (url.StartsWith("file:", StringComparison.OrdinalIgnoreCase)
+            && Uri.TryCreate(url, UriKind.Absolute, out var file))
+        {
+            path = file.LocalPath; // already unescaped
+        }
+        else
+        {
+            path = Uri.UnescapeDataString(url);
+        }
+
+        try
+        {
+            if (!System.IO.Path.IsPathRooted(path))
+            {
+                if (BasePath is not { } dir)
+                {
+                    return null;
+                }
+
+                path = System.IO.Path.GetFullPath(System.IO.Path.Combine(dir, path));
+            }
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        return System.IO.File.Exists(path) ? (path, null) : null;
+    }
+
+    /// <summary>The bytes of a data:image/...;base64 URI, or null when malformed or oversized.</summary>
+    private static byte[]? DataImageBytes(string url)
+    {
+        var comma = url.IndexOf(',');
+        if (comma < 0
+            || !url[..comma].EndsWith(";base64", StringComparison.OrdinalIgnoreCase)
+            || url.Length - comma - 1 > MaxDataImageBase64)
+        {
+            return null;
+        }
+
+        try
+        {
+            return Convert.FromBase64String(url[(comma + 1)..]);
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>A data URI decodes from bytes rather than a file, so the bitmap fills from a
+    /// stream once the frame is placed; a corrupt payload swaps in linked alt text.</summary>
+    private async Task LoadDataImageAsync(Microsoft.UI.Xaml.Controls.Image frame, byte[] bytes, UIElementCollection into, MarkdownInline.Image image, double size)
+    {
+        try
+        {
+            var stream = new InMemoryRandomAccessStream();
+            using (var writer = new DataWriter(stream))
+            {
+                writer.WriteBytes(bytes);
+                await writer.StoreAsync();
+                await writer.FlushAsync();
+                writer.DetachStream();
+            }
+
+            stream.Seek(0);
+            var bitmap = new BitmapImage();
+            await bitmap.SetSourceAsync(stream);
+            frame.Source = bitmap;
+        }
+        catch (Exception)
+        {
+            ReplaceImage(into, frame, AltTextBlock(ImageFallbackLink(image, size), size));
+        }
+    }
+
+    /// <summary>A frame that could not draw gives its spot back — the view may have rebuilt
+    /// while the bitmap decoded, in which case the stale frame is gone already.</summary>
+    private static void ReplaceImage(UIElementCollection into, FrameworkElement frame, FrameworkElement fallback)
+    {
+        var at = into.IndexOf(frame);
+        if (at < 0)
+        {
+            return;
+        }
+
+        into.RemoveAt(at);
+        into.Insert(at, fallback);
+    }
+
+    /// <summary>Where an image cannot draw — a remote URL, a nested cell, a load failure —
+    /// its alt text stays on screen as the link it came from.</summary>
+    private Hyperlink ImageFallbackLink(MarkdownInline.Image image, double size)
+    {
+        var hyperlink = new Hyperlink();
+        FillInlines(hyperlink.Inlines, image.Content, size, linkify: false);
+
+        if (Uri.TryCreate(image.Url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
+        {
+            hyperlink.NavigateUri = uri;
+        }
+        else if (FileTarget(image.Url) is { } target)
+        {
+            hyperlink.Click += (_, _) => FileLinkClicked?.Invoke(this, target);
+        }
+
+        return hyperlink;
+    }
+
+    /// <summary>A failed or unloaded image's alt line as prose, still carrying the link.</summary>
+    private TextBlock AltTextBlock(Hyperlink link, double size)
+    {
+        var text = new TextBlock
+        {
+            FontSize = size,
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+            Foreground = ThemeBrush("MdBodyBrush", 0xD4, 0xD7, 0xDF),
+        };
+        text.Inlines.Add(link);
+        return text;
+    }
+
+    /// <summary>An inline list as plain text — an image's alt line, for tools that read it.</summary>
+    private static string InlineText(IReadOnlyList<MarkdownInline> content) => string.Concat(content.Select(TextOf));
+
+    private static string TextOf(MarkdownInline inline) => inline switch
+    {
+        MarkdownInline.Text text => text.Value,
+        MarkdownInline.CodeSpan code => code.Value,
+        MarkdownInline.Emphasis emphasis => InlineText(emphasis.Content),
+        MarkdownInline.Strike struck => InlineText(struck.Content),
+        MarkdownInline.Link link => InlineText(link.Content),
+        MarkdownInline.Image image => InlineText(image.Content),
+        _ => "",
+    };
 
     /// <summary>
     /// A file path or line in the transcript was clicked. Static because the view is
