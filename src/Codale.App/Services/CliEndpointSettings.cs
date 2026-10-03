@@ -89,6 +89,13 @@ public sealed class CliEndpointSettings
             ["ANTHROPIC_API_KEY"] = token,
         };
 
+        // The CLI abandons a request after 10 minutes by default; a slow provider or a long
+        // reasoning pass behind the bridge can outlast that. A value the user set wins.
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("API_TIMEOUT_MS")))
+        {
+            env["API_TIMEOUT_MS"] = "1800000";
+        }
+
         if (def is { Length: > 0 })
         {
             env["ANTHROPIC_MODEL"] = def;
