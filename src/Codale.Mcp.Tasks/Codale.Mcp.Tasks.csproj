@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Codale.Mcp.Common\Codale.Mcp.Common.csproj" />
+    <ProjectReference Include="..\Codale.Core\Codale.Core.csproj" />
+    <ProjectReference Include="..\Codale.Commands\Codale.Commands.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Codale.Mcp.Tasks</RootNamespace>
+  </PropertyGroup>
+
+</Project>

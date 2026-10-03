@@ -1,0 +1,379 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="Codale.App.Views.DiffTab"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:git="using:Codale.Git"
+    xmlns:views="using:Codale.App.Views"
+    mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <views:DiffBackgroundConverter x:Key="DiffBackground" />
+        <views:DiffForegroundConverter x:Key="DiffForeground" />
+        <views:NullToVisibilityConverter x:Key="NullToVisibility" />
+        <views:NullToInverseVisibilityConverter x:Key="NullToInverseVisibility" />
+        <views:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+        <views:CountToVisibilityConverter x:Key="CountToVisibility" />
+        <views:ChangeLetterBrushConverter x:Key="ChangeLetterBrush" />
+
+        <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas</FontFamily>
+
+        <!--  One card look for the header, the file list and the diff pane.  -->
+        <Style x:Key="DiffCard" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource DetailSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource DetailStrokeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+        </Style>
+
+        <Style x:Key="FileItem" TargetType="ListViewItem">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="Margin" Value="0,0,0,1" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="CornerRadius" Value="6" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid Padding="16,12,16,12" RowSpacing="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!--  Header: the full subject (the tab header truncates it), then where the diff
+              came from - sha, author and date for a commit, the path otherwise - and the
+              size of the whole change.  -->
+        <Border Padding="14,10" Style="{StaticResource DiffCard}">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Spacing="6">
+                    <TextBlock
+                        FontSize="15"
+                        FontWeight="SemiBold"
+                        IsTextSelectionEnabled="True"
+                        MaxLines="2"
+                        Text="{x:Bind ViewModel.Title, Mode=OneWay}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="WrapWholeWords" />
+
+                    <StackPanel
+                        Orientation="Horizontal"
+                        Spacing="12"
+                        Visibility="{x:Bind ViewModel.IsCommit, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                        <Border
+                            Padding="6,1"
+                            VerticalAlignment="Center"
+                            Background="{StaticResource PillBackgroundBrush}"
+                            CornerRadius="4"
+                            ToolTipService.ToolTip="{x:Bind ViewModel.Commit.Sha, Mode=OneWay}">
+                            <TextBlock
+                                FontFamily="{StaticResource MonoFont}"
+                                FontSize="11"
+                                Foreground="{StaticResource KindAskBrush}"
+                                IsTextSelectionEnabled="True"
+                                Text="{x:Bind ViewModel.Commit.ShortSha, Mode=OneWay}" />
+                        </Border>
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <FontIcon
+                                FontSize="11"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Glyph="&#xE77B;" />
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{x:Bind ViewModel.Commit.Author, Mode=OneWay}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <FontIcon
+                                FontSize="11"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Glyph="&#xE823;" />
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{x:Bind ViewModel.Commit.RelativeDate, Mode=OneWay}"
+                                ToolTipService.ToolTip="{x:Bind ViewModel.CommitDate, Mode=OneWay}" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <TextBlock
+                        FontFamily="{StaticResource MonoFont}"
+                        FontSize="12"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{x:Bind ViewModel.Subtitle, Mode=OneWay}"
+                        TextTrimming="CharacterEllipsis"
+                        ToolTipService.ToolTip="{x:Bind ViewModel.Subtitle, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.IsNotCommit, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                </StackPanel>
+
+                <StackPanel
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="8"
+                    Visibility="{x:Bind ViewModel.Files.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                    <ProgressRing
+                        Width="14"
+                        Height="14"
+                        IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}" />
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontSize="12"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{x:Bind ViewModel.FilesSummary, Mode=OneWay}" />
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontFamily="{StaticResource MonoFont}"
+                        FontSize="12"
+                        Foreground="{StaticResource DiffAddedForegroundBrush}"
+                        Text="{x:Bind ViewModel.TotalAddedText, Mode=OneWay}" />
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontFamily="{StaticResource MonoFont}"
+                        FontSize="12"
+                        Foreground="{StaticResource DiffRemovedForegroundBrush}"
+                        Text="{x:Bind ViewModel.TotalRemovedText, Mode=OneWay}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1" ColumnSpacing="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!--  The commit's files as a list: a status letter, the name, and the folder
+                  under it - twenty page.tsx files are only told apart by their folders.
+                  Hidden for a single file, where the diff pane's own header says it all.  -->
+            <Border
+                Width="280"
+                Padding="4"
+                Style="{StaticResource DiffCard}"
+                Visibility="{x:Bind ViewModel.Files.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}, ConverterParameter=2}">
+                <ListView
+                    ItemContainerStyle="{StaticResource FileItem}"
+                    ItemsSource="{x:Bind ViewModel.Files, Mode=OneWay}"
+                    SelectedItem="{x:Bind ViewModel.Selected, Mode=TwoWay}"
+                    SelectionMode="Single">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="git:FileDiff">
+                            <Grid ColumnSpacing="8" ToolTipService.ToolTip="{x:Bind Path}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <Border
+                                    Width="18"
+                                    Height="18"
+                                    VerticalAlignment="Top"
+                                    Margin="0,1,0,0"
+                                    Background="{x:Bind ChangeLetter, Converter={StaticResource ChangeLetterBrush}, ConverterParameter=tint}"
+                                    CornerRadius="4">
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        FontFamily="{StaticResource MonoFont}"
+                                        FontSize="10"
+                                        FontWeight="SemiBold"
+                                        Foreground="{x:Bind ChangeLetter, Converter={StaticResource ChangeLetterBrush}}"
+                                        Text="{x:Bind ChangeLetter}" />
+                                </Border>
+
+                                <StackPanel Grid.Column="1" Spacing="1">
+                                    <TextBlock
+                                        FontSize="12"
+                                        Text="{x:Bind FileName}"
+                                        TextTrimming="CharacterEllipsis" />
+                                    <TextBlock
+                                        FontSize="11"
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                        Text="{x:Bind Directory}"
+                                        TextTrimming="CharacterEllipsis"
+                                        Visibility="{x:Bind Directory, Converter={StaticResource NullToVisibility}}" />
+                                </StackPanel>
+
+                                <StackPanel
+                                    Grid.Column="2"
+                                    VerticalAlignment="Top"
+                                    Margin="0,1,0,0"
+                                    Orientation="Horizontal"
+                                    Spacing="4">
+                                    <TextBlock
+                                        FontFamily="{StaticResource MonoFont}"
+                                        FontSize="10"
+                                        Foreground="{StaticResource DiffAddedForegroundBrush}"
+                                        Text="{x:Bind AddedText}" />
+                                    <TextBlock
+                                        FontFamily="{StaticResource MonoFont}"
+                                        FontSize="10"
+                                        Foreground="{StaticResource DiffRemovedForegroundBrush}"
+                                        Text="{x:Bind RemovedText}" />
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Border>
+
+            <!--  The selected file: its path and size on a bar, the hunks beneath.  -->
+            <Border Grid.Column="1" Style="{StaticResource DiffCard}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border
+                        Padding="12,7"
+                        BorderBrush="{StaticResource DetailStrokeBrush}"
+                        BorderThickness="0,0,0,1"
+                        Visibility="{x:Bind ViewModel.Selected, Mode=OneWay, Converter={StaticResource NullToVisibility}}">
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                FontFamily="{StaticResource MonoFont}"
+                                FontSize="12"
+                                IsTextSelectionEnabled="True"
+                                Text="{x:Bind ViewModel.Selected.Path, Mode=OneWay}"
+                                TextTrimming="CharacterEllipsis"
+                                ToolTipService.ToolTip="{x:Bind ViewModel.Selected.Path, Mode=OneWay}" />
+
+                            <StackPanel
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Orientation="Horizontal"
+                                Spacing="6">
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    FontFamily="{StaticResource MonoFont}"
+                                    FontSize="12"
+                                    Foreground="{StaticResource DiffAddedForegroundBrush}"
+                                    Text="{x:Bind ViewModel.Selected.AddedText, Mode=OneWay}" />
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    FontFamily="{StaticResource MonoFont}"
+                                    FontSize="12"
+                                    Foreground="{StaticResource DiffRemovedForegroundBrush}"
+                                    Text="{x:Bind ViewModel.Selected.RemovedText, Mode=OneWay}" />
+                                <Button
+                                    Margin="6,0,0,0"
+                                    Padding="6,2"
+                                    Click="OnOpenFileClick"
+                                    ToolTipService.ToolTip="Open the file in the editor"
+                                    Visibility="{x:Bind ViewModel.CanOpenFile, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon FontSize="12" Glyph="&#xE8E5;" />
+                                        <TextBlock FontSize="12" Text="Open file" />
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock
+                        Grid.Row="1"
+                        Margin="12,10"
+                        Opacity="0.55"
+                        Text="No diff for this file."
+                        Visibility="{x:Bind ViewModel.Selected, Mode=OneWay, Converter={StaticResource NullToInverseVisibility}}" />
+
+                    <TextBlock
+                        Grid.Row="1"
+                        Margin="12,10"
+                        Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                        Text="{x:Bind ViewModel.Error, Mode=OneWay}"
+                        TextWrapping="Wrap"
+                        Visibility="{x:Bind ViewModel.Error, Mode=OneWay, Converter={StaticResource NullToVisibility}}" />
+
+                    <ScrollViewer
+                        Grid.Row="1"
+                        Padding="0,6,0,6"
+                        HorizontalScrollBarVisibility="Auto"
+                        HorizontalScrollMode="Auto"
+                        VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{x:Bind ViewModel.Selected.Hunks, Mode=OneWay}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="git:DiffHunk">
+                                    <StackPanel Margin="0,0,0,10">
+                                        <!--  The @@ line as a quiet band, so hunks read as sections.  -->
+                                        <Border Padding="12,3" Background="{StaticResource AskSurfaceBrush}">
+                                            <TextBlock
+                                                FontFamily="{StaticResource MonoFont}"
+                                                FontSize="11"
+                                                Foreground="{StaticResource DiffHunkHeaderBrush}"
+                                                Text="{x:Bind Header}" />
+                                        </Border>
+                                        <ItemsControl ItemsSource="{x:Bind Lines}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="git:DiffLine">
+                                                    <Grid Background="{x:Bind Kind, Converter={StaticResource DiffBackground}}">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="46" />
+                                                            <ColumnDefinition Width="46" />
+                                                            <ColumnDefinition Width="20" />
+                                                            <ColumnDefinition Width="*" />
+                                                        </Grid.ColumnDefinitions>
+
+                                                        <TextBlock
+                                                            Grid.Column="0"
+                                                            Margin="0,0,8,0"
+                                                            FontFamily="{StaticResource MonoFont}"
+                                                            FontSize="12"
+                                                            Foreground="{StaticResource DiffGutterBrush}"
+                                                            Text="{x:Bind OldText}"
+                                                            TextAlignment="Right" />
+                                                        <TextBlock
+                                                            Grid.Column="1"
+                                                            Margin="0,0,8,0"
+                                                            FontFamily="{StaticResource MonoFont}"
+                                                            FontSize="12"
+                                                            Foreground="{StaticResource DiffGutterBrush}"
+                                                            Text="{x:Bind NewText}"
+                                                            TextAlignment="Right" />
+                                                        <TextBlock
+                                                            Grid.Column="2"
+                                                            FontFamily="{StaticResource MonoFont}"
+                                                            FontSize="12"
+                                                            Foreground="{x:Bind Kind, Converter={StaticResource DiffForeground}}"
+                                                            Text="{x:Bind Sign}"
+                                                            TextAlignment="Center" />
+                                                        <TextBlock
+                                                            Grid.Column="3"
+                                                            Margin="0,0,16,0"
+                                                            FontFamily="{StaticResource MonoFont}"
+                                                            FontSize="12"
+                                                            Foreground="{x:Bind Kind, Converter={StaticResource DiffForeground}}"
+                                                            Text="{x:Bind Text}"
+                                                            TextWrapping="NoWrap" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

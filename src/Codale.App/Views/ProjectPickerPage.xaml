@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Codale.App.Views.ProjectPickerPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <StackPanel
+        HorizontalAlignment="Center"
+        VerticalAlignment="Center"
+        MaxWidth="460"
+        Spacing="12">
+
+        <FontIcon
+            FontSize="40"
+            Glyph="&#xE8B7;"
+            Opacity="0.5" />
+
+        <TextBlock
+            HorizontalAlignment="Center"
+            Style="{StaticResource TitleTextBlockStyle}"
+            Text="Open a project" />
+
+        <TextBlock
+            HorizontalAlignment="Center"
+            Opacity="0.7"
+            TextAlignment="Center"
+            TextWrapping="Wrap"
+            Text="Codale opens one window per project. Choose a folder, or right-click a folder in File Explorer and pick Open in Codale." />
+
+        <Button
+            x:Name="BrowseButton"
+            HorizontalAlignment="Center"
+            Click="OnBrowseClick"
+            Style="{StaticResource AccentButtonStyle}">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <FontIcon FontSize="14" Glyph="&#xE8DA;" />
+                <TextBlock Text="Choose folder" />
+            </StackPanel>
+        </Button>
+
+        <TextBlock
+            x:Name="RecentHeader"
+            HorizontalAlignment="Center"
+            Opacity="0.6"
+            Style="{StaticResource CaptionTextBlockStyle}"
+            Text="Recent projects"
+            Visibility="Collapsed" />
+
+        <ListView
+            x:Name="RecentList"
+            HorizontalAlignment="Center"
+            MaxWidth="460"
+            SelectionMode="Single"
+            SelectionChanged="OnRecentClick"
+            Visibility="Collapsed">
+            <ListView.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel
+                        Orientation="Horizontal"
+                        Spacing="10"
+                        Padding="4">
+                        <FontIcon
+                            FontSize="14"
+                            Glyph="&#xE8B7;"
+                            Opacity="0.7" />
+                        <StackPanel>
+                            <TextBlock Text="{Binding Name}" />
+                            <TextBlock
+                                Opacity="0.6"
+                                FontSize="12"
+                                Text="{Binding Path}" />
+                        </StackPanel>
+                    </StackPanel>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+
+        <TextBlock
+            x:Name="ErrorText"
+            HorizontalAlignment="Center"
+            Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+            TextWrapping="Wrap"
+            Visibility="Collapsed" />
+    </StackPanel>
+</Page>

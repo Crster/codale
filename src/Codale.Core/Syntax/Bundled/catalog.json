@@ -1,0 +1,10 @@
+[
+  { "id": "zig", "name": "Zig", "extensions": ["zig", "zon"], "url": "https://raw.githubusercontent.com/ziglang/vscode-zig/master/syntaxes/zig.tmLanguage.json", "source": "ziglang/vscode-zig" },
+  { "id": "terraform", "name": "Terraform", "extensions": ["tf", "tfvars"], "url": "https://raw.githubusercontent.com/hashicorp/syntax/main/syntaxes/terraform.tmGrammar.json", "source": "hashicorp/syntax" },
+  { "id": "graphql", "name": "GraphQL", "extensions": ["graphql", "graphqls", "gql"], "url": "https://raw.githubusercontent.com/graphql/graphiql/main/packages/vscode-graphql-syntax/grammars/graphql.json", "source": "graphql/graphiql" },
+  { "id": "vue", "name": "Vue", "extensions": ["vue"], "url": "https://raw.githubusercontent.com/vuejs/language-tools/master/extensions/vscode/syntaxes/vue.tmLanguage.json", "source": "vuejs/language-tools" },
+  { "id": "d", "name": "D", "extensions": ["d", "di"], "url": "https://raw.githubusercontent.com/Pure-D/code-d/master/syntaxes/d.json", "source": "Pure-D/code-d" },
+  { "id": "nim", "name": "Nim", "extensions": ["nim", "nims", "nimble"], "url": "https://raw.githubusercontent.com/nim-lang/vscode-nim/master/syntaxes/nim.json", "source": "nim-lang/vscode-nim" },
+  { "id": "gdscript", "name": "GDScript", "extensions": ["gd"], "url": "https://raw.githubusercontent.com/godotengine/godot-vscode-plugin/master/syntaxes/GDScript.tmLanguage.json", "source": "godotengine/godot-vscode-plugin" },
+  { "id": "prisma", "name": "Prisma", "extensions": ["prisma"], "url": "https://raw.githubusercontent.com/prisma/language-tools/main/packages/vscode/syntaxes/prisma.tmLanguage.json", "source": "prisma/language-tools" }
+]

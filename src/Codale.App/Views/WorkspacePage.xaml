@@ -1,0 +1,2297 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Codale.App.Views.WorkspacePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:Codale.App.ViewModels"
+    xmlns:views="using:Codale.App.Views"
+    xmlns:controls="using:Codale.App.Controls"
+    xmlns:agents="using:Codale.Core.Agents"
+    xmlns:git="using:Codale.Git"
+    xmlns:claude="using:Codale.Agents.Claude"
+    xmlns:sizers="using:CommunityToolkit.WinUI.Controls"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <views:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+        <views:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility" />
+        <views:NullToVisibilityConverter x:Key="NullToVisibility" />
+        <views:UsageToBrushConverter x:Key="UsageToBrush" />
+        <views:FileChangeGlyphConverter x:Key="ChangeGlyph" />
+        <views:FileNodeGlyphConverter x:Key="NodeGlyph" />
+        <views:TodoGlyphConverter x:Key="TodoGlyph" />
+        <views:TodoBrushConverter x:Key="TodoBrush" />
+        <views:DiffBackgroundConverter x:Key="DiffBackground" />
+        <views:DiffForegroundConverter x:Key="DiffForeground" />
+        <views:CountToInverseVisibilityConverter x:Key="CountToInverseVisibility" />
+        <views:CountToVisibilityConverter x:Key="CountToVisibility" />
+        <views:NotBoolConverter x:Key="NotBool" />
+        <views:GitStatusBrushConverter x:Key="GitStatusBrush" />
+        <views:CurrentToFontWeightConverter x:Key="CurrentToFontWeight" />
+        <views:IgnoredMuteConverter x:Key="IgnoredMute" />
+        <views:TabStateToGlyphConverter x:Key="TabStateToGlyph" />
+        <views:TabStateToBrushConverter x:Key="TabStateToBrush" />
+        <views:PreviewToFontStyleConverter x:Key="PreviewToItalic" />
+        <views:TerminalActivityBrushConverter x:Key="TerminalActivityBrush" />
+        <views:TerminalTitleConverter x:Key="TerminalTitle" />
+        <views:TerminalExitSuffixConverter x:Key="TerminalExitSuffix" />
+        <views:RelativeTimeConverter x:Key="RelativeTime" />
+        <views:NullableBoolToVisibilityConverter x:Key="NullableBoolToVisibility" />
+        <views:FileChangeBrushConverter x:Key="FileChangeBrush" />
+        <views:ArtifactStatusBrushConverter x:Key="ArtifactStatusBrush" />
+        <views:TodoTextBrushConverter x:Key="TodoTextBrush" />
+
+        <!--  A small rounded label, for model / permission / status facts in the
+              session panel  -->
+        <Style x:Key="Chip" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="8,3" />
+        </Style>
+
+        <!--  A pill-shaped quiet button, for the model / effort pickers in the session
+              card. Reads as a labelled chip until hovered, then as the button it is.  -->
+        <Style x:Key="ChipButton" TargetType="Button">
+            <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="11" />
+            <Setter Property="Padding" Value="10,5" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+        </Style>
+
+        <!--  The session card's model / effort / mode controls: labelled tiles
+              rather than bare pills, so each says what it sets as well as its value.  -->
+        <Style x:Key="SessionControlButton" TargetType="Button">
+            <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="10,6,8,7" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+        </Style>
+
+        <Style x:Key="SessionControlCaption" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="CharacterSpacing" Value="40" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
+        </Style>
+
+        <Style x:Key="SessionControlValue" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="TextWrapping" Value="NoWrap" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <!--  Collapsible sidebar section header: a quiet full-width toggle whose
+              chevron turns with the state. Replaces the stock Expander, whose boxed
+              header and container chrome read as a generic control rather than a
+              panel section.  -->
+        <Style x:Key="SectionHeader" TargetType="ToggleButton">
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="6,5" />
+            <Setter Property="MinHeight" Value="26" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Setter Property="UseSystemFocusVisuals" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Grid
+                            x:Name="Root"
+                            Background="{TemplateBinding Background}"
+                            CornerRadius="{TemplateBinding CornerRadius}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                            <Setter Target="HeaderContent.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
+                                            <Setter Target="HeaderContent.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Opacity" Value="0.4" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                                <VisualStateGroup x:Name="CheckStates">
+                                    <VisualState x:Name="Checked">
+                                        <VisualState.Setters>
+                                            <Setter Target="HeaderContent.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Unchecked">
+                                        <VisualState.Setters>
+                                            <Setter Target="Chevron.(UIElement.RenderTransform).(RotateTransform.Angle)" Value="-90" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Indeterminate" />
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <StackPanel
+                                Margin="{TemplateBinding Padding}"
+                                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="Center"
+                                Orientation="Horizontal"
+                                Spacing="6">
+                                <FontIcon
+                                    x:Name="Chevron"
+                                    VerticalAlignment="Center"
+                                    FontSize="9"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    Glyph="&#xE70D;"
+                                    RenderTransformOrigin="0.5,0.5">
+                                    <FontIcon.RenderTransform>
+                                        <RotateTransform Angle="0" />
+                                    </FontIcon.RenderTransform>
+                                </FontIcon>
+                                <ContentPresenter x:Name="HeaderContent" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!--  Slim rounded rows for the panel's lists: the stock ListViewItem's tall
+              chrome suits a settings page, not a sidebar.  -->
+        <Style x:Key="PanelItem" TargetType="ListViewItem">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="UseSystemFocusVisuals" Value="False" />
+        </Style>
+
+        <!--  Zero item padding: the row's own content pads itself so its context-menu hit area fills the row.  -->
+        <Style
+            x:Key="PanelItemFlush"
+            BasedOn="{StaticResource PanelItem}"
+            TargetType="ListViewItem">
+            <Setter Property="Padding" Value="0" />
+        </Style>
+
+        <!--  The shared look of every popup the workspace opens: a floating card,
+              rounded, hairline stroke, the theme's shadow. The fill is the solid base
+              color, not the card fill: card fills are translucent for layering on
+              Mica, and a popup that shows the page through itself reads as broken.  -->
+        <Style x:Key="PickerFlyout" TargetType="FlyoutPresenter">
+            <Setter Property="Padding" Value="6" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Background" Value="{ThemeResource SolidBackgroundFillColorBaseBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MaxWidth" Value="380" />
+        </Style>
+
+        <!--  The endpoint form: wider than a picker, padded by its content, and scrolls
+              vertically rather than clipping on a short window.  -->
+        <Style x:Key="EndpointFlyout" TargetType="FlyoutPresenter">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Background" Value="{ThemeResource SolidBackgroundFillColorBaseBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MaxWidth" Value="420" />
+            <Setter Property="ScrollViewer.HorizontalScrollMode" Value="Disabled" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="ScrollViewer.VerticalScrollMode" Value="Auto" />
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+        </Style>
+
+        <!--  Heading and footnote of a picker popup, and its accent action button.
+              Styles rather than inline setters because the popups are built in code,
+              and ThemeResource brushes resolve reliably from XAML, not from C#.  -->
+        <Style x:Key="PickerTitleText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Setter Property="Margin" Value="8,4,8,4" />
+        </Style>
+
+        <Style x:Key="PickerHintText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="8,10,8,2" />
+        </Style>
+
+        <!--  One choice in a picker flyout: a full-width row rather than a stock
+              radio circle. Selection reads as a quiet tinted row with a check on the
+              right - the pattern command palettes and modern pickers use.  -->
+        <Style x:Key="PickerRow" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="UseSystemFocusVisuals" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Grid
+                            x:Name="Root"
+                            Background="Transparent"
+                            CornerRadius="{TemplateBinding CornerRadius}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Opacity" Value="0.4" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                                <VisualStateGroup x:Name="CheckStates">
+                                    <VisualState x:Name="Checked">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                            <Setter Target="CheckGlyph.Opacity" Value="1" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Unchecked" />
+                                    <VisualState x:Name="Indeterminate" />
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <Grid Margin="{TemplateBinding Padding}" ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter
+                                    HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalAlignment="Center" />
+                                <FontIcon
+                                    x:Name="CheckGlyph"
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    FontSize="13"
+                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                    Glyph="&#xE73E;"
+                                    Opacity="0" />
+                            </Grid>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!--  Right-click menu for one change in the git list; the handlers read the
+              item off the flyout's target, since templates bind to the data, not the VM  -->
+        <MenuFlyout x:Key="ChangeContextMenu" Opening="OnChangeMenuOpening">
+            <MenuFlyout.MenuFlyoutPresenterStyle>
+                <Style TargetType="MenuFlyoutPresenter">
+                    <Setter Property="CornerRadius" Value="8" />
+                </Style>
+            </MenuFlyout.MenuFlyoutPresenterStyle>
+            <MenuFlyoutItem Click="OnMenuViewDiff" Text="View diff">
+                <MenuFlyoutItem.Icon>
+                    <FontIcon Glyph="&#xE8A5;" />
+                </MenuFlyoutItem.Icon>
+            </MenuFlyoutItem>
+            <MenuFlyoutSeparator />
+            <MenuFlyoutItem Click="OnMenuStage" Text="Stage" />
+            <MenuFlyoutItem Click="OnMenuUnstage" Text="Unstage" />
+            <MenuFlyoutSeparator />
+            <MenuFlyoutItem Click="OnMenuDiscard" Text="Discard changes…">
+                <MenuFlyoutItem.Icon>
+                    <FontIcon Glyph="&#xE74D;" />
+                </MenuFlyoutItem.Icon>
+            </MenuFlyoutItem>
+            <MenuFlyoutSeparator />
+            <MenuFlyoutItem Click="OnMenuIgnore" Text="Add to .gitignore">
+                <MenuFlyoutItem.Icon>
+                    <FontIcon Glyph="&#xE7B3;" />
+                </MenuFlyoutItem.Icon>
+            </MenuFlyoutItem>
+            <MenuFlyoutItem x:Name="IgnoreFolderItem" Click="OnMenuIgnoreFolder" Text="Add folder to .gitignore">
+                <MenuFlyoutItem.Icon>
+                    <FontIcon Glyph="&#xE8B7;" />
+                </MenuFlyoutItem.Icon>
+            </MenuFlyoutItem>
+            <MenuFlyoutItem x:Name="IgnoreRootFolderItem" Click="OnMenuIgnoreRootFolder" Text="Add root folder to .gitignore">
+                <MenuFlyoutItem.Icon>
+                    <FontIcon Glyph="&#xE8B7;" />
+                </MenuFlyoutItem.Icon>
+            </MenuFlyoutItem>
+        </MenuFlyout>
+
+        <!--  What the + button offers: one of each centre area, created on demand  -->
+        <MenuFlyout x:Name="NewTabMenuFlyout" Opening="OnNewTabMenuOpening" Placement="Bottom">
+            <MenuFlyout.MenuFlyoutPresenterStyle>
+                <Style TargetType="MenuFlyoutPresenter">
+                    <Setter Property="CornerRadius" Value="8" />
+                </Style>
+            </MenuFlyout.MenuFlyoutPresenterStyle>
+            <MenuFlyoutItem x:Name="ClaudeMenuItem" Click="OnNewTabMenuItemClick" Tag="claude" Text="Claude chat">
+                <MenuFlyoutItem.Icon>
+                    <FontIcon Glyph="&#xE8BD;" />
+                </MenuFlyoutItem.Icon>
+            </MenuFlyoutItem>
+            <MenuFlyoutSeparator />
+            <MenuFlyoutItem Click="OnNewTabMenuItemClick" Tag="terminal" Text="Terminal">
+                <MenuFlyoutItem.Icon>
+                    <FontIcon Glyph="&#xE756;" />
+                </MenuFlyoutItem.Icon>
+            </MenuFlyoutItem>
+            <MenuFlyoutItem Click="OnNewTabMenuItemClick" Tag="openfile" Text="Open file…">
+                <MenuFlyoutItem.Icon>
+                    <FontIcon Glyph="&#xE8E5;" />
+                </MenuFlyoutItem.Icon>
+            </MenuFlyoutItem>
+            <MenuFlyoutItem Click="OnNewTabMenuItemClick" Tag="newfile" Text="New file">
+                <MenuFlyoutItem.Icon>
+                    <FontIcon Glyph="&#xE710;" />
+                </MenuFlyoutItem.Icon>
+            </MenuFlyoutItem>
+            <MenuFlyoutSeparator />
+            <MenuFlyoutItem Click="OnNewTabMenuItemClick" Tag="search" Text="Search">
+                <MenuFlyoutItem.Icon>
+                    <FontIcon Glyph="&#xE721;" />
+                </MenuFlyoutItem.Icon>
+            </MenuFlyoutItem>
+        </MenuFlyout>
+    </Page.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <!--  The width lives on the column, not the pivot: the splitter
+                      writes pixel widths to this column as it is dragged, and a
+                      fixed-width child would leave the content at its old size.  -->
+                <ColumnDefinition x:Name="LeftColumn" Width="260" MinWidth="200" MaxWidth="500" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" MinWidth="360" />
+            </Grid.ColumnDefinitions>
+
+            <!--  Left: files and git. The only area that keeps the Mica backdrop.  -->
+            <Pivot
+                x:Name="LeftPanel"
+                Padding="8,0,4,0">
+                <PivotItem Header="Files">
+                    <TreeView
+                        x:Name="FileTree"
+                        CanDragItems="False"
+                        Expanding="OnTreeExpanding"
+                        ItemInvoked="OnTreeItemInvoked"
+                        ItemsSource="{x:Bind ViewModel.Files.Nodes}"
+                        RightTapped="OnTreeRightTapped"
+                        SelectionMode="Single">
+                        <TreeView.ItemTemplate>
+                            <DataTemplate x:DataType="vm:FileNode">
+                                <!--  Root folders (the project and any added ones) start expanded  -->
+                                <TreeViewItem IsExpanded="{x:Bind IsRootEntry}" ItemsSource="{x:Bind Children}">
+                                    <StackPanel>
+                                        <!--  Ignored files fade; changed names take their git colour  -->
+                                        <StackPanel
+                                            Opacity="{x:Bind IsIgnored, Mode=OneWay, Converter={StaticResource IgnoredMute}}"
+                                            Orientation="Horizontal"
+                                            Spacing="8">
+                                            <FontIcon
+                                                FontSize="13"
+                                                Glyph="{x:Bind IsDirectory, Converter={StaticResource NodeGlyph}}"
+                                                Opacity="0.7" />
+                                            <!--  The converter answers null for clean nodes so the
+                                                  theme's own foreground stands; it must never
+                                                  answer UnsetValue - the compiled binding casts
+                                                  its result straight to Brush and an UnsetValue
+                                                  crashes the layout pass.  -->
+                                            <TextBlock
+                                                Foreground="{Binding GitStatus, Mode=OneWay, Converter={StaticResource GitStatusBrush}}"
+                                                Text="{x:Bind Name}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </TreeViewItem>
+                            </DataTemplate>
+                        </TreeView.ItemTemplate>
+                    </TreeView>
+                </PivotItem>
+
+                <PivotItem Header="Git">
+                    <Grid>
+                    <!--  Not a repository (or git missing): offer to initialise one  -->
+                    <StackPanel
+                        Margin="16,40,16,0"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        MaxWidth="260"
+                        Spacing="10"
+                        Visibility="{x:Bind ViewModel.Git.IsRepository, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
+                        <Border
+                            Width="52"
+                            Height="52"
+                            HorizontalAlignment="Center"
+                            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                            CornerRadius="26">
+                            <FontIcon FontSize="22" Glyph="&#xE81E;" Opacity="0.75" />
+                        </Border>
+                        <TextBlock
+                            HorizontalAlignment="Center"
+                            FontSize="14"
+                            FontWeight="SemiBold"
+                            Text="No repository" />
+                        <TextBlock
+                            HorizontalAlignment="Center"
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="This folder isn't tracked by git yet. Initialise a repository to track changes, commit and branch."
+                            TextAlignment="Center"
+                            TextWrapping="Wrap" />
+                        <Button
+                            HorizontalAlignment="Center"
+                            Command="{x:Bind ViewModel.Git.InitRepositoryCommand}"
+                            IsEnabled="{x:Bind ViewModel.Git.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
+                            Style="{StaticResource AccentButtonStyle}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon FontSize="12" Glyph="&#xE710;" />
+                                <TextBlock Text="Initialize repository" />
+                            </StackPanel>
+                        </Button>
+                        <TextBlock
+                            HorizontalAlignment="Center"
+                            FontSize="11"
+                            Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                            Text="{x:Bind ViewModel.Git.Error, Mode=OneWay}"
+                            TextAlignment="Center"
+                            TextWrapping="Wrap"
+                            Visibility="{x:Bind ViewModel.Git.Error, Mode=OneWay, Converter={StaticResource NullToVisibility}}" />
+                        <TextBlock
+                            HorizontalAlignment="Center"
+                            FontSize="11"
+                            Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                            Text="{x:Bind ViewModel.Git.ActionError, Mode=OneWay}"
+                            TextAlignment="Center"
+                            TextWrapping="Wrap"
+                            Visibility="{x:Bind ViewModel.Git.ActionError, Mode=OneWay, Converter={StaticResource NullToVisibility}}" />
+                    </StackPanel>
+
+                    <Grid
+                        RowSpacing="0"
+                        Visibility="{x:Bind ViewModel.Git.IsRepository, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" MinHeight="110" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" MinHeight="120" />
+                        </Grid.RowDefinitions>
+
+                        <!--  Header: branch switcher on the left, sync actions on the right  -->
+                        <Grid Margin="2,0,2,6" ColumnSpacing="2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <Button
+                                x:Name="BranchButton"
+                                Padding="6,4"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Left"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                ToolTipService.ToolTip="Switch branch">
+                                <Button.Flyout>
+                                    <Flyout
+                                        FlyoutPresenterStyle="{StaticResource PickerFlyout}"
+                                        Opening="OnBranchFlyoutOpening"
+                                        Placement="Bottom">
+                                        <StackPanel Width="280" Spacing="6">
+                                            <StackPanel
+                                                Margin="8,4,8,0"
+                                                Orientation="Horizontal"
+                                                Spacing="6">
+                                                <TextBlock
+                                                    VerticalAlignment="Center"
+                                                    CharacterSpacing="60"
+                                                    FontSize="11"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="BRANCHES" />
+                                                <Border
+                                                    Padding="6,0"
+                                                    VerticalAlignment="Center"
+                                                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                                    CornerRadius="8">
+                                                    <TextBlock
+                                                        FontSize="10"
+                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                        Text="{x:Bind ViewModel.Git.Branches.Count, Mode=OneWay}" />
+                                                </Border>
+                                            </StackPanel>
+
+                                            <!--  A fresh repository has no branch refs until the first commit  -->
+                                            <StackPanel
+                                                Margin="8,6,8,6"
+                                                Orientation="Horizontal"
+                                                Spacing="8"
+                                                Visibility="{x:Bind ViewModel.Git.Branches.Count, Mode=OneWay, Converter={StaticResource CountToInverseVisibility}}">
+                                                <FontIcon
+                                                    FontSize="12"
+                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                    Glyph="&#xE946;" />
+                                                <TextBlock
+                                                    FontSize="12"
+                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                    Text="No branches yet. Make a first commit."
+                                                    TextWrapping="Wrap" />
+                                            </StackPanel>
+
+                                            <ListView
+                                                x:Name="BranchList"
+                                                MaxHeight="240"
+                                                IsItemClickEnabled="True"
+                                                ItemClick="OnBranchClick"
+                                                ItemContainerStyle="{StaticResource PanelItem}"
+                                                ItemsSource="{x:Bind ViewModel.Git.Branches}"
+                                                SelectionMode="None">
+                                                <ListView.ItemTemplate>
+                                                    <DataTemplate x:DataType="git:GitBranch">
+                                                        <Grid
+                                                            Background="Transparent"
+                                                            ColumnSpacing="8"
+                                                            ToolTipService.ToolTip="{x:Bind Name}">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+
+                                                            <!--  The checked-out branch gets a green check;
+                                                                  the rest a faint branch glyph  -->
+                                                            <FontIcon
+                                                                FontSize="12"
+                                                                Glyph="&#xE73E;"
+                                                                Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                                                                Visibility="{x:Bind IsCurrent, Converter={StaticResource BoolToVisibility}}" />
+                                                            <FontIcon
+                                                                FontSize="12"
+                                                                Glyph="&#xE81E;"
+                                                                Opacity="0.45"
+                                                                Visibility="{x:Bind IsCurrent, Converter={StaticResource InverseBoolToVisibility}}" />
+
+                                                            <TextBlock
+                                                                Grid.Column="1"
+                                                                FontSize="12"
+                                                                FontWeight="{x:Bind IsCurrent, Converter={StaticResource CurrentToFontWeight}}"
+                                                                Text="{x:Bind Name}"
+                                                                TextTrimming="CharacterEllipsis" />
+
+                                                            <TextBlock
+                                                                Grid.Column="2"
+                                                                VerticalAlignment="Center"
+                                                                FontSize="10"
+                                                                Opacity="0.55"
+                                                                Text="{x:Bind TrackingSummary}"
+                                                                TextTrimming="CharacterEllipsis"
+                                                                Visibility="{x:Bind TrackingSummary, Converter={StaticResource NullToVisibility}}" />
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ListView.ItemTemplate>
+                                            </ListView>
+
+                                            <!--  New branch: one compact field, Enter or the + creates  -->
+                                            <Border
+                                                Margin="0,2,0,0"
+                                                Padding="8,10,8,6"
+                                                BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                                BorderThickness="0,1,0,0">
+                                                <StackPanel Spacing="6">
+                                                    <Grid ColumnSpacing="4">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBox
+                                                            x:Name="NewBranchBox"
+                                                            FontSize="12"
+                                                            KeyDown="OnNewBranchBoxKeyDown"
+                                                            PlaceholderText="New branch from HEAD…" />
+                                                        <Button
+                                                            Grid.Column="1"
+                                                            Width="32"
+                                                            Height="32"
+                                                            Padding="0"
+                                                            Click="OnCreateBranchClick"
+                                                            Style="{StaticResource AccentButtonStyle}"
+                                                            ToolTipService.ToolTip="Create and switch (Enter)">
+                                                            <FontIcon FontSize="12" Glyph="&#xE710;" />
+                                                        </Button>
+                                                    </Grid>
+                                                    <TextBlock
+                                                        FontSize="11"
+                                                        Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                                        Text="{x:Bind ViewModel.Git.ActionError, Mode=OneWay}"
+                                                        TextWrapping="Wrap"
+                                                        Visibility="{x:Bind ViewModel.Git.ActionError, Mode=OneWay, Converter={StaticResource NullToVisibility}}" />
+                                                </StackPanel>
+                                            </Border>
+                                        </StackPanel>
+                                    </Flyout>
+                                </Button.Flyout>
+                                <Grid ColumnSpacing="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon FontSize="12" Glyph="&#xE81E;" Opacity="0.7" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        FontWeight="SemiBold"
+                                        Text="{x:Bind ViewModel.Git.BranchName, Mode=OneWay}"
+                                        TextTrimming="CharacterEllipsis" />
+                                    <FontIcon
+                                        Grid.Column="2"
+                                        FontSize="10"
+                                        Glyph="&#xE70D;"
+                                        Opacity="0.6" />
+                                </Grid>
+                            </Button>
+
+                            <TextBlock
+                                Margin="30,-2,0,0"
+                                FontSize="11"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Text="{x:Bind ViewModel.Git.TrackingSummary, Mode=OneWay}"
+                                Visibility="{x:Bind ViewModel.Git.TrackingSummary, Mode=OneWay, Converter={StaticResource NullToVisibility}}" />
+                        </StackPanel>
+
+                        <!--  Sync with the remote, re-read  -->
+                        <StackPanel
+                            Grid.Column="1"
+                            VerticalAlignment="Top"
+                            Orientation="Horizontal"
+                            Spacing="0">
+                            <Button
+                                Padding="6,3"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                Command="{x:Bind ViewModel.Git.PushCommand}"
+                                IsEnabled="{x:Bind ViewModel.Git.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
+                                ToolTipService.ToolTip="Push to origin">
+                                <FontIcon FontSize="13" Glyph="&#xE898;" />
+                            </Button>
+                            <Button
+                                Padding="6,3"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                Command="{x:Bind ViewModel.Git.PullCommand}"
+                                IsEnabled="{x:Bind ViewModel.Git.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
+                                ToolTipService.ToolTip="Pull (fast-forward)">
+                                <FontIcon FontSize="13" Glyph="&#xE896;" />
+                            </Button>
+                            <Button
+                                Padding="6,3"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                Command="{x:Bind ViewModel.Git.RefreshCommand}"
+                                IsEnabled="{x:Bind ViewModel.Git.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
+                                ToolTipService.ToolTip="Refresh">
+                                <FontIcon FontSize="13" Glyph="&#xE72C;" />
+                            </Button>
+                        </StackPanel>
+                        </Grid>
+
+                        <!--  git's own complaint when a write fails  -->
+                        <Border
+                            Grid.Row="1"
+                            Margin="2,0,2,6"
+                            Padding="10,6"
+                            Background="{ThemeResource SystemFillColorCriticalBackgroundBrush}"
+                            CornerRadius="{StaticResource ControlCornerRadius}"
+                            Visibility="{x:Bind ViewModel.Git.ActionError, Mode=OneWay, Converter={StaticResource NullToVisibility}}">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <FontIcon
+                                    VerticalAlignment="Top"
+                                    Margin="0,2,0,0"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                    Glyph="&#xEA39;" />
+                                <TextBlock
+                                    Grid.Column="1"
+                                    FontSize="11"
+                                    Text="{x:Bind ViewModel.Git.ActionError, Mode=OneWay}"
+                                    TextWrapping="Wrap" />
+                            </Grid>
+                        </Border>
+
+                        <!--  Commit: a roomy multi-line message (first line is the subject);
+                              Enter breaks lines, Ctrl+Enter commits  -->
+                        <StackPanel Grid.Row="2" Margin="2,0,2,10" Spacing="6">
+                            <Grid>
+                                <TextBox
+                                    x:Name="CommitMessageBox"
+                                    AcceptsReturn="True"
+                                    MaxHeight="130"
+                                    MinHeight="60"
+                                    Padding="10,6,34,6"
+                                    PlaceholderText="Commit message"
+                                    Text="{x:Bind ViewModel.Git.CommitMessage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                    TextWrapping="Wrap">
+                                    <TextBox.KeyboardAccelerators>
+                                        <KeyboardAccelerator
+                                            Key="Enter"
+                                            Invoked="OnCommitAccelerator"
+                                            Modifiers="Control" />
+                                    </TextBox.KeyboardAccelerators>
+                                </TextBox>
+
+                                <!--  The local model writes the subject from the working-tree
+                                      diff; icon only, docked in the field's corner like the
+                                      generators in editors. A ring stands in while it runs -
+                                      the first click may load the model, which takes a while.  -->
+                                <Button
+                                    Width="26"
+                                    Height="26"
+                                    Margin="0,4,4,0"
+                                    Padding="0"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Command="{x:Bind ViewModel.Git.GenerateCommitMessageCommand}"
+                                    IsEnabled="{x:Bind ViewModel.Git.IsGeneratingMessage, Mode=OneWay, Converter={StaticResource NotBool}}"
+                                    ToolTipService.ToolTip="Generate commit message with the local model">
+                                    <Grid>
+                                        <FontIcon
+                                            FontSize="13"
+                                            Glyph="&#xEB78;"
+                                            Visibility="{x:Bind ViewModel.Git.IsGeneratingMessage, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}" />
+                                        <ProgressRing
+                                            Width="14"
+                                            Height="14"
+                                            IsActive="{x:Bind ViewModel.Git.IsGeneratingMessage, Mode=OneWay}"
+                                            Visibility="{x:Bind ViewModel.Git.IsGeneratingMessage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                    </Grid>
+                                </Button>
+                            </Grid>
+                            <Button
+                                HorizontalAlignment="Stretch"
+                                Command="{x:Bind ViewModel.Git.CommitCommand}"
+                                IsEnabled="{x:Bind ViewModel.Git.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
+                                Style="{StaticResource AccentButtonStyle}"
+                                ToolTipService.ToolTip="Commit (Ctrl+Enter)">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon FontSize="12" Glyph="&#xE73E;" />
+                                    <TextBlock Text="Commit" />
+                                    <TextBlock Opacity="0.75" Text="{x:Bind ViewModel.Git.StagedSummary, Mode=OneWay}" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+
+                        <!--  Changes section header: count + stage all  -->
+                        <Grid Grid.Row="3" Margin="6,0,2,2" ColumnSpacing="6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                CharacterSpacing="60"
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="CHANGES" />
+                            <Border
+                                Grid.Column="1"
+                                Padding="6,0"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                CornerRadius="8">
+                                <TextBlock
+                                    FontSize="10"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="{x:Bind ViewModel.Git.ChangeCount, Mode=OneWay}" />
+                            </Border>
+                            <Button
+                                Grid.Column="2"
+                                Padding="6,3"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                Command="{x:Bind ViewModel.Git.StageAllCommand}"
+                                IsEnabled="{x:Bind ViewModel.Git.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
+                                ToolTipService.ToolTip="Stage all changes">
+                                <FontIcon FontSize="12" Glyph="&#xE710;" />
+                            </Button>
+                        </Grid>
+
+                        <!--  Working tree: click opens the diff in the centre; right-click stages  -->
+                        <ListView
+                            Grid.Row="4"
+                            IsItemClickEnabled="True"
+                            ItemClick="OnGitChangeClick"
+                            ItemsSource="{x:Bind ViewModel.Git.Changes}"
+                            SelectedItem="{x:Bind ViewModel.Git.SelectedChange, Mode=TwoWay}"
+                            SelectionMode="Single">
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem">
+                                    <Setter Property="MinHeight" Value="26" />
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="VerticalContentAlignment" Value="Center" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                </Style>
+                            </ListView.ItemContainerStyle>
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="git:GitFileStatus">
+                                    <!--  The name's colour stands in for git's XY code. Duplicate names get their directory under.  -->
+                                    <Grid
+                                        Background="Transparent"
+                                        ContextFlyout="{StaticResource ChangeContextMenu}"
+                                        ToolTipService.ToolTip="{x:Bind Path}">
+<TextBlock
+                                            VerticalAlignment="Center"
+                                            FontSize="12"
+                                            TextTrimming="CharacterEllipsis">
+                                            <!--  Name first: a narrow row trims the dimmed
+                                                  directory off the end, not the name.  -->
+                                            <Run Foreground="{Binding DisplayKind, Converter={StaticResource GitStatusBrush}}" Text="{x:Bind DisplayName}" /><Run Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="{x:Bind PathHintTail}" />
+                                        </TextBlock>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+
+                        <StackPanel
+                            Grid.Row="5"
+                            Margin="6,10,0,4"
+                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                            BorderThickness="0,1,0,0"
+                            Padding="0,8,0,0"
+                            ToolTipService.ToolTip="Click a commit for its diff">
+                            <TextBlock
+                                CharacterSpacing="60"
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="HISTORY" />
+                        </StackPanel>
+
+                        <!--  History as a branch graph; click opens the commit's diff  -->
+                        <ListView
+                            Grid.Row="6"
+                            IsItemClickEnabled="True"
+                            ItemClick="OnGitCommitClick"
+                            ItemsSource="{x:Bind ViewModel.Git.Log}"
+                            SelectionMode="None">
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem">
+                                    <Setter Property="MinHeight" Value="28" />
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="VerticalContentAlignment" Value="Center" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                </Style>
+                            </ListView.ItemContainerStyle>
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="git:GitCommit">
+                                    <StackPanel Orientation="Horizontal" Spacing="6" ToolTipService.ToolTip="{x:Bind Subject}">
+                                        <views:GitGraphCell />
+                                        <StackPanel Margin="0,0,0,2">
+                                            <TextBlock
+                                                FontSize="12"
+                                                Text="{x:Bind Subject}"
+                                                TextTrimming="CharacterEllipsis" />
+                                            <TextBlock
+                                                FontSize="10"
+                                                Foreground="#D4A017"
+                                                Text="{x:Bind RefDisplay}"
+                                                TextTrimming="CharacterEllipsis"
+                                                Visibility="{x:Bind RefDisplay, Converter={StaticResource NullToVisibility}}" />
+                                            <TextBlock FontSize="11" Opacity="0.55">
+                                                <Run Text="{x:Bind ShortSha}" />
+                                                <Run Text="&#183;" />
+                                                <Run Text="{x:Bind Author}" />
+                                                <Run Text="&#183;" />
+                                                <Run Text="{x:Bind RelativeDate}" />
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                    </Grid>
+                </PivotItem>
+            </Pivot>
+
+            <sizers:GridSplitter
+                x:Name="LeftSplitter"
+                Grid.Column="1"
+                Width="8"
+                HorizontalAlignment="Center"
+                ResizeBehavior="BasedOnAlignment"
+                ResizeDirection="Columns" />
+
+            <!--  Centre: a rounded card on the backdrop, like the Gallery's content
+                  panels. The tab strip starts empty; the + button offers chat,
+                  terminal, editor and search; nothing runs until the user asks.  -->
+            <Border
+                x:Name="CentreCard"
+                Grid.Column="2"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="{StaticResource OverlayCornerRadius}">
+                <Grid x:Name="CentreContent">
+                    <!--  Column 0 is the tabs; the splitter and peek column stay at zero
+                          width until a running task is opened from the session panel.  -->
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition x:Name="CentreTabsColumn" Width="*" MinWidth="240" />
+                        <ColumnDefinition x:Name="PeekSplitterColumn" Width="0" />
+                        <ColumnDefinition x:Name="PeekColumn" Width="0" />
+                    </Grid.ColumnDefinitions>
+
+                    <sizers:GridSplitter
+                        x:Name="PeekSplitter"
+                        Grid.Column="1"
+                        Width="8"
+                        HorizontalAlignment="Center"
+                        ResizeBehavior="PreviousAndNext"
+                        ResizeDirection="Columns"
+                        Visibility="Collapsed" />
+
+                    <views:TaskPeekPane
+                        x:Name="PeekPane"
+                        Grid.Column="2"
+                        CloseRequested="OnPeekCloseRequested"
+                        StopRequested="OnPeekStopRequested"
+                        Visibility="Collapsed" />
+
+                    <!--  TabView's default style pins VerticalAlignment to Top, which
+                          collapses the whole centre area to one tab's content height.  -->
+                    <TabView
+                        x:Name="CentreTabs"
+                        Grid.Column="0"
+                        AddTabButtonClick="OnCentreAddTabClick"
+                        Background="Transparent"
+                        SelectionChanged="OnCentreTabSelectionChanged"
+                        TabCloseRequested="OnCentreTabCloseRequested"
+                        VerticalAlignment="Stretch" />
+
+                <StackPanel
+                    x:Name="EmptyState"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Spacing="10">
+                    <FontIcon
+                        FontSize="36"
+                        Glyph="&#xE8A5;"
+                        Opacity="0.4" />
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource SubtitleTextBlockStyle}"
+                        Text="Nothing open" />
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        TextAlignment="Center"
+                        TextWrapping="Wrap"
+                        MaxWidth="380"
+                        Text="Pick something to start on this project." />
+                    <StackPanel
+                        Margin="0,10,0,0"
+                        HorizontalAlignment="Center"
+                        Orientation="Horizontal"
+                        Spacing="8">
+                        <Button Click="OnNewTabMenuItemClick" Tag="claude">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon FontSize="14" Glyph="&#xE8BD;" />
+                                <TextBlock x:Name="ClaudeEmptyLabel" Text="Claude chat" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                    <StackPanel
+                        HorizontalAlignment="Center"
+                        Orientation="Horizontal"
+                        Spacing="8">
+                        <Button Click="OnNewTabMenuItemClick" Tag="terminal">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon FontSize="14" Glyph="&#xE756;" />
+                                <TextBlock Text="Terminal" />
+                            </StackPanel>
+                        </Button>
+                        <Button Click="OnNewTabMenuItemClick" Tag="openfile">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon FontSize="14" Glyph="&#xE8E5;" />
+                                <TextBlock Text="Open file…" />
+                            </StackPanel>
+                        </Button>
+                        <Button Click="OnNewTabMenuItemClick" Tag="newfile">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon FontSize="14" Glyph="&#xE710;" />
+                                <TextBlock Text="New file" />
+                            </StackPanel>
+                        </Button>
+                        <Button Click="OnNewTabMenuItemClick" Tag="search">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon FontSize="14" Glyph="&#xE721;" />
+                                <TextBlock Text="Search" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+                </Grid>
+            </Border>
+
+            <!--  Session panel: floats over the centre card's right side rather than
+                  docking as its own column. It exists only for the agent chat -
+                  hidden until a chat tab is in front, gone again when it is not.
+                  Deferred (x:Load): it is over half this file's element count, and
+                  SetSessionPanel realizes it on first open.  -->
+            <Border
+                x:Name="RightPanel"
+                x:Load="False"
+                Grid.Column="2"
+                Width="450"
+                Margin="0,16,6,16"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Stretch"
+                Visibility="Collapsed"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!--  Header: who the panel belongs to - the live agent  -->
+                    <Grid Padding="16,12,12,12">
+                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                            <FontIcon
+                                FontSize="14"
+                                Glyph="&#xE77B;"
+                                Opacity="0.7" />
+                            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Agent session" />
+                        </StackPanel>
+
+                        <StackPanel
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Orientation="Horizontal"
+                            Spacing="6">
+                            <Ellipse
+                                Width="6"
+                                Height="6"
+                                VerticalAlignment="Center"
+                                Fill="SeaGreen"
+                                Visibility="{x:Bind ViewModel.Chat.IsConnected, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                            <TextBlock
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{x:Bind ViewModel.Chat.ProviderName, Mode=OneWay}" />
+                            <TextBlock
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Text="{x:Bind CliUpdate.VersionText, Mode=OneWay}"
+                                Visibility="{x:Bind CliUpdate.IsVersionKnown, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                            <Button
+                                Width="24"
+                                Height="24"
+                                Padding="0"
+                                VerticalAlignment="Center"
+                                Click="OnUpdateCliClick"
+                                ToolTipService.ToolTip="{x:Bind CliUpdate.UpdateTip, Mode=OneWay}"
+                                Visibility="{x:Bind CliUpdate.UpdateAvailable, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                <FontIcon
+                                    FontSize="13"
+                                    Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                    Glyph="&#xE896;" />
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+
+                    <Border
+                        Height="1"
+                        VerticalAlignment="Bottom"
+                        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                    <ScrollViewer Grid.Row="1" Margin="12,10,12,12">
+                        <StackPanel Spacing="10">
+
+                            <!--  Crash recovery: only shown when a session was left running  -->
+                            <InfoBar
+                                Title="Session interrupted"
+                                IsClosable="True"
+                                IsOpen="{x:Bind ViewModel.Sessions.HasInterrupted, Mode=OneWay}"
+                                Message="Codale closed while an agent was working."
+                                Severity="Warning">
+                                <InfoBar.ActionButton>
+                                    <Button
+                                        Command="{x:Bind ViewModel.Sessions.ResumeCommand}"
+                                        CommandParameter="{x:Bind ViewModel.Sessions.FirstInterrupted, Mode=OneWay}"
+                                        Content="Resume" />
+                                </InfoBar.ActionButton>
+                            </InfoBar>
+
+                            <!--  Reading an old transcript: make the way back obvious  -->
+                            <InfoBar
+                                IsClosable="False"
+                                IsOpen="{x:Bind ViewModel.IsViewingHistory, Mode=OneWay}"
+                                Message="{x:Bind ViewModel.HistoryTitle, Mode=OneWay}"
+                                Severity="Informational"
+                                Title="Viewing history">
+                                <InfoBar.ActionButton>
+                                    <Button Click="OnReturnToLiveClick" Content="Back to live session" />
+                                </InfoBar.ActionButton>
+                            </InfoBar>
+
+                            <!--  The live session: which CLI, what model, and where it works  -->
+                            <Border
+                                Padding="12,10"
+                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                                <StackPanel Spacing="10">
+                                    <!--  Model, effort and mode: labelled tiles, each opening a
+                                          picker whose pick switches the live session  -->
+                                    <Grid ColumnSpacing="6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="1.3*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <Button
+                                            Click="OnModelChipClick"
+                                            Style="{StaticResource SessionControlButton}"
+                                            ToolTipService.ToolTip="{x:Bind ViewModel.Chat.ModelDisplay, Mode=OneWay}">
+                                            <Grid ColumnSpacing="6" RowSpacing="2">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <TextBlock
+                                                    Grid.ColumnSpan="3"
+                                                    Style="{StaticResource SessionControlCaption}"
+                                                    Text="MODEL" />
+                                                <FontIcon
+                                                    Grid.Row="1"
+                                                    FontSize="12"
+                                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                    Glyph="&#xE99A;" />
+                                                <TextBlock
+                                                    Grid.Row="1"
+                                                    Grid.Column="1"
+                                                    Style="{StaticResource SessionControlValue}"
+                                                    Text="{x:Bind ViewModel.Chat.ModelDisplay, Mode=OneWay}" />
+                                                <FontIcon
+                                                    Grid.Row="1"
+                                                    Grid.Column="2"
+                                                    FontSize="8"
+                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                    Glyph="&#xE70D;" />
+                                            </Grid>
+                                        </Button>
+
+                                        <Button
+                                            Grid.Column="1"
+                                            Click="OnEffortChipClick"
+                                            Style="{StaticResource SessionControlButton}"
+                                            ToolTipService.ToolTip="How hard the model thinks before it answers">
+                                            <Grid ColumnSpacing="6" RowSpacing="2">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <TextBlock
+                                                    Grid.ColumnSpan="3"
+                                                    Style="{StaticResource SessionControlCaption}"
+                                                    Text="EFFORT" />
+                                                <FontIcon
+                                                    Grid.Row="1"
+                                                    FontSize="12"
+                                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                    Glyph="&#xE9D9;" />
+                                                <TextBlock
+                                                    Grid.Row="1"
+                                                    Grid.Column="1"
+                                                    Style="{StaticResource SessionControlValue}"
+                                                    Text="{x:Bind ViewModel.Chat.EffortDisplay, Mode=OneWay}" />
+                                                <FontIcon
+                                                    Grid.Row="1"
+                                                    Grid.Column="2"
+                                                    FontSize="8"
+                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                    Glyph="&#xE70D;" />
+                                            </Grid>
+                                        </Button>
+
+                                        <Button
+                                            Grid.Column="2"
+                                            Click="OnModeChipClick"
+                                            Style="{StaticResource SessionControlButton}"
+                                            ToolTipService.ToolTip="How much the agent may do before asking">
+                                            <Grid ColumnSpacing="6" RowSpacing="2">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <TextBlock
+                                                    Grid.ColumnSpan="3"
+                                                    Style="{StaticResource SessionControlCaption}"
+                                                    Text="MODE" />
+                                                <FontIcon
+                                                    Grid.Row="1"
+                                                    FontSize="12"
+                                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                    Glyph="{x:Bind ViewModel.Chat.ModeGlyph, Mode=OneWay}" />
+                                                <TextBlock
+                                                    Grid.Row="1"
+                                                    Grid.Column="1"
+                                                    Style="{StaticResource SessionControlValue}"
+                                                    Text="{x:Bind ViewModel.Chat.ModeDisplayText, Mode=OneWay}" />
+                                                <FontIcon
+                                                    Grid.Row="1"
+                                                    Grid.Column="2"
+                                                    FontSize="8"
+                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                    Glyph="&#xE70D;" />
+                                            </Grid>
+                                        </Button>
+                                    </Grid>
+
+                                    <!--  Ask mode changes what a prompt does, so it says so where it is set  -->
+                                    <Border
+                                        Padding="10,7"
+                                        Background="{ThemeResource SystemFillColorAttentionBackgroundBrush}"
+                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Visibility="{x:Bind ViewModel.Chat.IsAskMode, Mode=OneWay}">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <FontIcon
+                                                FontSize="12"
+                                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                Glyph="&#xE8BD;" />
+                                            <TextBlock
+                                                FontSize="11"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Text="Ask mode: the agent explains and won't change any files."
+                                                TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <!--  The two ways to start over, side by side: the primary one in accent  -->
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <Button
+                                            HorizontalAlignment="Stretch"
+                                            Click="OnNewSessionClick"
+                                            CornerRadius="8"
+                                            FontSize="12"
+                                            Padding="10,8"
+                                            Style="{StaticResource AccentButtonStyle}"
+                                            ToolTipService.ToolTip="End this conversation and start a fresh one in the project directory">
+                                            <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                                                <FontIcon FontSize="12" Glyph="&#xE710;" />
+                                                <TextBlock Text="New session" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </Button>
+
+                                        <Button
+                                            Grid.Column="1"
+                                            HorizontalAlignment="Stretch"
+                                            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                            Click="OnIsolatedSessionClick"
+                                            CornerRadius="8"
+                                            FontSize="12"
+                                            IsEnabled="{x:Bind ViewModel.IsStartingWorktree, Mode=OneWay, Converter={StaticResource NotBool}}"
+                                            Padding="10,8"
+                                            ToolTipService.ToolTip="Start a new session on its own branch in a git worktree, leaving your working tree untouched">
+                                            <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                                                <FontIcon FontSize="12" Glyph="&#xE8EA;" />
+                                                <TextBlock Text="Isolated" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </Button>
+                                    </Grid>
+
+                                    <TextBlock
+                                        FontSize="11"
+                                        Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                        Text="{x:Bind ViewModel.WorktreeError, Mode=OneWay}"
+                                        TextWrapping="Wrap"
+                                        Visibility="{x:Bind ViewModel.WorktreeError, Mode=OneWay, Converter={StaticResource NullToVisibility}}" />
+
+                                    <Grid ToolTipService.ToolTip="{x:Bind ViewModel.WorkingDirectory, Mode=OneWay}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <FontIcon
+                                            VerticalAlignment="Center"
+                                            FontSize="11"
+                                            Glyph="&#xE8B7;"
+                                            Opacity="0.55" />
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            Margin="6,0,0,0"
+                                            FontSize="11"
+                                            Opacity="0.55"
+                                            Text="{x:Bind ViewModel.WorkingDirectory, Mode=OneWay}"
+                                            TextTrimming="CharacterEllipsis" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!--  History  -->
+                            <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Sessions.Sessions.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                <ToggleButton
+                                    x:Name="HistorySection"
+                                    IsChecked="True"
+                                    Style="{StaticResource SectionHeader}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <TextBlock Text="History" />
+                                        <ProgressRing
+                                            Width="12"
+                                            Height="12"
+                                            IsActive="{x:Bind ViewModel.Sessions.IsLoading, Mode=OneWay}" />
+                                    </StackPanel>
+                                </ToggleButton>
+
+                                <StackPanel Margin="14,2,0,4" Visibility="{x:Bind HistorySection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
+                                    <ListView
+                                        MaxHeight="300"
+                                        IsItemClickEnabled="True"
+                                        ItemClick="OnSessionClick"
+                                        ItemContainerStyle="{StaticResource PanelItemFlush}"
+                                        ItemsSource="{x:Bind ViewModel.Sessions.Sessions}"
+                                        SelectionMode="None">
+                                        <ListView.ItemTemplate>
+                                            <!--  Open sessions say so: "running" with a pulsing dot while
+                                                  their tab works, "open" while it idles. Clicking an open
+                                                  one switches to its tab; any other opens beside it.  -->
+                                            <DataTemplate x:DataType="vm:SessionListItem">
+                                                <StackPanel
+                                                    Padding="8,6"
+                                                    Background="Transparent"
+                                                    Spacing="2"
+                                                    ToolTipService.ToolTip="{x:Bind SessionId}">
+                                                    <StackPanel.ContextFlyout>
+                                                        <MenuFlyout>
+                                                            <MenuFlyoutItem Click="OnCopySessionHandoutClick" Text="Copy handout">
+                                                                <MenuFlyoutItem.Icon>
+                                                                    <FontIcon Glyph="&#xE8C8;" />
+                                                                </MenuFlyoutItem.Icon>
+                                                            </MenuFlyoutItem>
+                                                            <MenuFlyoutItem Click="OnCopySessionIdClick" Text="Copy session ID">
+                                                                <MenuFlyoutItem.Icon>
+                                                                    <FontIcon Glyph="&#xE8C8;" />
+                                                                </MenuFlyoutItem.Icon>
+                                                            </MenuFlyoutItem>
+                                                            <MenuFlyoutItem Click="OnRetitleSessionClick" Text="Change title">
+                                                                <MenuFlyoutItem.Icon>
+                                                                    <FontIcon Glyph="&#xE70F;" />
+                                                                </MenuFlyoutItem.Icon>
+                                                            </MenuFlyoutItem>
+                                                            <MenuFlyoutItem Click="OnForkSessionClick" Text="Fork session">
+                                                                <MenuFlyoutItem.Icon>
+                                                                                                                                <FontIcon Glyph="&#xE8AD;" />
+                                                                </MenuFlyoutItem.Icon>
+                                                            </MenuFlyoutItem>
+                                                            <MenuFlyoutItem Click="OnCompactSessionClick" Text="Compact session">
+                                                                <MenuFlyoutItem.Icon>
+                                                                    <FontIcon Glyph="&#xE73F;" />
+                                                                </MenuFlyoutItem.Icon>
+                                                            </MenuFlyoutItem>
+                                                            <MenuFlyoutSeparator />
+                                                            <MenuFlyoutItem Click="OnDeleteSessionClick" Text="Delete session">
+                                                                <MenuFlyoutItem.Icon>
+                                                                    <FontIcon Glyph="&#xE74D;" />
+                                                                </MenuFlyoutItem.Icon>
+                                                            </MenuFlyoutItem>
+                                                        </MenuFlyout>
+                                                    </StackPanel.ContextFlyout>
+                                                    <TextBlock
+                                                        FontSize="12"
+                                                        Text="{x:Bind Title}"
+                                                        TextTrimming="CharacterEllipsis"
+                                                        TextWrapping="NoWrap" />
+                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}">
+                                                            <Run Text="{x:Bind UserTurns}" />
+                                                            <Run Text=" turns · " />
+                                                            <Run Text="{x:Bind UpdatedAt, Converter={StaticResource RelativeTime}}" />
+                                                        </TextBlock>
+                                                        <Border
+                                                            Padding="7,1"
+                                                            Background="{StaticResource KindReadTintBrush}"
+                                                            CornerRadius="8"
+                                                            Visibility="{x:Bind IsWorking, Mode=OneWay}">
+                                                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                                                <Ellipse
+                                                                    Width="6"
+                                                                    Height="6"
+                                                                    VerticalAlignment="Center"
+                                                                    Fill="{StaticResource StatusRunningBrush}"
+                                                                    views:Pulse.IsActive="{x:Bind IsWorking, Mode=OneWay}" />
+                                                                <TextBlock
+                                                                    FontSize="10"
+                                                                    Foreground="{StaticResource StatusRunningBrush}"
+                                                                    Text="running" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                        <Border
+                                                            Padding="7,1"
+                                                            Background="{StaticResource KindWriteTintBrush}"
+                                                            CornerRadius="8"
+                                                            Visibility="{x:Bind IsOpenIdle, Mode=OneWay}">
+                                                            <TextBlock
+                                                                FontSize="10"
+                                                                Foreground="{StaticResource StatusSuccessBrush}"
+                                                                Text="open" />
+                                                        </Border>
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!--  Session changes: what the agent itself changed, live, one row
+                                  per file measured from before its first touch. The badge
+                                  pulses while a change is fresh, so an edit landing mid-turn
+                                  is visible without looking at the transcript.  -->
+                            <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Status.ChangeCount, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                <ToggleButton
+                                    x:Name="SessionChangesSection"
+                                    IsChecked="True"
+                                    Style="{StaticResource SectionHeader}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <TextBlock Text="Session changes" />
+                                        <Border
+                                            Padding="7,1"
+                                            VerticalAlignment="Center"
+                                            Background="{StaticResource KindEditTintBrush}"
+                                            CornerRadius="8"
+                                            Visibility="{x:Bind ViewModel.Status.ChangeCount, Mode=OneWay, Converter={StaticResource CountToVisibility}}"
+                                            views:Pulse.IsActive="{x:Bind ViewModel.Status.HasFreshChanges, Mode=OneWay}">
+                                            <TextBlock
+                                                FontSize="10"
+                                                Foreground="{StaticResource KindEditBrush}"
+                                                Text="{x:Bind ViewModel.Status.ChangeCount, Mode=OneWay}" />
+                                        </Border>
+                                    </StackPanel>
+                                </ToggleButton>
+
+                                <StackPanel
+                                    Margin="14,2,0,4"
+                                    Spacing="4"
+                                    Visibility="{x:Bind SessionChangesSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
+                                    <TextBlock
+                                        Margin="8,0,8,2"
+                                        FontSize="12"
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                        Text="{x:Bind ViewModel.Status.ChangeSummary, Mode=OneWay}"
+                                        TextWrapping="Wrap" />
+
+                                    <ListView
+                                        MaxHeight="220"
+                                        IsItemClickEnabled="True"
+                                        ItemClick="OnSessionChangeClick"
+                                        ItemContainerStyle="{StaticResource PanelItem}"
+                                        ItemsSource="{x:Bind ViewModel.Status.Changes, Mode=OneWay}"
+                                        SelectionMode="None">
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:SessionFileChange">
+                                                <Grid ColumnSpacing="8" ToolTipService.ToolTip="{x:Bind Path}">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Ellipse
+                                                        Width="7"
+                                                        Height="7"
+                                                        VerticalAlignment="Center"
+                                                        Fill="{x:Bind Kind, Mode=OneWay, Converter={StaticResource FileChangeBrush}}"
+                                                        views:Pulse.IsActive="{x:Bind IsFresh, Mode=OneWay}" />
+                                                    <StackPanel
+                                                        Grid.Column="1"
+                                                        Orientation="Horizontal"
+                                                        Spacing="6">
+                                                        <TextBlock
+                                                            VerticalAlignment="Center"
+                                                            FontSize="12"
+                                                            Text="{x:Bind Name}"
+                                                            TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock
+                                                            VerticalAlignment="Center"
+                                                            FontSize="11"
+                                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                            Text="{x:Bind Directory}"
+                                                            TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+                                                    <StackPanel
+                                                        Grid.Column="2"
+                                                        Orientation="Horizontal"
+                                                        Spacing="6">
+                                                        <TextBlock
+                                                            VerticalAlignment="Center"
+                                                            FontSize="10.5"
+                                                            Foreground="{x:Bind Kind, Mode=OneWay, Converter={StaticResource FileChangeBrush}}"
+                                                            Text="{x:Bind KindText, Mode=OneWay}" />
+                                                        <TextBlock
+                                                            VerticalAlignment="Center"
+                                                            FontFamily="Cascadia Mono, Consolas"
+                                                            FontSize="11">
+                                                            <Run Foreground="{StaticResource DiffAddedForegroundBrush}" Text="{x:Bind AddedText, Mode=OneWay}" />
+                                                            <Run Foreground="{StaticResource DiffRemovedForegroundBrush}" Text="{x:Bind RemovedText, Mode=OneWay}" />
+                                                        </TextBlock>
+                                                    </StackPanel>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!--  Plans: proposed in chat or written to disk, one click away.  -->
+                            <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Chat.Artifacts.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                <ToggleButton
+                                    x:Name="PlansSection"
+                                    IsChecked="True"
+                                    Style="{StaticResource SectionHeader}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <TextBlock Text="Artifacts" />
+                                        <Border
+                                            Padding="7,1"
+                                            VerticalAlignment="Center"
+                                            Background="{StaticResource KindPlanTintBrush}"
+                                            CornerRadius="8"
+                                            Visibility="{x:Bind ViewModel.Chat.Artifacts.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                            <TextBlock
+                                                FontSize="10"
+                                                Foreground="{StaticResource KindPlanBrush}"
+                                                Text="{x:Bind ViewModel.Chat.Artifacts.Count, Mode=OneWay}" />
+                                        </Border>
+                                    </StackPanel>
+                                </ToggleButton>
+
+                                <StackPanel Margin="14,2,0,4" Visibility="{x:Bind PlansSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
+                                    <ListView
+                                        IsItemClickEnabled="True"
+                                        ItemClick="OnArtifactClick"
+                                        ItemContainerStyle="{StaticResource PanelItem}"
+                                        ItemsSource="{x:Bind ViewModel.Chat.Artifacts, Mode=OneWay}"
+                                        SelectionMode="None">
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:SessionArtifact">
+                                                <Grid ColumnSpacing="10">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border
+                                                        Width="24"
+                                                        Height="24"
+                                                        Background="{StaticResource KindPlanTintBrush}"
+                                                        CornerRadius="6">
+                                                        <FontIcon
+                                                            FontSize="11"
+                                                            Foreground="{StaticResource KindPlanBrush}"
+                                                            Glyph="{x:Bind Glyph}" />
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" Spacing="1">
+                                                        <TextBlock
+                                                            FontSize="12"
+                                                            FontWeight="SemiBold"
+                                                            Text="{x:Bind Title, Mode=OneWay}"
+                                                            TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock
+                                                            FontSize="11"
+                                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                            TextTrimming="CharacterEllipsis">
+                                                            <Run Text="{x:Bind Subtitle}" />
+                                                            <Run Text=" · " />
+                                                            <Run Text="{x:Bind UpdatedAt, Mode=OneWay, Converter={StaticResource RelativeTime}}" />
+                                                        </TextBlock>
+                                                    </StackPanel>
+                                                    <Border
+                                                        Grid.Column="2"
+                                                        Padding="7,1"
+                                                        VerticalAlignment="Center"
+                                                        BorderBrush="{x:Bind Status, Mode=OneWay, Converter={StaticResource ArtifactStatusBrush}}"
+                                                        BorderThickness="1"
+                                                        CornerRadius="8">
+                                                        <TextBlock
+                                                            FontSize="10"
+                                                            Foreground="{x:Bind Status, Mode=OneWay, Converter={StaticResource ArtifactStatusBrush}}"
+                                                            Text="{x:Bind StatusText, Mode=OneWay}" />
+                                                    </Border>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!--  Running tasks: background shells and subagents; hidden until
+                                  one starts. Clicking a row splits the centre to peek at it.  -->
+                            <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Chat.RunningTasks.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                <ToggleButton
+                                    x:Name="RunningTasksSection"
+                                    IsChecked="True"
+                                    Style="{StaticResource SectionHeader}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <TextBlock Text="Running tasks" />
+                                        <Border
+                                            Padding="7,1"
+                                            VerticalAlignment="Center"
+                                            Background="{StaticResource KindReadTintBrush}"
+                                            CornerRadius="8">
+                                            <TextBlock
+                                                FontSize="10"
+                                                Foreground="{StaticResource StatusRunningBrush}"
+                                                Text="{x:Bind ViewModel.Chat.RunningTasks.Count, Mode=OneWay}" />
+                                        </Border>
+                                    </StackPanel>
+                                </ToggleButton>
+
+                                <ListView
+                                    Margin="14,2,0,4"
+                                    MaxHeight="260"
+                                    IsItemClickEnabled="True"
+                                    ItemClick="OnRunningTaskClick"
+                                    ItemContainerStyle="{StaticResource PanelItem}"
+                                    ItemsSource="{x:Bind ViewModel.Chat.RunningTasks, Mode=OneWay}"
+                                    SelectionMode="None"
+                                    Visibility="{x:Bind RunningTasksSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:RunningTaskItem">
+                                            <Grid ColumnSpacing="8" ToolTipService.ToolTip="{x:Bind Title}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <FontIcon
+                                                    VerticalAlignment="Center"
+                                                    FontSize="12"
+                                                    Glyph="{x:Bind KindGlyph}" />
+                                                <Button
+                                                    Grid.Column="3"
+                                                    Padding="5"
+                                                    VerticalAlignment="Center"
+                                                    Background="Transparent"
+                                                    BorderThickness="0"
+                                                    Click="OnStopTaskClick"
+                                                    Tag="{x:Bind}"
+                                                    ToolTipService.ToolTip="Stop this task"
+                                                    Visibility="{x:Bind CanStop, Mode=OneWay}">
+                                                    <FontIcon FontSize="10" Glyph="&#xE71A;" />
+                                                </Button>
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    FontSize="12"
+                                                    Text="{x:Bind Title}"
+                                                    TextTrimming="CharacterEllipsis"
+                                                    TextWrapping="NoWrap" />
+                                                <StackPanel
+                                                    Grid.Column="2"
+                                                    VerticalAlignment="Center"
+                                                    Orientation="Horizontal"
+                                                    Spacing="5">
+                                                    <Ellipse
+                                                        Width="6"
+                                                        Height="6"
+                                                        VerticalAlignment="Center"
+                                                        Fill="{StaticResource StatusRunningBrush}"
+                                                        Visibility="{x:Bind IsRunning, Mode=OneWay}"
+                                                        views:Pulse.IsActive="{x:Bind IsRunning, Mode=OneWay}" />
+                                                    <TextBlock
+                                                        FontSize="10"
+                                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                        Text="{x:Bind StatusLabel, Mode=OneWay}" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </StackPanel>
+
+                            <!--  Todos: collapsed until the agent publishes something  -->
+                            <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Chat.Todos.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                <ToggleButton
+                                    x:Name="TodosSection"
+                                    IsChecked="True"
+                                    Style="{StaticResource SectionHeader}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <TextBlock Text="Todos" />
+                                        <Border
+                                            Padding="7,1"
+                                            VerticalAlignment="Center"
+                                            Background="{StaticResource KindTodoTintBrush}"
+                                            CornerRadius="8"
+                                            Visibility="{x:Bind ViewModel.Chat.TasksTotal, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                            <TextBlock FontSize="10" Foreground="{StaticResource KindTodoBrush}">
+                                                <Run Text="{x:Bind ViewModel.Chat.TasksDone, Mode=OneWay}" />
+                                                <Run Text="/" />
+                                                <Run Text="{x:Bind ViewModel.Chat.TasksTotal, Mode=OneWay}" />
+                                            </TextBlock>
+                                        </Border>
+                                    </StackPanel>
+                                </ToggleButton>
+
+                                <StackPanel
+                                    Margin="14,2,0,4"
+                                    Spacing="4"
+                                    Visibility="{x:Bind TodosSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
+                                    <!--  Progress at a glance: a thin bar over the list.  -->
+                                    <ProgressBar
+                                        Margin="8,0,8,4"
+                                        Maximum="{x:Bind ViewModel.Chat.TasksTotal, Mode=OneWay}"
+                                        Value="{x:Bind ViewModel.Chat.TasksDone, Mode=OneWay}"
+                                        Visibility="{x:Bind ViewModel.Chat.TasksTotal, Mode=OneWay, Converter={StaticResource CountToVisibility}}" />
+
+                                    <ListView
+                                        ItemContainerStyle="{StaticResource PanelItem}"
+                                        ItemsSource="{x:Bind ViewModel.Chat.Todos, Mode=OneWay}"
+                                        SelectionMode="None">
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="agents:TodoItem">
+                                                <Grid ColumnSpacing="8">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <FontIcon
+                                                        VerticalAlignment="Top"
+                                                        Margin="0,2,0,0"
+                                                        FontSize="12"
+                                                        Foreground="{x:Bind Status, Converter={StaticResource TodoBrush}}"
+                                                        Glyph="{x:Bind Status, Converter={StaticResource TodoGlyph}}" />
+                                                    <TextBlock
+                                                        Grid.Column="1"
+                                                        FontSize="12"
+                                                        Foreground="{x:Bind Status, Converter={StaticResource TodoTextBrush}}"
+                                                        Text="{x:Bind Content}"
+                                                        TextWrapping="Wrap" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!--  Status bar  -->
+        <StackPanel Grid.Row="1">
+        <Border
+            Margin="6,2,6,6"
+            Padding="12,4"
+            Background="{ThemeResource LayerFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="{StaticResource OverlayCornerRadius}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!--  Left: the repository, then this run's clock  -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="16">
+
+                    <!--  Icons center on their label: 10px keeps the glyph inside the text band,
+                          and each Margin (computed from the icon font's glyph boxes) lines the
+                          glyph's visual center up with the label's. Both sides center again in
+                          whatever height the row ends up with.  -->
+                    <!--  Git: branch, then modified / created / deleted counts  -->
+                    <StackPanel
+                        Orientation="Horizontal"
+                        Spacing="12"
+                        Visibility="{x:Bind ViewModel.Git.IsRepository, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel
+                            Orientation="Horizontal"
+                            Spacing="6"
+                            ToolTipService.ToolTip="{x:Bind ViewModel.Git.TrackingSummary, Mode=OneWay}">
+                            <FontIcon VerticalAlignment="Center" Margin="0,1.3,0,0" FontSize="10" Glyph="&#xE81E;" Opacity="0.6" />
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                Opacity="0.8"
+                                Text="{x:Bind ViewModel.Git.BranchName, Mode=OneWay}" />
+                        </StackPanel>
+
+                        <StackPanel
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            ToolTipService.ToolTip="{x:Bind ViewModel.Git.StatusDetail, Mode=OneWay}">
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                ToolTipService.ToolTip="Modified">
+                                <Run Text="~" /><Run Text="{x:Bind ViewModel.Git.ModifiedCount, Mode=OneWay}" />
+                            </TextBlock>
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                                ToolTipService.ToolTip="Created (added or untracked)">
+                                <Run Text="+" /><Run Text="{x:Bind ViewModel.Git.CreatedCount, Mode=OneWay}" />
+                            </TextBlock>
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                ToolTipService.ToolTip="Deleted">
+                                <Run Text="−" /><Run Text="{x:Bind ViewModel.Git.DeletedCount, Mode=OneWay}" />
+                            </TextBlock>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Rectangle
+                        VerticalAlignment="Center"
+                        Width="1"
+                        Height="14"
+                        Fill="{ThemeResource DividerStrokeColorDefaultBrush}"
+                        Visibility="{x:Bind ViewModel.Git.IsRepository, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+
+                    <!--  Language of the file in front: shows what colours it, and lets the user override that  -->
+                    <StackPanel x:Name="LanguageHost" Orientation="Horizontal" Spacing="16" Visibility="Collapsed">
+                        <Button
+                            x:Name="LanguageButton"
+                            Padding="8,2"
+                            ToolTipService.ToolTip="Language mode: change how this file is coloured">
+                            <Button.Flyout>
+                                <Flyout
+                                    x:Name="LanguageFlyout"
+                                    FlyoutPresenterStyle="{StaticResource EndpointFlyout}"
+                                    Opening="OnLanguageFlyoutOpening"
+                                    Placement="TopEdgeAlignedLeft">
+                                    <controls:LanguagePicker x:Name="LanguagePickerControl" />
+                                </Flyout>
+                            </Button.Flyout>
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="10" Glyph="&#xE943;" Opacity="0.6" />
+                                <TextBlock
+                                    x:Name="LanguageText"
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    Opacity="0.8" />
+                            </StackPanel>
+                        </Button>
+                        <Rectangle
+                            VerticalAlignment="Center"
+                            Width="1"
+                            Height="14"
+                            Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                    </StackPanel>
+
+                    <!--  Run time: when this window started, and how long it has been running  -->
+                    <StackPanel
+                        Orientation="Horizontal"
+                        Spacing="6"
+                        ToolTipService.ToolTip="Run started at · time elapsed since">
+                        <FontIcon VerticalAlignment="Center" Margin="0,1.3,0,0" FontSize="10" Glyph="&#xE916;" Opacity="0.6" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            Opacity="0.6"
+                            Text="{x:Bind ViewModel.StartedAtText}" />
+                        <TextBlock
+                            MinWidth="52"
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            Opacity="0.8"
+                            Text="{x:Bind ViewModel.ElapsedText, Mode=OneWay}" />
+                    </StackPanel>
+
+                    <Rectangle
+                        VerticalAlignment="Center"
+                        Width="1"
+                        Height="14"
+                        Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                </StackPanel>
+
+                <!--  Middle: the newest message from a running task, "[Task 2] finding file x.png"  -->
+                <TextBlock
+                    Grid.Column="1"
+                    Margin="4,0"
+                    VerticalAlignment="Center"
+                    FontSize="12"
+                    Opacity="0.8"
+                    Text="{x:Bind ViewModel.Chat.TaskStatusLine, Mode=OneWay}"
+                    TextTrimming="CharacterEllipsis"
+                    ToolTipService.ToolTip="{x:Bind ViewModel.Chat.TaskStatusLine, Mode=OneWay}" />
+
+                <!--  Right: usage (Claude CLI, then the custom provider), then the provider override  -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
+                    <!--  Usage: a percentage summary here, the full breakdown on click  -->
+                    <Button
+                        Padding="8,2"
+                        Visibility="{x:Bind ViewModel.Status.HasClaudeUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                        <Button.Flyout>
+                            <Flyout FlyoutPresenterStyle="{StaticResource EndpointFlyout}" Placement="TopEdgeAlignedRight">
+                                <StackPanel Width="320" Padding="16,14,16,14" Spacing="16">
+                                    <TextBlock FontSize="14" FontWeight="SemiBold" Text="Usage limits" />
+
+                                    <!--  5-hour window  -->
+                                    <StackPanel Spacing="6" Visibility="{x:Bind ViewModel.Status.HasFiveHour, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="5-hour limit" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                FontSize="12"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Text="{x:Bind ViewModel.Status.FiveHourSummary, Mode=OneWay}" />
+                                        </Grid>
+                                        <ProgressBar
+                                            MinHeight="4"
+                                            CornerRadius="2"
+                                            Foreground="{x:Bind ViewModel.Status.FiveHourPercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}"
+                                            Maximum="100"
+                                            Value="{x:Bind ViewModel.Status.FiveHourPercent, Mode=OneWay}" />
+                                    </StackPanel>
+
+                                    <!--  Weekly window  -->
+                                    <StackPanel Spacing="6" Visibility="{x:Bind ViewModel.Status.HasSevenDay, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="Weekly" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                FontSize="12"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Text="{x:Bind ViewModel.Status.SevenDaySummary, Mode=OneWay}" />
+                                        </Grid>
+                                        <ProgressBar
+                                            MinHeight="4"
+                                            CornerRadius="2"
+                                            Foreground="{x:Bind ViewModel.Status.SevenDayPercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}"
+                                            Maximum="100"
+                                            Value="{x:Bind ViewModel.Status.SevenDayPercent, Mode=OneWay}" />
+                                    </StackPanel>
+
+                                    <!--  Context window of this conversation  -->
+                                    <StackPanel Spacing="6" Visibility="{x:Bind ViewModel.Status.HasContext, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="Context" />
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                                <TextBlock
+                                                    FontSize="12"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="{x:Bind ViewModel.Status.ContextText, Mode=OneWay}" />
+                                                <TextBlock
+                                                    FontSize="12"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="{x:Bind ViewModel.Status.ContextPercentText, Mode=OneWay}"
+                                                    Visibility="{x:Bind ViewModel.Status.HasContextWindow, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <ProgressBar
+                                            MinHeight="4"
+                                            CornerRadius="2"
+                                            Foreground="{x:Bind ViewModel.Status.ContextPercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}"
+                                            Maximum="100"
+                                            Value="{x:Bind ViewModel.Status.ContextPercent, Mode=OneWay}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Flyout>
+                        </Button.Flyout>
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="10" Glyph="&#xEC4A;" Opacity="0.6" />
+                            <TextBlock VerticalAlignment="Center" FontSize="12" Opacity="0.6" Text="Claude CLI" />
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                Opacity="0.8"
+                                Text="{x:Bind ViewModel.Status.UsageSummary, Mode=OneWay}" />
+                        </StackPanel>
+                    </Button>
+
+                    <!--  Custom provider: labeled with its own name; what it has served since the window opened, chat and background tasks alike  -->
+                    <Button Padding="8,2">
+                        <Button.Flyout>
+                            <Flyout FlyoutPresenterStyle="{StaticResource EndpointFlyout}" Placement="TopEdgeAlignedRight">
+                                <StackPanel Width="320" Padding="16,14,16,14" Spacing="12">
+                                    <TextBlock FontSize="14" FontWeight="SemiBold" Text="{x:Bind ViewModel.Status.CustomProviderName, Mode=OneWay}" />
+                                    <TextBlock
+                                        FontSize="12"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Text="{x:Bind ViewModel.BackgroundTaskProviderLabel, Mode=OneWay}"
+                                        ToolTipService.ToolTip="Provider used for background tasks: commit messages, titles, routing, search" />
+
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock FontSize="13" FontWeight="SemiBold" Text="Requests" />
+                                        <TextBlock Grid.Column="1" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind ViewModel.Status.CustomCallsText, Mode=OneWay}" />
+                                    </Grid>
+
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock FontSize="13" FontWeight="SemiBold" Text="Tokens" />
+                                        <TextBlock Grid.Column="1" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind ViewModel.Status.CustomTokensText, Mode=OneWay}" />
+                                    </Grid>
+
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock FontSize="13" FontWeight="SemiBold" Text="Cost" />
+                                        <TextBlock Grid.Column="1" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind ViewModel.Status.CostText, Mode=OneWay}" />
+                                    </Grid>
+
+                                    <StackPanel Spacing="6" Visibility="{x:Bind ViewModel.Status.HasContext, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="Context" />
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                                <TextBlock FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind ViewModel.Status.ContextText, Mode=OneWay}" />
+                                                <TextBlock
+                                                    FontSize="12"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="{x:Bind ViewModel.Status.ContextPercentText, Mode=OneWay}"
+                                                    Visibility="{x:Bind ViewModel.Status.HasContextWindow, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <ProgressBar
+                                            MinHeight="4"
+                                            CornerRadius="2"
+                                            Foreground="{x:Bind ViewModel.Status.ContextPercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}"
+                                            Maximum="100"
+                                            Value="{x:Bind ViewModel.Status.ContextPercent, Mode=OneWay}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Flyout>
+                        </Button.Flyout>
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="10" Glyph="&#xE968;" Opacity="0.6" />
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                Opacity="0.8"
+                                Text="{x:Bind ViewModel.Status.CustomButtonText, Mode=OneWay}" />
+                        </StackPanel>
+                    </Button>
+
+                    <!--  Built-in MCP servers: a browser to verify work in, and desktop control  -->
+                    <!--  Opened from the title bar's Browser button; this host only owns the flyout  -->
+                    <Border x:Name="McpToolsHost" Width="0" Height="0">
+                        <FlyoutBase.AttachedFlyout>
+                            <Flyout FlyoutPresenterStyle="{StaticResource EndpointFlyout}" Placement="BottomEdgeAlignedRight">
+                                <StackPanel Width="360" Padding="16,14,16,14" Spacing="14">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock FontSize="14" FontWeight="SemiBold" Text="Agent tools" />
+                                        <TextBlock
+                                            FontSize="12"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Text="Let Claude test and verify their own work. Applies to sessions started from now on."
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+
+                                    <StackPanel Spacing="4">
+                                        <ToggleSwitch
+                                            Header="Browser"
+                                            IsEnabled="{x:Bind ViewModel.McpTools.BrowserAvailable}"
+                                            IsOn="{x:Bind ViewModel.McpTools.BrowserEnabled, Mode=TwoWay}" />
+                                        <TextBlock
+                                            FontSize="12"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Text="{x:Bind ViewModel.McpTools.BrowserNote}"
+                                            TextWrapping="Wrap" />
+                                        <Button
+                                            Command="{x:Bind ViewModel.McpTools.OpenBrowserCommand}"
+                                            Content="Open browser"
+                                            IsEnabled="{x:Bind ViewModel.McpTools.BrowserAvailable}" />
+                                    </StackPanel>
+
+                                    <StackPanel Spacing="4">
+                                        <ToggleSwitch
+                                            Header="Desktop control"
+                                            IsEnabled="{x:Bind ViewModel.McpTools.ComputerAvailable}"
+                                            IsOn="{x:Bind ViewModel.McpTools.ComputerEnabled, Mode=TwoWay}" />
+                                        <TextBlock
+                                            FontSize="12"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Text="{x:Bind ViewModel.McpTools.ComputerNote}"
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Flyout>
+                        </FlyoutBase.AttachedFlyout>
+                    </Border>
+
+                    <Rectangle
+                        Margin="8,0"
+                        VerticalAlignment="Center"
+                        Width="1"
+                        Height="14"
+                        Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                    <!--  The BYOK provider picker: providers are configured in Settings, here one is chosen  -->
+                    <Button Padding="8,2" ToolTipService.ToolTip="Agent provider">
+                        <Button.Flyout>
+                            <Flyout
+                                FlyoutPresenterStyle="{StaticResource EndpointFlyout}"
+                                Opening="OnCliEndpointFlyoutOpening"
+                                Placement="TopEdgeAlignedRight">
+                                <StackPanel Width="320" Padding="16,14,16,14" Spacing="12">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock FontSize="14" FontWeight="SemiBold" Text="Provider" />
+                                        <TextBlock
+                                            FontSize="12"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Text="{x:Bind ViewModel.CliEndpoint.RouteText, Mode=OneWay}"
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+
+                                    <ListView
+                                        ItemsSource="{x:Bind ViewModel.CliEndpoint.Choices}"
+                                        SelectedItem="{x:Bind ViewModel.CliEndpoint.Selected, Mode=TwoWay}"
+                                        SelectionMode="Single">
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:ProviderChoice">
+                                                <StackPanel Padding="0,6" Spacing="1">
+                                                    <TextBlock Text="{x:Bind Label}" />
+                                                    <TextBlock
+                                                        FontSize="11"
+                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                        Text="{x:Bind Detail}"
+                                                        TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            FontSize="12"
+                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                            Text="Add or edit providers in Settings."
+                                            TextWrapping="Wrap" />
+                                        <Button
+                                            Grid.Column="1"
+                                            Click="OnOpenProviderSettingsClick"
+                                            Content="Settings" />
+                                    </Grid>
+                                </StackPanel>
+                            </Flyout>
+                        </Button.Flyout>
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="10" Glyph="&#xF22C;" Opacity="0.6" />
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                Opacity="0.8"
+                                Text="{x:Bind ViewModel.EndpointLabel, Mode=OneWay}" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+        </StackPanel>
+    </Grid>
+</Page>

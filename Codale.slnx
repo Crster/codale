@@ -1,0 +1,28 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Codale.Agents/Codale.Agents.csproj" />
+    <Project Path="src/Codale.App/Codale.App.csproj">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/Codale.Commands/Codale.Commands.csproj" />
+    <Project Path="src/Codale.Core/Codale.Core.csproj" />
+    <Project Path="src/Codale.Git/Codale.Git.csproj" />
+    <Project Path="src/Codale.Mcp.Browser/Codale.Mcp.Browser.csproj" />
+    <Project Path="src/Codale.Mcp.Common/Codale.Mcp.Common.csproj" />
+    <Project Path="src/Codale.Mcp.Computer/Codale.Mcp.Computer.csproj" />
+    <Project Path="src/Codale.Mcp.Tasks/Codale.Mcp.Tasks.csproj" />
+    <Project Path="src/Codale.Search/Codale.Search.csproj" />
+    <Project Path="src/Codale.Storage/Codale.Storage.csproj" />
+    <Project Path="src/Codale.Terminal/Codale.Terminal.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Codale.Agents.Tests/Codale.Agents.Tests.csproj" />
+    <Project Path="tests/Codale.Commands.Tests/Codale.Commands.Tests.csproj" />
+    <Project Path="tests/Codale.Core.Tests/Codale.Core.Tests.csproj" />
+    <Project Path="tests/Codale.Git.Tests/Codale.Git.Tests.csproj" />
+    <Project Path="tests/Codale.Mcp.Tests/Codale.Mcp.Tests.csproj" />
+    <Project Path="tests/Codale.Search.Tests/Codale.Search.Tests.csproj" />
+    <Project Path="tests/Codale.Storage.Tests/Codale.Storage.Tests.csproj" />
+    <Project Path="tests/Codale.Terminal.Tests/Codale.Terminal.Tests.csproj" />
+  </Folder>
+</Solution>

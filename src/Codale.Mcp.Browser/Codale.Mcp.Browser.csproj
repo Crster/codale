@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Codale.Mcp.Common\Codale.Mcp.Common.csproj" />
+    <!--
+      Pinned: the App copies this project's bin tree (including the .playwright driver)
+      with wildcard Content globs, so a floating version could silently change what ships.
+    -->
+    <PackageReference Include="Microsoft.Playwright" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Codale.Mcp.Browser</RootNamespace>
+    <!-- Drivers are installed by the package; browsers come from the installed Edge/Chrome. -->
+    <PlaywrightPlatform>win32;win64</PlaywrightPlatform>
+  </PropertyGroup>
+
+</Project>

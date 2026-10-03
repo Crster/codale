@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="Codale.App.Views.TaskPeekPane"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:views="using:Codale.App.Views"
+    mc:Ignorable="d">
+
+    <!--  A live, read-only look at one running task, shown beside the chat.  -->
+    <!--  The log area uses the terminal's own colours (#0C0C0C / #CCCCCC); the header
+          is as tall as the tab strip beside it so the two rows line up.  -->
+    <Grid Background="{ThemeResource SolidBackgroundFillColorBaseBrush}" RowSpacing="0">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="40" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid
+            Padding="12,0,8,0"
+            Background="{ThemeResource LayerFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1,0,0,1"
+            ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <FontIcon
+                x:Name="KindIcon"
+                VerticalAlignment="Center"
+                FontSize="14" />
+            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock
+                    x:Name="TitleText"
+                    FontSize="12"
+                    FontWeight="SemiBold"
+                    TextTrimming="CharacterEllipsis" />
+                <TextBlock
+                    x:Name="StatusText"
+                    FontSize="11"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+            </StackPanel>
+            <Ellipse
+                x:Name="RunningDot"
+                Grid.Column="2"
+                Width="7"
+                Height="7"
+                VerticalAlignment="Center"
+                Fill="{StaticResource StatusRunningBrush}" />
+            <Button
+                x:Name="StopButton"
+                Grid.Column="3"
+                Padding="8,3"
+                Click="OnStopClick"
+                Visibility="Collapsed">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="10" Glyph="&#xE71A;" />
+                    <TextBlock FontSize="11" Text="Stop" />
+                </StackPanel>
+            </Button>
+            <Button
+                Grid.Column="4"
+                Padding="6"
+                Background="Transparent"
+                BorderThickness="0"
+                Click="OnCloseClick"
+                Content="&#xE711;"
+                FontFamily="{StaticResource SymbolThemeFontFamily}"
+                FontSize="11"
+                ToolTipService.ToolTip="Close peek" />
+        </Grid>
+
+        <!--  A subagent reads as a transcript; only a shell's log is the black terminal panel.  -->
+        <ScrollViewer
+            x:Name="TranscriptScroll"
+            Grid.Row="1"
+            HorizontalScrollBarVisibility="Disabled"
+            VerticalScrollBarVisibility="Auto"
+            Visibility="Collapsed">
+            <views:SubagentTranscript x:Name="Transcript" />
+        </ScrollViewer>
+
+        <ScrollViewer
+            x:Name="LogScroll"
+            Grid.Row="1"
+            Background="#0C0C0C"
+            HorizontalScrollBarVisibility="Auto"
+            VerticalScrollBarVisibility="Auto">
+            <TextBlock
+                x:Name="LogText"
+                Margin="12,8,8,4"
+                FontFamily="Cascadia Mono, Consolas"
+                FontSize="13"
+                Foreground="#CCCCCC"
+                IsTextSelectionEnabled="True"
+                TextWrapping="NoWrap" />
+        </ScrollViewer>
+    </Grid>
+</UserControl>

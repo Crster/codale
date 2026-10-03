@@ -1,0 +1,316 @@
+using Codale.Core.Agents;
+using Codale.Storage;
+
+namespace Codale.App.Services;
+
+/// <summary>
+/// Which of Codale's built-in MCP servers a project's agents get: a browser the agent
+/// can drive to test and verify what it built, and desktop control (screenshots, mouse,
+/// keyboard) for everything a browser cannot reach. The browser is a global preference
+/// that defaults on; desktop control acts on the real screen, so it is per project and
+/// defaults off. Like <see cref="CliEndpointSettings"/> the values are re-read on every
+/// access, so a toggle applies to the next session start.
+/// </summary>
+public sealed class McpServerSettings
+{
+    public const string BrowserName = "codale-browser";
+    public const string ComputerName = "codale-computer";
+
+    private const string BrowserKey = "mcp.browser.enabled";
+    private const string ComputerKey = "mcp.computer.enabled";
+
+    private readonly CodaleStore _store;
+    private readonly string _projectPath;
+    private readonly string _baseDirectory;
+
+    public McpServerSettings(CodaleStore store, string projectPath, string? baseDirectory = null)
+    {
+        _store = store;
+        _projectPath = projectPath;
+        _baseDirectory = baseDirectory ?? AppContext.BaseDirectory;
+    }
+
+    /// <summary>On unless the user turned it off.</summary>
+    public bool BrowserEnabled
+    {
+        get => _store.GetSetting(BrowserKey) != "0";
+        set => _store.SetSetting(BrowserKey, value ? "1" : "0");
+    }
+
+    /// <summary>Off unless the user turned it on for this project.</summary>
+    public bool ComputerEnabled
+    {
+        get => _store.GetUiState(_projectPath, ComputerKey) == "1";
+        set => _store.SetUiState(_projectPath, ComputerKey, value ? "1" : "0");
+    }
+
+    public bool BrowserAvailable => File.Exists(ExePath("Codale.Mcp.Browser"));
+
+    public bool ComputerAvailable => File.Exists(ExePath("Codale.Mcp.Computer"));
+
+    public const string TasksName = "codale-tasks";
+
+    /// <summary>
+    /// Long-running commands are run by Codale itself, so the tasks server ships with
+    /// the app and is not a user preference: without it the agent's own background
+    /// shells stay allowed, because blocking them would leave no way to run a dev server.
+    /// </summary>
+    public bool TasksAvailable => File.Exists(ExePath("Codale.Mcp.Tasks"));
+
+    /// <summary>The tasks server, wired to this chat's pipe; the exe finds the app through its environment.</summary>
+    /// <param name="runDirectory">Where the chat's tasks run (its worktree, when it has one); the command list itself is always the project's.</param>
+    /// <param name="assist">Offer the explore and ask_files tools, answered by the background-task model.</param>
+    public McpServerSpec? TasksSpec(string pipeName, string token, string? runDirectory = null, bool assist = false) => !TasksAvailable
+        ? null
+        : new McpServerSpec
+        {
+            Name = TasksName,
+            Command = RunnablePath("Codale.Mcp.Tasks"),
+
+            // Codale's own server (task list, artifacts, background tasks): no approval prompt for it.
+            AutoApprove = true,
+
+            // Starting processes and saving commands reach beyond the sandbox, so these still ask.
+            AskTools = ["start_task", "run_command", "add_command"],
+            Env = new Dictionary<string, string>
+            {
+                ["CODALE_TASKS_PIPE"] = pipeName,
+                ["CODALE_TASKS_TOKEN"] = token,
+                ["CODALE_PROJECT_DIR"] = _projectPath,
+                ["CODALE_RUN_DIR"] = runDirectory ?? _projectPath,
+                ["CODALE_ASSIST"] = assist ? "1" : "0",
+            },
+        };
+
+    /// <summary>
+    /// The <c>PostToolUse</c> hook that condenses long shell output; with
+    /// <paramref name="digest"/> it asks the background-task model before cutting.
+    /// </summary>
+    public string? ShellOutputHookCommand(bool digest) => !TasksAvailable
+        ? null
+        : TasksHook($"--posttooluse-hook{(digest ? " --digest" : "")}");
+
+    /// <summary>The <c>PreToolUse</c> hook that turns away a first whole-file read of a large file.</summary>
+    public string? ReadGuardCommand(bool offerAskFiles) => !TasksAvailable
+        ? null
+        : TasksHook($"--pretooluse-hook --read-guard 400{(offerAskFiles ? " --ask-files" : "")}");
+
+    /// <summary>Standing instruction that sends exploration to the background-task model.</summary>
+    public const string AssistDirective =
+        "To save context, codebase exploration goes through Codale's helper model: for an open-ended question " +
+        "(where is X handled, how does Y work, which files are involved) call mcp__codale-tasks__explore first, instead of a chain " +
+        "of Grep/Glob/Read calls or an Explore/Task subagent. To understand a large file you will not edit, use " +
+        "mcp__codale-tasks__ask_files. Then Read only the exact ranges you will change. When you already know the file " +
+        "or symbol, Grep and Read it directly. These tools are deferred: load them first with one ToolSearch " +
+        "(select:mcp__codale-tasks__explore,mcp__codale-tasks__ask_files).";
+
+    /// <summary>Standing instruction for short replies, when the user turned it on.</summary>
+    public const string TerseDirective =
+        "Keep replies short: no preamble and no recap of what you are about to do or just did. Do not reprint code you " +
+        "wrote or read; point to it as path:line. Report results in at most five bullets unless the user asks for more.";
+
+    /// <summary>The CLI's own task-list tools, switched off when todos_set is available so the panel has one source.</summary>
+    public const string NativeTodoTools = "TodoWrite,TaskCreate,TaskUpdate,TaskList,TaskGet";
+
+    /// <summary>The PreToolUse hook command that refuses background shells.</summary>
+    public string? TasksGuardCommand() => !TasksAvailable
+        ? null
+        : TasksHook("--pretooluse-hook");
+
+    /// <summary>A hook command line for the tasks exe. Forward slashes and quotes: the CLI runs hooks through a shell that eats backslashes.</summary>
+    private string TasksHook(string arguments) => $"\"{RunnablePath("Codale.Mcp.Tasks").Replace('\\', '/')}\" {arguments}";
+
+    /// <summary>Standing instruction that sends long-running commands to the task tools.</summary>
+    public const string TasksDirective =
+        "Shell tools cannot run commands in the background here (run_in_background and async modes are refused). " +
+        "For a dev server, watcher or any command that keeps running, use the codale-tasks start_task tool " +
+        "(mcp__codale-tasks__start_task), then read_task for its output and stop_task when you are done. " +
+        "Codale shows the task and its live output to the user. Short commands still run normally in the foreground. " +
+        "The project also keeps a saved command list that the user sees in Codale's commands menu: list_commands shows it, " +
+        "add_command saves a new run command to it, and run_command runs a saved one by name (as a task). " +
+        "Codale's session panel is fed by two codale-tasks tools, and they are the only way to fill it. " +
+        "Keep your task list with mcp__codale-tasks__todos_set: pass the whole list every time (2-6 short steps, one in_progress, " +
+        "finished ones completed) when you start, as you begin each step and as you finish it. The built-in task tools " +
+        "(TodoWrite, TaskCreate, TaskUpdate) are switched off; do not look for them. " +
+        "Use mcp__codale-tasks__artifact_add for anything you produce that is output rather than project source " +
+        "(a report, document or image): pass a path or markdown and it is listed for the user. " +
+        "If these tools are not directly available, load them with one ToolSearch (select:mcp__codale-tasks__todos_set,mcp__codale-tasks__artifact_add).";
+
+    /// <summary>The servers to attach to a session started now; a server whose exe did not ship is left out.</summary>
+    public IReadOnlyList<McpServerSpec> Servers()
+    {
+        var servers = new List<McpServerSpec>();
+
+        if (BrowserEnabled && BrowserAvailable)
+        {
+            servers.Add(new McpServerSpec
+            {
+                Name = BrowserName,
+                Command = RunnablePath("Codale.Mcp.Browser"),
+                AutoApprove = true,
+
+                // Uploads and script evaluation reach beyond the sandbox, so these still ask.
+                AskTools = ["browser_upload", "browser_evaluate"],
+
+                // browser_upload is confined to this folder and refuses without it.
+                Env = new Dictionary<string, string> { ["CODALE_PROJECT_DIR"] = _projectPath },
+            });
+        }
+
+        if (ComputerEnabled && ComputerAvailable)
+        {
+            servers.Add(new McpServerSpec
+            {
+                Name = ComputerName,
+                Command = RunnablePath("Codale.Mcp.Computer"),
+                RequireApproval = true,
+            });
+        }
+
+        return servers;
+    }
+
+    /// <summary>
+    /// A standing instruction for the enabled servers, appended to the agent's system prompt; null when none.
+    /// Pass the <paramref name="servers"/> already computed for the session to skip a second scan.
+    /// </summary>
+    public string? Directive(IReadOnlyList<McpServerSpec>? servers = null)
+    {
+        servers ??= Servers();
+        var parts = new List<string>();
+
+        if (servers.Any(s => s.Name == BrowserName))
+        {
+            parts.Add(
+                $"You can drive a real browser with the {McpServerSpec.PrefixOf(BrowserName)}* tools. After you change something " +
+                "a browser can show (a web page, UI, or a local dev server), open it, use browser_snapshot to read the " +
+                "page and browser_screenshot to look at it, exercise the changed flow, and check browser_console_messages, " +
+                "before you report the work as done. The browser is hidden by default and keeps logins between runs. When a page needs a sign-in, " +
+                "captcha or 2FA, do not give up or ask for credentials: call browser_handoff and the user completes it in a visible window. " +
+                "To check responsive layouts use browser_set_viewport (mobile, tablet, laptop, desktop, 4k) or browser_responsive_check for a screenshot at several sizes at once; " +
+                "browser_emulate switches dark mode. Element refs come from the latest browser_snapshot.");
+        }
+
+        if (servers.Any(s => s.Name == ComputerName))
+        {
+            parts.Add(
+                $"You can also see and control the desktop with the {McpServerSpec.PrefixOf(ComputerName)}* tools, for what a browser cannot reach " +
+                "(native apps, dialogs). Take a computer_screenshot before every click; the user approves each action.");
+        }
+
+        return parts.Count == 0 ? null : string.Join(' ', parts);
+    }
+
+    private string ExePath(string name) => Path.Combine(_baseDirectory, name, name + ".exe");
+
+    /// <summary>
+    /// The exe as a spawned agent can launch it. A package's install folder
+    /// (WindowsApps) cannot be executed by processes outside the package, and the agent
+    /// CLI spawns MCP servers itself (<c>spawn EPERM</c>), so a packaged server is first
+    /// copied to a plain folder, once per build, and run from there.
+    /// </summary>
+    private string RunnablePath(string name)
+    {
+        var source = ExePath(name);
+        if (!source.Contains(@"\WindowsApps\", StringComparison.OrdinalIgnoreCase))
+        {
+            return source;
+        }
+
+        // Every Servers() and hook call asks; the stamp scan and staging check run once per name.
+        lock (_runnable)
+        {
+            if (_runnable.TryGetValue(name, out var known) && File.Exists(known))
+            {
+                return known;
+            }
+
+            // A failed staging falls back to the source and is retried next time.
+            var staged = StageRunnable(name, source);
+            if (!string.Equals(staged, source, StringComparison.OrdinalIgnoreCase))
+            {
+                _runnable[name] = staged;
+            }
+
+            return staged;
+        }
+    }
+
+    private readonly Dictionary<string, string> _runnable = new(StringComparer.Ordinal);
+
+    private static string StageRunnable(string name, string source)
+    {
+        try
+        {
+            // The exe is a small apphost that rarely changes between builds; the code
+            // lives in the dlls beside it (and in subfolders such as the browser's driver),
+            // so the stamp covers every file under the folder.
+            var files = new DirectoryInfo(Path.GetDirectoryName(source)!).GetFiles("*", SearchOption.AllDirectories);
+            var stamp = $"{files.Length:x}-{files.Sum(f => f.Length):x}-{files.Max(f => f.LastWriteTimeUtc.Ticks):x}";
+            var target = Path.Combine(StagingRoot(), name, stamp);
+            var staged = Path.Combine(target, name + ".exe");
+            if (File.Exists(staged))
+            {
+                return staged;
+            }
+
+            var partial = target + ".partial";
+            if (Directory.Exists(partial))
+            {
+                Directory.Delete(partial, recursive: true);
+            }
+
+            CopyDirectory(Path.GetDirectoryName(source)!, partial);
+            Directory.Move(partial, target);
+
+            // Older builds' copies are dead weight (the browser one carries a Node runtime).
+            foreach (var old in Directory.GetDirectories(Path.Combine(StagingRoot(), name)))
+            {
+                if (!string.Equals(old, target, StringComparison.OrdinalIgnoreCase))
+                {
+                    try { Directory.Delete(old, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* in use by a running session */ }
+                }
+            }
+
+            return staged;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            CrashLog.Trace($"MCP staging failed for {name}: {ex.Message}");
+            return source;
+        }
+    }
+
+    /// <summary>
+    /// A physical folder other processes see at the same path. A packaged app's
+    /// %LOCALAPPDATA% is virtualised, so it is not that; the package's local cache is.
+    /// </summary>
+    private static string StagingRoot()
+    {
+        string root;
+        try
+        {
+            root = Windows.Storage.ApplicationData.Current.LocalCacheFolder.Path;
+        }
+        catch (Exception)
+        {
+            root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        }
+
+        return Path.Combine(root, "Codale", "mcp");
+    }
+
+    private static void CopyDirectory(string from, string to)
+    {
+        Directory.CreateDirectory(to);
+        foreach (var file in Directory.GetFiles(from))
+        {
+            File.Copy(file, Path.Combine(to, Path.GetFileName(file)), overwrite: true);
+        }
+
+        foreach (var dir in Directory.GetDirectories(from))
+        {
+            CopyDirectory(dir, Path.Combine(to, Path.GetFileName(dir)));
+        }
+    }
+}

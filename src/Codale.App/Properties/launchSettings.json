@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Codale.App (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "Codale.App (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

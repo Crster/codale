@@ -1,0 +1,435 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="Codale.App.Controls.SettingsPanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--  Slides in over the right edge of the main window; the theme is inherited from it.  -->
+    <Border
+        Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+        BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+        BorderThickness="1,0,0,0">
+        <Grid RowDefinitions="Auto,*">
+            <Grid.Resources>
+                <Style x:Key="GroupTitle" TargetType="TextBlock">
+                    <Setter Property="FontSize" Value="13" />
+                    <Setter Property="FontWeight" Value="SemiBold" />
+                    <Setter Property="Margin" Value="4,18,0,8" />
+                    <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Style>
+                <Style x:Key="Card" TargetType="Border">
+                    <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+                    <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                    <Setter Property="BorderThickness" Value="1" />
+                    <Setter Property="CornerRadius" Value="8" />
+                </Style>
+                <Style x:Key="SettingRow" TargetType="Grid">
+                    <Setter Property="Padding" Value="16,12" />
+                    <Setter Property="ColumnSpacing" Value="24" />
+                </Style>
+                <Style x:Key="Divider" TargetType="Rectangle">
+                    <Setter Property="Height" Value="1" />
+                    <Setter Property="Fill" Value="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                </Style>
+                <Style x:Key="Hint" TargetType="TextBlock">
+                    <Setter Property="FontSize" Value="12" />
+                    <Setter Property="TextWrapping" Value="Wrap" />
+                    <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Style>
+            </Grid.Resources>
+
+            <Grid Margin="24,14,12,4" ColumnDefinitions="*,Auto">
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="20"
+                    FontWeight="SemiBold"
+                    Text="Settings" />
+                <Button
+                    Grid.Column="1"
+                    Width="32"
+                    Height="32"
+                    Padding="0"
+                    Background="Transparent"
+                    BorderBrush="Transparent"
+                    Click="OnCloseClick"
+                    ToolTipService.ToolTip="Close (Esc)">
+                    <FontIcon FontSize="12" Glyph="&#xE711;" />
+                </Button>
+            </Grid>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <StackPanel Padding="20,0,20,24">
+
+                    <TextBlock Style="{StaticResource GroupTitle}" Text="BYOK providers" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel Padding="16,12" Spacing="10">
+                            <TextBlock
+                                Style="{StaticResource Hint}"
+                                Text="Your own Anthropic Messages API endpoints, used by Claude. Pick one in the status bar; Default uses the Claude CLI login. Also editable in settings.json." />
+                            <StackPanel x:Name="ProvidersPanel" Spacing="6" />
+                            <Button Click="OnAddProviderClick" Content="Add provider" />
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource GroupTitle}" Text="Appearance" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Theme" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Applies immediately, including transcript colours. The terminal stays dark." />
+                                </StackPanel>
+                                <ComboBox x:Name="ThemeBox" Grid.Column="1" VerticalAlignment="Center" Width="160" SelectionChanged="OnThemeChanged">
+                                    <ComboBoxItem Content="Dark" />
+                                    <ComboBoxItem Content="Light" />
+                                    <ComboBoxItem Content="Follow system" />
+                                </ComboBox>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource GroupTitle}" Text="Editor" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Font size" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Points, 8–40. Applies to tabs opened after the change; Ctrl+wheel zooms one tab." />
+                                </StackPanel>
+                                <NumberBox x:Name="EditorFontSizeBox" Grid.Column="1" VerticalAlignment="Center" Width="120" Maximum="40" Minimum="8" SmallChange="1" SpinButtonPlacementMode="Compact" ValueChanged="OnEditorFontSizeChanged" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Tab width" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Spaces the Tab key inserts." />
+                                </StackPanel>
+                                <ComboBox x:Name="EditorTabWidthBox" Grid.Column="1" VerticalAlignment="Center" Width="130" SelectionChanged="OnEditorTabWidthChanged">
+                                    <ComboBoxItem Content="2 spaces" />
+                                    <ComboBoxItem Content="4 spaces" />
+                                    <ComboBoxItem Content="8 spaces" />
+                                </ComboBox>
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Word wrap" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Fold long lines at the viewport edge instead of scrolling sideways." />
+                                </StackPanel>
+                                <ToggleSwitch x:Name="WordWrapToggle" Grid.Column="1" MinWidth="0" Toggled="OnWordWrapToggled" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Line numbers" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Draw the numbered gutter left of the text." />
+                                </StackPanel>
+                                <ToggleSwitch x:Name="EditorLineNumbersToggle" Grid.Column="1" MinWidth="0" Toggled="OnEditorLineNumbersToggled" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Syntax highlighting" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Colour keywords, strings and comments. Off can help on very large files." />
+                                </StackPanel>
+                                <ToggleSwitch x:Name="EditorHighlightingToggle" Grid.Column="1" MinWidth="0" Toggled="OnEditorHighlightingToggled" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource GroupTitle}" Text="Syntax" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Get more languages" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Download grammars from the built-in catalog, have the AI write one for a file type, or import a .tmLanguage.json." />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Orientation="Horizontal" Spacing="6">
+                                    <Button Content="Download…" Click="OnSyntaxDownloadClick" />
+                                    <Button Content="Generate…" Click="OnSyntaxGenerateClick" />
+                                    <Button Content="Import…" Click="OnSyntaxImportClick" />
+                                </StackPanel>
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid Style="{StaticResource SettingRow}" RowSpacing="6">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock x:Name="SyntaxSummary" Text="Installed languages" />
+                                <StackPanel x:Name="SyntaxList" Grid.Row="1" Spacing="2" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Per-file language overrides" />
+                                    <TextBlock x:Name="SyntaxOverridesHint" Style="{StaticResource Hint}" Text="Files you set by hand from the status bar." />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Orientation="Horizontal" Spacing="6">
+                                    <Button x:Name="SyntaxClearOverridesButton" Content="Clear all" Click="OnSyntaxClearOverridesClick" />
+                                    <Button Content="Open folder" Click="OnSyntaxOpenFolderClick" />
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource GroupTitle}" Text="Terminal" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Default shell" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="What a new terminal tab runs. Open tabs keep their shell." />
+                                </StackPanel>
+                                <ComboBox x:Name="TerminalShellBox" Grid.Column="1" VerticalAlignment="Center" Width="190" SelectionChanged="OnTerminalShellChanged">
+                                    <ComboBoxItem Content="Auto-detect" />
+                                    <ComboBoxItem Content="PowerShell 7 (pwsh)" />
+                                    <ComboBoxItem Content="Windows PowerShell" />
+                                    <ComboBoxItem Content="Command Prompt" />
+                                </ComboBox>
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Font family" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Must be monospace. Falls back to Cascadia Mono if not installed." />
+                                </StackPanel>
+                                <ComboBox x:Name="TerminalFontFamilyBox" Grid.Column="1" VerticalAlignment="Center" Width="190" SelectionChanged="OnTerminalFontFamilyChanged">
+                                    <ComboBoxItem Content="Cascadia Mono" />
+                                    <ComboBoxItem Content="Cascadia Code" />
+                                    <ComboBoxItem Content="Consolas" />
+                                    <ComboBoxItem Content="Courier New" />
+                                    <ComboBoxItem Content="JetBrains Mono" />
+                                    <ComboBoxItem Content="Fira Code" />
+                                </ComboBox>
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Font size" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Points, 8–40. Open terminals refit immediately." />
+                                </StackPanel>
+                                <NumberBox x:Name="TerminalFontSizeBox" Grid.Column="1" VerticalAlignment="Center" Width="120" Maximum="40" Minimum="8" SmallChange="1" SpinButtonPlacementMode="Compact" ValueChanged="OnTerminalFontSizeChanged" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Scrollback" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Scrolled-off lines kept. Applies to terminals opened after the change." />
+                                </StackPanel>
+                                <ComboBox x:Name="TerminalScrollbackBox" Grid.Column="1" VerticalAlignment="Center" Width="140" SelectionChanged="OnTerminalScrollbackChanged">
+                                    <ComboBoxItem Content="1,000 lines" />
+                                    <ComboBoxItem Content="10,000 lines" />
+                                    <ComboBoxItem Content="50,000 lines" />
+                                    <ComboBoxItem Content="100,000 lines" />
+                                </ComboBox>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource GroupTitle}" Text="Chat" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Font size" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Base text size of the transcript; headings and code scale with it." />
+                                </StackPanel>
+                                <NumberBox x:Name="ChatFontSizeBox" Grid.Column="1" VerticalAlignment="Center" Width="120" LargeChange="1" Maximum="24" Minimum="9" SmallChange="0.5" SpinButtonPlacementMode="Compact" ValueChanged="OnChatFontSizeChanged" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Font" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Transcript typeface. Code stays monospaced." />
+                                </StackPanel>
+                                <ComboBox x:Name="ChatFontFamilyBox" Grid.Column="1" VerticalAlignment="Center" Width="190" SelectionChanged="OnChatFontFamilyChanged" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Suggest next prompt" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Claude predicts what you will type next; press Tab in an empty composer to use it. Costs a small extra request per turn. Applies to new sessions." />
+                                </StackPanel>
+                                <ToggleSwitch x:Name="SuggestNextPromptToggle" Grid.Column="1" MinWidth="0" Toggled="OnSuggestNextPromptToggled" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource GroupTitle}" Text="New chat defaults" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Default model" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="CLI default leaves it to the CLI; keep it there when a custom endpoint is active." />
+                                </StackPanel>
+                                <ComboBox x:Name="DefaultModelBox" Grid.Column="1" VerticalAlignment="Center" Width="220" SelectionChanged="OnDefaultModelChanged" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Default reasoning effort" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="How hard the agent thinks on new chats." />
+                                </StackPanel>
+                                <ComboBox x:Name="DefaultEffortBox" Grid.Column="1" VerticalAlignment="Center" Width="160" SelectionChanged="OnDefaultEffortChanged">
+                                    <ComboBoxItem Content="CLI default" />
+                                    <ComboBoxItem Content="Low" />
+                                    <ComboBoxItem Content="Medium" />
+                                    <ComboBoxItem Content="High" />
+                                    <ComboBoxItem Content="Extra high" />
+                                    <ComboBoxItem Content="Max" />
+                                </ComboBox>
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Default permission mode" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Auto picks a mode per message; Ask explains and changes nothing; Full works without asking." TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ComboBox x:Name="DefaultChatModeBox" Grid.Column="1" VerticalAlignment="Center" Width="190" SelectionChanged="OnDefaultChatModeChanged">
+                                    <ComboBoxItem Content="Auto" Tag="automatic" />
+                                    <ComboBoxItem Content="Ask (explain only)" Tag="ask" />
+                                    <ComboBoxItem Content="Planning" Tag="plan" />
+                                    <ComboBoxItem Content="Manual" Tag="manual" />
+                                    <ComboBoxItem Content="Accept edits" Tag="acceptEdits" />
+                                    <ComboBoxItem Content="Full (no permission prompts)" Tag="auto" />
+                                </ComboBox>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource GroupTitle}" Text="Background tasks" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Background tasks" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Writes commit messages, names sessions, reads Auto-mode messages and powers search. Calls one of your custom providers directly (no process to start, the fastest), separate from the provider picked in the status bar. Falls back to the Claude CLI until one with a key and model exists." TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ComboBox x:Name="HelperProviderBox" Grid.Column="1" VerticalAlignment="Center" Width="190" SelectionChanged="OnHelperProviderChanged" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource GroupTitle}" Text="Token saving" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock
+                                x:Name="TokenSaverByokHint"
+                                Margin="16,12,16,0"
+                                Style="{StaticResource Hint}"
+                                Text="Explore, ask_files, output digests and the handoff note need a custom provider for background tasks. Until one is set they stay off, so they never spend Claude tokens."
+                                TextWrapping="Wrap" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Condense shell output" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Build logs, test runs and installs reach Claude without progress noise, passing tests or repeated lines; errors always stay. The full output is kept in a file Claude can read." TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ToggleSwitch x:Name="CompressShellToggle" Grid.Column="1" MinWidth="0" Toggled="OnTokenSaverToggled" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Digest long output" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Output still long after condensing is summarised by the background-task model instead of being cut to its first and last lines." TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ToggleSwitch x:Name="DigestToggle" Grid.Column="1" MinWidth="0" Toggled="OnTokenSaverToggled" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Explore with the background model" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Claude gets explore and ask_files tools: the background-task model searches and reads the code, and Claude reads only its answer." TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ToggleSwitch x:Name="ExploreToggle" Grid.Column="1" MinWidth="0" Toggled="OnTokenSaverToggled" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Guard large file reads" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="The first whole-file read of a file over 400 lines is turned away in favour of reading just the part needed. Asking again reads it all." TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ToggleSwitch x:Name="ReadGuardToggle" Grid.Column="1" MinWidth="0" Toggled="OnTokenSaverToggled" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Offer a fresh session" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Once the context is 60% full, offer a fresh session that starts from a handoff note (or a /compact without a custom provider)." TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ToggleSwitch x:Name="HandoffNudgeToggle" Grid.Column="1" MinWidth="0" Toggled="OnTokenSaverToggled" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Cheaper subagents" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Claude's Explore subagent runs on Haiku and its general-purpose one on Sonnet at medium effort, instead of the chat's model, and both are told to read in ranges and report briefly." TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ToggleSwitch x:Name="CheapSubagentsToggle" Grid.Column="1" MinWidth="0" Toggled="OnTokenSaverToggled" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Short replies" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Ask Claude for brief answers: no recaps, no reprinted code. Output tokens cost the most." TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ToggleSwitch x:Name="TerseToggle" Grid.Column="1" MinWidth="0" Toggled="OnTokenSaverToggled" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Compact earlier" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Context percentage at which Claude compacts on its own. 0 keeps the CLI's default." TextWrapping="Wrap" />
+                                </StackPanel>
+                                <NumberBox x:Name="AutoCompactBox" Grid.Column="1" VerticalAlignment="Center" Width="120" Maximum="100" Minimum="0" SmallChange="5" SpinButtonPlacementMode="Compact" ValueChanged="OnAutoCompactChanged" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <StackPanel Padding="16,12" Spacing="6">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Never read" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Deny rules for paths Claude may not read or search, one per line, such as Read(**/bin/**)." TextWrapping="Wrap" />
+                                </StackPanel>
+                                <TextBox x:Name="DenyRulesBox" AcceptsReturn="True" FontFamily="Consolas" FontSize="12" MinHeight="96" LostFocus="OnDenyRulesLostFocus" TextWrapping="NoWrap" />
+                            </StackPanel>
+                            <TextBlock Margin="16,0,16,12" Style="{StaticResource Hint}" Text="These apply to new sessions." />
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource GroupTitle}" Text="Git" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Refresh interval" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Seconds between working-tree checks, 1–600. Lower is snappier but spawns git more often." />
+                                </StackPanel>
+                                <NumberBox x:Name="GitPollBox" Grid.Column="1" VerticalAlignment="Center" Width="120" Maximum="600" Minimum="1" SmallChange="1" SpinButtonPlacementMode="Compact" ValueChanged="OnGitPollChanged" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource GroupTitle}" Text="Keyboard shortcuts" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <!--  Rows are built in code; the divider style is looked up from here.  -->
+                            <StackPanel x:Name="ShortcutsPanel">
+                                <StackPanel.Resources>
+                                    <Style x:Key="ShortcutDivider" TargetType="Rectangle" BasedOn="{StaticResource Divider}" />
+                                    <Style x:Key="ShortcutText" TargetType="TextBlock" BasedOn="{StaticResource Hint}" />
+                                </StackPanel.Resources>
+                            </StackPanel>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <TextBlock x:Name="ShortcutHint" VerticalAlignment="Center" Style="{StaticResource Hint}" />
+                                <Button Grid.Column="1" Click="OnResetShortcutsClick" Content="Reset all" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Border>
+</UserControl>

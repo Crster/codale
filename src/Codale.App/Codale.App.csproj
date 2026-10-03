@@ -1,0 +1,149 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.22621.0</TargetPlatformMinVersion>
+    <RootNamespace>Codale.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64;ARM64</Platforms>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>
+    <PublishProfile Condition="Exists('Properties\PublishProfiles\win-$(Platform).pubxml')">win-$(Platform).pubxml</PublishProfile>
+    <UseWinUI>true</UseWinUI>
+    <WinUISDKReferences>false</WinUISDKReferences>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!--
+      Custom Program.Main: which instance owns this project has to be decided, and
+      activation possibly redirected, before the XAML application starts.
+    -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\SplashScreen.scale-200.png" />
+    <Content Include="Assets\LockScreenLogo.scale-200.png" />
+    <Content Include="Assets\Square150x150Logo.scale-200.png" />
+    <Content Include="Assets\Square44x44Logo.scale-200.png" />
+    <Content Include="Assets\Square44x44Logo.targetsize-24_altform-unplated.png" />
+    <Content Include="Assets\Square44x44Logo.targetsize-48_altform-lightunplated.png" />
+    <Content Include="Assets\StoreLogo.png" />
+    <Content Include="Assets\AppIcon.ico" />
+    <Content Include="Assets\Wide310x150Logo.scale-200.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Manifest Include="$(ApplicationManifest)" />
+  </ItemGroup>
+
+  <!--
+    The Explorer context menu handler. It is a native vcxproj, which the .NET SDK's
+    MSBuild cannot build, so it is not a ProjectReference: run.ps1 builds it with
+    Visual Studio's MSBuild first and this picks up the output. The condition keeps a
+    plain `dotnet build` working (the app just ships without the shell extension).
+  -->
+  <ItemGroup>
+    <Content Include="..\Codale.ShellExt\bin\$(Platform)\$(Configuration)\Codale.ShellExt.dll" Condition="Exists('..\Codale.ShellExt\bin\$(Platform)\$(Configuration)\Codale.ShellExt.dll')">
+      <Link>Codale.ShellExt.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!--
+    The built-in MCP servers ship the same way, one folder each beside the app exe, where
+    McpServerSettings looks for them. The browser folder carries Playwright's driver
+    (.playwright); run.ps1 builds both before this project. Playwright's vite UIs
+    (trace viewer, recorder, dashboard) are excluded: the driver runs headless, and their
+    hashed asset names (codicon-DCmgc-ay.ttf, ...) parse as invalid resource qualifiers
+    and raise PRI249.
+  -->
+  <ItemGroup>
+    <Content
+      Include="..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\**\*.*"
+      Exclude="..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\.playwright\package\lib\vite\**;..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\.playwright\node\darwin*\**;..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\.playwright\node\linux*\**"
+      Condition="Exists('..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\Codale.Mcp.Browser.exe')">
+      <Link>Codale.Mcp.Browser\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content
+      Include="..\Codale.Mcp.Computer\bin\$(Configuration)\net10.0-windows10.0.26100.0\**\*.*"
+      Condition="Exists('..\Codale.Mcp.Computer\bin\$(Configuration)\net10.0-windows10.0.26100.0\Codale.Mcp.Computer.exe')">
+      <Link>Codale.Mcp.Computer\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content
+      Include="..\Codale.Mcp.Tasks\bin\$(Configuration)\net10.0\**\*.*"
+      Condition="Exists('..\Codale.Mcp.Tasks\bin\$(Configuration)\net10.0\Codale.Mcp.Tasks.exe')">
+      <Link>Codale.Mcp.Tasks\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!--
+    Bundled ripgrep, cached by run.ps1 into tools\rg. Optional: without it the app
+    falls back to whatever rg is on PATH at runtime.
+  -->
+  <ItemGroup>
+    <Content Include="..\..\tools\rg\rg.exe" Condition="Exists('..\..\tools\rg\rg.exe')">
+      <Link>rg.exe</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!--
+    Defining the "Msix" ProjectCapability here allows the Single-project MSIX Packaging
+    Tools extension to be activated for this project even if the Windows App SDK Nuget
+    package has not yet been restored.
+  -->
+  <ItemGroup Condition="'$(DisableMsixProjectCapabilityAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
+    <ProjectCapability Include="Msix" />
+  </ItemGroup>
+
+  <!--
+    Microsoft.Windows.SDK.BuildTools.WinApp adds first-class support for
+    `dotnet run` on packaged WinUI apps: it hooks the .NET CLI Run target to
+    register a debug identity via the winapp CLI and launch the app with
+    package identity (AUMID).
+    Set <EnableWinAppRunSupport>false</EnableWinAppRunSupport> in a
+    <PropertyGroup> above to opt out.
+  -->
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.Sizers" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp" />
+    <PackageReference Include="Microsoft.Graphics.Win2D" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Codale.Core\Codale.Core.csproj" />
+    <ProjectReference Include="..\Codale.Commands\Codale.Commands.csproj" />
+    <ProjectReference Include="..\Codale.Agents\Codale.Agents.csproj" />
+    <ProjectReference Include="..\Codale.Terminal\Codale.Terminal.csproj" />
+    <ProjectReference Include="..\Codale.Git\Codale.Git.csproj" />
+    <ProjectReference Include="..\Codale.Search\Codale.Search.csproj" />
+    <ProjectReference Include="..\Codale.Storage\Codale.Storage.csproj" />
+  </ItemGroup>
+
+  <!--
+    Defining the "HasPackageAndPublishMenuAddedByProject" property here allows the Solution
+    Explorer "Package and Publish" context menu entry to be enabled for this project even if
+    the Windows App SDK Nuget package has not yet been restored.
+  -->
+  <PropertyGroup Condition="'$(DisableHasPackageAndPublishMenuAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
+    <HasPackageAndPublishMenu>true</HasPackageAndPublishMenu>
+  </PropertyGroup>
+
+  <!-- Publish Properties -->
+  <PropertyGroup>
+    <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
+    <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
+    <!--
+      PublishTrimmed stays off: XAML-reflection metadata means WinUI 3 does not support
+      full trimming, and the Windows SDK projection (26MB) survives regardless - so the
+      size win was never there while the risk of Release-only stowed failures was.
+    -->
+    <PublishTrimmed>False</PublishTrimmed>
+  </PropertyGroup>
+</Project>

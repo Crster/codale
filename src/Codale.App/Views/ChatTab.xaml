@@ -1,0 +1,1731 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="Codale.App.Views.ChatTab"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:Codale.App.ViewModels"
+    xmlns:views="using:Codale.App.Views"
+    xmlns:core="using:Codale.Core.Agents"
+    xmlns:git="using:Codale.Git"
+    mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <!--  The stop button's pulse: animated from code-behind while a turn runs.  -->
+        <SolidColorBrush x:Name="StopPulseBrush" Color="Transparent" />
+
+        <views:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+        <views:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility" />
+        <views:NullToVisibilityConverter x:Key="NullToVisibility" />
+        <views:CountToInverseVisibilityConverter x:Key="CountToInverseVisibility" />
+        <views:AnyToVisibilityConverter x:Key="AnyToVisibility" />
+        <views:ToolStatusBrushConverter x:Key="ToolBrush" />
+        <views:ToolKindGlyphConverter x:Key="ToolKindGlyph" />
+        <views:ToolKindBrushConverter x:Key="ToolKindBrush" />
+        <views:ToolKindTintConverter x:Key="ToolKindTint" />
+        <views:NoticeSeverityBrushConverter x:Key="NoticeBrush" />
+        <views:BoolToChevronConverter x:Key="ChevronGlyph" />
+        <views:TurnOutcomeBrushConverter x:Key="TurnOutcomeBrush" />
+        <views:PathToImageSourceConverter x:Key="PathToImage" />
+        <views:AttachmentGlyphConverter x:Key="AttachmentGlyph" />
+        <views:SuggestionGlyphConverter x:Key="SuggestionGlyph" />
+        <views:DiffBackgroundConverter x:Key="DiffBackground" />
+        <views:DiffForegroundConverter x:Key="DiffForeground" />
+        <views:SelectedStrokeConverter x:Key="SelectedStroke" />
+        <views:SelectedFillConverter x:Key="SelectedFill" />
+        <views:DotBrushConverter x:Key="DotBrush" />
+
+        <!--  ===== Styles =====  -->
+
+        <!--  A step's row as a button: disc, verb and target are one click target for
+              folding the step's body. Flush left so the disc sits on the rail.  -->
+        <Style x:Key="ToolToggle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0,3,8,3" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="CornerRadius" Value="13" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+
+        <!--  A workspace file a step touched: quiet until hovered, then it reads as the link it is.  -->
+        <Style x:Key="ToolFileChip" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="5,2" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+
+        <!--  Text-only action: "Open in diff tab", "Open plan".  -->
+        <Style x:Key="LinkButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Foreground" Value="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+
+        <!--  An answer on a question card: a full-width row, label over description.  -->
+        <Style x:Key="OptionRow" TargetType="Button">
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="12,9" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
+
+        <!--  Secondary pill button on approval cards: Deny, Skip, suggestions.  -->
+        <Style x:Key="QuietButton" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource PillBackgroundBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="12,5" />
+            <Setter Property="CornerRadius" Value="6" />
+        </Style>
+
+        <!--  ===== Shared pieces =====  -->
+
+        <!--  A diff, inline: one gutter column, a sign column, tinted rows, wrapped
+              code. Used for edits in the timeline and while an edit awaits approval.  -->
+        <DataTemplate x:Key="DiffBlockTemplate" x:DataType="git:FileDiff">
+            <Border
+                Padding="0,4"
+                Background="{StaticResource CodeSurfaceBrush}"
+                BorderBrush="{StaticResource DetailStrokeBrush}"
+                BorderThickness="1"
+                CornerRadius="6">
+                <ScrollViewer MaxHeight="320" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{x:Bind Hunks}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="git:DiffHunk">
+                                <StackPanel Margin="0,0,0,4">
+                                    <TextBlock
+                                        Margin="12,3,12,3"
+                                        FontFamily="Cascadia Mono, Consolas"
+                                        FontSize="11"
+                                        Foreground="{StaticResource DiffHunkHeaderBrush}"
+                                        Text="{x:Bind Header}"
+                                        Visibility="{x:Bind Header, Converter={StaticResource NullToVisibility}}" />
+                                    <ItemsControl ItemsSource="{x:Bind Lines}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="git:DiffLine">
+                                                <Grid Padding="0,0,12,0" Background="{x:Bind Kind, Converter={StaticResource DiffBackground}}">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="40" />
+                                                        <ColumnDefinition Width="16" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock
+                                                        Margin="0,0,8,0"
+                                                        FontFamily="Cascadia Mono, Consolas"
+                                                        FontSize="11.5"
+                                                        Foreground="{StaticResource DiffGutterBrush}"
+                                                        Text="{x:Bind GutterText}"
+                                                        TextAlignment="Right" />
+                                                    <TextBlock
+                                                        Grid.Column="1"
+                                                        FontFamily="Cascadia Mono, Consolas"
+                                                        FontSize="12"
+                                                        Foreground="{x:Bind Kind, Converter={StaticResource DiffForeground}}"
+                                                        Text="{x:Bind Sign}" />
+                                                    <TextBlock
+                                                        Grid.Column="2"
+                                                        FontFamily="Cascadia Mono, Consolas"
+                                                        FontSize="12"
+                                                        Foreground="{x:Bind Kind, Converter={StaticResource DiffForeground}}"
+                                                        IsTextSelectionEnabled="True"
+                                                        Text="{x:Bind Text}"
+                                                        TextWrapping="Wrap" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Border>
+        </DataTemplate>
+
+        <!--  One AskUserQuestion question: the header chip, the question, and its
+              answers as full rows with their descriptions in view - not in tooltips -
+              plus a free-text "Other" row. Numbers 1-9 pick a row from the keyboard.  -->
+        <DataTemplate x:Key="QuestionTemplate" x:DataType="vm:ApprovalQuestion">
+            <StackPanel Spacing="8">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Border
+                        Padding="7,2"
+                        VerticalAlignment="Center"
+                        Background="{StaticResource KindAskTintBrush}"
+                        CornerRadius="4"
+                        Visibility="{x:Bind HasHeader}">
+                        <TextBlock
+                            FontSize="{x:Bind S11, Mode=OneWay}"
+                            FontWeight="SemiBold"
+                            Foreground="{StaticResource KindAskBrush}"
+                            Text="{x:Bind Header}" />
+                    </Border>
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontSize="{x:Bind S11, Mode=OneWay}"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Text="{x:Bind SelectHint}" />
+                </StackPanel>
+                <TextBlock
+                    FontSize="{x:Bind S14, Mode=OneWay}"
+                    FontWeight="SemiBold"
+                    Text="{x:Bind Text}"
+                    TextWrapping="Wrap" />
+                <ItemsControl ItemsSource="{x:Bind Options}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ApprovalQuestionOption">
+                            <Button
+                                Margin="0,0,0,6"
+                                Background="{x:Bind IsSelected, Mode=OneWay, Converter={StaticResource SelectedFill}}"
+                                BorderBrush="{x:Bind IsSelected, Mode=OneWay, Converter={StaticResource SelectedStroke}}"
+                                Click="OnQuestionOptionClick"
+                                Style="{StaticResource OptionRow}"
+                                Tag="{x:Bind}">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon
+                                        VerticalAlignment="Top"
+                                        Margin="0,2,0,0"
+                                        FontSize="{x:Bind S14, Mode=OneWay}"
+                                        Foreground="{StaticResource KindAskBrush}"
+                                        Glyph="{x:Bind Glyph, Mode=OneWay}" />
+                                    <StackPanel Grid.Column="1" Spacing="2">
+                                        <TextBlock
+                                            FontWeight="SemiBold"
+                                            Text="{x:Bind Label}"
+                                            TextWrapping="Wrap" />
+                                        <TextBlock
+                                            FontSize="{x:Bind S12, Mode=OneWay}"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Text="{x:Bind Description}"
+                                            TextWrapping="Wrap"
+                                            Visibility="{x:Bind HasDescription}" />
+                                    </StackPanel>
+                                    <Border
+                                        Grid.Column="2"
+                                        MinWidth="20"
+                                        Padding="5,1"
+                                        VerticalAlignment="Top"
+                                        BorderBrush="{StaticResource DetailStrokeBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="4"
+                                        Visibility="{x:Bind KeyText, Converter={StaticResource NullToVisibility}}">
+                                        <TextBlock
+                                            HorizontalAlignment="Center"
+                                            FontFamily="Cascadia Mono, Consolas"
+                                            FontSize="{x:Bind S10_5, Mode=OneWay}"
+                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                            Text="{x:Bind KeyText}" />
+                                    </Border>
+                                </Grid>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Border
+                    Padding="12,2,12,2"
+                    Background="{x:Bind HasOtherText, Mode=OneWay, Converter={StaticResource SelectedFill}}"
+                    BorderBrush="{x:Bind HasOtherText, Mode=OneWay, Converter={StaticResource SelectedStroke}}"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon
+                            FontSize="{x:Bind S13, Mode=OneWay}"
+                            Foreground="{StaticResource KindAskBrush}"
+                            Glyph="&#xE70F;" />
+                        <TextBox
+                            Grid.Column="1"
+                            AcceptsReturn="False"
+                            PlaceholderText="Other - type your own answer"
+                            Style="{StaticResource ComposerTextBox}"
+                            Text="{x:Bind OtherText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Border>
+            </StackPanel>
+        </DataTemplate>
+
+        <!--  The tool step itself - row and body - shared by the timeline (on the
+              rail) and by standalone calls (a plan lifted out of its turn).
+
+              Row: a tinted disc in the kind's colour (pulsing while it works), the
+              verb in that colour, the target, and on the right the diff stat, a
+              word only when something went wrong, and the duration.
+
+              Body: whatever matters for the kind - the command, the diff, the plan,
+              the question or permission prompt, and the output.  -->
+        <DataTemplate x:Key="ToolCoreTemplate" x:DataType="vm:ToolCallItem">
+            <StackPanel>
+                <Grid ColumnSpacing="6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Button
+                        Grid.ColumnSpan="{x:Bind ToggleSpan}"
+                        HorizontalAlignment="Left"
+                        Click="OnToolToggleClick"
+                        Style="{StaticResource ToolToggle}"
+                        Tag="{x:Bind}"
+                        ToolTipService.ToolTip="{x:Bind Summary, Mode=OneWay}">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border
+                                Width="20"
+                                Height="20"
+                                VerticalAlignment="Center"
+                                Background="{x:Bind Kind, Converter={StaticResource ToolKindTint}}"
+                                CornerRadius="10">
+                                <FontIcon
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    FontSize="{x:Bind S10, Mode=OneWay}"
+                                    Foreground="{x:Bind Kind, Converter={StaticResource ToolKindBrush}}"
+                                    Glyph="{x:Bind Kind, Converter={StaticResource ToolKindGlyph}}"
+                                    views:Pulse.IsActive="{Binding IsWorking, Mode=OneWay}" />
+                            </Border>
+                            <!--  Verb and target are runs of ONE TextBlock: separate
+                                  TextBlocks of different fonts, each centred in its own
+                                  line box, put their baselines a couple of pixels apart.  -->
+                            <TextBlock
+                                Grid.Column="1"
+                                FontFamily="Cascadia Mono, Consolas"
+                                VerticalAlignment="Center"
+                                TextTrimming="CharacterEllipsis">
+                                <Run
+                                    FontFamily="Cascadia Mono, Consolas"
+                                    FontSize="{x:Bind S12_5, Mode=OneWay}"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    Text="{x:Bind Verb, Mode=OneWay}" />
+                                <Run
+                                    FontFamily="Cascadia Mono, Consolas"
+                                    FontSize="{x:Bind S12_5, Mode=OneWay}"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    Text="{x:Bind CodeTarget, Mode=OneWay}" />
+                                <Run
+                                    FontFamily="Cascadia Mono, Consolas"
+                                    FontSize="{x:Bind S12_5, Mode=OneWay}"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    Text="{x:Bind ProseTarget, Mode=OneWay}" />
+                            </TextBlock>
+                        </Grid>
+                    </Button>
+                    <!--  A file target is its own link: edits open their diff, reads open the file.  -->
+                    <Button
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        Click="OnToolFileClick"
+                        Style="{StaticResource ToolFileChip}"
+                        Tag="{x:Bind}"
+                        ToolTipService.ToolTip="{x:Bind PrimaryFile.Path}"
+                        Visibility="{x:Bind HasFiles}">
+                        <TextBlock FontFamily="Cascadia Mono, Consolas" MaxWidth="320" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                            <Run
+                                FontFamily="Cascadia Mono, Consolas"
+                                FontSize="{x:Bind S12_5, Mode=OneWay}"
+                                Text="{x:Bind Target, Mode=OneWay}" />
+                            <Run
+                                FontFamily="Cascadia Mono, Consolas"
+                                FontSize="{x:Bind S12_5, Mode=OneWay}"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Text="{x:Bind FileDirectoryHint, Mode=OneWay}" />
+                        </TextBlock>
+                    </Button>
+                    <!--  Diff stat, status word and duration as runs of one TextBlock:
+                          same baseline, and each segment collapses to empty on its own.  -->
+                    <TextBlock FontFamily="Cascadia Mono, Consolas" Grid.Column="3" VerticalAlignment="Center">
+                        <Run
+                            FontFamily="Cascadia Mono, Consolas"
+                            FontSize="{x:Bind S10_5, Mode=OneWay}"
+                            Foreground="{StaticResource DiffAddedForegroundBrush}"
+                            Text="{x:Bind DiffAddedText, Mode=OneWay}" />
+                        <Run
+                            FontFamily="Cascadia Mono, Consolas"
+                            FontSize="{x:Bind S10_5, Mode=OneWay}"
+                            Foreground="{StaticResource DiffRemovedForegroundBrush}"
+                            Text="{x:Bind DiffRemovedText, Mode=OneWay}" />
+                        <Run
+                            FontFamily="Cascadia Mono, Consolas"
+                            FontSize="{x:Bind S10, Mode=OneWay}"
+                            FontWeight="SemiBold"
+                            Foreground="{x:Bind Status, Mode=OneWay, Converter={StaticResource ToolBrush}}"
+                            Text="{x:Bind MetaStatus, Mode=OneWay}" />
+                        <Run
+                            FontFamily="Cascadia Mono, Consolas"
+                            FontSize="{x:Bind S10, Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Text="{x:Bind MetaDuration, Mode=OneWay}" />
+                    </TextBlock>
+                </Grid>
+
+                <StackPanel
+                    Margin="28,4,0,8"
+                    Spacing="8"
+                    Visibility="{x:Bind IsExpanded, Mode=OneWay}">
+                    <!--  The command in full, highlighted: approving what you cannot read is no approval.  -->
+                    <Border
+                        Padding="12,8"
+                        Background="{StaticResource CodeSurfaceBrush}"
+                        BorderBrush="{StaticResource DetailStrokeBrush}"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Visibility="{x:Bind ShellCommand, Converter={StaticResource NullToVisibility}}">
+                        <TextBlock
+                            FontFamily="Cascadia Mono, Consolas"
+                            FontSize="{x:Bind S12_5, Mode=OneWay}"
+                            IsTextSelectionEnabled="True"
+                            TextWrapping="Wrap"
+                            views:CodeText.Code="{x:Bind ShellCommand}"
+                            views:CodeText.Syntax="shell" />
+                    </Border>
+
+                    <!--  The change itself: what went, what replaced it.  -->
+                    <StackPanel Spacing="2" Visibility="{x:Bind HasDiff, Mode=OneWay}">
+                        <ContentControl
+                            HorizontalContentAlignment="Stretch"
+                            Content="{x:Bind InlineDiff, Mode=OneWay}"
+                            ContentTemplate="{StaticResource DiffBlockTemplate}" />
+                        <Button
+                            Click="OnOpenToolDiffClick"
+                            Content="Open in diff tab"
+                            Style="{StaticResource LinkButton}"
+                            Tag="{x:Bind}" />
+                    </StackPanel>
+
+                    <!--  The plan, rendered: in plan mode it is the turn's deliverable.  -->
+                    <StackPanel Spacing="2" Visibility="{x:Bind IsPlan}">
+                        <Border
+                            Padding="16,10"
+                            Background="{StaticResource DetailSurfaceBrush}"
+                            BorderBrush="{StaticResource AskStrokeBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8">
+                            <views:MarkdownView BaseFontSize="{x:Bind S12_5, Mode=OneWay}" Markdown="{x:Bind PlanText}" />
+                        </Border>
+                        <Button
+                            Click="OnOpenPlanClick"
+                            Content="Open plan in a tab"
+                            Style="{StaticResource LinkButton}"
+                            Tag="{x:Bind}" />
+                    </StackPanel>
+
+                    <!--  AskUserQuestion: the question card. The turn is blocked on it,
+                          so it is the loudest thing on screen while it is open.  -->
+                    <Border
+                        Padding="16,14"
+                        Background="{StaticResource AskSurfaceBrush}"
+                        BorderBrush="{StaticResource AskStrokeBrush}"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        KeyDown="OnQuestionCardKeyDown"
+                        Loaded="OnQuestionCardLoaded"
+                        Tag="{x:Bind Approval, Mode=OneWay}"
+                        Visibility="{x:Bind QuestionCardVisible, Mode=OneWay}">
+                        <StackPanel Spacing="12">
+                            <Grid>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon
+                                        FontSize="{x:Bind S13, Mode=OneWay}"
+                                        Foreground="{StaticResource KindAskBrush}"
+                                        Glyph="&#xE9CE;" />
+                                    <TextBlock
+                                        FontFamily="Cascadia Mono, Consolas"
+                                        FontSize="{x:Bind S12, Mode=OneWay}"
+                                        FontWeight="SemiBold"
+                                        Foreground="{StaticResource KindAskBrush}"
+                                        Text="The agent needs your input" />
+                                </StackPanel>
+                                <StackPanel
+                                    HorizontalAlignment="Right"
+                                    Orientation="Horizontal"
+                                    Spacing="8"
+                                    Visibility="{x:Bind Approval.HasManyQuestions, Mode=OneWay}">
+                                    <TextBlock
+                                        FontFamily="Cascadia Mono, Consolas"
+                                        VerticalAlignment="Center"
+                                        FontSize="{x:Bind S11, Mode=OneWay}"
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                        Text="{x:Bind Approval.StepText, Mode=OneWay}" />
+                                    <ItemsControl VerticalAlignment="Center" ItemsSource="{x:Bind Approval.Dots, Mode=OneWay}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Horizontal" Spacing="4" />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:QuestionDot">
+                                                <Ellipse
+                                                    Width="6"
+                                                    Height="6"
+                                                    Fill="{x:Bind IsCurrent, Converter={StaticResource DotBrush}}" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Grid>
+
+                            <ContentControl
+                                HorizontalContentAlignment="Stretch"
+                                Content="{x:Bind Approval.CurrentQuestion, Mode=OneWay}"
+                                ContentTemplate="{StaticResource QuestionTemplate}"
+                                IsTabStop="False" />
+
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Button
+                                    Click="OnApprovalSkip"
+                                    Content="Skip"
+                                    Style="{StaticResource QuietButton}"
+                                    Tag="{x:Bind Approval, Mode=OneWay}"
+                                    ToolTipService.ToolTip="Let the agent continue without an answer (Esc)" />
+                                <TextBlock
+                                    FontFamily="Cascadia Mono, Consolas"
+                                    Grid.Column="1"
+                                    Margin="4,0"
+                                    VerticalAlignment="Center"
+                                    FontSize="{x:Bind S11, Mode=OneWay}"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    Text="1-9 picks · Enter continues"
+                                    TextTrimming="CharacterEllipsis" />
+                                <StackPanel
+                                    Grid.Column="2"
+                                    Orientation="Horizontal"
+                                    Spacing="6">
+                                    <Button
+                                        Click="OnQuestionBack"
+                                        Content="Back"
+                                        Style="{StaticResource QuietButton}"
+                                        Tag="{x:Bind Approval, Mode=OneWay}"
+                                        Visibility="{x:Bind Approval.ShowBack, Mode=OneWay}" />
+                                    <Button
+                                        Padding="16,5"
+                                        Click="OnQuestionNext"
+                                        Content="Next"
+                                        IsEnabled="{x:Bind Approval.CanAdvance, Mode=OneWay}"
+                                        Style="{StaticResource AccentButtonStyle}"
+                                        Tag="{x:Bind Approval, Mode=OneWay}"
+                                        Visibility="{x:Bind Approval.IsNotLast, Mode=OneWay}" />
+                                    <Button
+                                        Padding="16,5"
+                                        Click="OnApprovalSubmitAnswers"
+                                        Content="Submit"
+                                        IsEnabled="{x:Bind Approval.CanSubmit, Mode=OneWay}"
+                                        Style="{StaticResource AccentButtonStyle}"
+                                        Tag="{x:Bind Approval, Mode=OneWay}"
+                                        Visibility="{x:Bind Approval.IsLast, Mode=OneWay}" />
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!--  ExitPlanMode: accepting a plan is also choosing how the work runs.  -->
+                    <Border
+                        Padding="14,12"
+                        Background="{StaticResource AskSurfaceBrush}"
+                        BorderBrush="{StaticResource AskStrokeBrush}"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        Visibility="{x:Bind PlanApprovalVisible, Mode=OneWay}">
+                        <StackPanel Spacing="10">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon
+                                    FontSize="{x:Bind S13, Mode=OneWay}"
+                                    Foreground="{StaticResource KindPlanBrush}"
+                                    Glyph="&#xE8FD;" />
+                                <TextBlock FontFamily="Cascadia Mono, Consolas" FontWeight="SemiBold" Text="Ready to build this plan?" />
+                            </StackPanel>
+                            <TextBox
+                                AcceptsReturn="True"
+                                MinHeight="60"
+                                PlaceholderText="What should change about the plan?"
+                                Text="{x:Bind Approval.RevisionFeedback, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                TextWrapping="Wrap"
+                                Visibility="{x:Bind Approval.IsRevising, Mode=OneWay}" />
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Button
+                                    Padding="14,5"
+                                    Click="OnApprovalPlanAccept"
+                                    CommandParameter="acceptEdits"
+                                    Content="Accept · review edits"
+                                    Style="{StaticResource AccentButtonStyle}"
+                                    Tag="{x:Bind Approval, Mode=OneWay}"
+                                    ToolTipService.ToolTip="Build it, asking before each file change" />
+                                <Button
+                                    Click="OnApprovalPlanAccept"
+                                    CommandParameter="auto"
+                                    Content="Accept · auto"
+                                    Style="{StaticResource QuietButton}"
+                                    Tag="{x:Bind Approval, Mode=OneWay}"
+                                    ToolTipService.ToolTip="Build it without asking" />
+                                <Button
+                                    Click="OnApprovalStartRevise"
+                                    Content="Revise…"
+                                    Style="{StaticResource QuietButton}"
+                                    Tag="{x:Bind Approval, Mode=OneWay}"
+                                    Visibility="{x:Bind Approval.IsNotRevising, Mode=OneWay}" />
+                                <Button
+                                    Click="OnApprovalRevise"
+                                    Content="Send feedback"
+                                    Style="{StaticResource QuietButton}"
+                                    Tag="{x:Bind Approval, Mode=OneWay}"
+                                    Visibility="{x:Bind Approval.IsRevising, Mode=OneWay}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!--  Any other permission: one compact amber bar under the preview above.  -->
+                    <Border
+                        Padding="12,8"
+                        Background="{StaticResource ApprovalSurfaceBrush}"
+                        BorderBrush="{StaticResource ApprovalStrokeBrush}"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        Visibility="{x:Bind PermissionVisible, Mode=OneWay}">
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon
+                                FontSize="{x:Bind S14, Mode=OneWay}"
+                                Foreground="{StaticResource StatusWarnBrush}"
+                                Glyph="&#xE83D;" />
+                            <TextBlock
+                                FontFamily="Cascadia Mono, Consolas"
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                FontWeight="SemiBold"
+                                Text="{x:Bind Approval.QuestionHeader, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                            <StackPanel
+                                Grid.Column="2"
+                                Orientation="Horizontal"
+                                Spacing="6">
+                                <ItemsControl VerticalAlignment="Center" ItemsSource="{x:Bind Approval.Suggestions, Mode=OneWay}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" Spacing="6" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:SuggestionOption">
+                                            <Button
+                                                Click="OnApprovalSuggestion"
+                                                Content="{x:Bind Label}"
+                                                FontSize="12"
+                                                Style="{StaticResource QuietButton}"
+                                                Tag="{x:Bind}" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <Button
+                                    Click="OnApprovalDeny"
+                                    Content="Deny"
+                                    Style="{StaticResource QuietButton}"
+                                    Tag="{x:Bind Approval, Mode=OneWay}" />
+                                <Button
+                                    Padding="16,5"
+                                    Click="OnApprovalAllow"
+                                    Content="Allow"
+                                    Style="{StaticResource AccentButtonStyle}"
+                                    Tag="{x:Bind Approval, Mode=OneWay}" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!--  The result as a terminal page: monospaced, columns intact, scrollable.  -->
+                    <Border
+                        Padding="12,8"
+                        Background="{StaticResource CodeSurfaceBrush}"
+                        BorderBrush="{StaticResource DetailStrokeBrush}"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Visibility="{x:Bind ShowOutput, Mode=OneWay}">
+                        <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto">
+                            <TextBlock
+                                FontFamily="Cascadia Mono, Consolas"
+                                FontSize="{x:Bind S12, Mode=OneWay}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                IsTextSelectionEnabled="True"
+                                TextWrapping="Wrap"
+                                views:CodeText.Code="{x:Bind Output, Mode=OneWay}"
+                                views:CodeText.Syntax="text" />
+                        </ScrollViewer>
+                    </Border>
+                </StackPanel>
+            </StackPanel>
+        </DataTemplate>
+
+        <!--  ===== Timeline steps: each on the rail, the rail broken where its mark sits =====  -->
+
+        <DataTemplate x:Key="StepToolTemplate" x:DataType="vm:ToolCallItem">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="22" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Rectangle
+                    Width="1"
+                    Height="3"
+                    VerticalAlignment="Top"
+                    Fill="{StaticResource TimelineRailBrush}" />
+                <Rectangle
+                    Width="1"
+                    Margin="0,23,0,0"
+                    Fill="{StaticResource TimelineRailBrush}" />
+                <ContentControl
+                    Grid.ColumnSpan="2"
+                    Margin="1,0,0,0"
+                    HorizontalContentAlignment="Stretch"
+                    Content="{x:Bind}"
+                    ContentTemplate="{StaticResource ToolCoreTemplate}"
+                    IsTabStop="False" />
+            </Grid>
+        </DataTemplate>
+
+        <!--  The agent thinking aloud between steps: quieter than the answer.  -->
+        <DataTemplate x:Key="StepNarrationTemplate" x:DataType="vm:AssistantMessageItem">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="22" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Rectangle
+                    Width="1"
+                    Height="8"
+                    VerticalAlignment="Top"
+                    Fill="{StaticResource TimelineRailBrush}" />
+                <Ellipse
+                    Width="6"
+                    Height="6"
+                    Margin="0,9,0,0"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Top"
+                    Fill="{ThemeResource TextFillColorTertiaryBrush}" />
+                <Rectangle
+                    Width="1"
+                    Margin="0,17,0,0"
+                    Fill="{StaticResource TimelineRailBrush}" />
+                <StackPanel
+                    Grid.Column="1"
+                    Margin="6,2,0,8"
+                    Spacing="2">
+                    <StackPanel
+                        Orientation="Horizontal"
+                        Spacing="6"
+                        Visibility="{x:Bind HasThinking, Mode=OneWay}">
+                        <FontIcon
+                            FontSize="{x:Bind S12_5, Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Glyph="&#xEA80;" />
+                        <TextBlock
+                            FontSize="{x:Bind S12_5, Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Text="thought" />
+                    </StackPanel>
+                    <views:MarkdownView BaseFontSize="{x:Bind S13_5, Mode=OneWay}" Markdown="{x:Bind Text, Mode=OneWay}" />
+                    <Rectangle
+                        Width="7"
+                        Height="14"
+                        HorizontalAlignment="Left"
+                        Fill="{ThemeResource AccentFillColorDefaultBrush}"
+                        RadiusX="1"
+                        RadiusY="1"
+                        Visibility="{x:Bind IsStreaming, Mode=OneWay}"
+                        views:Pulse.IsActive="{Binding IsStreaming, Mode=OneWay}" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <!--  Consecutive reads and searches as one row; it opens to the calls.  -->
+        <DataTemplate x:Key="StepExploreTemplate" x:DataType="vm:ExploreGroupStep">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="22" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Rectangle
+                    Width="1"
+                    Height="3"
+                    VerticalAlignment="Top"
+                    Fill="{StaticResource TimelineRailBrush}" />
+                <Rectangle
+                    Width="1"
+                    Margin="0,23,0,0"
+                    Fill="{StaticResource TimelineRailBrush}" />
+                <StackPanel Grid.ColumnSpan="2" Margin="1,0,0,0">
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            HorizontalAlignment="Left"
+                            Click="OnExploreToggleClick"
+                            Style="{StaticResource ToolToggle}"
+                            Tag="{x:Bind}">
+                            <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Border
+                                Width="20"
+                                Height="20"
+                                VerticalAlignment="Center"
+                                Background="{x:Bind Kind, Mode=OneWay, Converter={StaticResource ToolKindTint}}"
+                                CornerRadius="10">
+                                <FontIcon
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    FontSize="{x:Bind S10, Mode=OneWay}"
+                                    Foreground="{x:Bind Kind, Mode=OneWay, Converter={StaticResource ToolKindBrush}}"
+                                    Glyph="&#xE8B7;"
+                                    views:Pulse.IsActive="{Binding IsWorking, Mode=OneWay}" />
+                            </Border>
+                            <!--  One TextBlock, so verb and title share a baseline.  -->
+                            <TextBlock
+                                Grid.Column="1"
+                                FontFamily="Cascadia Mono, Consolas"
+                                VerticalAlignment="Center"
+                                TextTrimming="CharacterEllipsis">
+                                <Run
+                                    FontFamily="Cascadia Mono, Consolas"
+                                    FontSize="{x:Bind S12_5, Mode=OneWay}"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    Text="{x:Bind Verb, Mode=OneWay}" />
+                                <Run
+                                    FontFamily="Cascadia Mono, Consolas"
+                                    FontSize="{x:Bind S12_5, Mode=OneWay}"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    Text="&#x2002;" />
+                                <Run
+                                    FontFamily="Cascadia Mono, Consolas"
+                                    FontSize="{x:Bind S12_5, Mode=OneWay}"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    Text="{x:Bind Title, Mode=OneWay}" />
+                            </TextBlock>
+                            <FontIcon
+                                Grid.Column="2"
+                                VerticalAlignment="Center"
+                                FontSize="{x:Bind S8, Mode=OneWay}"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Glyph="{x:Bind IsExpanded, Mode=OneWay, Converter={StaticResource ChevronGlyph}}" />
+                        </Grid>
+                        </Button>
+                        <StackPanel
+                            Grid.Column="1"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Orientation="Horizontal"
+                            Spacing="8">
+                            <TextBlock
+                                FontFamily="Cascadia Mono, Consolas"
+                                FontSize="{x:Bind S11, Mode=OneWay}"
+                                FontWeight="SemiBold"
+                                Foreground="{StaticResource StatusFailedBrush}"
+                                Text="{x:Bind ProblemText, Mode=OneWay}"
+                                Visibility="{x:Bind HasProblems, Mode=OneWay}" />
+                            <TextBlock
+                                FontFamily="Cascadia Mono, Consolas"
+                                FontSize="{x:Bind S11, Mode=OneWay}"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Text="{x:Bind DurationText, Mode=OneWay}" />
+                        </StackPanel>
+                    </Grid>
+                    <ItemsControl
+                        Margin="28,0,0,4"
+                        ItemTemplate="{StaticResource ToolCoreTemplate}"
+                        ItemsSource="{x:Bind Tools}"
+                        Visibility="{x:Bind IsExpanded, Mode=OneWay}" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <!--  The task list moved: one quiet row, kept current in place.  -->
+        <DataTemplate x:Key="StepTodoTemplate" x:DataType="vm:TodoStepItem">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="22" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Rectangle
+                    Width="1"
+                    Height="3"
+                    VerticalAlignment="Top"
+                    Fill="{StaticResource TimelineRailBrush}" />
+                <Rectangle
+                    Width="1"
+                    Margin="0,23,0,0"
+                    Fill="{StaticResource TimelineRailBrush}" />
+                <StackPanel
+                    Grid.ColumnSpan="2"
+                    Margin="1,3,0,3"
+                    Orientation="Horizontal"
+                    Spacing="8">
+                    <Border
+                        Width="20"
+                        Height="20"
+                        VerticalAlignment="Center"
+                        Background="{StaticResource KindTodoTintBrush}"
+                        CornerRadius="10">
+                        <FontIcon
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind S10, Mode=OneWay}"
+                            Foreground="{StaticResource KindTodoBrush}"
+                            Glyph="&#xE9D5;" />
+                    </Border>
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontSize="{x:Bind S13, Mode=OneWay}"
+                        FontWeight="SemiBold"
+                        Foreground="{StaticResource KindTodoBrush}"
+                        Text="Tasks" />
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontFamily="Cascadia Mono, Consolas"
+                        FontSize="{x:Bind S12, Mode=OneWay}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{x:Bind ProgressText, Mode=OneWay}" />
+                    <TextBlock
+                        MaxWidth="420"
+                        VerticalAlignment="Center"
+                        FontSize="{x:Bind S12, Mode=OneWay}"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Text="{x:Bind ActiveTask, Mode=OneWay}"
+                        TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <views:StepTemplateSelector
+            x:Key="StepSelector"
+            ExploreTemplate="{StaticResource StepExploreTemplate}"
+            NarrationTemplate="{StaticResource StepNarrationTemplate}"
+            TodoTemplate="{StaticResource StepTodoTemplate}"
+            ToolTemplate="{StaticResource StepToolTemplate}" />
+
+        <!--  ===== Transcript rows =====  -->
+        <!--  Every row takes its margin from the item's RowMargin, which the chat view
+              model recomputes from the row above: same block sits close, a boundary
+              between blocks - the tool run and the prose answer - breathes apart.  -->
+
+        <DataTemplate x:Key="UserTemplate" x:DataType="vm:UserMessageItem">
+            <StackPanel
+                MaxWidth="560"
+                Margin="{x:Bind RowMargin, Mode=OneWay}"
+                HorizontalAlignment="Right"
+                Spacing="4">
+                <ItemsControl
+                    HorizontalAlignment="Right"
+                    ItemsSource="{x:Bind Attachments}"
+                    Visibility="{x:Bind HasAttachments, Converter={StaticResource BoolToVisibility}}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="4" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="core:TurnAttachment">
+                            <Border
+                                Padding="6,3"
+                                Background="{StaticResource PillBackgroundBrush}"
+                                CornerRadius="6"
+                                Tag="{x:Bind}"
+                                Tapped="OnPreviewAttachment"
+                                ToolTipService.ToolTip="Preview">
+                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                    <FontIcon FontSize="11" Glyph="{x:Bind Kind, Converter={StaticResource AttachmentGlyph}}" />
+                                    <TextBlock
+                                        MaxWidth="150"
+                                        VerticalAlignment="Center"
+                                        FontSize="12"
+                                        Text="{x:Bind Name}"
+                                        TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Border
+                    Padding="8,2"
+                    HorizontalAlignment="Right"
+                    Background="{StaticResource KindPlanTintBrush}"
+                    CornerRadius="4"
+                    Visibility="{x:Bind SentAsPlan, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock
+                        FontSize="{x:Bind S10, Mode=OneWay}"
+                        FontWeight="SemiBold"
+                        Foreground="{StaticResource KindPlanBrush}"
+                        Text="PLAN" />
+                </Border>
+                <Border
+                    Padding="8,2"
+                    HorizontalAlignment="Right"
+                    Background="{StaticResource PillBackgroundBrush}"
+                    CornerRadius="4"
+                    Visibility="{x:Bind IsSteer, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock
+                        FontSize="{x:Bind S10, Mode=OneWay}"
+                        FontWeight="SemiBold"
+                        Opacity="0.7"
+                        Text="STEER" />
+                </Border>
+                <Border
+                    Padding="14,9"
+                    HorizontalAlignment="Right"
+                    Background="{StaticResource UserBubbleBrush}"
+                    BorderBrush="{StaticResource UserBubbleStrokeBrush}"
+                    BorderThickness="1"
+                    CornerRadius="14,14,4,14"
+                    Visibility="{x:Bind HasText, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock
+                        IsTextSelectionEnabled="True"
+                        Text="{x:Bind Text}"
+                        TextWrapping="Wrap" />
+                </Border>
+            </StackPanel>
+        </DataTemplate>
+
+        <!--  A turn: the header line (live clock, or outcome + time + pills once it
+              lands) and, while open, the step timeline beneath it.  -->
+        <DataTemplate x:Key="ActivityTemplate" x:DataType="vm:TurnActivityItem">
+            <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="2">
+                <!--  The header only appears once the turn lands: while it runs, the
+                      live status sits at the bottom of the chat, above the composer.  -->
+                <Button
+                    Padding="0,3,10,3"
+                    Click="OnTurnToggleClick"
+                    Style="{StaticResource ToolToggle}"
+                    Tag="{x:Bind}"
+                    ToolTipService.ToolTip="Show or hide the steps of this turn"
+                    Visibility="{x:Bind IsFinished, Mode=OneWay}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Grid Width="22" Height="20" VerticalAlignment="Center">
+                            <FontIcon
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                FontSize="{x:Bind S11, Mode=OneWay}"
+                                Foreground="{x:Bind Outcome, Mode=OneWay, Converter={StaticResource TurnOutcomeBrush}}"
+                                Glyph="{x:Bind StatusGlyph, Mode=OneWay}"
+                                Visibility="{x:Bind IsFinished, Mode=OneWay}" />
+                        </Grid>
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind S12, Mode=OneWay}"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind HeaderText, Mode=OneWay}" />
+                        <ItemsControl
+                            VerticalAlignment="Center"
+                            ItemsSource="{x:Bind Pills, Mode=OneWay}"
+                            Visibility="{x:Bind IsFinished, Mode=OneWay}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="5" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:ActivityPill">
+                                    <Border
+                                        Height="20"
+                                        Padding="9,0"
+                                        VerticalAlignment="Center"
+                                        Background="{x:Bind Kind, Converter={StaticResource ToolKindTint}}"
+                                        CornerRadius="10">
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            FontSize="11"
+                                            FontWeight="SemiBold">
+                                            <Run Foreground="{x:Bind Kind, Converter={StaticResource ToolKindBrush}}" Text="{x:Bind Label}" />
+                                            <Run
+                                                FontFamily="Cascadia Mono, Consolas"
+                                                Foreground="{StaticResource DiffAddedForegroundBrush}"
+                                                Text="{x:Bind AddedText}" />
+                                            <Run
+                                                FontFamily="Cascadia Mono, Consolas"
+                                                Foreground="{StaticResource DiffRemovedForegroundBrush}"
+                                                Text="{x:Bind RemovedText}" />
+                                        </TextBlock>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind S11, Mode=OneWay}"
+                            FontWeight="SemiBold"
+                            Foreground="{x:Bind OverallStatus, Mode=OneWay, Converter={StaticResource ToolBrush}}"
+                            Text="{x:Bind ProblemText, Mode=OneWay}"
+                            Visibility="{x:Bind HasProblems, Mode=OneWay}" />
+                        <FontIcon
+                            FontSize="{x:Bind S8, Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Glyph="{x:Bind IsExpanded, Mode=OneWay, Converter={StaticResource ChevronGlyph}}"
+                            Visibility="{x:Bind HasSteps, Mode=OneWay}" />
+                    </StackPanel>
+                </Button>
+                <ItemsControl
+                    ItemTemplateSelector="{StaticResource StepSelector}"
+                    ItemsSource="{x:Bind Steps}"
+                    Visibility="{x:Bind IsExpanded, Mode=OneWay}" />
+            </StackPanel>
+        </DataTemplate>
+
+        <!--  The answer: plain prose under the folded turn, no chrome.  -->
+        <DataTemplate x:Key="AssistantTemplate" x:DataType="vm:AssistantMessageItem">
+            <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="4">
+                <StackPanel
+                    Orientation="Horizontal"
+                    Spacing="6"
+                    Visibility="{x:Bind HasThinking, Mode=OneWay}">
+                    <FontIcon
+                        FontSize="{x:Bind S12_5, Mode=OneWay}"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Glyph="&#xEA80;" />
+                    <TextBlock
+                        FontSize="{x:Bind S12_5, Mode=OneWay}"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Text="thought about this" />
+                </StackPanel>
+                <views:MarkdownView BaseFontSize="{x:Bind S13_5, Mode=OneWay}" Markdown="{x:Bind Text, Mode=OneWay}" />
+                <Rectangle
+                    Width="7"
+                    Height="14"
+                    HorizontalAlignment="Left"
+                    Fill="{ThemeResource AccentFillColorDefaultBrush}"
+                    RadiusX="1"
+                    RadiusY="1"
+                    Visibility="{x:Bind IsStreaming, Mode=OneWay}"
+                    views:Pulse.IsActive="{Binding IsStreaming, Mode=OneWay}" />
+            </StackPanel>
+        </DataTemplate>
+
+        <!--  A standalone tool call: a plan lifted out of its turn, or a call made outside one.  -->
+        <DataTemplate x:Key="ToolTemplate" x:DataType="vm:ToolCallItem">
+            <ContentControl
+                Margin="{x:Bind RowMargin, Mode=OneWay}"
+                HorizontalContentAlignment="Stretch"
+                Content="{x:Bind}"
+                ContentTemplate="{StaticResource ToolCoreTemplate}"
+                IsTabStop="False" />
+        </DataTemplate>
+
+        <DataTemplate x:Key="NoticeTemplate" x:DataType="vm:NoticeItem">
+            <!--  Grid, not a horizontal StackPanel: an unconstrained width never wraps,
+                  so long notices were clipped to one line.  -->
+            <Grid
+                Margin="{x:Bind RowMargin, Mode=OneWay}"
+                ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Ellipse
+                    Width="5"
+                    Height="5"
+                    VerticalAlignment="Center"
+                    Fill="{x:Bind Severity, Converter={StaticResource NoticeBrush}}" />
+                <TextBlock
+                    Grid.Column="1"
+                    FontSize="{x:Bind S12, Mode=OneWay}"
+                    Foreground="{x:Bind Severity, Converter={StaticResource NoticeBrush}}"
+                    Text="{x:Bind Text}"
+                    TextWrapping="Wrap" />
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="ComposerNoticeTemplate" x:DataType="vm:NoticeItem">
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <FontIcon
+                    FontSize="14"
+                    VerticalAlignment="Center"
+                    Foreground="{x:Bind Severity, Converter={StaticResource NoticeBrush}}"
+                    Glyph="{x:Bind Glyph}" />
+                <TextBlock
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    FontSize="{x:Bind S12, Mode=OneWay}"
+                    Foreground="{x:Bind Severity, Converter={StaticResource NoticeBrush}}"
+                    Text="{x:Bind Text}"
+                    TextWrapping="Wrap" />
+                <StackPanel
+                    Grid.Column="2"
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="4">
+                    <HyperlinkButton
+                        Padding="6,2"
+                        VerticalAlignment="Center"
+                        Click="OnComposerNoticeAction"
+                        Content="{x:Bind ActionText}"
+                        FontSize="{x:Bind S12, Mode=OneWay}"
+                        Visibility="{x:Bind HasAction, Converter={StaticResource BoolToVisibility}}" />
+                    <Button
+                        Width="24"
+                        Height="24"
+                        VerticalAlignment="Center"
+                        Click="OnCloseComposerNotice"
+                        Style="{StaticResource ComposerIconButton}"
+                        ToolTipService.ToolTip="Dismiss">
+                        <FontIcon FontSize="9" Glyph="&#xE711;" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <views:ChatItemTemplateSelector
+            x:Key="ChatTemplateSelector"
+            ActivityTemplate="{StaticResource ActivityTemplate}"
+            AssistantTemplate="{StaticResource AssistantTemplate}"
+            NoticeTemplate="{StaticResource NoticeTemplate}"
+            ToolTemplate="{StaticResource ToolTemplate}"
+            UserTemplate="{StaticResource UserTemplate}" />
+
+        <!--  Quiet icon button used inside the composer.  -->
+        <Style x:Key="ComposerIconButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="CornerRadius" Value="6" />
+        </Style>
+
+        <!--  Slim rounded rows for the / and @ suggestion popup, so it matches the
+              workspace's pickers.  -->
+        <Style x:Key="SuggestItem" TargetType="ListViewItem">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Padding" Value="8,7" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="UseSystemFocusVisuals" Value="False" />
+        </Style>
+
+        <!--  The typing surface. A stock TextBox repaints a solid background and an
+              accent underline on focus, which reads as a boxed text field inside the
+              composer card. This template renders nothing but text and placeholder:
+              the card is the input, the whole area types.  -->
+        <Style x:Key="ComposerTextBox" TargetType="TextBox">
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+            <Setter Property="PlaceholderForeground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="4,10" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Grid x:Name="RootGrid">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootGrid.Opacity" Value="0.45" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ScrollViewer
+                                x:Name="ContentElement"
+                                Margin="{TemplateBinding Padding}"
+                                AutomationProperties.AccessibilityView="Raw"
+                                HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                                HorizontalScrollMode="{TemplateBinding ScrollViewer.HorizontalScrollMode}"
+                                IsTabStop="False"
+                                VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}"
+                                VerticalScrollMode="{TemplateBinding ScrollViewer.VerticalScrollMode}"
+                                ZoomMode="Disabled" />
+                            <TextBlock
+                                x:Name="PlaceholderTextContentPresenter"
+                                Margin="{TemplateBinding Padding}"
+                                Foreground="{TemplateBinding PlaceholderForeground}"
+                                IsHitTestVisible="False"
+                                Text="{TemplateBinding PlaceholderText}"
+                                TextAlignment="{TemplateBinding TextAlignment}"
+                                TextWrapping="{TemplateBinding TextWrapping}" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid Padding="12,8,12,12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="ComposerFocusGroup">
+                <VisualState x:Name="ComposerFocused">
+                    <VisualState.Setters>
+                        <Setter Target="ComposerBorder.BorderBrush" Value="{ThemeResource AccentFillColorDefaultBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="ComposerUnfocused" />
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+
+        <ScrollViewer x:Name="ChatScroller" VerticalScrollBarVisibility="Auto">
+            <ItemsControl
+                x:Name="Transcript"
+                Padding="0,0,8,8"
+                ItemTemplateSelector="{StaticResource ChatTemplateSelector}"
+                ItemsSource="{x:Bind ViewModel.Items}" />
+        </ScrollViewer>
+
+        <!--  Shown until the first message arrives.  -->
+        <StackPanel
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            IsHitTestVisible="False"
+            Spacing="6"
+            Visibility="{x:Bind ViewModel.Items.Count, Mode=OneWay, Converter={StaticResource CountToInverseVisibility}}">
+            <FontIcon
+                HorizontalAlignment="Center"
+                FontSize="28"
+                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                Glyph="&#xE8BD;" />
+            <TextBlock
+                HorizontalAlignment="Center"
+                FontSize="14"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="No messages yet" />
+            <TextBlock
+                HorizontalAlignment="Center"
+                FontSize="12"
+                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                Text="Ask a question or describe a task to get started." />
+        </StackPanel>
+
+        <!--  The live status, always at the bottom while a turn runs: a playful line
+              that changes every few seconds, the clock, and what the agent says it is
+              on. It turns amber when the turn is waiting on the reader.  -->
+        <Grid
+            Grid.Row="1"
+            Margin="4,8,4,0"
+            ColumnSpacing="10"
+            Visibility="{x:Bind ViewModel.IsBusy, Mode=OneWay}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid Width="10" VerticalAlignment="Center">
+                <Ellipse
+                    Width="8"
+                    Height="8"
+                    Fill="{ThemeResource AccentFillColorDefaultBrush}"
+                    Visibility="{x:Bind ViewModel.IsWorkingOnItsOwn, Mode=OneWay}"
+                    views:Pulse.IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" />
+                <Ellipse
+                    Width="8"
+                    Height="8"
+                    Fill="{StaticResource StatusWarnBrush}"
+                    Visibility="{x:Bind ViewModel.IsWaitingForYou, Mode=OneWay}"
+                    views:Pulse.IsActive="{x:Bind ViewModel.IsWaitingForYou, Mode=OneWay}" />
+            </Grid>
+            <Grid Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock
+                    FontSize="12.5"
+                    FontWeight="SemiBold"
+                    Foreground="{ThemeResource AccentFillColorDefaultBrush}"
+                    Text="{x:Bind ViewModel.WorkingMessage, Mode=OneWay}"
+                    Visibility="{x:Bind ViewModel.IsWorkingOnItsOwn, Mode=OneWay}" />
+                <TextBlock
+                    FontSize="12.5"
+                    FontWeight="SemiBold"
+                    Foreground="{StaticResource StatusWarnBrush}"
+                    Text="Waiting for you…"
+                    Visibility="{x:Bind ViewModel.IsWaitingForYou, Mode=OneWay}" />
+            </Grid>
+            <TextBlock
+                Grid.Column="2"
+                VerticalAlignment="Center"
+                FontFamily="Cascadia Mono, Consolas"
+                FontSize="11.5"
+                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                Text="{x:Bind ViewModel.WorkingElapsed, Mode=OneWay}" />
+            <TextBlock
+                Grid.Column="3"
+                VerticalAlignment="Center"
+                FontSize="11.5"
+                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                Text="{x:Bind ViewModel.StatusDetail, Mode=OneWay}"
+                TextTrimming="CharacterEllipsis" />
+        </Grid>
+
+        <Grid Grid.Row="2" Margin="0,8,0,0">
+            <!--  The / and @ suggestions. A Popup rather than a Flyout: a flyout takes
+                  focus and light-dismisses on the next keystroke, so the list closed
+                  (or swallowed Enter) the moment it opened. This one never takes focus;
+                  the draft keeps typing and drives it with Up/Down/Enter/Esc. It is
+                  lifted above the composer in code once its height is known.  -->
+            <Popup
+                x:Name="SuggestPopup"
+                IsLightDismissEnabled="False"
+                ShouldConstrainToRootBounds="True">
+                <Border
+                    x:Name="SuggestPanel"
+                    Padding="6"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    SizeChanged="OnSuggestPanelSizeChanged">
+                    <Grid RowSpacing="4">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock
+                            x:Name="SuggestHeader"
+                            Margin="8,2,8,0"
+                            FontSize="11"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Text="Commands" />
+                        <ListView
+                            x:Name="SuggestList"
+                            Grid.Row="1"
+                            MaxHeight="280"
+                            AllowFocusOnInteraction="False"
+                            IsItemClickEnabled="True"
+                            ItemClick="OnSuggestionClick"
+                            ItemContainerStyle="{StaticResource SuggestItem}"
+                            ItemsSource="{x:Bind ViewModel.Suggestions}"
+                            SelectionMode="Single">
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="vm:SuggestionItem">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <FontIcon
+                                            FontSize="13"
+                                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                            Glyph="{x:Bind IsCommand, Converter={StaticResource SuggestionGlyph}}" />
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            FontFamily="Cascadia Mono, Consolas"
+                                            FontSize="12.5"
+                                            Text="{x:Bind Title}"
+                                            TextTrimming="CharacterEllipsis" />
+                                        <TextBlock
+                                            Grid.Column="2"
+                                            HorizontalAlignment="Right"
+                                            VerticalAlignment="Center"
+                                            FontSize="11"
+                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                            Text="{x:Bind Detail}"
+                                            TextTrimming="CharacterEllipsis" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                </Border>
+            </Popup>
+
+            <StackPanel>
+                <!--  Session notices that must sit where the reader is looking - pinned
+                      above the composer, not appended to the bottom of the transcript.  -->
+                <Border
+                    Margin="0,0,0,6"
+                    Padding="12,6,8,6"
+                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Visibility="{x:Bind ViewModel.HasComposerNotice, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                    <ContentControl
+                        HorizontalContentAlignment="Stretch"
+                        Content="{x:Bind ViewModel.ComposerNotice, Mode=OneWay}"
+                        ContentTemplate="{StaticResource ComposerNoticeTemplate}"
+                        IsTabStop="False" />
+                </Border>
+
+                <Border
+                x:Name="ComposerBorder"
+                Padding="12,8,8,8"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="12"
+                Tapped="OnComposerTapped">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <ItemsControl
+                        ItemsSource="{x:Bind ViewModel.Attachments}"
+                        Visibility="{x:Bind ViewModel.HasAttachments, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel
+                                    Margin="0,2,0,6"
+                                    Orientation="Horizontal"
+                                    Spacing="6" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ComposerAttachment">
+                                <Border
+                                    Padding="4,4,2,4"
+                                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="8"
+                                    Tag="{x:Bind}"
+                                    Tapped="OnPreviewAttachment"
+                                    ToolTipService.ToolTip="Preview">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <Border CornerRadius="4" Visibility="{x:Bind IsImage, Converter={StaticResource BoolToVisibility}}">
+                                            <Image
+                                                Width="32"
+                                                Height="32"
+                                                Source="{x:Bind Path, Converter={StaticResource PathToImage}}"
+                                                Stretch="UniformToFill" />
+                                        </Border>
+                                        <FontIcon
+                                            Margin="4,0,0,0"
+                                            FontSize="14"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Glyph="{x:Bind Kind, Converter={StaticResource AttachmentGlyph}}"
+                                            Visibility="{x:Bind IsPdf, Converter={StaticResource BoolToVisibility}}" />
+                                        <TextBlock
+                                            MaxWidth="150"
+                                            VerticalAlignment="Center"
+                                            FontSize="12"
+                                            Text="{x:Bind Name}"
+                                            TextTrimming="CharacterEllipsis" />
+                                        <Button
+                                            Width="22"
+                                            Height="22"
+                                            VerticalAlignment="Center"
+                                            Click="OnRemoveAttachment"
+                                            Style="{StaticResource ComposerIconButton}"
+                                            Tag="{x:Bind}"
+                                            ToolTipService.ToolTip="Remove">
+                                            <FontIcon FontSize="9" Glyph="&#xE711;" />
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <TextBox
+                        x:Name="DraftBox"
+                        Grid.Row="1"
+                        MinHeight="44"
+                        MaxHeight="220"
+                        AcceptsReturn="True"
+                        GotFocus="OnDraftFocusChanged"
+                        IsEnabled="{x:Bind ViewModel.IsConnected, Mode=OneWay}"
+                        KeyDown="OnDraftKeyDown"
+                        LostFocus="OnDraftFocusChanged"
+                        Paste="OnDraftPaste"
+                        PlaceholderText="{x:Bind ViewModel.ComposerPlaceholder, Mode=OneWay}"
+                        ScrollViewer.VerticalScrollBarVisibility="Auto"
+                        Style="{StaticResource ComposerTextBox}"
+                        Text="{x:Bind ViewModel.Draft, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        TextChanged="OnDraftTextChanged"
+                        TextWrapping="Wrap">
+                        <!--  Accelerators, not KeyDown: a multiline TextBox handles Enter
+                              before the KeyDown event reaches user handlers, so Enter-to-
+                              send there never runs. Accelerators run earlier and, marked
+                              handled, keep the newline out. Shift+Enter matches neither
+                              and falls through to the normal newline. Paste goes through
+                              the Paste event, so Ctrl+V, Shift+Insert and the context
+                              menu all take the same path.  -->
+                        <TextBox.KeyboardAccelerators>
+                            <KeyboardAccelerator Key="Enter" Invoked="OnEnterAccelerator" />
+                            <KeyboardAccelerator
+                                Key="Enter"
+                                Invoked="OnPlanEnterAccelerator"
+                                Modifiers="Control" />
+                        </TextBox.KeyboardAccelerators>
+                    </TextBox>
+
+                    <!--  Cue for the suggested next prompt shown as the placeholder above.  -->
+                    <Border
+                        Grid.Row="1"
+                        Margin="0,0,8,0"
+                        Padding="6,1"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        Background="{StaticResource PillBackgroundBrush}"
+                        CornerRadius="4"
+                        IsHitTestVisible="False"
+                        Visibility="{x:Bind ViewModel.ShowSuggestionHint, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock
+                            FontSize="10"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Text="Tab" />
+                    </Border>
+
+                    <Grid
+                        Grid.Row="2"
+                        Margin="0,4,0,0"
+                        ColumnSpacing="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <Button
+                            Click="OnAttachClick"
+                            IsEnabled="{x:Bind ViewModel.IsConnected, Mode=OneWay}"
+                            Style="{StaticResource ComposerIconButton}"
+                            ToolTipService.ToolTip="Attach images or a PDF (or paste them)">
+                            <FontIcon FontSize="14" Glyph="&#xE723;" />
+                        </Button>
+                        <Button
+                            Grid.Column="1"
+                            Click="OnInsertTriggerClick"
+                            IsEnabled="{x:Bind ViewModel.IsConnected, Mode=OneWay}"
+                            Style="{StaticResource ComposerIconButton}"
+                            Tag="/"
+                            ToolTipService.ToolTip="Commands (/)">
+                            <TextBlock
+                                FontFamily="Cascadia Mono, Consolas"
+                                FontSize="14"
+                                Text="/" />
+                        </Button>
+                        <Button
+                            Grid.Column="2"
+                            Click="OnInsertTriggerClick"
+                            IsEnabled="{x:Bind ViewModel.IsConnected, Mode=OneWay}"
+                            Style="{StaticResource ComposerIconButton}"
+                            Tag="@"
+                            ToolTipService.ToolTip="Mention a file (@)">
+                            <TextBlock
+                                FontFamily="Cascadia Mono, Consolas"
+                                FontSize="14"
+                                Text="@" />
+                        </Button>
+
+                        <TextBlock
+                            Grid.Column="3"
+                            Margin="8,0"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            FontSize="11"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Text="Enter send · Shift+Enter newline · Ctrl+Enter plan"
+                            TextTrimming="CharacterEllipsis"
+                            Visibility="{x:Bind ViewModel.IsRouting, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}" />
+
+                        <!--  Automatic mode: the local model is reading the message before it goes out.  -->
+                        <StackPanel
+                            Grid.Column="3"
+                            Margin="8,0"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Orientation="Horizontal"
+                            Spacing="6"
+                            Visibility="{x:Bind ViewModel.IsRouting, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                            <ProgressRing
+                                Width="12"
+                                Height="12"
+                                IsActive="{x:Bind ViewModel.IsRouting, Mode=OneWay}" />
+                            <TextBlock
+                                FontSize="11"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Text="Reading your message…" />
+                        </StackPanel>
+
+                        <StackPanel
+                            Grid.Column="4"
+                            Orientation="Horizontal"
+                            Spacing="6">
+                            <Button
+                                Width="32"
+                                Height="32"
+                                Padding="0"
+                                Command="{x:Bind ViewModel.SendCommand}"
+                                CornerRadius="16"
+                                Style="{StaticResource AccentButtonStyle}"
+                                ToolTipService.ToolTip="Send (Enter)"
+                                Visibility="{x:Bind ViewModel.ShowStop, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
+                                <FontIcon FontSize="14" Glyph="&#xE74A;" />
+                            </Button>
+                            <Button
+                                Width="32"
+                                Height="32"
+                                Padding="0"
+                                Background="{StaticResource StopPulseBrush}"
+                                Command="{x:Bind ViewModel.InterruptCommand}"
+                                CornerRadius="16"
+                                Style="{StaticResource ComposerIconButton}"
+                                ToolTipService.ToolTip="Stop the current turn"
+                                Visibility="{x:Bind ViewModel.ShowStop, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                <FontIcon FontSize="14" Glyph="&#xE71A;" />
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Border>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</UserControl>

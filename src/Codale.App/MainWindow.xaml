@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Window
+    x:Class="Codale.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:controls="using:Codale.App.Controls"
+    xmlns:local="using:Codale.App"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="Codale"
+    mc:Ignorable="d">
+    <Window.SystemBackdrop>
+        <MicaBackdrop />
+    </Window.SystemBackdrop>
+
+    <!--  The theme comes from Settings (AppSettings.Theme); dark is the default look.  -->
+    <Grid x:Name="RootGrid" RequestedTheme="Dark">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TitleBar x:Name="AppTitleBar" Title="Codale">
+            <TitleBar.LeftHeader>
+                <StackPanel Orientation="Horizontal">
+                    <Image
+                        Width="20"
+                        Height="20"
+                        Margin="10,0,8,0"
+                        VerticalAlignment="Center"
+                        Source="Assets/AppIcon.ico" />
+                    <Button
+                        x:Name="LeftPanelButton"
+                        Width="40"
+                        Height="32"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        Click="OnTitleBarLeftPanelClick"
+                        ToolTipService.ToolTip="Left panel"
+                        Visibility="Collapsed">
+                        <FontIcon FontSize="16" Glyph="&#xE700;" />
+                    </Button>
+                </StackPanel>
+            </TitleBar.LeftHeader>
+            <TitleBar.Content>
+                <StackPanel
+                    x:Name="TitleBarExtras"
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="4"
+                    Visibility="Collapsed">
+                    <Button
+                        Width="32"
+                        Height="32"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        Click="OnChangeFolderClick"
+                        ToolTipService.ToolTip="Change folder">
+                        <FontIcon FontSize="14" Glyph="&#xE8B7;" />
+                    </Button>
+                    <Button
+                        Width="32"
+                        Height="32"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        Click="OnSettingsClick"
+                        ToolTipService.ToolTip="Settings">
+                        <FontIcon FontSize="14" Glyph="&#xE713;" />
+                    </Button>
+                    <AutoSuggestBox
+                        x:Name="TitleSearchBox"
+                        Width="360"
+                        VerticalAlignment="Center"
+                        PlaceholderText="Ask or search the project…"
+                        LostFocus="OnSearchLostFocus"
+                        QueryIcon="Find"
+                        QuerySubmitted="OnSearchQuerySubmitted"
+                        TextChanged="OnSearchTextChanged" />
+                    <Button
+                        x:Name="CommandsButton"
+                        Width="40"
+                        Height="32"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        Click="OnTitleBarCommandsClick"
+                        ToolTipService.ToolTip="Commands">
+                        <Grid>
+                            <FontIcon FontSize="14" Glyph="&#xE768;" />
+                            <!--  The running-command count; hidden when nothing runs.  -->
+                            <Border
+                                x:Name="CommandsBadge"
+                                MinWidth="16"
+                                Padding="5,1"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Top"
+                                Margin="0,-6,-8,0"
+                                Background="#2E8B57"
+                                CornerRadius="8"
+                                Visibility="Collapsed">
+                                <TextBlock
+                                    x:Name="CommandsBadgeText"
+                                    FontSize="10"
+                                    Foreground="#FFFFFF"
+                                    HorizontalTextAlignment="Center"
+                                    Text="0" />
+                            </Border>
+                        </Grid>
+                    </Button>
+                    <Button
+                        x:Name="BrowserButton"
+                        Height="32"
+                        Padding="10,0"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        Click="OnTitleBarBrowserClick"
+                        ToolTipService.ToolTip="Browser and desktop tools for the agent">
+                        <FontIcon FontSize="14" Glyph="&#xE774;" />
+                    </Button>
+                    <Button
+                        x:Name="SessionButton"
+                        Width="40"
+                        Height="32"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        Click="OnTitleBarSessionClick"
+                        ToolTipService.ToolTip="Agent session panel">
+                        <FontIcon FontSize="14" Glyph="&#xE77B;" />
+                    </Button>
+                </StackPanel>
+            </TitleBar.Content>
+        </TitleBar>
+
+        <!--
+            The Frame hosts pages for your application content. Add your UI to
+            MainPage.xaml rather than here so you can use Page features such as
+            navigation events and the Loaded lifecycle.
+        -->
+        <Frame x:Name="RootFrame" Grid.Row="1" />
+
+        <!--  Settings slides in over the right edge; Collapsed (and off-screen) until opened.  -->
+        <controls:SettingsPanel
+            x:Name="SettingsHost"
+            Grid.Row="1"
+            Width="560"
+            HorizontalAlignment="Right"
+            Visibility="Collapsed">
+            <controls:SettingsPanel.RenderTransform>
+                <TranslateTransform x:Name="SettingsSlide" X="560" />
+            </controls:SettingsPanel.RenderTransform>
+        </controls:SettingsPanel>
+    </Grid>
+</Window>

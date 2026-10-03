@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+    The transcript's colour system. The window is pinned to the dark theme
+    (MainWindow.xaml), so these are plain resources rather than theme dictionaries:
+    converters resolve them from Application.Resources, which only sees the
+    app-level theme and would pick the wrong half of a theme dictionary.
+
+    Colour carries meaning, never decoration:
+      * a tool's KIND picks its hue (read blue, edit amber, shell violet...), shown
+        on a small tinted disc and the step's verb - enough to scan a turn by colour;
+      * a call's OUTCOME only speaks up when it went wrong (red / amber);
+      * surfaces stay neutral, so the colours above are the only loud things.
+-->
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--  Tool kinds: foreground, and a ~14% tint for the icon disc and pills.  -->
+    <SolidColorBrush x:Key="KindReadBrush" Color="#5AA9F8" />
+    <SolidColorBrush x:Key="KindReadTintBrush" Color="#245AA9F8" />
+    <SolidColorBrush x:Key="KindSearchBrush" Color="#2DD4BF" />
+    <SolidColorBrush x:Key="KindSearchTintBrush" Color="#242DD4BF" />
+    <SolidColorBrush x:Key="KindEditBrush" Color="#F5B94A" />
+    <SolidColorBrush x:Key="KindEditTintBrush" Color="#24F5B94A" />
+    <SolidColorBrush x:Key="KindWriteBrush" Color="#4CC38A" />
+    <SolidColorBrush x:Key="KindWriteTintBrush" Color="#244CC38A" />
+    <SolidColorBrush x:Key="KindShellBrush" Color="#A78BFA" />
+    <SolidColorBrush x:Key="KindShellTintBrush" Color="#24A78BFA" />
+    <SolidColorBrush x:Key="KindWebBrush" Color="#F472B6" />
+    <SolidColorBrush x:Key="KindWebTintBrush" Color="#24F472B6" />
+    <SolidColorBrush x:Key="KindAgentBrush" Color="#FB923C" />
+    <SolidColorBrush x:Key="KindAgentTintBrush" Color="#24FB923C" />
+    <SolidColorBrush x:Key="KindAskBrush" Color="#818CF8" />
+    <SolidColorBrush x:Key="KindAskTintBrush" Color="#24818CF8" />
+    <SolidColorBrush x:Key="KindPlanBrush" Color="#818CF8" />
+    <SolidColorBrush x:Key="KindPlanTintBrush" Color="#24818CF8" />
+    <SolidColorBrush x:Key="KindTodoBrush" Color="#94A3B8" />
+    <SolidColorBrush x:Key="KindTodoTintBrush" Color="#1F94A3B8" />
+    <SolidColorBrush x:Key="KindOtherBrush" Color="#A1A1AA" />
+    <SolidColorBrush x:Key="KindOtherTintBrush" Color="#1FA1A1AA" />
+
+    <!--  Outcomes.  -->
+    <SolidColorBrush x:Key="StatusRunningBrush" Color="#60A5FA" />
+    <SolidColorBrush x:Key="StatusSuccessBrush" Color="#4CC38A" />
+    <SolidColorBrush x:Key="StatusFailedBrush" Color="#F87171" />
+    <SolidColorBrush x:Key="StatusWarnBrush" Color="#F5B94A" />
+    <SolidColorBrush x:Key="StatusMutedBrush" Color="#8B8B93" />
+
+    <!--  Diffs: faint row tints that stay readable, stronger text for the +/- marks.  -->
+    <SolidColorBrush x:Key="DiffAddedBackgroundBrush" Color="#1F3FB950" />
+    <SolidColorBrush x:Key="DiffRemovedBackgroundBrush" Color="#24F85149" />
+    <SolidColorBrush x:Key="DiffAddedForegroundBrush" Color="#7EE2A8" />
+    <SolidColorBrush x:Key="DiffRemovedForegroundBrush" Color="#FF8A80" />
+    <SolidColorBrush x:Key="DiffContextForegroundBrush" Color="#B4FFFFFF" />
+    <SolidColorBrush x:Key="DiffGutterBrush" Color="#5CFFFFFF" />
+    <SolidColorBrush x:Key="DiffHunkHeaderBrush" Color="#8C818CF8" />
+
+    <!--  Surfaces.  -->
+    <SolidColorBrush x:Key="TimelineRailBrush" Color="#1FFFFFFF" />
+    <SolidColorBrush x:Key="StepHoverBrush" Color="#0DFFFFFF" />
+    <SolidColorBrush x:Key="DetailSurfaceBrush" Color="#0AFFFFFF" />
+    <SolidColorBrush x:Key="DetailStrokeBrush" Color="#14FFFFFF" />
+    <SolidColorBrush x:Key="CodeSurfaceBrush" Color="#33000000" />
+    <SolidColorBrush x:Key="UserBubbleBrush" Color="#2E6D7CF7" />
+    <SolidColorBrush x:Key="UserBubbleStrokeBrush" Color="#406D7CF7" />
+    <SolidColorBrush x:Key="PillBackgroundBrush" Color="#0FFFFFFF" />
+    <SolidColorBrush x:Key="TodoTextBrush" Color="#E6FFFFFF" />
+    <SolidColorBrush x:Key="TodoDoneTextBrush" Color="#73FFFFFF" />
+
+    <!--  Markdown in messages: body slightly softer than bold, so emphasis and headings stand out.  -->
+    <SolidColorBrush x:Key="MdBodyBrush" Color="#D4D7DF" />
+    <SolidColorBrush x:Key="MdStrongBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="MdHeading1Brush" Color="#9DB8FF" />
+    <SolidColorBrush x:Key="MdHeading2Brush" Color="#7CC4FA" />
+    <SolidColorBrush x:Key="MdHeading3Brush" Color="#6EDDC8" />
+    <SolidColorBrush x:Key="MdCodeBrush" Color="#F2C078" />
+    <SolidColorBrush x:Key="MdBulletBrush" Color="#8B97F8" />
+
+    <!--  Asking the reader something: indigo for questions, amber for permission.  -->
+    <SolidColorBrush x:Key="AskSurfaceBrush" Color="#14818CF8" />
+    <SolidColorBrush x:Key="AskStrokeBrush" Color="#59818CF8" />
+    <SolidColorBrush x:Key="OptionSelectedBrush" Color="#29818CF8" />
+    <SolidColorBrush x:Key="OptionHoverBrush" Color="#0FFFFFFF" />
+    <SolidColorBrush x:Key="ApprovalSurfaceBrush" Color="#12F5B94A" />
+    <SolidColorBrush x:Key="ApprovalStrokeBrush" Color="#59F5B94A" />
+</ResourceDictionary>

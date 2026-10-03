@@ -1,0 +1,405 @@
+using System.Collections.ObjectModel;
+using System.Text;
+
+using Codale.Agents.Claude;
+using Codale.Core.Agents;
+using Codale.Storage;
+
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+
+namespace Codale.App.ViewModels;
+
+/// <summary>
+/// Past conversations for this project, plus anything a crash left behind.
+/// </summary>
+/// <remarks>
+/// The list comes from Claude's own transcript files rather than from Codale's database, so
+/// sessions started outside Codale - in a plain terminal - show up too.
+/// The database only supplies what the CLI does not know: which sessions Codale itself
+/// started, the worktree they run in, and whether one was still running when the app died.
+/// </remarks>
+public sealed partial class SessionsViewModel : ObservableObject
+{
+    private readonly ClaudeTranscriptReader _reader;
+    private readonly CodaleStore _store;
+    private readonly string _projectPath;
+    private readonly string _databasePath;
+
+    /// <param name="databasePath">The database <paramref name="store"/> was opened on; background reads open their own connection to it.</param>
+    public SessionsViewModel(string projectPath, CodaleStore store, string databasePath)
+    {
+        _projectPath = projectPath;
+        _store = store;
+        _databasePath = databasePath;
+        _reader = new ClaudeTranscriptReader(projectPath);
+    }
+
+    public ObservableCollection<SessionListItem> Sessions { get; } = [];
+
+    /// <summary>
+    /// Sessions open in a chat tab right now, and whether each is mid-turn. Kept in
+    /// sync by the workspace, so the history list can show which conversations are
+    /// live - and which are working - without re-reading any transcript.
+    /// </summary>
+    private IReadOnlyDictionary<string, bool> _open = new Dictionary<string, bool>();
+
+    public void UpdateOpenSessions(IReadOnlyDictionary<string, bool> open)
+    {
+        _open = open;
+        foreach (var item in Sessions)
+        {
+            item.ApplyOpenState(_open);
+        }
+    }
+
+    public ObservableCollection<SessionRecord> Interrupted { get; } = [];
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasInterrupted))]
+    public partial int InterruptedCount { get; set; }
+
+    /// <summary>
+    /// The session the recovery prompt offers.
+    /// </summary>
+    /// <remarks>
+    /// Exposed as a property rather than binding to <c>Interrupted[0]</c>: x:Bind
+    /// evaluates an indexer even when the collection is empty, and the resulting
+    /// out-of-range exception surfaces as a stowed WinRT crash at startup.
+    /// </remarks>
+    [ObservableProperty]
+    public partial SessionRecord? FirstInterrupted { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsLoading { get; set; }
+
+    public bool HasInterrupted => InterruptedCount > 0;
+
+    /// <summary>Raised when the user picks a stored session to read.</summary>
+    public event EventHandler<TranscriptSummary>? SessionOpened;
+
+    /// <summary>Raised when the user chooses to continue an interrupted session.</summary>
+    public event EventHandler<SessionRecord>? SessionResumed;
+
+    /// <summary>
+    /// Called once at startup, before anything is marked running: whatever is still
+    /// flagged as running belongs to a process that no longer exists.
+    /// </summary>
+    public void DetectInterrupted()
+    {
+        Interrupted.Clear();
+
+        foreach (var session in _store.GetInterruptedSessions(_projectPath))
+        {
+            Interrupted.Add(session);
+        }
+
+        InterruptedCount = Interrupted.Count;
+        FirstInterrupted = Interrupted.FirstOrDefault();
+
+        // Clear the flags so a second launch does not offer the same recovery forever.
+        _store.MarkAllStopped(_projectPath);
+    }
+
+    private bool _refreshing;
+    private bool _refreshQueued;
+
+    /// <summary>
+    /// Rebuilds the list. Calls arriving mid-refresh collapse into one follow-up pass,
+    /// so a burst of session changes cannot stack scans or flicker the panel.
+    /// </summary>
+    [RelayCommand]
+    public async Task RefreshAsync()
+    {
+        if (_refreshing)
+        {
+            _refreshQueued = true;
+            return;
+        }
+
+        _refreshing = true;
+        IsLoading = Sessions.Count == 0;
+
+        try
+        {
+            do
+            {
+                _refreshQueued = false;
+                await RefreshOnceAsync();
+            }
+            while (_refreshQueued);
+        }
+        finally
+        {
+            _refreshing = false;
+            IsLoading = false;
+        }
+    }
+
+    private async Task RefreshOnceAsync()
+    {
+        // Reading every transcript in a busy project is disk-bound, and each row also
+        // wants its stored title: all of it stays off the UI thread so opening the panel
+        // never stutters.
+        Merge(await Task.Run(ReadSessions));
+    }
+
+    private List<TranscriptSummary> ReadSessions()
+    {
+        var sessions = _reader.ListSessions().OrderByDescending(s => s.UpdatedAt).ToList();
+
+        // The shared connection belongs to the UI thread; this read gets its own (WAL lets
+        // readers run beside its writes).
+        CodaleStore? reader = null;
+        try
+        {
+            reader = new CodaleStore(_databasePath);
+        }
+        catch (Exception ex) when (ex is StoreSchemaException or Microsoft.Data.Sqlite.SqliteException or IOException)
+        {
+            CrashLog.Warn("sessions", $"stored titles unavailable: {ex.Message}");
+        }
+
+        using (reader)
+        {
+            if (reader is null)
+            {
+                return sessions;
+            }
+
+            // Titles the helper model generated live in Codale's own database; show them
+            // for sessions the CLI itself has not named, then the opening prompt.
+            var titles = reader.GetSessions(_projectPath)
+                .Where(s => s.Title is { Length: > 0 })
+                .GroupBy(s => s.SessionId)
+                .ToDictionary(g => g.Key, g => g.First().Title!, StringComparer.Ordinal);
+
+            // A title the user typed beats every other source.
+            return sessions.Select(session =>
+            {
+                if (reader.GetUiState(_projectPath, RetitleKey(session.SessionId)) is { Length: > 0 } chosen)
+                {
+                    return session with { CustomTitle = chosen };
+                }
+
+                return titles.TryGetValue(session.SessionId, out var title) && session.CustomTitle is null
+                    ? session with { CustomTitle = title }
+                    : session;
+            }).ToList();
+        }
+    }
+
+    private static string RetitleKey(string sessionId) => $"session.title.{sessionId}";
+
+    /// <summary>
+    /// Gives a past session the user's own name. It is kept in Codale's database, not in
+    /// the agent's transcript, so it survives the transcript; an empty title
+    /// drops the override and the list falls back to the automatic name.
+    /// </summary>
+    public async Task RetitleAsync(SessionListItem item, string title)
+    {
+        _store.SetUiState(_projectPath, RetitleKey(item.SessionId), title.Trim());
+        await RefreshAsync();
+    }
+
+    /// <summary>
+    /// Brings <see cref="Sessions"/> in line with the scan without clearing it: rows
+    /// that did not change stay put, so the list neither flickers nor re-realizes on
+    /// every refresh.
+    /// </summary>
+    private void Merge(IReadOnlyList<TranscriptSummary> wanted)
+    {
+        var existing = new Dictionary<string, SessionListItem>(StringComparer.Ordinal);
+        foreach (var current in Sessions)
+        {
+            existing.TryAdd(current.SessionId, current);
+        }
+
+        for (var i = 0; i < wanted.Count; i++)
+        {
+            var summary = wanted[i];
+            existing.TryGetValue(summary.SessionId, out var item);
+
+            if (item is not null && item.Summary == summary)
+            {
+                var at = Sessions.IndexOf(item);
+                if (at != i)
+                {
+                    Sessions.Move(at, i);
+                }
+
+                continue;
+            }
+
+            var fresh = new SessionListItem { Summary = summary };
+            fresh.ApplyOpenState(_open);
+
+            if (item is not null)
+            {
+                Sessions.Remove(item);
+            }
+
+            Sessions.Insert(Math.Min(i, Sessions.Count), fresh);
+        }
+
+        while (Sessions.Count > wanted.Count)
+        {
+            Sessions.RemoveAt(Sessions.Count - 1);
+        }
+    }
+
+    [RelayCommand]
+    private void Open(SessionListItem? item)
+    {
+        if (item is not null)
+        {
+            SessionOpened?.Invoke(this, item.Summary);
+        }
+    }
+
+    /// <summary>
+    /// Removes a past session: Claude's transcript file and Codale's record of it. Open sessions are refused - their tab
+    /// would keep writing to it.
+    /// </summary>
+    public async Task DeleteAsync(SessionListItem item)
+    {
+        if (item.IsOpen)
+        {
+            throw new InvalidOperationException("Close the session's tab before deleting it.");
+        }
+
+        if (File.Exists(item.Summary.FilePath))
+        {
+            File.Delete(item.Summary.FilePath);
+        }
+
+        _store.DeleteSession(item.SessionId);
+        _store.SetUiState(_projectPath, RetitleKey(item.SessionId), "");
+        Sessions.Remove(item);
+    }
+
+    /// <summary>
+    /// A Markdown handout of a past session - what was asked, what the agent answered,
+    /// and which files it touched - for pasting into another session, a ticket or a chat.
+    /// Subagent chatter and thinking are left out; only the main conversation reads well.
+    /// </summary>
+    public async Task<string> BuildHandoutAsync(SessionListItem item)
+    {
+        var events = await LoadTranscriptAsync(item.Summary);
+        var text = new StringBuilder();
+        var files = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        text.AppendLine($"# {item.Title}");
+        text.AppendLine();
+        text.AppendLine($"Session `{item.SessionId}` · {item.UserTurns} turns · last active {item.UpdatedAt:yyyy-MM-dd HH:mm}");
+        text.AppendLine();
+        text.AppendLine("## Conversation");
+
+        foreach (var e in events)
+        {
+            switch (e)
+            {
+                case UserMessageRecorded { Text.Length: > 0 } user:
+                    text.AppendLine();
+                    text.AppendLine("### User");
+                    text.AppendLine(user.Text.Trim());
+                    break;
+                case AssistantMessageCompleted { ParentToolUseId: null, Text.Length: > 0 } reply:
+                    text.AppendLine();
+                    text.AppendLine("### Assistant");
+                    text.AppendLine(reply.Text.Trim());
+                    break;
+                case ToolCallCompleted { FileChange: { } change }:
+                    files.Add(Path.GetRelativePath(_projectPath, change.FilePath));
+                    break;
+            }
+        }
+
+        if (files.Count > 0)
+        {
+            text.AppendLine();
+            text.AppendLine("## Files changed");
+            foreach (var file in files)
+            {
+                text.AppendLine($"- `{file}`");
+            }
+        }
+
+        return text.ToString();
+    }
+
+    /// <summary>What the fork summarizer reads: the session's conversation, clipped to a budget (see <see cref="SessionForking"/>).</summary>
+    public async Task<string> BuildForkSourceAsync(SessionListItem item)
+    {
+        var events = await LoadTranscriptAsync(item.Summary);
+        return SessionForking.BuildSource(item.Title, events, _projectPath);
+    }
+
+    /// <summary>
+    /// Removes what a throwaway summarizer session left behind: Claude's transcript folder
+    /// for its scratch directory. Best effort.
+    /// </summary>
+    public void DiscardScratchSession(string scratchDirectory)
+    {
+        try
+        {
+            var history = new ClaudeTranscriptReader(scratchDirectory).HistoryDirectory;
+            if (Directory.Exists(history))
+            {
+                Directory.Delete(history, recursive: true);
+            }
+
+            if (Directory.Exists(scratchDirectory))
+            {
+                Directory.Delete(scratchDirectory, recursive: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Trace($"Fork scratch cleanup skipped: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private void Resume(SessionRecord? record)
+    {
+        if (record is null)
+        {
+            return;
+        }
+
+        Interrupted.Remove(record);
+        InterruptedCount = Interrupted.Count;
+        FirstInterrupted = Interrupted.FirstOrDefault();
+        SessionResumed?.Invoke(this, record);
+    }
+
+    /// <summary>
+    /// The stored transcript of a session Codale started - under the project's history,
+    /// or its worktree's when it ran isolated. Empty when the CLI never wrote one.
+    /// </summary>
+    public Task<IReadOnlyList<AgentEvent>> LoadTranscriptAsync(SessionRecord record) =>
+        Task.Run<IReadOnlyList<AgentEvent>>(() =>
+        {
+            var readers = new List<ClaudeTranscriptReader> { _reader };
+            if (record.WorktreePath is { Length: > 0 } worktree)
+            {
+                readers.Insert(0, new ClaudeTranscriptReader(worktree));
+            }
+
+            foreach (var reader in readers)
+            {
+                var file = Path.Combine(reader.HistoryDirectory, record.SessionId + ".jsonl");
+                if (File.Exists(file))
+                {
+                    return reader.Replay(file).ToList();
+                }
+            }
+
+            return [];
+        });
+
+    /// <summary>Replays a stored transcript into chat items for read-only viewing.</summary>
+    public Task<IReadOnlyList<AgentEvent>> LoadTranscriptAsync(TranscriptSummary summary) =>
+        Task.Run<IReadOnlyList<AgentEvent>>(() => _reader.Replay(summary.FilePath).ToList());
+}
