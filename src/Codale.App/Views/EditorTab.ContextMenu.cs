@@ -5,6 +5,7 @@ using Microsoft.UI.Input;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media;
 
 using Windows.System;
@@ -50,29 +51,49 @@ public sealed partial class EditorTab
     /// <summary>Bumped per job so a finished job's delayed panel hide cannot hide the next job's.</summary>
     private int _askVersion;
 
+    /// <summary>
+    /// The text the composer floats beside: the selection's first and last positions
+    /// (0-based line, raw column), or the cursor twice. Null docks the panel at the bottom.
+    /// </summary>
+    private (int Line, int Col, int EndLine, int EndCol)? _askAnchor;
+
+    /// <summary>The outcome a job ends with when it is stopped before the reply is applied.</summary>
+    private const string CancelledOutcome = "Stopped - the document was left as it was";
+
+    private const double AskPanelWidth = 560;
+    private const double AskPanelInset = 12;
+    private const double AskPanelGap = 6;
+
+    /// <summary>Room below the anchor that keeps the panel under it rather than flipping above.</summary>
+    private const double AskPanelRoom = 300;
+
     /// <summary>How long a finished Format or Check job's log stays up when there is no composer to close.</summary>
     private static readonly TimeSpan LogOnlyLinger = TimeSpan.FromSeconds(6);
 
-    private static MenuFlyoutItem Item(string text, Action click, string? accelerator = null)
+    private static MenuFlyoutItem Item(string text, Action click, string? accelerator = null, string? glyph = null)
     {
         var item = new MenuFlyoutItem { Text = text, KeyboardAcceleratorTextOverride = accelerator ?? string.Empty };
+        if (glyph is not null)
+        {
+            item.Icon = new FontIcon { Glyph = glyph };
+        }
         item.Click += (_, _) => click();
         return item;
     }
 
     private void BuildContextMenu()
     {
-        _undoItem = Item("Undo", FileEditor.Undo, "Ctrl+Z");
-        _redoItem = Item("Redo", FileEditor.Redo, "Ctrl+Y");
-        _cutItem = Item("Cut", FileEditor.CutToClipboard, "Ctrl+X");
-        _copyItem = Item("Copy", FileEditor.CopyToClipboard, "Ctrl+C");
-        _pasteItem = Item("Paste", FileEditor.PasteFromClipboard, "Ctrl+V");
-        _deleteItem = Item("Delete", FileEditor.DeleteSelection);
-        var selectAll = Item("Select All", FileEditor.SelectEverything, "Ctrl+A");
-        _formatItem = Item("Format Document", () => _ = FormatDocumentAsync());
-        _askItem = Item("Ask Claude…", () => _ = AskClaudeAsync());
-        _checkItem = Item("Check Issues", () => _ = CheckIssuesAsync());
-        _previewItem = Item("Preview", TogglePreview);
+        _undoItem = Item("Undo", FileEditor.Undo, "Ctrl+Z", "");
+        _redoItem = Item("Redo", FileEditor.Redo, "Ctrl+Y", "");
+        _cutItem = Item("Cut", FileEditor.CutToClipboard, "Ctrl+X", "");
+        _copyItem = Item("Copy", FileEditor.CopyToClipboard, "Ctrl+C", "");
+        _pasteItem = Item("Paste", FileEditor.PasteFromClipboard, "Ctrl+V", "");
+        _deleteItem = Item("Delete", FileEditor.DeleteSelection, null, "");
+        var selectAll = Item("Select All", FileEditor.SelectEverything, "Ctrl+A", "");
+        _formatItem = Item("Format Document", () => _ = FormatDocumentAsync(), null, "");
+        _askItem = Item("Ask Claude…", () => _ = AskClaudeAsync(), null, "");
+        _checkItem = Item("Check Issues", () => _ = CheckIssuesAsync(), null, "");
+        _previewItem = Item("Preview", TogglePreview, null, "");
 
         var menu = new MenuFlyout();
         foreach (var item in new MenuFlyoutItemBase[]
@@ -87,13 +108,16 @@ public sealed partial class EditorTab
 
         _session.Entries.CollectionChanged += OnAskEntriesChanged;
         _session.PropertyChanged += OnAskSessionChanged;
+        FileEditor.ScrollChanged += (_, _) => PositionAskPanel();
+        EditorSurface.SizeChanged += (_, _) => PositionAskPanel();
+        ConfigureAskPanelAnimations();
 
         menu.Opening += (_, _) => RefreshContextMenu();
         FileEditor.ContextFlyout = menu;
 
         // While previewing, the only thing to do is go back to the text.
         var back = new MenuFlyout();
-        back.Items.Add(Item("Edit Markdown", TogglePreview));
+        back.Items.Add(Item("Edit Markdown", TogglePreview, null, ""));
         MarkdownPreviewHost.ContextFlyout = back;
     }
 
@@ -205,8 +229,7 @@ public sealed partial class EditorTab
 
         var ct = _session.Begin();
         AskLogTitle.Text = label;
-        _session.Log(AskLogKind.Info, $"{ViewModel.FileName} · line {FileEditor.CursorPosition.LineNumber + 1}");
-        (string Outcome, bool IsError) result = ("Cancelled", false);
+        (string Outcome, bool IsError) result = (CancelledOutcome, false);
         string? reply = null;
         try
         {
@@ -240,7 +263,7 @@ public sealed partial class EditorTab
             }
 
             _session.End(result.Outcome, result.IsError);
-            AskLogTitle.Text = result.IsError ? "Failed" : "Done";
+            AskLogTitle.Text = result.IsError ? "Failed" : result.Outcome == CancelledOutcome ? "Stopped" : "Done";
             if (!fromComposer)
             {
                 _ = HideAskPanelAfterLingerAsync(version);
@@ -448,14 +471,9 @@ public sealed partial class EditorTab
             where = $"Write at the cursor on line {cursorLine}";
         }
 
-        AskContextIcon.Glyph = hasSelection ? "" : "";
-        AskContextText.Inlines.Clear();
-        AskContextText.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = ViewModel.FileName, FontWeight = FontWeights.SemiBold });
-        AskContextText.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run
-        {
-            Text = "  ·  " + where,
-            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-        });
+        AskContextIcon.Glyph = hasSelection ? "\uE70F" : "\uE710";
+        AskContextText.Text = $"{ViewModel.FileName}  ·  {where}";
+        _askAnchor = (LineOf(text, start) - 1, ColumnOf(text, start), LineOf(text, end) - 1, ColumnOf(text, end));
 
         if (hasSelection)
         {
@@ -475,6 +493,7 @@ public sealed partial class EditorTab
             : "What should Claude write here? e.g. a method that parses the header…";
         AskInput.Text = string.Empty;
         AskInput.IsReadOnly = false;
+        RefreshAskSendButton();
         AskLogRows.Children.Clear();
         AskLogArea.Visibility = Visibility.Collapsed;
 
@@ -488,9 +507,87 @@ public sealed partial class EditorTab
 
     private void OpenAskPanel(bool composer)
     {
-        AskPanel.Visibility = Visibility.Visible;
+        if (!composer)
+        {
+            _askAnchor = null;
+        }
+
         AskComposer.Visibility = composer ? Visibility.Visible : Visibility.Collapsed;
         AskStopButton.Visibility = !composer && _session.IsRunning ? Visibility.Visible : Visibility.Collapsed;
+        AskPanel.Visibility = Visibility.Visible;
+        PositionAskPanel();
+    }
+
+    /// <summary>
+    /// Floats the panel just under the anchored text, or just above it when the room
+    /// below is short - aligned so it grows away from the text either way - and keeps it
+    /// inside the editor. Without an anchor it docks at the bottom centre.
+    /// </summary>
+    private void PositionAskPanel()
+    {
+        if (AskPanel.Visibility != Visibility.Visible || EditorSurface.ActualWidth <= 0)
+        {
+            return;
+        }
+
+        var surfaceWidth = EditorSurface.ActualWidth;
+        var surfaceHeight = EditorSurface.ActualHeight;
+        var width = Math.Max(0, Math.Min(AskPanelWidth, surfaceWidth - 2 * AskPanelInset));
+        AskPanel.Width = width;
+
+        if (_askAnchor is not { } anchor)
+        {
+            AskPanel.HorizontalAlignment = HorizontalAlignment.Center;
+            AskPanel.VerticalAlignment = VerticalAlignment.Bottom;
+            AskPanel.Margin = new Thickness(AskPanelInset, AskPanelInset, AskPanelInset, 16);
+            return;
+        }
+
+        var origin = FileEditor.TransformToVisual(EditorSurface).TransformPoint(default);
+        var first = FileEditor.PositionBounds(anchor.Line, anchor.Col);
+        var last = FileEditor.PositionBounds(anchor.EndLine, anchor.EndCol);
+
+        // A selection ending at column 0 stops on the line before; do not cover the line after it.
+        var spansLines = anchor.EndLine > anchor.Line;
+        var top = Math.Clamp(origin.Y + first.Y, 0, surfaceHeight);
+        var bottom = Math.Clamp(origin.Y + (spansLines && anchor.EndCol == 0 ? last.Y : last.Bottom), 0, surfaceHeight);
+
+        // Start a little left of the text so the input's own inset lines up with it.
+        var x = origin.X + (spansLines ? Math.Min(first.X, last.X) : first.X) - 20;
+        var left = Math.Clamp(x, AskPanelInset, Math.Max(AskPanelInset, surfaceWidth - width - AskPanelInset));
+
+        AskPanel.HorizontalAlignment = HorizontalAlignment.Left;
+        var below = surfaceHeight - bottom;
+        if (below >= AskPanelRoom || below >= top)
+        {
+            AskPanel.VerticalAlignment = VerticalAlignment.Top;
+            AskPanel.Margin = new Thickness(left, bottom + AskPanelGap, 0, AskPanelInset);
+        }
+        else
+        {
+            AskPanel.VerticalAlignment = VerticalAlignment.Bottom;
+            AskPanel.Margin = new Thickness(left, AskPanelInset, 0, surfaceHeight - top + AskPanelGap);
+        }
+    }
+
+    /// <summary>A short fade in and out, so the panel arrives like a flyout rather than popping.</summary>
+    private void ConfigureAskPanelAnimations()
+    {
+        var compositor = ElementCompositionPreview.GetElementVisual(AskPanel).Compositor;
+
+        var show = compositor.CreateScalarKeyFrameAnimation();
+        show.Target = "Opacity";
+        show.InsertKeyFrame(0, 0);
+        show.InsertKeyFrame(1, 1);
+        show.Duration = TimeSpan.FromMilliseconds(140);
+
+        var hide = compositor.CreateScalarKeyFrameAnimation();
+        hide.Target = "Opacity";
+        hide.InsertKeyFrame(1, 0);
+        hide.Duration = TimeSpan.FromMilliseconds(100);
+
+        ElementCompositionPreview.SetImplicitShowAnimation(AskPanel, show);
+        ElementCompositionPreview.SetImplicitHideAnimation(AskPanel, hide);
     }
 
     /// <summary>Closes the panel; a job still running is cancelled, a composer still waiting is dismissed.</summary>
@@ -507,6 +604,52 @@ public sealed partial class EditorTab
     private void OnAskCloseClick(object sender, RoutedEventArgs e) => CloseAskPanel();
 
     private void OnAskInputTextChanged(object sender, TextChangedEventArgs e) => RefreshAskSendButton();
+
+    /// <summary>The field around the text box shows focus, since the box itself is stripped of chrome.</summary>
+    private void OnAskInputFocusChanged(object sender, RoutedEventArgs e) =>
+        AskInputField.BorderBrush = Resource(
+            AskInput.FocusState == FocusState.Unfocused ? "ControlStrokeColorDefaultBrush" : "AccentFillColorDefaultBrush");
+
+    private void OnAskPanelPointerPressed(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (AskPanel.Visibility == Visibility.Visible)
+        {
+            e.Handled = true;
+            if (AskComposer.Visibility == Visibility.Visible && AskInput.FocusState == FocusState.Unfocused)
+            {
+                AskInput.Focus(FocusState.Programmatic);
+            }
+        }
+    }
+
+    /// <summary>Dismisses a waiting composer once focus has moved outside the panel.</summary>
+    private void OnAskPanelLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (AskPanel.Visibility != Visibility.Visible || AskComposer.Visibility != Visibility.Visible || _session.IsRunning)
+        {
+            return;
+        }
+
+        // Focus moving between the panel's own controls also raises LostFocus; settle first, then look.
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (AskPanel.Visibility != Visibility.Visible || AskComposer.Visibility != Visibility.Visible || _session.IsRunning)
+            {
+                return;
+            }
+
+            var focused = Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(XamlRoot) as DependencyObject;
+            for (var node = focused; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+            {
+                if (ReferenceEquals(node, AskPanel))
+                {
+                    return;
+                }
+            }
+
+            CloseAskPanel();
+        });
+    }
 
     private void RefreshAskSendButton() =>
         AskSendButton.IsEnabled = _session.IsRunning || AskInput.Text.Trim().Length > 0;
@@ -571,6 +714,17 @@ public sealed partial class EditorTab
         AskLogArea.Visibility = Visibility.Visible;
         foreach (AskLogEntry entry in e.NewItems)
         {
+            // The previous step is no longer the current one: run the rail down to the new
+            // row and let its text settle back.
+            if (AskLogRows.Children.Count > 0 && AskLogRows.Children[^1] is Grid { Tag: LogRowParts previous })
+            {
+                previous.Connector.Visibility = Visibility.Visible;
+                if (previous.Kind is AskLogKind.Info or AskLogKind.Search)
+                {
+                    previous.Body.Foreground = Resource("TextFillColorSecondaryBrush");
+                }
+            }
+
             AskLogRows.Children.Add(BuildLogRow(entry));
         }
 
@@ -578,49 +732,86 @@ public sealed partial class EditorTab
         AskLogScroll.ChangeView(null, AskLogScroll.ScrollableHeight, null, disableAnimation: true);
     }
 
+    /// <summary>The parts of a log row that change once a later step arrives.</summary>
+    private sealed record LogRowParts(AskLogKind Kind, UIElement Connector, TextBlock Body);
+
+    private static Brush Resource(string key) => (Brush)Application.Current.Resources[key];
+
+    /// <summary>
+    /// One step on the timeline: a marker on the rail (a dot, or an icon for searches and
+    /// the outcome), what happened, and how far into the job it happened.
+    /// </summary>
     private static UIElement BuildLogRow(AskLogEntry entry)
     {
-        var (glyph, brushKey) = entry.Kind switch
-        {
-            AskLogKind.Search => ("", "TextFillColorSecondaryBrush"),
-            AskLogKind.Done => ("", "SystemFillColorSuccessBrush"),
-            AskLogKind.Error => ("", "SystemFillColorCriticalBrush"),
-            _ => ("", "TextFillColorTertiaryBrush"),
-        };
+        const double markerSize = 14;
+        const double markerTop = 2;
 
-        var row = new Grid { ColumnSpacing = 8 };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var row = new Grid { ColumnSpacing = 10 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        var icon = new FontIcon
+        // The rail segment down to the next step's marker; shown once there is a next step.
+        var connector = new Microsoft.UI.Xaml.Shapes.Rectangle
         {
-            Glyph = glyph,
-            FontSize = 10,
-            Margin = new Thickness(0, 3, 0, 0),
+            Width = 1,
+            Margin = new Thickness(0, markerTop + markerSize + 2, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Fill = Resource("DividerStrokeColorDefaultBrush"),
+            Visibility = Visibility.Collapsed,
+        };
+        row.Children.Add(connector);
+
+        UIElement marker = entry.Kind switch
+        {
+            AskLogKind.Search => new FontIcon { Glyph = "\uE721", FontSize = 11, Foreground = Resource("TextFillColorSecondaryBrush") },
+            AskLogKind.Done => new FontIcon { Glyph = "\uE930", FontSize = 14, Foreground = Resource("SystemFillColorSuccessBrush") },
+            AskLogKind.Error => new FontIcon { Glyph = "\uEA39", FontSize = 14, Foreground = Resource("SystemFillColorCriticalBrush") },
+            _ => new Microsoft.UI.Xaml.Shapes.Ellipse
+            {
+                Width = 7,
+                Height = 7,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Fill = Resource("AccentFillColorDefaultBrush"),
+            },
+        };
+        row.Children.Add(new Grid
+        {
+            Width = markerSize,
+            Height = markerSize,
+            Margin = new Thickness(0, markerTop, 0, 0),
             VerticalAlignment = VerticalAlignment.Top,
-            Foreground = (Brush)Application.Current.Resources[brushKey],
-        };
-        var time = new TextBlock
-        {
-            Text = entry.Time,
-            FontSize = 11,
-            FontFamily = new FontFamily("Cascadia Mono, Consolas"),
-            Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
-        };
+            Children = { marker },
+        });
+
+        var outcome = entry.Kind is AskLogKind.Done or AskLogKind.Error;
         var body = new TextBlock
         {
             Text = entry.Text,
             FontSize = 12,
+            LineHeight = 18,
+            Margin = new Thickness(0, 0, 0, 8),
             TextWrapping = TextWrapping.Wrap,
             IsTextSelectionEnabled = true,
-            Foreground = (Brush)Application.Current.Resources[entry.Kind == AskLogKind.Error ? "SystemFillColorCriticalBrush" : "TextFillColorPrimaryBrush"],
+            FontWeight = outcome ? FontWeights.SemiBold : FontWeights.Normal,
+            Foreground = Resource(entry.Kind == AskLogKind.Error ? "SystemFillColorCriticalBrush" : "TextFillColorPrimaryBrush"),
         };
-        Grid.SetColumn(time, 1);
-        Grid.SetColumn(body, 2);
-        row.Children.Add(icon);
-        row.Children.Add(time);
+        Grid.SetColumn(body, 1);
         row.Children.Add(body);
+
+        var time = new TextBlock
+        {
+            Text = entry.Time,
+            FontSize = 11,
+            Margin = new Thickness(0, 1, 0, 0),
+            FontFamily = new FontFamily("Cascadia Mono, Consolas"),
+            Foreground = Resource("TextFillColorTertiaryBrush"),
+        };
+        Grid.SetColumn(time, 2);
+        row.Children.Add(time);
+
+        row.Tag = new LogRowParts(entry.Kind, connector, body);
         return row;
     }
 
@@ -635,6 +826,20 @@ public sealed partial class EditorTab
             case nameof(AskSessionViewModel.IsRunning):
                 var running = _session.IsRunning;
                 AskProgress.IsActive = running;
+                AskProgress.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+                AskStatusIcon.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
+                if (!running)
+                {
+                    var (glyph, brush) = _session switch
+                    {
+                        { OutcomeIsError: true } => ("\uEA39", "SystemFillColorCriticalBrush"),
+                        { Outcome: CancelledOutcome } => ("\uE71A", "TextFillColorSecondaryBrush"),
+                        _ => ("\uE930", "SystemFillColorSuccessBrush"),
+                    };
+                    AskStatusIcon.Glyph = glyph;
+                    AskStatusIcon.Foreground = Resource(brush);
+                }
+
                 AskInput.IsReadOnly = running;
                 AskSendIcon.Glyph = running ? "" : "";
                 AskStopButton.Visibility = running && AskComposer.Visibility == Visibility.Collapsed
@@ -697,6 +902,13 @@ public sealed partial class EditorTab
             CloseButtonText = "Close",
         };
         await dialog.ShowAsync();
+    }
+
+    /// <summary>The 0-based column of an offset within its line.</summary>
+    private static int ColumnOf(string text, int offset)
+    {
+        offset = Math.Clamp(offset, 0, text.Length);
+        return offset - (offset == 0 ? 0 : text.LastIndexOf('\n', offset - 1) + 1);
     }
 
     private static int LineOf(string text, int offset)

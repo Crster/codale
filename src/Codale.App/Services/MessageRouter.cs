@@ -4,9 +4,9 @@ using Codale.Core.Helper;
 namespace Codale.App.Services;
 
 /// <summary>
-/// Automatic mode's front door: one helper-model call that corrects a message, picks
-/// its mode and spots a change of subject. No CLI, a slow one or a timeout never hold a
-/// message back: it goes out as typed, with the mode read from its wording.
+/// Automatic mode's front door: one helper-model call that picks a message's mode and
+/// spots a change of subject; the message itself always goes out as typed. No CLI, a
+/// slow one or a timeout never hold a message back: the mode is then read from its wording.
 /// </summary>
 public sealed class MessageRouter
 {
@@ -39,11 +39,12 @@ public sealed class MessageRouter
             return MessageRouting.RouteWithoutModel(text);
         }
 
-        var userTurns = chat.Items.OfType<UserMessageItem>().Select(u => u.Text).Where(t => t.Length > 0).ToList();
-        var recent = userTurns.Skip(Math.Max(0, userTurns.Count - 3)).ToList();
-        var lastAssistant = chat.Items.OfType<AssistantMessageItem>().LastOrDefault()?.Text;
-        var conversation = MessageRouting.BuildConversation(
-            text, chat.Title, recent, lastAssistant, firstUserTurn: userTurns.FirstOrDefault());
+        // The agent's last reply sums up what the session did: the only context the model
+        // needs. Without one, or with a bare "Done.", there is nothing to judge a change
+        // of subject against, so the message stays where it was typed.
+        var lastAssistant = chat.Items.OfType<AssistantMessageItem>().LastOrDefault()?.Text?.Trim();
+        var canMoveTopic = lastAssistant is { Length: >= MessageRouting.MinSummaryChars };
+        var conversation = MessageRouting.BuildConversation(text, canMoveTopic ? lastAssistant : null);
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(Timeout);
@@ -57,10 +58,9 @@ public sealed class MessageRouter
                 [MessageRouting.RouteTool],
                 timeout.Token);
 
-            var decision = MessageRouting.Interpret(call, text, hasConversation: recent.Count > 0);
+            var decision = MessageRouting.Interpret(call, text, canMoveTopic);
             CrashLog.Trace(
-                $"Routed in {started.ElapsedMilliseconds}ms: intent={decision.Intent} newTopic={decision.NewTopic} " +
-                $"rewritten={decision.Text != text}");
+                $"Routed in {started.ElapsedMilliseconds}ms: intent={decision.Intent} newTopic={decision.NewTopic}");
             return decision;
         }
         catch (Exception ex)

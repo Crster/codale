@@ -1322,27 +1322,6 @@
                                         </Button>
                                     </Grid>
 
-                                    <!--  Ask mode changes what a prompt does, so it says so where it is set  -->
-                                    <Border
-                                        Padding="10,7"
-                                        Background="{ThemeResource SystemFillColorAttentionBackgroundBrush}"
-                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="8"
-                                        Visibility="{x:Bind ViewModel.Chat.IsAskMode, Mode=OneWay}">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <FontIcon
-                                                FontSize="12"
-                                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                                Glyph="&#xE8BD;" />
-                                            <TextBlock
-                                                FontSize="11"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                Text="Ask mode: the agent explains and won't change any files."
-                                                TextWrapping="Wrap" />
-                                        </StackPanel>
-                                    </Border>
-
                                     <!--  The two ways to start over, side by side: the primary one in accent  -->
                                     <Grid ColumnSpacing="8">
                                         <Grid.ColumnDefinitions>
@@ -1364,12 +1343,13 @@
                                             </StackPanel>
                                         </Button>
 
-                                        <Button
+                                        <ToggleButton
                                             Grid.Column="1"
                                             HorizontalAlignment="Stretch"
                                             Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                             Click="OnIsolatedSessionClick"
+                                            IsChecked="{x:Bind ViewModel.IsIsolated, Mode=OneWay}"
                                             CornerRadius="8"
                                             FontSize="12"
                                             IsEnabled="{x:Bind ViewModel.IsStartingWorktree, Mode=OneWay, Converter={StaticResource NotBool}}"
@@ -1379,7 +1359,7 @@
                                                 <FontIcon FontSize="12" Glyph="&#xE8EA;" />
                                                 <TextBlock Text="Isolated" TextTrimming="CharacterEllipsis" />
                                             </StackPanel>
-                                        </Button>
+                                        </ToggleButton>
                                     </Grid>
 
                                     <TextBlock
@@ -2133,7 +2113,7 @@
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <TextBlock FontSize="13" FontWeight="SemiBold" Text="Cost" />
-                                        <TextBlock Grid.Column="1" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind ViewModel.Status.CostText, Mode=OneWay}" />
+                                        <TextBlock Grid.Column="1" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind ViewModel.Status.CustomCostText, Mode=OneWay}" />
                                     </Grid>
 
                                     <StackPanel Spacing="6" Visibility="{x:Bind ViewModel.Status.HasContext, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">

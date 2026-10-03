@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 
+using Codale.Agents.OpenAi;
 using Codale.Core.Agents;
 using Codale.Core.Helper;
 using Codale.Core.Processes;
@@ -11,7 +12,7 @@ namespace Codale.Agents;
 
 /// <summary>
 /// Answers <see cref="IHelperModel"/> requests with a one-shot run of the Claude CLI
-/// (or an Anthropic-compatible API endpoint): prompt in on stdin, reply out on stdout, no tools, no saved session.
+/// (or an OpenAI-compatible API endpoint): prompt in on stdin, reply out on stdout, no tools, no saved session.
 /// </summary>
 /// <remarks>
 /// Without the Claude CLI and without an API endpoint, <see cref="IsAvailable"/> is false
@@ -22,7 +23,7 @@ namespace Codale.Agents;
 /// Each system prompt gets its own spare, so routing and a search's two steps can all be
 /// ready at once.
 /// </remarks>
-public sealed class HelperModel(Func<AnthropicEndpoint?>? api = null) : IHelperModel, IDisposable
+public sealed class HelperModel(Func<OpenAiEndpoint?>? api = null) : IHelperModel, IDisposable
 {
     /// <summary>The cheapest Claude model: these jobs are short and latency is what the user feels.</summary>
     internal const string ClaudeModel = "haiku";
@@ -50,7 +51,7 @@ public sealed class HelperModel(Func<AnthropicEndpoint?>? api = null) : IHelperM
     private bool _disposed;
 
     /// <summary>The API endpoint background jobs use instead of a CLI, or null to use the CLI.</summary>
-    private AnthropicEndpoint? ApiEndpoint => api?.Invoke();
+    private OpenAiEndpoint? ApiEndpoint => api?.Invoke();
 
     /// <summary>Raised after each request the custom API endpoint answered, with what it reported spending.</summary>
     public event Action<UsageSnapshot>? ApiRequestServed;
@@ -62,13 +63,13 @@ public sealed class HelperModel(Func<AnthropicEndpoint?>? api = null) : IHelperM
     private static bool ClaudeInstalled => CliLocator.IsInstalled();
 
     public Task<string> CompleteAsync(string systemPrompt, string prompt, CancellationToken ct = default) =>
-        CompleteAsync(systemPrompt, prompt, AnthropicApiClient.MaxTokens, ct);
+        CompleteAsync(systemPrompt, prompt, OpenAiApiClient.MaxTokens, ct);
 
     public async Task<string> CompleteAsync(string systemPrompt, string prompt, int maxTokens, CancellationToken ct = default)
     {
         if (ApiEndpoint is { } endpoint)
         {
-            return (await AnthropicApiClient.CompleteAsync(endpoint, systemPrompt, prompt, ct, maxTokens, OnApiRequestServed).ConfigureAwait(false)).Trim();
+            return (await OpenAiApiClient.CompleteAsync(endpoint, systemPrompt, prompt, ct, maxTokens, OnApiRequestServed).ConfigureAwait(false)).Trim();
         }
 
         if (!ClaudeInstalled)
@@ -88,7 +89,7 @@ public sealed class HelperModel(Func<AnthropicEndpoint?>? api = null) : IHelperM
     {
         if (ApiEndpoint is { } endpoint)
         {
-            return await AnthropicApiClient.CallToolAsync(endpoint, systemPrompt, conversation, tools, ct, OnApiRequestServed).ConfigureAwait(false);
+            return await OpenAiApiClient.CallToolAsync(endpoint, systemPrompt, conversation, tools, ct, OnApiRequestServed).ConfigureAwait(false);
         }
 
         if (!ClaudeInstalled)
@@ -122,7 +123,7 @@ public sealed class HelperModel(Func<AnthropicEndpoint?>? api = null) : IHelperM
     {
         if (ApiEndpoint is { } endpoint)
         {
-            return await AnthropicApiClient.CallToolsAsync(endpoint, systemPrompt, conversation, tools, ct, OnApiRequestServed).ConfigureAwait(false);
+            return await OpenAiApiClient.CallToolsAsync(endpoint, systemPrompt, conversation, tools, ct, OnApiRequestServed).ConfigureAwait(false);
         }
 
         // The CLI's reply contract is a single JSON call.
@@ -385,7 +386,7 @@ public sealed class HelperModel(Func<AnthropicEndpoint?>? api = null) : IHelperM
     /// <summary>The stream-json line that asks a warm CLI one question.</summary>
     internal static string BuildStreamRequest(string prompt)
     {
-        return AnthropicApiClient.WriteJson(json =>
+        return OpenAiApiClient.WriteJson(json =>
         {
             json.WriteStartObject();
             json.WriteString("type", "user");

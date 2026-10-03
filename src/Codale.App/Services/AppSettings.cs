@@ -292,7 +292,7 @@ public static class AppSettings
         set => WriteFlag("tokens.digest", value);
     }
 
-    /// <summary>Give Claude sessions the explore and ask_files tools, answered by the background-task model.</summary>
+    /// <summary>Give Claude sessions the explore tool, answered by the background-task model.</summary>
     public static bool TokenSaverExplore
     {
         get => ReadFlag("tokens.explore", true);
@@ -302,7 +302,7 @@ public static class AppSettings
     /// <summary>Turn away a first whole-file Read of a large file in favour of a ranged read.</summary>
     public static bool TokenSaverReadGuard
     {
-        get => ReadFlag("tokens.readGuard", true);
+        get => ReadFlag("tokens.readGuard", false);
         set => WriteFlag("tokens.readGuard", value);
     }
 
@@ -428,6 +428,8 @@ public static class AppSettings
     private static ByokProvider Clone(ByokProvider p, string? apiKey = null) => new()
     {
         Name = p.Name, BaseUrl = p.BaseUrl, ApiKey = apiKey ?? p.ApiKey, Model = p.Model, SmartModel = p.SmartModel,
+        InputPricePerMillion = p.InputPricePerMillion, OutputPricePerMillion = p.OutputPricePerMillion,
+        CachedInputPricePerMillion = p.CachedInputPricePerMillion,
     };
 
     /// <summary>Serialises providers for the file (<paramref name="protect"/>: keys DPAPI-wrapped) or, unprotected, for change comparison.</summary>

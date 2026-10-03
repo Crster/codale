@@ -1,5 +1,6 @@
 ﻿using Codale.Agents.Claude;
 using Codale.Agents;
+using Codale.Agents.OpenAi;
 using Codale.App.Services;
 using Codale.Core.Syntax;
 
@@ -474,7 +475,7 @@ public sealed partial class SettingsPanel : UserControl
                 previousName = provider.Name;
             }
         });
-        Field("Anthropic Messages base URL", "https://gateway.example.com", provider.BaseUrl, v => provider.BaseUrl = v);
+        Field("OpenAI-compatible base URL", "https://api.example.com/v1", provider.BaseUrl, v => provider.BaseUrl = v);
 
         var key = new PasswordBox { Header = "API key", Password = provider.ApiKey };
         key.PasswordChanged += (_, _) =>
@@ -484,8 +485,20 @@ public sealed partial class SettingsPanel : UserControl
         };
         panel.Children.Add(key);
 
-        Field("Default model", "e.g. claude-sonnet-5-5", provider.Model, v => provider.Model = v);
-        Field("Smart model", "e.g. claude-opus-5-5 (optional)", provider.SmartModel, v => provider.SmartModel = v);
+        Field("Default model", "e.g. deepseek-chat", provider.Model, v => provider.Model = v);
+        Field("Smart model", "e.g. deepseek-reasoner (optional)", provider.SmartModel, v => provider.SmartModel = v);
+
+        void PriceField(string label, decimal value, Action<decimal> apply)
+        {
+            Field(label, "USD per 1M tokens (optional)", value > 0 ? value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "", text =>
+            {
+                apply(decimal.TryParse(text, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var parsed) && parsed > 0 ? parsed : 0);
+            });
+        }
+
+        PriceField("Input price", provider.InputPricePerMillion, v => provider.InputPricePerMillion = v);
+        PriceField("Output price", provider.OutputPricePerMillion, v => provider.OutputPricePerMillion = v);
+        PriceField("Cached input price", provider.CachedInputPricePerMillion, v => provider.CachedInputPricePerMillion = v);
 
         var remove = new Button { Content = "Remove provider", HorizontalAlignment = HorizontalAlignment.Right };
         remove.Click += (_, _) =>
@@ -627,7 +640,7 @@ public sealed partial class SettingsPanel : UserControl
         var index = AppSettings.DefaultModel.Length == 0 ? 0 : -1;
         foreach (var model in ClaudeAgentSession.DocumentedModels)
         {
-            DefaultModelBox.Items.Add(new ComboBoxItem { Content = $"{model.DisplayName}  ({model.Id})", Tag = model.Id });
+            DefaultModelBox.Items.Add(new ComboBoxItem { Content = model.DisplayName, Tag = model.Id });
             if (string.Equals(AppSettings.DefaultModel, model.Id, StringComparison.OrdinalIgnoreCase))
             {
                 index = DefaultModelBox.Items.Count - 1;
@@ -771,7 +784,7 @@ public sealed partial class SettingsPanel : UserControl
     {
         // Settings has no file in front, so the dialog asks for the language and an optional sample.
         using var helper = new HelperModel(
-            () => AppSettings.HelperApiEndpoint is { } api ? new AnthropicEndpoint(api.BaseUrl, api.ApiKey, api.Model) : null);
+            () => AppSettings.HelperApiEndpoint is { } api ? new OpenAiEndpoint(api.BaseUrl, api.ApiKey, api.Model) : null);
         await SyntaxDialogs.ShowGenerateAsync(XamlRoot, helper, "", "", "");
     }
 

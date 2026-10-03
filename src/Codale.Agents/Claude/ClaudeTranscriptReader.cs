@@ -158,7 +158,7 @@ public sealed class ClaudeTranscriptReader
                         break;
 
                     case "last-prompt":
-                        lastPrompt = record.Str("lastPrompt");
+                        lastPrompt = record.Str("lastPrompt") is { } last ? UserTurn.StripHostInstructions(last) : null;
                         break;
 
                     case "user":
@@ -170,7 +170,8 @@ public sealed class ClaudeTranscriptReader
 
                         branch ??= record.Str("gitBranch");
 
-                        if (UserText(record) is { Length: > 0 } text)
+                        // The session list shows the user's words, not the host's ask-mode or fork preamble.
+                        if (UserText(record) is { Length: > 0 } raw && UserTurn.StripHostInstructions(raw) is { Length: > 0 } text)
                         {
                             userTurns++;
                             if (!Codale.Core.Agents.SessionTitles.IsResetCommand(text))

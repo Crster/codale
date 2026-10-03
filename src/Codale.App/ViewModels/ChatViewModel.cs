@@ -48,6 +48,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>The active turn's one task-list row, updated in place as the list moves.</summary>
     private TodoStepItem? _turnTodo;
 
+    /// <summary>The plan document the active turn wrote, which its ExitPlanMode proposes.</summary>
+    private SessionArtifact? _turnPlanFile;
+
     /// <summary>Tool calls tracked but kept out of the timeline: task bookkeeping and CLI plumbing.</summary>
     private readonly HashSet<string> _hiddenCalls = [];
 
@@ -206,6 +209,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             {
                 assist = new HelperAssistService(helper, workingDirectory, () => AppSettings.HasHelperApi);
                 assist.Saved += (before, after) => _dispatcher.TryEnqueue(() => _status.AddSaved(before - after));
+                assist.ExploreStarted += run => _dispatcher.TryEnqueue(() => OnExploreStarted(run));
             }
 
             _taskPipe = new TaskPipeServer(new LocalTaskService(_taskManager), assist);
@@ -228,6 +232,25 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             t.Status = RunningTaskStatus.Ended;
         }
+    }
+
+    /// <summary>Lists an explore as a task and streams its steps into the peek pane and status bar.</summary>
+    private void OnExploreStarted(ExploreRun run)
+    {
+        var item = new RunningTaskItem
+        {
+            ToolUseId = $"explore:{Guid.NewGuid():N}",
+            Kind = RunningTaskKind.Shell,
+            Title = "explore: " + run.Question.Trim().ReplaceLineEndings(" "),
+            StartedAt = run.StartedAt,
+            Header = $"[explore]\n{run.Question.Trim()}\n\n",
+        };
+        AddTask(item);
+        item.AppendOutput("Searching the code...\n");
+
+        run.Progress += line => _dispatcher.TryEnqueue(() => item.AppendOutput(line + "\n"));
+        run.Finished += failed => _dispatcher.TryEnqueue(() =>
+            item.Status = failed ? RunningTaskStatus.Failed : RunningTaskStatus.Completed);
     }
 
     private void OnHostedTaskStarted(HostedTask hosted)
@@ -382,8 +405,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 ? d.GetString()! : "Subagent";
             if (isHelper)
             {
-                title = (started.ToolName.EndsWith("ask_files", StringComparison.Ordinal) ? "Ask files: " : "Explore: ")
-                    + (title.Length > 80 ? title[..80] + "…" : title);
+                title = "Explore: " + (title.Length > 80 ? title[..80] + "…" : title);
             }
 
             var prompt = started.Input.ValueKind == JsonValueKind.Object
@@ -934,13 +956,20 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public bool IsAskMode => PermissionMode == AskMode;
 
     /// <summary>
-    /// The host's routed mode: each message is tidied by the helper model, sent as an
+    /// The host's routed mode: each message is classified by the helper model, sent as an
     /// ask, plan or act turn as it reads, and moved to a new session when it changes
     /// the subject. Between turns the CLI runs "auto", which act turns use as-is.
     /// </summary>
+    // NOTE: Auto is Claude's own auto mode (--permission-mode auto): the model evaluates each
+    // action's risk and only asks or denies the risky ones. This is already handled; do not
+    // auto-approve in the host when the CLI reports "default" - that would bypass the risk check
+    // (see RidesOn and CliMode).
     public const string AutomaticMode = "automatic";
 
     public bool IsAutomaticMode => PermissionMode == AutomaticMode;
+
+    /// <summary>The permission mode the CLI last reported at init; "default" under Auto means it has no classifier.</summary>
+    private string? _cliReportedMode;
 
     /// <summary>Modes only the host knows; the CLI is handed <see cref="CliMode"/> instead.</summary>
     public static bool IsHostMode(string mode) => mode is AskMode or AutomaticMode;
@@ -968,11 +997,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _ => false,
     };
 
-    /// <summary>Tidies and routes messages in <see cref="AutomaticMode"/>; null keeps every message as typed.</summary>
+    /// <summary>Picks each message's mode and session in <see cref="AutomaticMode"/>; null sends every message as a plain turn.</summary>
     public MessageRouter? Router { get; init; }
 
     /// <summary>
-    /// The background-task model, which answers the session's explore, ask_files and
+    /// The background-task model, which answers the session's explore and
     /// digest requests (on a BYOK provider) and writes handoff summaries. Null turns those off.
     /// </summary>
     public IHelperModel? Helper { get; init; }
@@ -1286,7 +1315,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public string? ResumeSessionId { get; set; }
 
     /// <summary>Working directory for the agent: the project, or a session worktree.</summary>
-    public string? WorktreePath { get; set; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsIsolated))]
+    public partial string? WorktreePath { get; set; }
+
+    /// <summary>True while the agent works in its own worktree rather than the project.</summary>
+    public bool IsIsolated => WorktreePath is { Length: > 0 };
 
     /// <summary>
     /// Standing instruction appended to every Claude session's system prompt: the task
@@ -1335,9 +1369,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private async Task ConnectCoreAsync()
     {
-        // "" is the CLI default: no mode flag, and the init handshake reports the real one.
-        var permissionMode = PermissionMode.Length == 0 ? null : CliMode(PermissionMode);
-        if (permissionMode is not null && permissionMode != PermissionMode && !IsHostMode(PermissionMode))
+        // Never leave the mode to the CLI's own default (it asks about every edit and run):
+        // an unset mode is Auto, so --permission-mode auto is always spelled out for it.
+        if (PermissionMode.Length == 0)
+        {
+            PermissionMode = DefaultMode;
+        }
+
+        var permissionMode = CliMode(PermissionMode);
+        if (permissionMode != PermissionMode && !IsHostMode(PermissionMode))
         {
             CrashLog.Trace($"Permission mode '{PermissionMode}' is not a Claude mode; starting with '{permissionMode}'");
             PermissionMode = permissionMode;
@@ -1346,7 +1386,19 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // With a custom endpoint the catalogue's Anthropic ids mean nothing to the
         // gateway (it answers "issue with the selected model"): the picker offers the
         // endpoint's own default / smart model and a session starts with the default.
-        var claudeEndpoint = ClaudeEndpointEnvironment();
+        IReadOnlyDictionary<string, string>? claudeEndpoint;
+        try
+        {
+            claudeEndpoint = ClaudeEndpointEnvironment();
+        }
+        catch (InvalidOperationException ex)
+        {
+            // The local bridge to the provider could not start: say so rather than fall back to the Claude login.
+            CrashLog.Error("chat", "Connect FAILED: no bridge", ex);
+            Add(new NoticeItem { Text = $"Could not start {ProviderName}: {ex.Message}", Severity = NoticeSeverity.Error });
+            return;
+        }
+
         _connectedProvider = SelectedProviderName();
         _status.IsCustomProvider = claudeEndpoint is not null;
         RefreshCustomProviderName();
@@ -1399,7 +1451,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
                 // With the read guard on, the shell hook also refuses cat/type/Get-Content of a big file.
                 shellGuard = AppSettings.TokenSaverReadGuard
-                    ? _mcpSettings.ReadGuardCommand(offerAskFiles: assist && AppSettings.TokenSaverExplore)
+                    ? _mcpSettings.ReadGuardCommand()
                     : _mcpSettings.TasksGuardCommand();
 
                 // Hooks run as children of the CLI, not of the MCP server: they reach this chat
@@ -1412,7 +1464,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                         ? _mcpSettings.ShellOutputHookCommand(digest: assist && AppSettings.TokenSaverDigest)
                         : null,
                     ReadGuardCommand = AppSettings.TokenSaverReadGuard
-                        ? _mcpSettings.ReadGuardCommand(offerAskFiles: assist && AppSettings.TokenSaverExplore)
+                        ? _mcpSettings.ReadGuardCommand()
                         : null,
                 };
             }
@@ -1675,6 +1727,19 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 return;
             }
 
+            // Chatter the UI never shows (thinking_tokens arrives per token, thousands a
+            // turn) is logged from here instead of queueing a UI-thread callback each;
+            // thinking_tokens is not logged at all, or it rotates the trace out in one turn.
+            if (e is CliMessageIgnored ignored)
+            {
+                if (ignored.Kind != "system/thinking_tokens")
+                {
+                    CrashLog.Debug("cli-ignored", $"{ignored.Kind}: {ignored.Raw}");
+                }
+
+                continue;
+            }
+
             var captured = e;
 
             // The swap can also happen between the enqueue and the dispatch, so the
@@ -1719,12 +1784,24 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             case SessionInitialized init:
                 _status.Model = init.Model;
+                _cliReportedMode = init.PermissionMode;
 
                 // Ask and automatic are the host's, riding on the CLI's manual and auto:
                 // the CLI confirming its half is not a reason to drop them.
                 if (!RidesOn(PermissionMode, init.PermissionMode))
                 {
-                    PermissionMode = init.PermissionMode;
+                    // Full never yields to a CLI that started more cautious: ask it again for YOLO.
+                    if (PermissionMode is "auto" or "dontAsk" or "bypassPermissions")
+                    {
+                        if (_session is { } live)
+                        {
+                            _ = live.TrySetPermissionModeAsync("bypassPermissions");
+                        }
+                    }
+                    else
+                    {
+                        PermissionMode = init.PermissionMode;
+                    }
                 }
 
                 // Keep the handshake's list if this one comes back empty.
@@ -1762,7 +1839,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             case AssistantMessageCompleted done:
                 if (_status.IsCustomProvider && done.Usage is { } served)
                 {
-                    _status.RecordCustomCall(served);
+                    _status.RecordCustomCall(served, AppSettings.ActiveByok);
                 }
 
                 if (done.ParentToolUseId is { } owner && _tasksByToolUse.TryGetValue(owner, out var subagent))
@@ -2266,7 +2343,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    /// <summary>An ExitPlanMode plan joins the session's plans the moment it is proposed.</summary>
+    /// <summary>
+    /// An ExitPlanMode plan joins the session's plans the moment it is proposed. Plan mode
+    /// writes the plan to a file under .claude/plans first, then proposes that same text:
+    /// the file's entry is taken over rather than listed beside it, so one plan is one row.
+    /// </summary>
     private void RecordPlanArtifact(ToolCallItem item)
     {
         if (Artifacts.Any(a => a.ToolUseId == item.ToolUseId))
@@ -2274,14 +2355,66 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        Artifacts.Insert(0, new SessionArtifact
+        var source = PlanSourceOf(item);
+        var plan = new SessionArtifact
         {
             Kind = SessionArtifactKind.Plan,
             ToolUseId = item.ToolUseId,
+            SourcePath = source?.SourcePath,
             Markdown = item.PlanText ?? "",
             UpdatedAt = item.Timestamp,
             Status = SessionArtifactStatus.Proposed,
-        });
+        };
+
+        if (source is not null)
+        {
+            var at = Artifacts.IndexOf(source);
+            Artifacts.RemoveAt(at);
+            if (ReferenceEquals(_turnPlanFile, source))
+            {
+                _turnPlanFile = plan;
+            }
+        }
+
+        Artifacts.Insert(0, plan);
+    }
+
+    /// <summary>
+    /// The listed plan document (or earlier proposal of it) a proposal came from: the file
+    /// ExitPlanMode names, else one holding the same text, else the plan file this turn wrote.
+    /// </summary>
+    private SessionArtifact? PlanSourceOf(ToolCallItem item)
+    {
+        var candidates = Artifacts
+            .Where(a => a.SourcePath is not null && a.Kind is SessionArtifactKind.PlanFile or SessionArtifactKind.Plan)
+            .ToList();
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        if (item.Input.ValueKind == JsonValueKind.Object &&
+            item.Input.TryGetProperty("planFilePath", out var named) &&
+            named.ValueKind == JsonValueKind.String &&
+            named.GetString() is { Length: > 0 } namedPath)
+        {
+            var full = ResolvePath(namedPath);
+            if (candidates.FirstOrDefault(a => string.Equals(a.SourcePath, full, StringComparison.OrdinalIgnoreCase)) is { } byPath)
+            {
+                return byPath;
+            }
+        }
+
+        static string Normalize(string? text) => (text ?? "").Replace("\r\n", "\n").Trim();
+        var proposed = Normalize(item.PlanText);
+        if (candidates.FirstOrDefault(a => Normalize(a.Markdown) == proposed) is { } byText)
+        {
+            return byText;
+        }
+
+        // Edited after it was written (or read back with different whitespace): the plan
+        // file touched this turn is still the one being proposed.
+        return _turnPlanFile is { } written && candidates.Contains(written) ? written : null;
     }
 
     /// <summary>Where saved tool images and agent-written markdown documents live.</summary>
@@ -2488,6 +2621,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (isPlan)
         {
             artifact.Markdown = content ?? artifact.Markdown;
+            _turnPlanFile = artifact;
         }
 
         artifact.UpdatedAt = DateTimeOffset.Now;
@@ -2496,7 +2630,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Why ask mode turned a tool down, in words the model acts on.</summary>
     private const string AskModeDenial =
         "Ask mode is on: the user wants an explanation only, so nothing may be edited, created, " +
-        "deleted or run. Answer in chat instead - describe the change and show the code.";
+        "deleted or run. Reading files and searching the project or the web are fine. Answer in chat " +
+        "instead - describe the change and show the code.";
 
     /// <summary>
     /// Shows the approval and relays the answer. Runs detached from the event handler, so
@@ -2532,7 +2667,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private async Task HandleApprovalCoreAsync(ApprovalRequested approval)
     {
-        // Codale's own sandboxed tools (explore, ask_files, the task list...) are essential
+        // Codale's own sandboxed tools (explore, the task list...) are essential
         // and harmless; the CLI still asks for them in plan mode, so the host answers yes
         // itself in every mode but Manual, where the user wants to see each call.
         if (PermissionMode is not ("manual" or "default") &&
@@ -2548,9 +2683,38 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        // A CLI without the "auto" classifier runs Auto in "default" and asks about every
+        // edit; Auto means edits go through, so the host answers yes for those.
+        if (IsAutomaticMode && _cliReportedMode == "default" &&
+            approval.ToolName is "Edit" or "Write" or "MultiEdit" or "NotebookEdit")
+        {
+            CrashLog.Trace($"Auto mode: allowed {approval.ToolName} unasked");
+
+            if (_session is { } editing)
+            {
+                await editing.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
+            }
+
+            return;
+        }
+
         // Ask mode backs its instruction with enforcement: anything the CLI had to ask
         // about is an action, and the answer is no - without bothering the reader.
         // Questions for the user are conversation, not action, so they still get through.
+        // Looking things up on the web reads, it changes nothing, and it often makes the
+        // answer: ask mode lets it through unasked.
+        if (IsAskMode && approval.ToolName is "WebSearch" or "WebFetch")
+        {
+            CrashLog.Trace($"Ask mode: allowed {approval.ToolName} unasked");
+
+            if (_session is { } searching)
+            {
+                await searching.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
+            }
+
+            return;
+        }
+
         if (IsAskMode && !string.Equals(approval.ToolName, "AskUserQuestion", StringComparison.Ordinal))
         {
             if (_toolCalls.TryGetValue(approval.ToolUseId ?? "", out var refused))
@@ -3008,6 +3172,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _turnStarted = eventStart ?? DateTimeOffset.Now;
         _turnStartFromEvent = eventStart is not null;
         _turnTodo = null;
+        _turnPlanFile = null;
 
         _activeTurn = new TurnActivityItem { HasClock = !_replayingHistory || eventStart is not null };
         Add(_activeTurn);
@@ -3060,6 +3225,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             foreach (var tool in turn.AllTools)
             {
+                // A call whose result never came (interrupt, dead process) would read as
+                // running forever - and keep its pulse animating on the UI thread.
+                if (tool.IsWorking)
+                {
+                    tool.Status = outcome == TurnOutcome.Completed ? ToolCallStatus.Succeeded : ToolCallStatus.Failed;
+                }
+
                 tool.AutoCollapse();
             }
 
@@ -3827,6 +3999,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         // Nobody is left to answer an open question once the session goes.
         AbandonPendingApprovals();
+
+        // The pump drops the dying session's SessionEnded, so a turn in flight has to be
+        // closed here, or the busy pulses and the stop button animate forever.
+        if (IsBusy)
+        {
+            IsBusy = false;
+            EndTurn(TurnOutcome.Stopped, end: null);
+        }
 
         if (_session is { } session)
         {

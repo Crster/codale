@@ -8,7 +8,7 @@ namespace Codale.Mcp.Tasks;
 /// Claude Code <c>PreToolUse</c> hook on Read and on the shell tools: turns away a
 /// whole-file read of a large file - a Read without a range, or a <c>cat</c> /
 /// <c>type</c> / <c>Get-Content</c> of the file - and points the agent at a ranged read
-/// (or the ask_files tool). A whole file read into context is paid for again on every
+/// . A whole file read into context is paid for again on every
 /// later call, and the agent usually needs one method of it. Asking for the same read
 /// again goes through for a file of moderate size, so the agent is not stuck when it
 /// really needs all of it; a very large file only ever comes in ranges.
@@ -17,7 +17,7 @@ public static partial class ReadGuard
 {
     public const int DefaultMaxLines = 400;
 
-    /// <summary>Above this, even a repeated whole-file read is refused: ranges or ask_files only.</summary>
+    /// <summary>Above this, even a repeated whole-file read is refused: ranges only.</summary>
     public const int RepeatMaxLines = 1500;
 
     /// <summary>The prefix the app looks for to tell a redirect from a user's denial.</summary>
@@ -31,9 +31,8 @@ public static partial class ReadGuard
     /// <param name="hookInputJson">The CLI's hook payload.</param>
     /// <param name="stateRoot">Where each session's refused paths are remembered.</param>
     /// <param name="maxLines">Files longer than this are refused once.</param>
-    /// <param name="offerAskFiles">Whether the ask_files tool is there to suggest.</param>
     /// <returns>The hook's stdout, or null to let the read through.</returns>
-    public static string? Evaluate(string hookInputJson, string stateRoot, int maxLines = DefaultMaxLines, bool offerAskFiles = false)
+    public static string? Evaluate(string hookInputJson, string stateRoot, int maxLines = DefaultMaxLines)
     {
         string? path;
         string? session;
@@ -98,9 +97,7 @@ public static partial class ReadGuard
         var how = viaShell
             ? $"{ReasonPrefix} {name} has {lines:N0} lines, so printing the whole file through the shell was skipped to save context. "
             : $"{ReasonPrefix} {name} has {lines:N0} lines, so this whole-file Read was skipped to save context. ";
-        var instead = "Grep for the symbol you need and Read just that range with offset/limit" +
-                      (offerAskFiles ? ", or ask mcp__codale-tasks__ask_files a question about the file if you only need to understand it" : "") +
-                      ".";
+        var instead = "Grep for the symbol you need and Read just that range with offset/limit.";
         var escape = lines > RepeatMaxLines
             ? $" Files over {RepeatMaxLines:N0} lines are only read in ranges (at most {RepeatMaxLines:N0} lines at a time)."
             : viaShell

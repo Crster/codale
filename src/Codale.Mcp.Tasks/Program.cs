@@ -21,8 +21,7 @@ if (args.Contains("--pretooluse-hook"))
             reply = ReadGuard.Evaluate(
                 payload,
                 Path.Combine(dataRoot, "hook-state"),
-                int.TryParse(limit, out var lines) && lines > 0 ? lines : ReadGuard.DefaultMaxLines,
-                offerAskFiles: args.Contains("--ask-files"));
+                int.TryParse(limit, out var lines) && lines > 0 ? lines : ReadGuard.DefaultMaxLines);
         }
 
         if (reply is not null)

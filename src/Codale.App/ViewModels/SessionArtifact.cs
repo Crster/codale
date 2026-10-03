@@ -17,6 +17,9 @@ public enum SessionArtifactKind
     File,
 }
 
+/// <summary>A note on a plan: the passage it is about (empty for the plan as a whole) and the change asked for.</summary>
+public sealed record PlanAnnotation(string Quote, string Note);
+
 public enum SessionArtifactStatus
 {
     Proposed,
@@ -74,6 +77,22 @@ public sealed partial class SessionArtifact : ObservableObject
         Title = headline is { Length: > 0 }
             ? headline.Length > 80 ? headline[..80] + "…" : headline
             : "Plan";
+    }
+
+    /// <summary>
+    /// What the reader wants changed, pinned to passages of the plan. Kept on the plan so the
+    /// chat card and the plan tab share one list until it is sent.
+    /// </summary>
+    public System.Collections.ObjectModel.ObservableCollection<PlanAnnotation> Annotations { get; } = [];
+
+    /// <summary>The annotations as one request for the agent to revise the plan.</summary>
+    public string RevisionMessage()
+    {
+        var lines = Annotations.Select((a, i) =>
+            a.Quote.Length > 0
+                ? $"{i + 1}. On \"{(a.Quote.Length > 200 ? a.Quote[..200] + "…" : a.Quote)}\": {a.Note}"
+                : $"{i + 1}. {a.Note}");
+        return $"Please revise the plan \"{Title}\" with these annotations:\n\n{string.Join("\n", lines)}";
     }
 
     public bool IsFile => Kind == SessionArtifactKind.PlanFile;

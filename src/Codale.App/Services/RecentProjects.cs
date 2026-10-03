@@ -53,6 +53,21 @@ public static class RecentProjects
         }
     }
 
+    /// <summary>Removes every entry from the MRU, e.g. from the picker's Clear link.</summary>
+    public static void Clear()
+    {
+        try
+        {
+            using var store = new CodaleStore(CodaleStore.DefaultDatabasePath);
+            store.SetSetting(SettingName, string.Empty);
+        }
+        catch (StoreSchemaException ex)
+        {
+            // The list reappears on next launch at worst; not worth failing over.
+            CrashLog.Warn("recent", ex.Message);
+        }
+    }
+
     /// <summary>Moves the project to the top of the MRU, adding it if new, and trims the tail.</summary>
     public static void Record(string projectPath)
     {

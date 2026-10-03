@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 
+using Codale.App.Services;
 using Codale.Core.Agents;
 using Codale.Git;
 
@@ -144,6 +145,7 @@ public sealed partial class StatusViewModel : ObservableObject
         OnPropertyChanged(nameof(CustomTokensDetail));
         OnPropertyChanged(nameof(CustomButtonText));
         OnPropertyChanged(nameof(CustomAverageText));
+        OnPropertyChanged(nameof(CustomCostText));
     }
 
     /// <summary>API requests the custom provider has served since the window opened.</summary>
@@ -170,7 +172,10 @@ public sealed partial class StatusViewModel : ObservableObject
         : "";
 
     /// <summary>Tallies one request served by the custom endpoint.</summary>
-    public void RecordCustomCall(UsageSnapshot usage) => _custom.Record(usage);
+    public void RecordCustomCall(UsageSnapshot usage, ByokProvider? provider = null) => _custom.Record(usage, provider);
+
+    /// <summary>"≈$0.0123" at the providers' configured prices, or a hint to set them.</summary>
+    public string CustomCostText => _custom.CostUsd > 0 ? $"≈${_custom.CostUsd:0.0000}" : "Set prices in Settings";
 
     internal static string FormatLong(long tokens) => Format((int)Math.Min(tokens, int.MaxValue));
 

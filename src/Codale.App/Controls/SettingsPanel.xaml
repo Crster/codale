@@ -65,7 +65,7 @@
                         <StackPanel Padding="16,12" Spacing="10">
                             <TextBlock
                                 Style="{StaticResource Hint}"
-                                Text="Your own Anthropic Messages API endpoints, used by Claude. Pick one in the status bar; Default uses the Claude CLI login. Also editable in settings.json." />
+                                Text="Your own OpenAI-compatible (Chat Completions) endpoints, used by Claude through a local bridge. The base URL is the one an OpenAI SDK takes, usually ending in /v1. Pick one in the status bar; Default uses the Claude CLI login. Also editable in settings.json." />
                             <StackPanel x:Name="ProvidersPanel" Spacing="6" />
                             <Button Click="OnAddProviderClick" Content="Add provider" />
                         </StackPanel>
@@ -320,7 +320,7 @@
                                 x:Name="TokenSaverByokHint"
                                 Margin="16,12,16,0"
                                 Style="{StaticResource Hint}"
-                                Text="Explore, ask_files, output digests and the handoff note need a custom provider for background tasks. Until one is set they stay off, so they never spend Claude tokens."
+                                Text="Explore, output digests and the handoff note need a custom provider for background tasks. Until one is set they stay off, so they never spend Claude tokens."
                                 TextWrapping="Wrap" />
                             <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
                                 <StackPanel VerticalAlignment="Center" Spacing="2">
@@ -341,7 +341,7 @@
                             <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
                                 <StackPanel VerticalAlignment="Center" Spacing="2">
                                     <TextBlock Text="Explore with the background model" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="Claude gets explore and ask_files tools: the background-task model searches and reads the code, and Claude reads only its answer." TextWrapping="Wrap" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Claude gets an explore tool: the background-task model searches and reads the code, and Claude reads only its answer." TextWrapping="Wrap" />
                                 </StackPanel>
                                 <ToggleSwitch x:Name="ExploreToggle" Grid.Column="1" MinWidth="0" Toggled="OnTokenSaverToggled" />
                             </Grid>

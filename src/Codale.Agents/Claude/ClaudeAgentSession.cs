@@ -643,22 +643,22 @@ public sealed class ClaudeAgentSession : IAgentSession
     [
         new()
         {
-            Id = "claude-sonnet-5-5", DisplayName = "Sonnet 5.5", Description = "Fast and capable for everyday tasks",
+            Id = "claude-sonnet-5-5", DisplayName = "Sonnet", Description = "Best for most tasks—balanced speed and capability",
             IsDefault = true, DefaultEffort = "medium", SupportedEfforts = ["low", "medium", "high", "xhigh", "max"],
         },
         new()
         {
-            Id = "claude-opus-5-5", DisplayName = "Opus 5.5", Description = "Most capable, for complex work",
+            Id = "claude-opus-5-5", DisplayName = "Opus", Description = "Most capable model—best for complex reasoning",
             DefaultEffort = "medium", SupportedEfforts = ["low", "medium", "high", "xhigh", "max"],
         },
         new()
         {
-            Id = "claude-fable-5-1", DisplayName = "Fable 5.1",
+            Id = "claude-fable-5-1", DisplayName = "Fable", Description = "Fast and efficient—good for simple tasks",
             DefaultEffort = "medium", SupportedEfforts = ["low", "medium", "high", "xhigh", "max"],
         },
         new()
         {
-            Id = "claude-haiku-4-5-20251001", DisplayName = "Haiku 4.5", Description = "Fastest, for quick answers",
+            Id = "claude-haiku-4-5-20251001", DisplayName = "Haiku", Description = "Fastest responses—ideal for quick answers",
         },
     ];
 

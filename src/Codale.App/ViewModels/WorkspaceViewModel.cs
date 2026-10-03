@@ -3,6 +3,7 @@ using System.ComponentModel;
 
 using Codale.Agents;
 using Codale.Agents.Claude;
+using Codale.Agents.OpenAi;
 using Codale.App.Services;
 using Codale.Commands;
 using Codale.Core.Agents;
@@ -32,7 +33,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// to the Claude CLI, or to a BYOK provider's API when Settings says so.
     /// </summary>
     private readonly HelperModel _helper = new(
-        () => AppSettings.HelperApiEndpoint is { } api ? new AnthropicEndpoint(api.BaseUrl, api.ApiKey, api.Model) : null);
+        () => AppSettings.HelperApiEndpoint is { } api ? new OpenAiEndpoint(api.BaseUrl, api.ApiKey, api.Model) : null);
 
     /// <summary>Automatic mode's message reader, shared by every chat in the window.</summary>
     private readonly MessageRouter _router;
@@ -122,6 +123,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(Status))]
     [NotifyPropertyChangedFor(nameof(WorkingDirectory))]
+    [NotifyPropertyChangedFor(nameof(IsIsolated))]
     [NotifyPropertyChangedFor(nameof(EndpointLabel))]
     public partial ChatViewModel Chat { get; set; }
 
@@ -164,13 +166,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>One background request the custom API answered; may arrive off the UI thread.</summary>
     private void OnBackgroundRequestServed(UsageSnapshot usage)
     {
+        var provider = AppSettings.HelperApiProvider?.Provider;
         if (_uiContext is null)
         {
-            _customUsage.Record(usage);
+            _customUsage.Record(usage, provider);
         }
         else
         {
-            _uiContext.Post(_ => _customUsage.Record(usage), null);
+            _uiContext.Post(_ => _customUsage.Record(usage, provider), null);
         }
     }
 
@@ -261,6 +264,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         if (e.PropertyName is nameof(ChatViewModel.IsBusy) or nameof(ChatViewModel.IsConnected))
         {
             PublishOpenSessions();
+        }
+        else if (e.PropertyName == nameof(ChatViewModel.WorktreePath) && ReferenceEquals(sender, Chat))
+        {
+            OnPropertyChanged(nameof(WorkingDirectory));
+            OnPropertyChanged(nameof(IsIsolated));
         }
     }
 
@@ -501,11 +509,58 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             await chat.DisposeSessionAsync();
             chat.ResetForNewSession();
             chat.WorktreePath = path;
-            chat.Title = "Isolated session";
             ChatActivationRequested?.Invoke(this, chat);
 
             await chat.ConnectAsync();
             await Diff.RefreshAsync();
+        }
+        finally
+        {
+            IsStartingWorktree = false;
+        }
+    }
+
+    /// <summary>True while the chat in front works in its own worktree.</summary>
+    public bool IsIsolated => Chat.IsIsolated;
+
+    /// <summary>
+    /// Leaves isolation for the chat in front. Merging first brings the worktree's
+    /// branch into the project; either way the worktree is removed and the chat
+    /// starts a fresh session in the project directory.
+    /// </summary>
+    public async Task LeaveIsolationAsync(bool merge)
+    {
+        var chat = Chat;
+        if (chat.WorktreePath is not { } path)
+        {
+            return;
+        }
+
+        IsStartingWorktree = true;
+
+        try
+        {
+            var worktrees = new GitWorktrees(ProjectPath);
+            var result = merge
+                ? await worktrees.MergeBackAsync(path)
+                : await worktrees.RemoveAsync(path, force: true);
+
+            if (!result.Success)
+            {
+                WorktreeError = merge
+                    ? $"Could not merge back: {result.Error}"
+                    : $"Could not remove the worktree: {result.Error}";
+                return;
+            }
+
+            WorktreeError = null;
+            CrashLog.Trace($"Isolated session left: worktree={path} merged={merge}");
+
+            await chat.DisposeSessionAsync();
+            chat.ResetForNewSession();
+            await chat.ConnectAsync();
+            await Diff.RefreshAsync();
+            await Git.RefreshAsync();
         }
         finally
         {

@@ -61,6 +61,27 @@ public sealed partial class ProjectPickerPage : Page
         }
     }
 
+    private async void OnClearRecentsClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "Clear all recent projects?",
+            Content = "The list on this page will be emptied. This cannot be undone.",
+            PrimaryButtonText = "Clear",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        RecentProjects.Clear();
+        LoadRecents();
+    }
+
     private void OnRecentClick(object sender, SelectionChangedEventArgs e)
     {
         if (RecentList.SelectedItem is not RecentProject recent)

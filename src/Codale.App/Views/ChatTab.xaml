@@ -422,6 +422,7 @@
                     </StackPanel>
 
                     <!--  The plan, rendered: in plan mode it is the turn's deliverable.  -->
+                    <!--  Select a passage (or right-click) to annotate it; notes collect under the plan.  -->
                     <StackPanel Spacing="2" Visibility="{x:Bind IsPlan}">
                         <Border
                             Padding="16,10"
@@ -429,7 +430,21 @@
                             BorderBrush="{StaticResource AskStrokeBrush}"
                             BorderThickness="1"
                             CornerRadius="8">
-                            <views:MarkdownView BaseFontSize="{x:Bind S12_5, Mode=OneWay}" Markdown="{x:Bind PlanText}" />
+                            <StackPanel Spacing="10">
+                                <views:MarkdownView
+                                    BaseFontSize="{x:Bind S12_5, Mode=OneWay}"
+                                    DataContextChanged="OnPlanMarkdownDataContextChanged"
+                                    HostOwnsTextMenu="True"
+                                    Loaded="OnPlanMarkdownLoaded"
+                                    Markdown="{x:Bind PlanText}" />
+                                <views:PlanAnnotationBar
+                                    Padding="0,10,0,0"
+                                    BorderBrush="{StaticResource AskStrokeBrush}"
+                                    BorderThickness="0,1,0,0"
+                                    DataContextChanged="OnPlanBarDataContextChanged"
+                                    Loaded="OnPlanBarLoaded"
+                                    SendRequested="OnPlanAnnotationsSend" />
+                            </StackPanel>
                         </Border>
                         <Button
                             Click="OnOpenPlanClick"
@@ -1366,7 +1381,7 @@
                     Height="8"
                     Fill="{ThemeResource AccentFillColorDefaultBrush}"
                     Visibility="{x:Bind ViewModel.IsWorkingOnItsOwn, Mode=OneWay}"
-                    views:Pulse.IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" />
+                    views:Pulse.IsActive="{x:Bind ViewModel.IsBusyWorking, Mode=OneWay}" />
                 <Ellipse
                     Width="8"
                     Height="8"

@@ -47,9 +47,6 @@ public interface ITaskAssist
     /// <summary>Answers an open-ended codebase question with file:line pointers.</summary>
     Task<string> ExploreAsync(string question, CancellationToken ct);
 
-    /// <summary>Answers a question about specific files without the agent reading them.</summary>
-    Task<string> AskFilesAsync(string question, IReadOnlyList<string> paths, CancellationToken ct);
-
     /// <summary>A digest of a command's output that keeps every error, or null when no model is available for it.</summary>
     Task<string?> DigestAsync(string command, string output, CancellationToken ct);
 
@@ -250,13 +247,6 @@ public sealed class TaskPipeServer : IDisposable
                         request["question"]?.GetValue<string>() ?? throw new TaskServiceException("question is required."),
                         ct).ConfigureAwait(false));
 
-                case "askFiles":
-                    return Text(await Assist.AskFilesAsync(
-                        request["question"]?.GetValue<string>() ?? throw new TaskServiceException("question is required."),
-                        [.. (request["paths"]?.AsArray() ?? throw new TaskServiceException("paths is required."))
-                            .Select(p => p?.GetValue<string>() ?? "").Where(p => p.Length > 0)],
-                        ct).ConfigureAwait(false));
-
                 case "digest":
                     return Text(await Assist.DigestAsync(
                         request["command"]?.GetValue<string>() ?? "",
@@ -322,8 +312,6 @@ public sealed class TaskPipeClient(string pipeName, string token) : ITaskService
     /// </summary>
     public static readonly TimeSpan ExploreTimeout = TimeSpan.FromMinutes(15);
 
-    public static readonly TimeSpan AskFilesTimeout = TimeSpan.FromSeconds(60);
-
     /// <summary>A hook holds the agent up while it waits, so a slow digest is given up on.</summary>
     public static readonly TimeSpan DigestTimeout = TimeSpan.FromSeconds(25);
 
@@ -331,19 +319,6 @@ public sealed class TaskPipeClient(string pipeName, string token) : ITaskService
 
     public async Task<string> ExploreAsync(string question, CancellationToken ct) =>
         TextOf(await CallAsync(new JsonObject { ["op"] = "explore", ["question"] = question }, ct, ExploreTimeout, exclusive: false)
-            .ConfigureAwait(false)) ?? "";
-
-    public async Task<string> AskFilesAsync(string question, IReadOnlyList<string> paths, CancellationToken ct) =>
-        TextOf(await CallAsync(
-                new JsonObject
-                {
-                    ["op"] = "askFiles",
-                    ["question"] = question,
-                    ["paths"] = new JsonArray([.. paths.Select(p => (JsonNode)p)]),
-                },
-                ct,
-                AskFilesTimeout,
-                exclusive: false)
             .ConfigureAwait(false)) ?? "";
 
     public async Task<string?> DigestAsync(string command, string output, CancellationToken ct) =>

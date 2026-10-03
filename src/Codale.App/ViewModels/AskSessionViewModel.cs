@@ -13,7 +13,7 @@ public enum AskLogKind
     Error,
 }
 
-/// <summary>One line of the Ask panel's progress stream.</summary>
+/// <summary>One line of the Ask panel's progress stream; <paramref name="Time"/> is how far into the job, e.g. "4.2s".</summary>
 public sealed record AskLogEntry(AskLogKind Kind, string Text, string Time);
 
 /// <summary>
@@ -66,7 +66,7 @@ public sealed partial class AskSessionViewModel : ObservableObject
     /// <summary>Adds a line to the stream; safe to call from any thread.</summary>
     public void Log(AskLogKind kind, string text)
     {
-        var entry = new AskLogEntry(kind, text, DateTime.Now.ToString("HH:mm:ss"));
+        var entry = new AskLogEntry(kind, text, SinceStart());
         if (_ui is null || SynchronizationContext.Current == _ui)
         {
             Entries.Add(entry);
@@ -85,10 +85,18 @@ public sealed partial class AskSessionViewModel : ObservableObject
         _cts?.Dispose();
         _cts = null;
 
-        Entries.Add(new AskLogEntry(isError ? AskLogKind.Error : AskLogKind.Done, outcome, DateTime.Now.ToString("HH:mm:ss")));
+        Entries.Add(new AskLogEntry(isError ? AskLogKind.Error : AskLogKind.Done, outcome, SinceStart()));
         Outcome = outcome;
         OutcomeIsError = isError;
         IsRunning = false;
+    }
+
+    private string SinceStart()
+    {
+        var elapsed = DateTime.Now - _startedAt;
+        return elapsed.TotalMinutes >= 1
+            ? $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds:00}s"
+            : $"{elapsed.TotalSeconds:0.0}s";
     }
 
     private bool CanCancel() => IsRunning;

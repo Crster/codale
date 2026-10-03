@@ -41,13 +41,24 @@
             </StackPanel>
         </Button>
 
-        <TextBlock
+        <StackPanel
             x:Name="RecentHeader"
             HorizontalAlignment="Center"
-            Opacity="0.6"
-            Style="{StaticResource CaptionTextBlockStyle}"
-            Text="Recent projects"
-            Visibility="Collapsed" />
+            Orientation="Horizontal"
+            Spacing="8"
+            Visibility="Collapsed">
+            <TextBlock
+                VerticalAlignment="Center"
+                Opacity="0.6"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                Text="Recent projects" />
+            <HyperlinkButton
+                Padding="4,0"
+                Click="OnClearRecentsClick"
+                Content="Clear"
+                FontSize="12"
+                ToolTipService.ToolTip="Remove all recent projects" />
+        </StackPanel>
 
         <ListView
             x:Name="RecentList"

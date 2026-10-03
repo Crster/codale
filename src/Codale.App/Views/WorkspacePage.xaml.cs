@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Diagnostics;
 
 using Codale.Agents;
@@ -13,6 +13,7 @@ using Codale.Git;
 
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Input;
@@ -162,6 +163,7 @@ public sealed partial class WorkspacePage : Page
 
             foreach (var entry in _chatTabs)
             {
+                StopTabAttention(entry);
                 entry.Chat.LoginRequired -= OnChatLoginRequired;
                 entry.Chat.AttentionNeeded -= OnChatAttentionNeeded;
                 entry.Chat.PropertyChanged -= OnChatPropertyChanged;
@@ -593,6 +595,7 @@ public sealed partial class WorkspacePage : Page
                 Header = ChatTabHeader(chat),
                 Content = tab,
             };
+            ApplyIsolationTint(item, chat);
 
             entry = new ChatTabEntry(item, tab, chat);
             _chatTabs.Add(entry);
@@ -604,8 +607,25 @@ public sealed partial class WorkspacePage : Page
         CentreTabs.SelectedItem = entry.Item;
     }
 
+    /// <summary>The tab's chat icon is blue while its chat works in an isolated worktree.</summary>
+    private static void ApplyIsolationTint(TabViewItem item, ChatViewModel chat)
+    {
+        if (item.IconSource is FontIconSource icon)
+        {
+            icon.Foreground = chat.IsIsolated
+                ? new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0x3B, 0x82, 0xF6))
+                : (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"];
+        }
+    }
+
     private void OnChatPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(ChatViewModel.IsIsolated) &&
+            _chatTabs.FirstOrDefault(t => ReferenceEquals(t.Chat, sender)) is { } isolated)
+        {
+            ApplyIsolationTint(isolated.Item, isolated.Chat);
+        }
+
         if (e.PropertyName == nameof(ChatViewModel.IsWaitingForYou) &&
             _chatTabs.FirstOrDefault(t => ReferenceEquals(t.Chat, sender)) is { } entry)
         {
@@ -614,16 +634,55 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>
-    /// Blinks the whole tab header while its chat is waiting on the reader (a question,
+    /// Tints the whole tab amber and breathes it while its chat is waiting on the reader (a question,
     /// a permission, a plan) and the tab is not the one in front - with several chats
     /// open, the small amber dot alone is easy to miss. Looking at the tab stops it.
+    /// Only the brush pulses, so the icon, title and close button stay steady.
     /// </summary>
     private void RefreshTabAttention(ChatTabEntry entry)
     {
-        if (entry.Item.Header is FrameworkElement header)
+        var active = entry.Chat.IsWaitingForYou && !ReferenceEquals(CentreTabs.SelectedItem, entry.Item);
+        if (active == entry.AttentionPulse is not null)
         {
-            Pulse.SetIsActive(header, entry.Chat.IsWaitingForYou && !ReferenceEquals(CentreTabs.SelectedItem, entry.Item));
+            return;
         }
+
+        if (!active)
+        {
+            StopTabAttention(entry);
+            return;
+        }
+
+        // TabViewItem's template paints its whole container (icon, title, close button)
+        // with Background, so a local value covers the tab edge to edge.
+        var warn = ((SolidColorBrush)Application.Current.Resources["StatusWarnBrush"]).Color;
+        var tint = new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, warn.R, warn.G, warn.B)) { Opacity = 0.45 };
+        entry.Item.Background = tint;
+
+        var breathe = new DoubleAnimation
+        {
+            From = 0.45,
+            To = 0.15,
+            Duration = new Duration(TimeSpan.FromMilliseconds(900)),
+            AutoReverse = true,
+            RepeatBehavior = RepeatBehavior.Forever,
+            EnableDependentAnimation = true,
+            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
+        };
+        Storyboard.SetTarget(breathe, tint);
+        Storyboard.SetTargetProperty(breathe, "Opacity");
+
+        var storyboard = new Storyboard { Children = { breathe } };
+        entry.AttentionPulse = storyboard;
+        storyboard.Begin();
+    }
+
+    /// <summary>Ends a tab's attention pulse and hands its background back to the theme.</summary>
+    private static void StopTabAttention(ChatTabEntry entry)
+    {
+        entry.AttentionPulse?.Stop();
+        entry.AttentionPulse = null;
+        entry.Item.ClearValue(Control.BackgroundProperty);
     }
 
     private static StackPanel ChatTabHeader(ChatViewModel chat)
@@ -1360,6 +1419,7 @@ public sealed partial class WorkspacePage : Page
             // close cannot await.
             CrashLog.Trace("Chat tab closed (session ended)");
             _chatTabs.Remove(chatEntry);
+            StopTabAttention(chatEntry);
             chatEntry.Chat.LoginRequired -= OnChatLoginRequired;
             chatEntry.Chat.AttentionNeeded -= OnChatAttentionNeeded;
             chatEntry.Chat.PropertyChanged -= OnChatPropertyChanged;
@@ -2052,25 +2112,25 @@ public sealed partial class WorkspacePage : Page
 
         if (node.IsDirectory)
         {
-            menu.Items.Add(MenuAction("New file", () => _ = CreateChildAsync(node, file: true)));
-            menu.Items.Add(MenuAction("New folder", () => _ = CreateChildAsync(node, file: false)));
+            menu.Items.Add(MenuAction("New file", () => _ = CreateChildAsync(node, file: true), ""));
+            menu.Items.Add(MenuAction("New folder", () => _ = CreateChildAsync(node, file: false), ""));
         }
         else
         {
-            menu.Items.Add(MenuAction("Open", () => ShowFile(node.FullPath)));
+            menu.Items.Add(MenuAction("Open", () => ShowFile(node.FullPath), ""));
 
             // A modified tracked file can go straight to the diff instead of the editor.
             if (node.GitStatus is GitChangeKind.Modified or GitChangeKind.Renamed or GitChangeKind.Copied)
             {
-                menu.Items.Add(MenuAction("View diff", () => _ = ShowNodeDiffAsync(node)));
+                menu.Items.Add(MenuAction("View diff", () => _ = ShowNodeDiffAsync(node), ""));
             }
 
-            menu.Items.Add(MenuAction("Open with default app", () => _ = OpenWithDefaultAppAsync(node)));
-            menu.Items.Add(MenuAction("Add to chat", () => AddFileToChat(node)));
+            menu.Items.Add(MenuAction("Open with default app", () => _ = OpenWithDefaultAppAsync(node), ""));
+            menu.Items.Add(MenuAction("Add to chat", () => AddFileToChat(node), ""));
 
             if (TurnAttachment.KindOf(node.FullPath) is not null)
             {
-                menu.Items.Add(MenuAction("Attach to chat", () => ViewModel.Chat.TryAddAttachment(node.FullPath)));
+                menu.Items.Add(MenuAction("Attach to chat", () => ViewModel.Chat.TryAddAttachment(node.FullPath), ""));
             }
         }
 
@@ -2080,11 +2140,11 @@ public sealed partial class WorkspacePage : Page
 
         if (!isRoot && !isFolderRoot)
         {
-            menu.Items.Add(MenuAction("Cut", () => CopyToClipboard(node, move: true)));
-            menu.Items.Add(MenuAction("Copy", () => CopyToClipboard(node, move: false)));
+            menu.Items.Add(MenuAction("Cut", () => CopyToClipboard(node, move: true), ""));
+            menu.Items.Add(MenuAction("Copy", () => CopyToClipboard(node, move: false), ""));
         }
 
-        var paste = MenuAction("Paste", () => _ = PasteAsync(node));
+        var paste = MenuAction("Paste", () => _ = PasteAsync(node), "");
         paste.IsEnabled = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent()
             .Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems);
         menu.Items.Add(paste);
@@ -2100,19 +2160,19 @@ public sealed partial class WorkspacePage : Page
 
             if (isFolderRoot)
             {
-                menu.Items.Add(MenuAction("Remove from workspace", () => ViewModel.ExtraFolders.Remove(node.FullPath)));
+                menu.Items.Add(MenuAction("Remove from workspace", () => ViewModel.ExtraFolders.Remove(node.FullPath), ""));
             }
             else
             {
-                menu.Items.Add(MenuAction("Rename…", () => _ = RenameAsync(node)));
-                menu.Items.Add(MenuAction("Delete", () => _ = DeleteAsync(node)));
+                menu.Items.Add(MenuAction("Rename…", () => _ = RenameAsync(node), ""));
+                menu.Items.Add(MenuAction("Delete", () => _ = DeleteAsync(node), ""));
             }
         }
 
         menu.Items.Add(new MenuFlyoutSeparator());
-        menu.Items.Add(MenuAction("Add folder to workspace…", () => _ = AddWorkspaceFolderAsync()));
-        menu.Items.Add(MenuAction("Refresh", AfterTreeMutation));
-        menu.Items.Add(MenuAction("Reveal in File Explorer", () => RevealInExplorer(node)));
+        menu.Items.Add(MenuAction("Add folder to workspace…", () => _ = AddWorkspaceFolderAsync(), ""));
+        menu.Items.Add(MenuAction("Refresh", AfterTreeMutation, ""));
+        menu.Items.Add(MenuAction("Reveal in File Explorer", () => RevealInExplorer(node), ""));
 
         menu.ShowAt(
             (FrameworkElement)sender,
@@ -2280,9 +2340,13 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
-    private MenuFlyoutItem MenuAction(string text, Action action)
+    private MenuFlyoutItem MenuAction(string text, Action action, string? glyph = null)
     {
         var item = new MenuFlyoutItem { Text = text };
+        if (glyph is not null)
+        {
+            item.Icon = new FontIcon { Glyph = glyph };
+        }
         item.Click += (_, _) => action();
         return item;
     }
@@ -2951,8 +3015,41 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
-    private async void OnIsolatedSessionClick(object sender, RoutedEventArgs e) =>
-        await ViewModel.StartIsolatedSessionAsync();
+    /// <summary>
+    /// Off to on starts an isolated session. On to off is never silent: the worktree's
+    /// work is merged back into the project, discarded, or the toggle stays on.
+    /// </summary>
+    private async void OnIsolatedSessionClick(object sender, RoutedEventArgs e)
+    {
+        var toggle = (ToggleButton)sender;
+
+        if (!ViewModel.IsIsolated)
+        {
+            await ViewModel.StartIsolatedSessionAsync();
+            toggle.IsChecked = ViewModel.IsIsolated;
+            return;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "Leave the isolated session?",
+            Content = "Merge its branch back into your project, or discard the work done in the worktree. " +
+                      "Either way this chat starts a fresh session in the project.",
+            PrimaryButtonText = "Merge back",
+            SecondaryButtonText = "Discard",
+            CloseButtonText = "Stay isolated",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+
+        var choice = await dialog.ShowAsync();
+        if (choice != ContentDialogResult.None)
+        {
+            await ViewModel.LeaveIsolationAsync(merge: choice == ContentDialogResult.Primary);
+        }
+
+        toggle.IsChecked = ViewModel.IsIsolated;
+    }
 
     /// <summary>
     /// The model chip: one flyout, one tap. Default first - named, so it is clear what
@@ -3161,6 +3258,9 @@ public sealed partial class WorkspacePage : Page
         public ChatTab Tab { get; } = tab;
 
         public ChatViewModel Chat { get; } = chat;
+
+        /// <summary>The running "waiting for you" pulse on the tab's background, or null when it is calm.</summary>
+        public Storyboard? AttentionPulse { get; set; }
     }
 
     /// <summary>
@@ -3188,3 +3288,7 @@ public sealed partial class WorkspacePage : Page
         public TerminalViewModel Terminal { get; } = terminal;
     }
 }
+
+
+
+

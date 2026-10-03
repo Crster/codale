@@ -20,7 +20,7 @@ public static class TaskTools
     /// tools out (a server started without it has no project to talk about).
     /// </param>
     /// <param name="runDirectory">What a command's relative working directory resolves against; defaults to the project root.</param>
-    /// <param name="assist">The app's background model; null leaves the explore and ask_files tools out.</param>
+    /// <param name="assist">The app's background model; null leaves the explore tool out.</param>
     public static IReadOnlyList<McpTool> Create(
         ITaskService tasks, string? projectRoot = null, string? runDirectory = null, ITaskAssist? assist = null) =>
     [
@@ -44,40 +44,6 @@ public static class TaskTools
             "Usually under a minute; a hard question can take several. Wait for it rather than searching in parallel.",
             McpTool.Schema([("question", "string", "The question, specific and self-contained.")], "question"),
             async (a, ct) => await McpTool.Text(await Call(() => assist.ExploreAsync(a.RequiredString("question"), ct)))),
-
-        new McpTool(
-            "ask_files",
-            "Ask a question about specific files without reading them into your context: a separate model reads them and answers " +
-            "with path:line references. Good for understanding a large file or several files you will not edit. " +
-            "Read the exact range yourself before you edit anything.",
-            new JsonObject
-            {
-                ["type"] = "object",
-                ["properties"] = new JsonObject
-                {
-                    ["question"] = new JsonObject { ["type"] = "string", ["description"] = "What you need to know about the files." },
-                    ["paths"] = new JsonObject
-                    {
-                        ["type"] = "array",
-                        ["items"] = new JsonObject { ["type"] = "string" },
-                        ["description"] = "The files to read, absolute or relative to the project.",
-                    },
-                },
-                ["required"] = new JsonArray("question", "paths"),
-            },
-            async (a, ct) =>
-            {
-                var paths = a.RequiredArray("paths")
-                    .Select(p => p.ValueKind == System.Text.Json.JsonValueKind.String ? p.GetString() ?? "" : "")
-                    .Where(p => p.Length > 0)
-                    .ToList();
-                if (paths.Count == 0)
-                {
-                    throw new McpToolException("Give at least one path.");
-                }
-
-                return await McpTool.Text(await Call(() => assist.AskFilesAsync(a.RequiredString("question"), paths, ct)));
-            }),
     ];
 
     /// <summary>

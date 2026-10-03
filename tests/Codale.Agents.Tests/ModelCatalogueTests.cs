@@ -44,4 +44,13 @@ public sealed class ModelCatalogueTests
         Assert.Equal("How does the parser work?", UserTurn.StripHostInstructions(turn.ProviderText));
         Assert.Equal("plain", new UserTurn("plain").ProviderText);
     }
+
+    [Fact]
+    public void An_older_ask_instruction_is_stripped_too()
+    {
+        const string recorded = "[Ask mode] Answer this with a detailed explanation only. Older wording.\r\n\r\nwhy is it slow?";
+
+        Assert.Equal("why is it slow?", UserTurn.StripHostInstructions(recorded));
+        Assert.Equal("[Ask mode] alone", UserTurn.StripHostInstructions("[Ask mode] alone"));
+    }
 }

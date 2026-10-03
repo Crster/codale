@@ -124,8 +124,18 @@ public sealed partial class ChatTab : UserControl
         // Only Esc presses nothing else claimed (a popup, a question card) reach this.
         KeyDown += OnChatKeyDown;
 
-        Loaded += (_, _) => MarkdownView.FileLinkClicked += OnMarkdownFileLink;
-        Unloaded += (_, _) => MarkdownView.FileLinkClicked -= OnMarkdownFileLink;
+        Loaded += (_, _) =>
+        {
+            MarkdownView.FileLinkClicked += OnMarkdownFileLink;
+            UpdateStopPulse();
+        };
+        Unloaded += (_, _) =>
+        {
+            MarkdownView.FileLinkClicked -= OnMarkdownFileLink;
+
+            // A background tab's forever storyboard would still tick every frame.
+            StopStopPulse();
+        };
     }
 
     private static readonly TimeSpan DoubleEscapeWindow = TimeSpan.FromMilliseconds(600);
@@ -214,7 +224,7 @@ public sealed partial class ChatTab : UserControl
     /// </summary>
     private void UpdateStopPulse()
     {
-        if (ViewModel?.IsBusy is true)
+        if (ViewModel?.IsBusy is true && IsLoaded)
         {
             if (_stopPulse is not null)
             {
@@ -238,7 +248,15 @@ public sealed partial class ChatTab : UserControl
             _stopPulse.Children.Add(fade);
             _stopPulse.Begin();
         }
-        else if (_stopPulse is not null)
+        else
+        {
+            StopStopPulse();
+        }
+    }
+
+    private void StopStopPulse()
+    {
+        if (_stopPulse is not null)
         {
             _stopPulse.Stop();
             _stopPulse = null;
@@ -293,6 +311,30 @@ public sealed partial class ChatTab : UserControl
             PlanOpenRequested?.Invoke(this, call);
         }
     }
+
+    /// <summary>The session's entry for a plan card: its annotations live there, shared with the plan tab.</summary>
+    private SessionArtifact? PlanArtifactOf(FrameworkElement element) =>
+        element.DataContext is ToolCallItem { IsPlan: true } call
+            ? ViewModel?.Artifacts.FirstOrDefault(a => a.ToolUseId == call.ToolUseId)
+            : null;
+
+    // A recycled card gets a new item, and a fresh one may render before its plan is
+    // listed, so the plan is looked up again both on load and on every new item.
+    private void OnPlanMarkdownLoaded(object sender, RoutedEventArgs e) => AttachPlanMarkdown((MarkdownView)sender);
+
+    private void OnPlanMarkdownDataContextChanged(FrameworkElement sender, DataContextChangedEventArgs e) => AttachPlanMarkdown((MarkdownView)sender);
+
+    private void AttachPlanMarkdown(MarkdownView markdown) => PlanAnnotator.For(markdown).Plan = PlanArtifactOf(markdown);
+
+    private void OnPlanBarLoaded(object sender, RoutedEventArgs e) => AttachPlanBar((PlanAnnotationBar)sender);
+
+    private void OnPlanBarDataContextChanged(FrameworkElement sender, DataContextChangedEventArgs e) => AttachPlanBar((PlanAnnotationBar)sender);
+
+    private void AttachPlanBar(PlanAnnotationBar bar) => bar.Plan = PlanArtifactOf(bar);
+
+    /// <summary>The card's annotations go back as a plan-mode revision request, as from the plan tab.</summary>
+    private void OnPlanAnnotationsSend(object? sender, string message) =>
+        _ = ViewModel?.SendRoutedAsync(message, [], Codale.Core.Helper.RouteIntent.Plan);
 
     /// <summary>A step's row: fold or unfold its body. Once done by hand, the step stays as the reader left it.</summary>
     private void OnToolToggleClick(object sender, RoutedEventArgs e)

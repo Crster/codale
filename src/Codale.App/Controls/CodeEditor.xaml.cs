@@ -231,6 +231,22 @@ public sealed partial class CodeEditor : UserControl
         return _rowOffsets[line] + rowInLine;
     }
 
+    /// <summary>
+    /// The row box a position is drawn in, in dips relative to this control at the current
+    /// scroll - for overlays that float next to the text, like the Ask panel.
+    /// </summary>
+    public Windows.Foundation.Rect PositionBounds(int line, int col)
+    {
+        EnsureMetrics();
+        EnsureRowMap();
+        line = Math.Clamp(line, 0, _doc.LineCount - 1);
+        var rawLine = _doc.GetLine(line);
+        var (rowInLine, colInRow) = Fold(TextDocument.ExpandedColFromRaw(rawLine, Math.Clamp(col, 0, rawLine.Length)));
+        var x = TextX + colInRow * _charWidth - _horizontalOffset;
+        var y = (_rowOffsets[line] + rowInLine) * _lineHeight - _verticalOffset;
+        return new Windows.Foundation.Rect(x, y, CaretWidth, _lineHeight);
+    }
+
     /// <summary>How many visual rows a logical line folds into.</summary>
     public int VisualRowsOf(int line)
     {

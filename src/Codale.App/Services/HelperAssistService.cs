@@ -7,8 +7,26 @@ using Codale.Search;
 
 namespace Codale.App.Services;
 
+/// <summary>One explore in flight: its steps as they happen, and when it ends.</summary>
+public sealed class ExploreRun(string question)
+{
+    public string Question { get; } = question;
+
+    public DateTimeOffset StartedAt { get; } = DateTimeOffset.Now;
+
+    /// <summary>Raised from the search's thread for each step.</summary>
+    public event Action<string>? Progress;
+
+    /// <summary>Raised once, with true when the search failed.</summary>
+    public event Action<bool>? Finished;
+
+    internal void Report(string line) => Progress?.Invoke(line);
+
+    internal void Finish(bool failed) => Finished?.Invoke(failed);
+}
+
 /// <summary>
-/// The app's end of <see cref="ITaskAssist"/>: explore, ask_files and output digests for a
+/// The app's end of <see cref="ITaskAssist"/>: explore and output digests for a
 /// Claude session, answered by the background-task model so the chat model never reads
 /// what they read. Works only on a BYOK provider - the Claude CLI fallback would spend the
 /// same tokens it is meant to save - and says so instead of answering.
@@ -26,17 +44,11 @@ public sealed class HelperAssistService(IHelperModel helper, string runDirectory
 
     private const int ExploreChars = 6_000;
     private const int SectionLines = 40;
-    private const int AskFilesChars = 200_000;
     private const int DigestInputChars = 150_000;
     private const int LongReplyTokens = 2048;
 
     private const string Unavailable =
         "Codale's background-task model is not a BYOK provider, so this tool is off. Use Grep/Glob/Read instead.";
-
-    private const string AskFilesPrompt =
-        "You answer a coding agent's question about the files below, so it does not have to read them itself. " +
-        "Answer precisely and briefly. Cite locations as path:line (lines are numbered in the input). " +
-        "Quote identifiers, signatures and values exactly as written. If the answer is not in these files, say so plainly; never guess.";
 
     private const string DigestPrompt =
         "You condense a shell command's output for a coding agent that must act on it. " +
@@ -47,6 +59,9 @@ public sealed class HelperAssistService(IHelperModel helper, string runDirectory
     /// <summary>Raised for each condensed tool result, with how long it was and how long it became.</summary>
     public event Action<long, long>? Saved;
 
+    /// <summary>Raised when an explore begins, so the chat can list it as a task and stream its steps.</summary>
+    public event Action<ExploreRun>? ExploreStarted;
+
     public async Task<string> ExploreAsync(string question, CancellationToken ct)
     {
         if (!hasApi())
@@ -54,9 +69,42 @@ public sealed class HelperAssistService(IHelperModel helper, string runDirectory
             return Unavailable;
         }
 
-        var loop = new SearchAgentLoop(runDirectory, new HelperSearchModel(helper)) { Budget = ExploreBudget, MaxSteps = ExploreSteps };
-        var answer = await loop.RunAsync(question, ct).ConfigureAwait(false);
-        return FormatExplore(answer);
+        var run = new ExploreRun(question);
+        ExploreStarted?.Invoke(run);
+        run.Report("Searching the code...");
+
+        var loop = new SearchAgentLoop(runDirectory, new HelperSearchModel(helper))
+        {
+            Budget = ExploreBudget,
+            MaxSteps = ExploreSteps,
+            OnStep = step => run.Report(DescribeStep(step)),
+        };
+
+        try
+        {
+            var answer = await loop.RunAsync(question, ct).ConfigureAwait(false);
+            run.Report("Writing up the findings...");
+            var text = FormatExplore(answer);
+            run.Finish(failed: false);
+            return text;
+        }
+        catch (Exception e)
+        {
+            run.Report(e is OperationCanceledException ? "Cancelled." : $"Failed: {e.Message}");
+            run.Finish(failed: e is not OperationCanceledException);
+            throw;
+        }
+    }
+
+    private static string DescribeStep(SearchStep step)
+    {
+        var text = step.Description.Trim().ReplaceLineEndings(" ");
+        if (step.Kind == SearchStepKind.Answer)
+        {
+            return $"Conclusion: {text}";
+        }
+
+        return step.ResultCount > 0 ? $"{text} ({step.ResultCount} results)" : text;
     }
 
     private static string FormatExplore(SearchAnswer answer)
@@ -107,83 +155,6 @@ public sealed class HelperAssistService(IHelperModel helper, string runDirectory
         }
 
         return text.ToString().TrimEnd();
-    }
-
-    public async Task<string> AskFilesAsync(string question, IReadOnlyList<string> paths, CancellationToken ct)
-    {
-        if (!hasApi())
-        {
-            return Unavailable;
-        }
-
-        var root = Path.GetFullPath(runDirectory);
-        var realRoot = ResolveLinks(root);
-        var input = new StringBuilder();
-        var skipped = new List<string>();
-
-        foreach (var raw in paths.Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            var full = Path.GetFullPath(Path.IsPathRooted(raw) ? raw : Path.Combine(root, raw));
-
-            // The model only reads inside the session's own folder - by real path, so a
-            // junction or symlink inside the project cannot lead out of it.
-            if (!ProjectPaths.IsInside(root, full) || !File.Exists(full) || !ProjectPaths.IsInside(realRoot, ResolveLinks(full)))
-            {
-                skipped.Add(raw);
-                continue;
-            }
-
-            if (input.Length >= AskFilesChars)
-            {
-                skipped.Add(raw);
-                continue;
-            }
-
-            input.Append("=== ").Append(Path.GetRelativePath(root, full)).AppendLine(" ===");
-            var number = 0;
-            foreach (var line in File.ReadLines(full))
-            {
-                input.Append(++number).Append(": ").AppendLine(line);
-                if (input.Length >= AskFilesChars)
-                {
-                    input.AppendLine("(file cut short here)");
-                    break;
-                }
-            }
-        }
-
-        if (input.Length == 0)
-        {
-            return $"None of these files could be read inside the project: {string.Join(", ", skipped)}.";
-        }
-
-        var answer = await helper.CompleteAsync(AskFilesPrompt, $"Question: {question}\n\n{input}", LongReplyTokens, ct).ConfigureAwait(false);
-        return skipped.Count == 0 ? answer : $"{answer}\n\n(Not read - outside the project, missing or over the size limit: {string.Join(", ", skipped)})";
-    }
-
-    /// <summary>The path with every symlink and junction along it replaced by its target (unresolvable links are left as written).</summary>
-    private static string ResolveLinks(string path)
-    {
-        var current = Path.GetPathRoot(path) ?? "";
-        var separators = new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar };
-        foreach (var part in path[current.Length..].Split(separators, StringSplitOptions.RemoveEmptyEntries))
-        {
-            current = Path.Combine(current, part);
-            try
-            {
-                FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
-                if (info.ResolveLinkTarget(returnFinalTarget: true) is { } target)
-                {
-                    current = target.FullName;
-                }
-            }
-            catch (IOException)
-            {
-                // Not resolvable: judge it by the literal path.
-            }
-        }
-
-        return current;
     }
 
     public async Task<string?> DigestAsync(string command, string output, CancellationToken ct)

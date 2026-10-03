@@ -59,9 +59,12 @@ public sealed record UserTurn(string Text)
 
     /// <summary>The prefix an ask-mode turn carries; history strips it back off.</summary>
     public const string AskInstruction =
-        "[Ask mode] Answer this with a detailed explanation only. You may read files and search the " +
-        "project to ground the answer, but do not edit, create or delete files and do not run commands " +
-        "that change anything. Explain what you would do and why, with code snippets where they help.\n\n";
+        "[Ask mode] Answer this with a detailed explanation only. You may read files, search the " +
+        "project and search or fetch from the web to ground the answer, but do not edit, create or " +
+        "delete files and do not run commands that change anything. Explain what you would do and why, " +
+        "with code snippets where they help.\n\n";
+
+    private const string AskMarker = "[Ask mode] ";
 
     /// <summary>
     /// A forked session's briefing (<see cref="SessionForking.ContextBlock"/>), carried on its
@@ -72,11 +75,22 @@ public sealed record UserTurn(string Text)
     /// <summary>The text as sent to the provider: the fork briefing and ask-mode prefix folded in when set.</summary>
     public string ProviderText => (ContextPrefix ?? "") + (AskOnly ? AskInstruction + Text : Text);
 
-    /// <summary>The user's own words from a recorded prompt: any ask-mode prefix removed.</summary>
+    /// <summary>
+    /// The user's own words from a recorded prompt: any ask-mode prefix removed. Matched
+    /// by its marker up to the blank line, so prompts recorded under an older wording of
+    /// the instruction come back clean too.
+    /// </summary>
     public static string StripHostInstructions(string text)
     {
         text = SessionForking.StripContext(text);
-        return text.StartsWith(AskInstruction, StringComparison.Ordinal) ? text[AskInstruction.Length..] : text;
+        if (!text.StartsWith(AskMarker, StringComparison.Ordinal))
+        {
+            return text;
+        }
+
+        var normalized = text.ReplaceLineEndings("\n");
+        var end = normalized.IndexOf("\n\n", StringComparison.Ordinal);
+        return end < 0 ? text : normalized[(end + 2)..];
     }
 }
 

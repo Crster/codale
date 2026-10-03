@@ -139,6 +139,10 @@ public sealed record ClaudeSessionOptions
             args.AddRange(["--permission-mode", permissionMode]);
         }
 
+        // Full is bypassPermissions; without this the CLI refuses a live switch into it
+        // (and may start in "default"), so Full would silently fall back to Manual.
+        args.Add("--allow-dangerously-skip-permissions");
+
         if (IncludePartialMessages)
         {
             args.Add("--include-partial-messages");

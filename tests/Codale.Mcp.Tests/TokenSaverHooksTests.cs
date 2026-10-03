@@ -6,7 +6,7 @@ using Codale.Mcp.Tasks;
 
 namespace Codale.Mcp.Tests;
 
-/// <summary>The output hook, the read guard and the explore/ask_files tools, without a CLI or a model.</summary>
+/// <summary>The output hook, the read guard and the explore tool, without a CLI or a model.</summary>
 public sealed class TokenSaverHooksTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "codale-hooks-" + Guid.NewGuid().ToString("N"));
@@ -29,19 +29,11 @@ public sealed class TokenSaverHooksTests : IDisposable
         public string? Digest;
         public (long Before, long After)? Saved;
         public string? LastQuestion;
-        public IReadOnlyList<string>? LastPaths;
 
         public Task<string> ExploreAsync(string question, CancellationToken ct)
         {
             LastQuestion = question;
             return Task.FromResult("It is in AppSettings.cs:340-360.");
-        }
-
-        public Task<string> AskFilesAsync(string question, IReadOnlyList<string> paths, CancellationToken ct)
-        {
-            LastQuestion = question;
-            LastPaths = paths;
-            return Task.FromResult("answer");
         }
 
         public Task<string?> DigestAsync(string command, string output, CancellationToken ct) => Task.FromResult(Digest);
@@ -142,15 +134,15 @@ public sealed class TokenSaverHooksTests : IDisposable
         var big = WriteLines("Big.cs", 900);
         var state = Path.Combine(_dir, "state");
 
-        var first = ReadGuard.Evaluate(ReadPayload(big), state, offerAskFiles: true);
+        var first = ReadGuard.Evaluate(ReadPayload(big), state);
         var reason = JsonNode.Parse(first!)!["hookSpecificOutput"]!;
         Assert.Equal("deny", reason["permissionDecision"]!.GetValue<string>());
         Assert.StartsWith(ReadGuard.ReasonPrefix, reason["permissionDecisionReason"]!.GetValue<string>());
         Assert.Contains("900 lines", reason["permissionDecisionReason"]!.GetValue<string>());
-        Assert.Contains("ask_files", reason["permissionDecisionReason"]!.GetValue<string>());
+        Assert.DoesNotContain("ask_files", reason["permissionDecisionReason"]!.GetValue<string>());
 
         // Asking again is deliberate.
-        Assert.Null(ReadGuard.Evaluate(ReadPayload(big), state, offerAskFiles: true));
+        Assert.Null(ReadGuard.Evaluate(ReadPayload(big), state));
     }
 
     [Fact]
@@ -165,13 +157,6 @@ public sealed class TokenSaverHooksTests : IDisposable
         Assert.Null(ReadGuard.Evaluate(ReadPayload(small), state));
         Assert.Null(ReadGuard.Evaluate(ReadPayload(image), state));
         Assert.Null(ReadGuard.Evaluate(ReadPayload(Path.Combine(_dir, "missing.cs")), state));
-    }
-
-    [Fact]
-    public void Read_guard_without_ask_files_does_not_mention_it()
-    {
-        var reply = ReadGuard.Evaluate(ReadPayload(WriteLines("Big3.cs", 900)), Path.Combine(_dir, "state"), offerAskFiles: false);
-        Assert.DoesNotContain("ask_files", reply);
     }
 
     [Fact]
@@ -283,21 +268,7 @@ public sealed class TokenSaverHooksTests : IDisposable
 
         var names = await ToolNames(new McpServer("t", "1", TaskTools.Create(new NoTasks(), assist: new FakeAssist())));
         Assert.Contains("explore", names);
-        Assert.Contains("ask_files", names);
-    }
-
-    [Fact]
-    public async Task Ask_files_passes_the_question_and_paths()
-    {
-        var assist = new FakeAssist();
-        var server = new McpServer("t", "1", TaskTools.Create(new NoTasks(), assist: assist));
-
-        var reply = await server.HandleLineAsync(
-            """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask_files","arguments":{"question":"what does it do?","paths":["a.cs","b.cs"]}}}""");
-
-        Assert.Contains("answer", reply!.ToJsonString());
-        Assert.Equal("what does it do?", assist.LastQuestion);
-        Assert.Equal(["a.cs", "b.cs"], assist.LastPaths);
+        Assert.DoesNotContain("ask_files", names);
     }
 
     [Fact]

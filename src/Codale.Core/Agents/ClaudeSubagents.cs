@@ -18,7 +18,7 @@ public static class ClaudeSubagents
 
     /// <summary>The <c>--agents</c> document.</summary>
     /// <param name="mainModel">The chat's model, when known: a chat already on Haiku keeps its workers on it.</param>
-    /// <param name="assist">Whether the explore and ask_files tools exist, so the prompts can send the subagents to them.</param>
+    /// <param name="assist">Whether the explore tool exists, so the prompts can send the subagents to them.</param>
     public static string Build(string? mainModel, bool assist)
     {
         var workerModel = mainModel is { } m && m.Contains("haiku", StringComparison.OrdinalIgnoreCase) ? "inherit" : WorkerModel;
@@ -47,9 +47,8 @@ public static class ClaudeSubagents
     }
 
     private static string AssistLine(bool assist) => assist
-        ? "For an open-ended question (where is X, how does Y work) call mcp__codale-tasks__explore first; to understand a large file " +
-          "you will not edit, call mcp__codale-tasks__ask_files. Both run on a separate model and cost you almost nothing. If they are " +
-          "not directly available, load them with one ToolSearch (select:mcp__codale-tasks__explore,mcp__codale-tasks__ask_files). "
+        ? "For an open-ended question (where is X, how does Y work) call mcp__codale-tasks__explore first; it runs on a separate model and costs you almost nothing. " +
+          "If it is not directly available, load it with one ToolSearch (select:mcp__codale-tasks__explore). "
         : "";
 
     private const string ReadEconomy =

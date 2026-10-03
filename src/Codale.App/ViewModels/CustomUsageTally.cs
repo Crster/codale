@@ -19,12 +19,20 @@ public sealed class CustomUsageTally
 
     public long CacheWriteTokens { get; private set; }
 
+    /// <summary>Estimated spend at the providers' configured prices; calls to unpriced providers add nothing.</summary>
+    public decimal CostUsd { get; private set; }
+
     /// <summary>Raised on the thread that recorded; callers record on the UI thread.</summary>
     public event Action? Changed;
 
-    public void Record(UsageSnapshot usage)
+    public void Record(UsageSnapshot usage, Codale.App.Services.ByokProvider? provider = null)
     {
         Calls++;
+        if (provider is { HasPricing: true })
+        {
+            CostUsd += provider.EstimateCost(usage);
+        }
+
         InputTokens += usage.InputTokens;
         OutputTokens += usage.OutputTokens;
         CacheReadTokens += usage.CacheReadInputTokens;

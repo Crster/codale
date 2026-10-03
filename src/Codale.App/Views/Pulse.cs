@@ -8,7 +8,7 @@ namespace Codale.App.Views;
 /// working" signal on a tool call's icon. A data template cannot start a storyboard
 /// itself (there is no way to address the realised element by name from the page),
 /// so the animation is built in code against whatever the property lands on, and
-/// torn down when the value goes false.
+/// torn down when the value goes false or the element unloads.
 /// </summary>
 public static class Pulse
 {
@@ -28,6 +28,13 @@ public static class Pulse
 
     public static void SetIsActive(FrameworkElement element, bool value) => element.SetValue(IsActiveProperty, value);
 
+    /// <summary>Marks an element whose Loaded/Unloaded hooks are already attached.</summary>
+    private static readonly DependencyProperty HookedProperty = DependencyProperty.RegisterAttached(
+        "PulseHooked",
+        typeof(bool),
+        typeof(Pulse),
+        new PropertyMetadata(false));
+
     private static void OnIsActiveChanged(DependencyObject sender, DependencyPropertyChangedEventArgs e)
     {
         if (sender is not FrameworkElement element)
@@ -35,15 +42,24 @@ public static class Pulse
             return;
         }
 
-        if (element.GetValue(StoryboardProperty) is Storyboard running)
+        // A forever storyboard keeps ticking after its element leaves the tree (a
+        // recycled row, a closed tab), costing the UI thread every frame for nothing:
+        // it runs only while the element is loaded.
+        if (element.GetValue(HookedProperty) is not true)
         {
-            running.Stop();
-            element.ClearValue(StoryboardProperty);
+            element.SetValue(HookedProperty, true);
+            element.Loaded += (_, _) => Apply(element);
+            element.Unloaded += (_, _) => Stop(element);
         }
 
-        element.Opacity = 1.0;
+        Apply(element);
+    }
 
-        if (e.NewValue is not true)
+    private static void Apply(FrameworkElement element)
+    {
+        Stop(element);
+
+        if (!GetIsActive(element) || !element.IsLoaded)
         {
             return;
         }
@@ -63,5 +79,16 @@ public static class Pulse
         storyboard.Children.Add(fade);
         element.SetValue(StoryboardProperty, storyboard);
         storyboard.Begin();
+    }
+
+    private static void Stop(FrameworkElement element)
+    {
+        if (element.GetValue(StoryboardProperty) is Storyboard running)
+        {
+            running.Stop();
+            element.ClearValue(StoryboardProperty);
+        }
+
+        element.Opacity = 1.0;
     }
 }

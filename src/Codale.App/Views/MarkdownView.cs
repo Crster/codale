@@ -119,6 +119,23 @@ public sealed class MarkdownView : StackPanel
         set => SetValue(BasePathProperty, value);
     }
 
+    /// <summary>
+    /// The host shows its own menu on right-click (e.g. the plan tab's annotations), so
+    /// selectable text drops its built-in Copy flyout, which would open over it.
+    /// </summary>
+    public bool HostOwnsTextMenu { get; set; }
+
+    /// <summary>Selectable text, minus the built-in flyout when the host owns the menu.</summary>
+    private void Selectable(TextBlock text)
+    {
+        text.IsTextSelectionEnabled = true;
+        if (HostOwnsTextMenu)
+        {
+            text.ContextFlyout = null;
+            text.SelectionFlyout = null;
+        }
+    }
+
     private static void OnMarkdownChanged(DependencyObject sender, DependencyPropertyChangedEventArgs e)
     {
         if (sender is MarkdownView view)
@@ -137,17 +154,30 @@ public sealed class MarkdownView : StackPanel
     /// <summary>Text or theme changed while the view was not loaded; rebuilt on Loaded.</summary>
     private bool _markdownStale;
 
+    /// <summary>
+    /// Bitmaps the last rebuild drew, by source key. A streaming reply rebuilds every few
+    /// frames; without this each rebuild re-decoded every data: URI (megabytes of base64)
+    /// and re-read every file image on the UI thread. Only keys still referenced survive.
+    /// </summary>
+    private Dictionary<string, BitmapImage> _images = [];
+
+    private Dictionary<string, BitmapImage> _imagesInUse = [];
+
+    /// <summary>Sources that failed to decode: they stay alt-text links on later rebuilds.</summary>
+    private readonly HashSet<string> _failedImages = [];
+
     private void Rebuild()
     {
         _markdownStale = false;
         Children.Clear();
+        _imagesInUse = [];
 
-        if (string.IsNullOrEmpty(Markdown))
+        if (!string.IsNullOrEmpty(Markdown))
         {
-            return;
+            RenderBlocks(Children, MarkdownParser.Parse(Markdown), BaseFontSize, topBlock: true);
         }
 
-        RenderBlocks(Children, MarkdownParser.Parse(Markdown), BaseFontSize, topBlock: true);
+        _images = _imagesInUse;
     }
 
     private void RenderBlocks(UIElementCollection into, IReadOnlyList<MarkdownBlock> blocks, double size, bool topBlock)
@@ -221,10 +251,10 @@ public sealed class MarkdownView : StackPanel
         {
             FontSize = size,
             TextWrapping = TextWrapping.Wrap,
-            IsTextSelectionEnabled = true,
             Foreground = ThemeBrush("MdBodyBrush", 0xD4, 0xD7, 0xDF),
             Margin = new Thickness(margin.L, margin.T, margin.R, margin.B),
         };
+        Selectable(text);
         FillInlines(text.Inlines, content, size);
         Highlight(text);
         return text;
@@ -332,8 +362,8 @@ public sealed class MarkdownView : StackPanel
             // Code runs a hair under the prose size, the same relation inline code has.
             FontSize = size - 0.5,
             TextWrapping = TextWrapping.Wrap,
-            IsTextSelectionEnabled = true,
         };
+        Selectable(text);
 
         // A fence naming a language the catalog knows is coloured by its grammar; a shell fence with
         // no usable grammar keeps the command-row colours, and everything else stays plain so prose
@@ -571,7 +601,7 @@ public sealed class MarkdownView : StackPanel
 
         foreach (var inline in content)
         {
-            if (inline is MarkdownInline.Image image && ImageFrame(image, size, into) is { } frame)
+            if (inline is MarkdownInline.Image image && ImageFrame(image) is { } frame)
             {
                 Flush();
                 into.Add(frame);
@@ -590,9 +620,29 @@ public sealed class MarkdownView : StackPanel
     /// images stay links, because agent-written markdown must not be able to make the
     /// transcript phone home. An image that fails to decode swaps to linked alt text.
     /// </summary>
-    private Microsoft.UI.Xaml.Controls.Image? ImageFrame(MarkdownInline.Image image, double size, UIElementCollection into)
+    private Microsoft.UI.Xaml.Controls.Image? ImageFrame(MarkdownInline.Image image)
     {
-        if (LocalImageSource(image.Url) is not { } source)
+        var isData = image.Url.StartsWith("data:", StringComparison.OrdinalIgnoreCase);
+
+        // A data URI is its own key, checked before the costly decode; a file's key
+        // carries its write time, so an edited picture redraws on the next rebuild.
+        string key;
+        string? path = null;
+        if (isData)
+        {
+            key = image.Url;
+        }
+        else if (LocalImagePath(image.Url) is { } local)
+        {
+            path = local;
+            key = $"{local}|{System.IO.File.GetLastWriteTimeUtc(local).Ticks}";
+        }
+        else
+        {
+            return null;
+        }
+
+        if (_failedImages.Contains(key))
         {
             return null;
         }
@@ -606,30 +656,60 @@ public sealed class MarkdownView : StackPanel
         };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(frame, InlineText(image.Content));
 
-        if (source.Bytes is { } bytes)
+        if (_images.TryGetValue(key, out var cached) || _imagesInUse.TryGetValue(key, out cached))
         {
-            _ = LoadDataImageAsync(frame, bytes, into, image, size);
+            _imagesInUse[key] = cached;
+            frame.Source = cached;
+            return frame;
+        }
+
+        // Frames from later rebuilds may share this bitmap, so a failure rebuilds once
+        // and the source, now marked failed, draws as its linked alt text everywhere.
+        void Failed()
+        {
+            if (_failedImages.Add(key))
+            {
+                _imagesInUse.Remove(key);
+                _images.Remove(key);
+                _markdownStale = true;
+                if (IsLoaded)
+                {
+                    _debounce.Start();
+                }
+            }
+        }
+
+        if (isData)
+        {
+            if (DataImageBytes(image.Url) is not { } bytes)
+            {
+                _failedImages.Add(key);
+                return null;
+            }
+
+            var bitmap = new BitmapImage();
+            _imagesInUse[key] = bitmap;
+            frame.Source = bitmap;
+            _ = LoadDataImageAsync(bitmap, bytes, Failed);
         }
         else
         {
-            frame.ImageFailed += (_, _) => ReplaceImage(into, frame, AltTextBlock(ImageFallbackLink(image, size), size));
-            frame.Source = new BitmapImage(new Uri(source.Path));
+            var bitmap = new BitmapImage();
+            bitmap.ImageFailed += (_, _) => Failed();
+            _imagesInUse[key] = bitmap;
+            frame.Source = bitmap;
+            bitmap.UriSource = new Uri(path!);
         }
 
         return frame;
     }
 
     /// <summary>
-    /// Where an image URL lands on disk — an absolute or document-relative path, a file:
-    /// URI, or a data: URI's bytes — or null when it should not render as a picture.
+    /// Where an image URL lands on disk — an absolute or document-relative path, or a
+    /// file: URI — or null when it should not render as a picture.
     /// </summary>
-    private (string Path, byte[]? Bytes)? LocalImageSource(string url)
+    private string? LocalImagePath(string url)
     {
-        if (url.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
-        {
-            return DataImageBytes(url) is { } bytes ? (url, bytes) : null;
-        }
-
         if (url.StartsWith("http:", StringComparison.OrdinalIgnoreCase) || url.StartsWith("https:", StringComparison.OrdinalIgnoreCase))
         {
             return null;
@@ -663,7 +743,7 @@ public sealed class MarkdownView : StackPanel
             return null;
         }
 
-        return System.IO.File.Exists(path) ? (path, null) : null;
+        return System.IO.File.Exists(path) ? path : null;
     }
 
     /// <summary>The bytes of a data:image/...;base64 URI, or null when malformed or oversized.</summary>
@@ -688,8 +768,8 @@ public sealed class MarkdownView : StackPanel
     }
 
     /// <summary>A data URI decodes from bytes rather than a file, so the bitmap fills from a
-    /// stream once the frame is placed; a corrupt payload swaps in linked alt text.</summary>
-    private async Task LoadDataImageAsync(Microsoft.UI.Xaml.Controls.Image frame, byte[] bytes, UIElementCollection into, MarkdownInline.Image image, double size)
+    /// stream after the frame is placed; a corrupt payload reports through <paramref name="failed"/>.</summary>
+    private static async Task LoadDataImageAsync(BitmapImage bitmap, byte[] bytes, Action failed)
     {
         try
         {
@@ -703,28 +783,12 @@ public sealed class MarkdownView : StackPanel
             }
 
             stream.Seek(0);
-            var bitmap = new BitmapImage();
             await bitmap.SetSourceAsync(stream);
-            frame.Source = bitmap;
         }
         catch (Exception)
         {
-            ReplaceImage(into, frame, AltTextBlock(ImageFallbackLink(image, size), size));
+            failed();
         }
-    }
-
-    /// <summary>A frame that could not draw gives its spot back — the view may have rebuilt
-    /// while the bitmap decoded, in which case the stale frame is gone already.</summary>
-    private static void ReplaceImage(UIElementCollection into, FrameworkElement frame, FrameworkElement fallback)
-    {
-        var at = into.IndexOf(frame);
-        if (at < 0)
-        {
-            return;
-        }
-
-        into.RemoveAt(at);
-        into.Insert(at, fallback);
     }
 
     /// <summary>Where an image cannot draw — a remote URL, a nested cell, a load failure —
@@ -744,20 +808,6 @@ public sealed class MarkdownView : StackPanel
         }
 
         return hyperlink;
-    }
-
-    /// <summary>A failed or unloaded image's alt line as prose, still carrying the link.</summary>
-    private TextBlock AltTextBlock(Hyperlink link, double size)
-    {
-        var text = new TextBlock
-        {
-            FontSize = size,
-            TextWrapping = TextWrapping.Wrap,
-            IsTextSelectionEnabled = true,
-            Foreground = ThemeBrush("MdBodyBrush", 0xD4, 0xD7, 0xDF),
-        };
-        text.Inlines.Add(link);
-        return text;
     }
 
     /// <summary>An inline list as plain text — an image's alt line, for tools that read it.</summary>

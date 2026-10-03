@@ -114,6 +114,47 @@ public sealed class GitWorktrees
         return GitRepository.GitWriteResult.Ok;
     }
 
+    /// <summary>
+    /// Merges an isolated session back: commits whatever is pending in the worktree,
+    /// merges its branch into the project's current branch, then removes the worktree.
+    /// A conflicting merge is aborted and the worktree left untouched.
+    /// </summary>
+    public async Task<GitRepository.GitWriteResult> MergeBackAsync(string worktreePath, CancellationToken ct = default)
+    {
+        var branch = (await ListAsync(ct).ConfigureAwait(false))
+            .FirstOrDefault(w => !w.IsMain && SamePath(w.Path, worktreePath))?.Branch;
+
+        if (branch is null || !branch.StartsWith(BranchPrefix, StringComparison.Ordinal) || !GitProcess.IsSafeRef(branch))
+        {
+            return new GitRepository.GitWriteResult(false, "That worktree has no Codale branch to merge.");
+        }
+
+        var status = await GitProcess.RunAsync(worktreePath, ["status", "--porcelain"], true, GitProcess.ReadTimeout, ct).ConfigureAwait(false);
+        if (status.Success && status.StandardOutput.Trim().Length > 0)
+        {
+            var add = await GitProcess.RunAsync(worktreePath, ["add", "-A"], false, GitProcess.WriteTimeout, ct).ConfigureAwait(false);
+            var commit = add.Success
+                ? await GitProcess.RunAsync(worktreePath, ["commit", "-m", "Isolated session changes"], false, GitProcess.WriteTimeout, ct).ConfigureAwait(false)
+                : add;
+            if (!commit.Success)
+            {
+                return new GitRepository.GitWriteResult(false, ErrorOf(commit));
+            }
+        }
+
+        var merge = await RunAsync(ct, readOnly: false, "merge", "--no-ff", "-m", $"Merge isolated session {branch}", "--end-of-options", branch).ConfigureAwait(false);
+        if (!merge.Success)
+        {
+            await RunAsync(ct, readOnly: false, "merge", "--abort").ConfigureAwait(false);
+            var detail = ErrorOf(merge);
+            return new GitRepository.GitWriteResult(false, detail == "git failed." && merge.StandardOutput.Length > 0
+                ? "Merge conflict; the isolated worktree was kept."
+                : detail);
+        }
+
+        return await RemoveAsync(worktreePath, force: true, ct).ConfigureAwait(false);
+    }
+
     /// <summary>git lists paths with forward slashes; the caller's may use backslashes.</summary>
     private static bool SamePath(string a, string b) =>
         string.Equals(

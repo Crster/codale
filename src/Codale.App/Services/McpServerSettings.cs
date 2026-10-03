@@ -59,7 +59,7 @@ public sealed class McpServerSettings
 
     /// <summary>The tasks server, wired to this chat's pipe; the exe finds the app through its environment.</summary>
     /// <param name="runDirectory">Where the chat's tasks run (its worktree, when it has one); the command list itself is always the project's.</param>
-    /// <param name="assist">Offer the explore and ask_files tools, answered by the background-task model.</param>
+    /// <param name="assist">Offer the explore tool, answered by the background-task model.</param>
     public McpServerSpec? TasksSpec(string pipeName, string token, string? runDirectory = null, bool assist = false) => !TasksAvailable
         ? null
         : new McpServerSpec
@@ -91,18 +91,17 @@ public sealed class McpServerSettings
         : TasksHook($"--posttooluse-hook{(digest ? " --digest" : "")}");
 
     /// <summary>The <c>PreToolUse</c> hook that turns away a first whole-file read of a large file.</summary>
-    public string? ReadGuardCommand(bool offerAskFiles) => !TasksAvailable
+    public string? ReadGuardCommand() => !TasksAvailable
         ? null
-        : TasksHook($"--pretooluse-hook --read-guard 400{(offerAskFiles ? " --ask-files" : "")}");
+        : TasksHook("--pretooluse-hook --read-guard 400");
 
     /// <summary>Standing instruction that sends exploration to the background-task model.</summary>
     public const string AssistDirective =
         "To save context, codebase exploration goes through Codale's helper model: for an open-ended question " +
         "(where is X handled, how does Y work, which files are involved) call mcp__codale-tasks__explore first, instead of a chain " +
-        "of Grep/Glob/Read calls or an Explore/Task subagent. To understand a large file you will not edit, use " +
-        "mcp__codale-tasks__ask_files. Then Read only the exact ranges you will change. When you already know the file " +
-        "or symbol, Grep and Read it directly. These tools are deferred: load them first with one ToolSearch " +
-        "(select:mcp__codale-tasks__explore,mcp__codale-tasks__ask_files).";
+        "of Grep/Glob/Read calls or an Explore/Task subagent. When you already know the file or symbol, Grep and Read it " +
+        "directly, including large files when you need them. This tool is deferred: load it first with one ToolSearch " +
+        "(select:mcp__codale-tasks__explore).";
 
     /// <summary>Standing instruction for short replies, when the user turned it on.</summary>
     public const string TerseDirective =
