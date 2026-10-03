@@ -104,284 +104,308 @@
 
             <!--  Ask Claude: a floating composer anchored next to the cursor or selection, with
                   the agent's progress streaming below it. Format and Check Issues reuse it
-                  without the composer, docked at the bottom. Placement is set in code.  -->
-            <Border
-                x:Name="AskPanel"
-                Width="560"
+                  without the composer, docked at the bottom. Placement is set in code.
+                  It is a plain popup shown and hidden with IsOpen, the way the WinUI Gallery
+                  does it: a raised Translation/ThemeShadow panel toggled by Visibility drew
+                  fine but never took the pointer. Light dismiss closes a waiting composer.  -->
+            <Popup
+                x:Name="AskPopup"
                 HorizontalAlignment="Left"
                 VerticalAlignment="Top"
-                Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource SurfaceStrokeColorFlyoutBrush}"
-                BorderThickness="1"
-                CornerRadius="{ThemeResource OverlayCornerRadius}"
-                Translation="0,0,32"
-                Visibility="Collapsed"
-                LostFocus="OnAskPanelLostFocus"
-                PointerPressed="OnAskPanelPointerPressed">
-                <Border.Shadow>
-                    <ThemeShadow />
-                </Border.Shadow>
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
+                Closed="OnAskPopupClosed">
+                <Popup.ChildTransitions>
+                    <TransitionCollection>
+                        <PopupThemeTransition />
+                    </TransitionCollection>
+                </Popup.ChildTransitions>
+                <!--  Spans the whole editor and never moves: the panel is placed inside it by
+                      margin, so the popup itself is never repositioned while open. With no
+                      background, the bare layer lets clicks through to the editor.  -->
+                <Grid x:Name="AskLayer">
+                    <Border
+                        x:Name="AskPanel"
+                        Width="560"
+                        Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource SurfaceStrokeColorFlyoutBrush}"
+                        BorderThickness="1"
+                        CornerRadius="{ThemeResource OverlayCornerRadius}"
+                        PointerPressed="OnAskPanelPointerPressed">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
 
-                    <!--  Composer  -->
-                    <Grid x:Name="AskComposer" Padding="14,12,12,12" RowSpacing="10">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
+                            <!--  Composer  -->
+                            <Grid x:Name="AskComposer" Padding="14,12,12,12" RowSpacing="10">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
 
-                        <!--  Header: what the request acts on  -->
-                        <Grid ColumnSpacing="10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <Border
-                                Width="28"
-                                Height="28"
-                                Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                CornerRadius="6">
-                                <FontIcon
-                                    x:Name="AskContextIcon"
-                                    FontSize="13"
-                                    Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
-                            </Border>
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                <TextBlock
-                                    FontSize="13"
-                                    FontWeight="SemiBold"
-                                    Text="Ask Claude" />
-                                <TextBlock
-                                    x:Name="AskContextText"
-                                    FontSize="12"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    TextTrimming="CharacterEllipsis" />
-                            </StackPanel>
-                            <Button
-                                Grid.Column="2"
-                                Width="28"
-                                Height="28"
-                                Padding="0"
-                                VerticalAlignment="Top"
-                                Click="OnAskCloseClick"
-                                Background="Transparent"
-                                BorderThickness="0"
-                                ToolTipService.ToolTip="Close (Esc)">
-                                <FontIcon FontSize="10" Glyph="&#xE711;" />
-                            </Button>
-                        </Grid>
+                                <!--  Header: what the request acts on; drag it to move the panel  -->
+                                <Grid
+                                    Background="Transparent"
+                                    ColumnSpacing="10"
+                                    PointerCaptureLost="OnAskDragEnded"
+                                    PointerMoved="OnAskDragMoved"
+                                    PointerPressed="OnAskDragStarted"
+                                    PointerReleased="OnAskDragEnded">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border
+                                        Width="28"
+                                        Height="28"
+                                        Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                        CornerRadius="6">
+                                        <FontIcon
+                                            x:Name="AskContextIcon"
+                                            FontSize="13"
+                                            Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock
+                                            FontSize="13"
+                                            FontWeight="SemiBold"
+                                            Text="Ask Claude" />
+                                        <TextBlock
+                                            x:Name="AskContextText"
+                                            FontSize="12"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <Button
+                                        Grid.Column="2"
+                                        Width="28"
+                                        Height="28"
+                                        Padding="0"
+                                        VerticalAlignment="Top"
+                                        Click="OnAskCloseClick"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        ToolTipService.ToolTip="Close (Esc)">
+                                        <FontIcon FontSize="10" Glyph="&#xE711;" />
+                                    </Button>
+                                </Grid>
 
-                        <!--  The selection the reply will replace  -->
-                        <Border
-                            x:Name="AskSelectionBox"
-                            Grid.Row="1"
-                            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                            BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
-                            BorderThickness="2,0,0,0"
-                            CornerRadius="4"
-                            Visibility="Collapsed">
-                            <TextBlock
-                                x:Name="AskSelectionText"
-                                Padding="10,7"
-                                FontFamily="Cascadia Mono, Consolas"
-                                FontSize="12"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                TextTrimming="CharacterEllipsis"
-                                TextWrapping="NoWrap" />
-                        </Border>
-
-                        <!--  Input field: the text box is stripped of its own chrome so the
-                              field border and the send button read as one control.  -->
-                        <Border
-                            x:Name="AskInputField"
-                            Grid.Row="2"
-                            Background="{ThemeResource ControlFillColorInputActiveBrush}"
-                            BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                            BorderThickness="1"
-                            CornerRadius="8">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBox
-                                    x:Name="AskInput"
-                                    MinHeight="42"
-                                    MaxHeight="168"
-                                    Padding="12,11,8,11"
-                                    VerticalAlignment="Stretch"
-                                    AcceptsReturn="True"
-                                    BorderThickness="0"
-                                    GotFocus="OnAskInputFocusChanged"
-                                    LostFocus="OnAskInputFocusChanged"
-                                    PreviewKeyDown="OnAskInputKeyDown"
-                                    ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                    TextChanged="OnAskInputTextChanged"
-                                    TextWrapping="Wrap">
-                                    <TextBox.Resources>
-                                        <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
-                                        <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
-                                        <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
-                                        <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="Transparent" />
-                                        <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
-                                        <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
-                                        <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
-                                        <SolidColorBrush x:Key="TextControlBorderBrushDisabled" Color="Transparent" />
-                                        <Thickness x:Key="TextControlBorderThemeThickness">0</Thickness>
-                                        <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
-                                    </TextBox.Resources>
-                                </TextBox>
-                                <!--  Bottom-anchored with equal insets, so it sits centred on a
-                                      single line and stays by the caret as the text grows.  -->
-                                <Button
-                                    x:Name="AskSendButton"
-                                    Grid.Column="1"
-                                    Width="30"
-                                    Height="30"
-                                    Margin="0,0,6,6"
-                                    Padding="0"
-                                    VerticalAlignment="Bottom"
-                                    Click="OnAskSendClick"
-                                    CornerRadius="6"
-                                    IsEnabled="False"
-                                    Style="{StaticResource AccentButtonStyle}"
-                                    ToolTipService.ToolTip="Send (Enter)">
-                                    <FontIcon
-                                        x:Name="AskSendIcon"
-                                        FontSize="13"
-                                        Glyph="&#xE724;" />
-                                </Button>
-                            </Grid>
-                        </Border>
-
-                        <!--  Keyboard hints  -->
-                        <StackPanel
-                            Grid.Row="3"
-                            Margin="2,0,0,0"
-                            Orientation="Horizontal"
-                            Spacing="14">
-                            <StackPanel.Resources>
-                                <Style x:Key="AskKey" TargetType="Border">
-                                    <Setter Property="Padding" Value="5,0" />
-                                    <Setter Property="MinWidth" Value="18" />
-                                    <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
-                                    <Setter Property="BorderBrush" Value="{ThemeResource ControlStrokeColorDefaultBrush}" />
-                                    <Setter Property="BorderThickness" Value="1" />
-                                    <Setter Property="CornerRadius" Value="3" />
-                                </Style>
-                                <Style x:Key="AskKeyText" TargetType="TextBlock">
-                                    <Setter Property="FontSize" Value="10" />
-                                    <Setter Property="HorizontalAlignment" Value="Center" />
-                                    <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
-                                </Style>
-                                <Style x:Key="AskHint" TargetType="TextBlock">
-                                    <Setter Property="FontSize" Value="11" />
-                                    <Setter Property="VerticalAlignment" Value="Center" />
-                                    <Setter Property="Foreground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
-                                </Style>
-                            </StackPanel.Resources>
-                            <StackPanel Orientation="Horizontal" Spacing="5">
-                                <Border Style="{StaticResource AskKey}">
-                                    <TextBlock Style="{StaticResource AskKeyText}" Text="Enter" />
+                                <!--  The selection the reply will replace  -->
+                                <Border
+                                    x:Name="AskSelectionBox"
+                                    Grid.Row="1"
+                                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                    BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                    BorderThickness="2,0,0,0"
+                                    CornerRadius="4"
+                                    Visibility="Collapsed">
+                                    <TextBlock
+                                        x:Name="AskSelectionText"
+                                        Padding="10,7"
+                                        FontFamily="Cascadia Mono, Consolas"
+                                        FontSize="12"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        TextTrimming="CharacterEllipsis"
+                                        TextWrapping="NoWrap" />
                                 </Border>
-                                <TextBlock Style="{StaticResource AskHint}" Text="send" />
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Spacing="5">
-                                <Border Style="{StaticResource AskKey}">
-                                    <TextBlock Style="{StaticResource AskKeyText}" Text="Shift+Enter" />
-                                </Border>
-                                <TextBlock Style="{StaticResource AskHint}" Text="new line" />
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Spacing="5">
-                                <Border Style="{StaticResource AskKey}">
-                                    <TextBlock Style="{StaticResource AskKeyText}" Text="Esc" />
-                                </Border>
-                                <TextBlock Style="{StaticResource AskHint}" Text="close" />
-                            </StackPanel>
-                        </StackPanel>
-                    </Grid>
 
-                    <!--  Progress: a status header, then a timeline of what the agent did  -->
-                    <Grid
-                        x:Name="AskLogArea"
-                        Grid.Row="1"
-                        Background="{ThemeResource LayerFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                        BorderThickness="0,1,0,0"
-                        Visibility="Collapsed">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
-                        <Grid Padding="14,10,12,6" ColumnSpacing="10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="16" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <ProgressRing
-                                x:Name="AskProgress"
-                                Width="14"
-                                Height="14"
-                                IsActive="False" />
-                            <FontIcon
-                                x:Name="AskStatusIcon"
-                                FontSize="14"
-                                Visibility="Collapsed" />
-                            <TextBlock
-                                x:Name="AskLogTitle"
-                                Grid.Column="1"
-                                VerticalAlignment="Center"
-                                FontSize="12"
-                                FontWeight="SemiBold"
-                                TextTrimming="CharacterEllipsis" />
-                            <Border
-                                Grid.Column="2"
-                                Padding="7,1,7,2"
-                                VerticalAlignment="Center"
-                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                                CornerRadius="9">
-                                <TextBlock
-                                    x:Name="AskElapsed"
-                                    FontFamily="Cascadia Mono, Consolas"
-                                    FontSize="11"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                            </Border>
-                            <Button
-                                x:Name="AskStopButton"
-                                Grid.Column="3"
-                                Height="24"
-                                Padding="8,0"
-                                Click="OnAskSendClick"
-                                Background="Transparent"
-                                BorderThickness="0"
-                                ToolTipService.ToolTip="Stop and leave the document as it is"
-                                Visibility="Collapsed">
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <FontIcon FontSize="10" Glyph="&#xE71A;" />
-                                    <TextBlock FontSize="12" Text="Stop" />
+                                <!--  Input field: the text box is stripped of its own chrome so the
+                                      field border and the send button read as one control.  -->
+                                <Border
+                                    x:Name="AskInputField"
+                                    Grid.Row="2"
+                                    Background="{ThemeResource ControlFillColorInputActiveBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox
+                                            x:Name="AskInput"
+                                            MinHeight="42"
+                                            MaxHeight="168"
+                                            Padding="12,11,8,11"
+                                            VerticalAlignment="Stretch"
+                                            AcceptsReturn="True"
+                                            BorderThickness="0"
+                                            GotFocus="OnAskInputFocusChanged"
+                                            LostFocus="OnAskInputFocusChanged"
+                                            PreviewKeyDown="OnAskInputKeyDown"
+                                            ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                            TextChanged="OnAskInputTextChanged"
+                                            TextWrapping="Wrap">
+                                            <TextBox.Resources>
+                                                <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+                                                <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                                                <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                                                <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="Transparent" />
+                                                <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+                                                <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                                                <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                                                <SolidColorBrush x:Key="TextControlBorderBrushDisabled" Color="Transparent" />
+                                                <Thickness x:Key="TextControlBorderThemeThickness">0</Thickness>
+                                                <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+                                            </TextBox.Resources>
+                                        </TextBox>
+                                        <!--  Bottom-anchored with equal insets, so it sits centred on a
+                                              single line and stays by the caret as the text grows.  -->
+                                        <Button
+                                            x:Name="AskSendButton"
+                                            Grid.Column="1"
+                                            Width="30"
+                                            Height="30"
+                                            Margin="0,0,6,6"
+                                            Padding="0"
+                                            VerticalAlignment="Bottom"
+                                            Click="OnAskSendClick"
+                                            CornerRadius="6"
+                                            IsEnabled="False"
+                                            Style="{StaticResource AccentButtonStyle}"
+                                            ToolTipService.ToolTip="Send (Enter)">
+                                            <FontIcon
+                                                x:Name="AskSendIcon"
+                                                FontSize="13"
+                                                Glyph="&#xE724;" />
+                                        </Button>
+                                    </Grid>
+                                </Border>
+
+                                <!--  Keyboard hints  -->
+                                <StackPanel
+                                    Grid.Row="3"
+                                    Margin="2,0,0,0"
+                                    Orientation="Horizontal"
+                                    Spacing="14">
+                                    <StackPanel.Resources>
+                                        <Style x:Key="AskKey" TargetType="Border">
+                                            <Setter Property="Padding" Value="5,0" />
+                                            <Setter Property="MinWidth" Value="18" />
+                                            <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                            <Setter Property="BorderBrush" Value="{ThemeResource ControlStrokeColorDefaultBrush}" />
+                                            <Setter Property="BorderThickness" Value="1" />
+                                            <Setter Property="CornerRadius" Value="3" />
+                                        </Style>
+                                        <Style x:Key="AskKeyText" TargetType="TextBlock">
+                                            <Setter Property="FontSize" Value="10" />
+                                            <Setter Property="HorizontalAlignment" Value="Center" />
+                                            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </Style>
+                                        <Style x:Key="AskHint" TargetType="TextBlock">
+                                            <Setter Property="FontSize" Value="11" />
+                                            <Setter Property="VerticalAlignment" Value="Center" />
+                                            <Setter Property="Foreground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
+                                        </Style>
+                                    </StackPanel.Resources>
+                                    <StackPanel Orientation="Horizontal" Spacing="5">
+                                        <Border Style="{StaticResource AskKey}">
+                                            <TextBlock Style="{StaticResource AskKeyText}" Text="Enter" />
+                                        </Border>
+                                        <TextBlock Style="{StaticResource AskHint}" Text="send" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Spacing="5">
+                                        <Border Style="{StaticResource AskKey}">
+                                            <TextBlock Style="{StaticResource AskKeyText}" Text="Shift+Enter" />
+                                        </Border>
+                                        <TextBlock Style="{StaticResource AskHint}" Text="new line" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Spacing="5">
+                                        <Border Style="{StaticResource AskKey}">
+                                            <TextBlock Style="{StaticResource AskKeyText}" Text="Esc" />
+                                        </Border>
+                                        <TextBlock Style="{StaticResource AskHint}" Text="close" />
+                                    </StackPanel>
                                 </StackPanel>
-                            </Button>
+                            </Grid>
+
+                            <!--  Progress: a status header, then a timeline of what the agent did  -->
+                            <Grid
+                                x:Name="AskLogArea"
+                                Grid.Row="1"
+                                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                BorderThickness="0,1,0,0"
+                                Visibility="Collapsed">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Grid
+                                    Padding="14,10,12,6"
+                                    Background="Transparent"
+                                    ColumnSpacing="10"
+                                    PointerCaptureLost="OnAskDragEnded"
+                                    PointerMoved="OnAskDragMoved"
+                                    PointerPressed="OnAskDragStarted"
+                                    PointerReleased="OnAskDragEnded">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="16" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ProgressRing
+                                        x:Name="AskProgress"
+                                        Width="14"
+                                        Height="14"
+                                        IsActive="False" />
+                                    <FontIcon
+                                        x:Name="AskStatusIcon"
+                                        FontSize="14"
+                                        Visibility="Collapsed" />
+                                    <TextBlock
+                                        x:Name="AskLogTitle"
+                                        Grid.Column="1"
+                                        VerticalAlignment="Center"
+                                        FontSize="12"
+                                        FontWeight="SemiBold"
+                                        TextTrimming="CharacterEllipsis" />
+                                    <Border
+                                        Grid.Column="2"
+                                        Padding="7,1,7,2"
+                                        VerticalAlignment="Center"
+                                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                        CornerRadius="9">
+                                        <TextBlock
+                                            x:Name="AskElapsed"
+                                            FontFamily="Cascadia Mono, Consolas"
+                                            FontSize="11"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </Border>
+                                    <Button
+                                        x:Name="AskStopButton"
+                                        Grid.Column="3"
+                                        Height="24"
+                                        Padding="8,0"
+                                        Click="OnAskSendClick"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        ToolTipService.ToolTip="Stop and leave the document as it is"
+                                        Visibility="Collapsed">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <FontIcon FontSize="10" Glyph="&#xE71A;" />
+                                            <TextBlock FontSize="12" Text="Stop" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                                <ScrollViewer
+                                    x:Name="AskLogScroll"
+                                    Grid.Row="1"
+                                    MaxHeight="200"
+                                    Padding="14,2,12,10"
+                                    VerticalScrollBarVisibility="Auto">
+                                    <StackPanel x:Name="AskLogRows" />
+                                </ScrollViewer>
+                            </Grid>
                         </Grid>
-                        <ScrollViewer
-                            x:Name="AskLogScroll"
-                            Grid.Row="1"
-                            MaxHeight="200"
-                            Padding="14,2,12,10"
-                            VerticalScrollBarVisibility="Auto">
-                            <StackPanel x:Name="AskLogRows" />
-                        </ScrollViewer>
-                    </Grid>
+                    </Border>
                 </Grid>
-            </Border>
+            </Popup>
         </Grid>
 
         <!--  Rendered Markdown, swapped in for the editor by the Preview menu item  -->

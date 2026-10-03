@@ -110,7 +110,21 @@ public sealed partial class EditorTab
         _session.PropertyChanged += OnAskSessionChanged;
         FileEditor.ScrollChanged += (_, _) => PositionAskPanel();
         EditorSurface.SizeChanged += (_, _) => PositionAskPanel();
-        ConfigureAskPanelAnimations();
+        AskPanel.SizeChanged += (_, _) => PositionAskPanel();
+
+        // A tab switched away from must not leave the panel floating over the next one;
+        // coming back brings it back where it was.
+        Loaded += (_, _) =>
+        {
+            AskPanel.RequestedTheme = ActualTheme;
+            if (_askShown)
+            {
+                AskPopup.IsOpen = true;
+                PositionAskPanel();
+            }
+        };
+        Unloaded += (_, _) => AskPopup.IsOpen = false;
+        ActualThemeChanged += (_, _) => AskPanel.RequestedTheme = ActualTheme;
 
         menu.Opening += (_, _) => RefreshContextMenu();
         FileEditor.ContextFlyout = menu;
@@ -276,7 +290,7 @@ public sealed partial class EditorTab
         await Task.Delay(LogOnlyLinger);
         if (version == _askVersion && !_modelBusy && AskComposer.Visibility == Visibility.Collapsed)
         {
-            AskPanel.Visibility = Visibility.Collapsed;
+            HideAskPopup();
         }
     }
 
@@ -498,7 +512,11 @@ public sealed partial class EditorTab
         AskLogArea.Visibility = Visibility.Collapsed;
 
         OpenAskPanel(composer: true);
-        AskInput.Focus(FocusState.Programmatic);
+
+        // The popup's content is only in the tree once it has been laid out.
+        DispatcherQueue.TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            () => AskInput.Focus(FocusState.Programmatic));
 
         var send = _askSend = new TaskCompletionSource<string?>();
         var instruction = await send.Task;
@@ -512,10 +530,38 @@ public sealed partial class EditorTab
             _askAnchor = null;
         }
 
+        _askMoved = null;
         AskComposer.Visibility = composer ? Visibility.Visible : Visibility.Collapsed;
         AskStopButton.Visibility = !composer && _session.IsRunning ? Visibility.Visible : Visibility.Collapsed;
-        AskPanel.Visibility = Visibility.Visible;
+        _askShown = true;
+        RefreshAskLightDismiss();
+        AskPopup.IsOpen = IsLoaded;
         PositionAskPanel();
+    }
+
+    /// <summary>Whether the panel is meant to be up; the popup itself is closed while the tab is off screen.</summary>
+    private bool _askShown;
+
+    private void HideAskPopup()
+    {
+        _askShown = false;
+        AskPopup.IsOpen = false;
+    }
+
+    /// <summary>
+    /// A composer waiting for an instruction (or showing a finished reply) closes on a click
+    /// outside it, like a flyout. While a job runs it stays up until Stop or the close button.
+    /// </summary>
+    private void RefreshAskLightDismiss() =>
+        AskPopup.IsLightDismissEnabled = AskComposer.Visibility == Visibility.Visible && !_session.IsRunning;
+
+    /// <summary>Closed by light dismiss rather than by our own code: treat it as the close button.</summary>
+    private void OnAskPopupClosed(object? sender, object e)
+    {
+        if (_askShown && IsLoaded)
+        {
+            CloseAskPanel();
+        }
     }
 
     /// <summary>
@@ -525,15 +571,24 @@ public sealed partial class EditorTab
     /// </summary>
     private void PositionAskPanel()
     {
-        if (AskPanel.Visibility != Visibility.Visible || EditorSurface.ActualWidth <= 0)
+        if (!AskPopup.IsOpen || EditorSurface.ActualWidth <= 0)
         {
             return;
         }
 
         var surfaceWidth = EditorSurface.ActualWidth;
         var surfaceHeight = EditorSurface.ActualHeight;
+        AskLayer.Width = surfaceWidth;
+        AskLayer.Height = surfaceHeight;
         var width = Math.Max(0, Math.Min(AskPanelWidth, surfaceWidth - 2 * AskPanelInset));
         AskPanel.Width = width;
+
+        // Moved by hand: stay put, only kept inside the editor as it resizes.
+        if (_askMoved is { } moved)
+        {
+            PlaceAskPanel(moved.X, moved.Y);
+            return;
+        }
 
         if (_askAnchor is not { } anchor)
         {
@@ -570,24 +625,65 @@ public sealed partial class EditorTab
         }
     }
 
-    /// <summary>A short fade in and out, so the panel arrives like a flyout rather than popping.</summary>
-    private void ConfigureAskPanelAnimations()
+    /// <summary>Puts the panel's top-left corner at a point in the editor, kept inside it; returns where it went.</summary>
+    private Windows.Foundation.Point PlaceAskPanel(double x, double y)
     {
-        var compositor = ElementCompositionPreview.GetElementVisual(AskPanel).Compositor;
+        var left = Math.Clamp(x, AskPanelInset, Math.Max(AskPanelInset, EditorSurface.ActualWidth - AskPanel.ActualWidth - AskPanelInset));
+        var top = Math.Clamp(y, AskPanelInset, Math.Max(AskPanelInset, EditorSurface.ActualHeight - AskPanel.ActualHeight - AskPanelInset));
+        AskPanel.HorizontalAlignment = HorizontalAlignment.Left;
+        AskPanel.VerticalAlignment = VerticalAlignment.Top;
+        AskPanel.Margin = new Thickness(left, top, 0, AskPanelInset);
+        return new Windows.Foundation.Point(left, top);
+    }
 
-        var show = compositor.CreateScalarKeyFrameAnimation();
-        show.Target = "Opacity";
-        show.InsertKeyFrame(0, 0);
-        show.InsertKeyFrame(1, 1);
-        show.Duration = TimeSpan.FromMilliseconds(140);
+    // ------------------------------------------------------------------ dragging
 
-        var hide = compositor.CreateScalarKeyFrameAnimation();
-        hide.Target = "Opacity";
-        hide.InsertKeyFrame(1, 0);
-        hide.Duration = TimeSpan.FromMilliseconds(100);
+    /// <summary>Where the panel was dragged to, in the editor's coordinates; null while it follows its anchor.</summary>
+    private Windows.Foundation.Point? _askMoved;
 
-        ElementCompositionPreview.SetImplicitShowAnimation(AskPanel, show);
-        ElementCompositionPreview.SetImplicitHideAnimation(AskPanel, hide);
+    /// <summary>The pointer's offset from the panel's corner while a drag is under way.</summary>
+    private Windows.Foundation.Point? _askGrab;
+
+    private void OnAskDragStarted(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        var point = e.GetCurrentPoint(AskLayer);
+        if (!point.Properties.IsLeftButtonPressed || sender is not UIElement handle)
+        {
+            return;
+        }
+
+        var corner = AskPanel.TransformToVisual(AskLayer).TransformPoint(default);
+        _askGrab = new Windows.Foundation.Point(point.Position.X - corner.X, point.Position.Y - corner.Y);
+        handle.CapturePointer(e.Pointer);
+        e.Handled = true;
+    }
+
+    private void OnAskDragMoved(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (_askGrab is not { } grab)
+        {
+            return;
+        }
+
+        // The layer sits on the editor's top-left corner, so its coordinates are the editor's.
+        var point = e.GetCurrentPoint(AskLayer).Position;
+        _askMoved = PlaceAskPanel(point.X - grab.X, point.Y - grab.Y);
+        e.Handled = true;
+    }
+
+    private void OnAskDragEnded(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (_askGrab is null)
+        {
+            return;
+        }
+
+        _askGrab = null;
+        (sender as UIElement)?.ReleasePointerCapture(e.Pointer);
+        if (AskComposer.Visibility == Visibility.Visible)
+        {
+            AskInput.Focus(FocusState.Programmatic);
+        }
     }
 
     /// <summary>Closes the panel; a job still running is cancelled, a composer still waiting is dismissed.</summary>
@@ -597,7 +693,7 @@ public sealed partial class EditorTab
         var send = _askSend;
         _askSend = null;
         send?.TrySetResult(null);
-        AskPanel.Visibility = Visibility.Collapsed;
+        HideAskPopup();
         FileEditor.Focus(FocusState.Programmatic);
     }
 
@@ -612,7 +708,7 @@ public sealed partial class EditorTab
 
     private void OnAskPanelPointerPressed(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
-        if (AskPanel.Visibility == Visibility.Visible)
+        if (AskPopup.IsOpen)
         {
             e.Handled = true;
             if (AskComposer.Visibility == Visibility.Visible && AskInput.FocusState == FocusState.Unfocused)
@@ -620,35 +716,6 @@ public sealed partial class EditorTab
                 AskInput.Focus(FocusState.Programmatic);
             }
         }
-    }
-
-    /// <summary>Dismisses a waiting composer once focus has moved outside the panel.</summary>
-    private void OnAskPanelLostFocus(object sender, RoutedEventArgs e)
-    {
-        if (AskPanel.Visibility != Visibility.Visible || AskComposer.Visibility != Visibility.Visible || _session.IsRunning)
-        {
-            return;
-        }
-
-        // Focus moving between the panel's own controls also raises LostFocus; settle first, then look.
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            if (AskPanel.Visibility != Visibility.Visible || AskComposer.Visibility != Visibility.Visible || _session.IsRunning)
-            {
-                return;
-            }
-
-            var focused = Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(XamlRoot) as DependencyObject;
-            for (var node = focused; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
-            {
-                if (ReferenceEquals(node, AskPanel))
-                {
-                    return;
-                }
-            }
-
-            CloseAskPanel();
-        });
     }
 
     private void RefreshAskSendButton() =>
@@ -841,6 +908,7 @@ public sealed partial class EditorTab
                 }
 
                 AskInput.IsReadOnly = running;
+                RefreshAskLightDismiss();
                 AskSendIcon.Glyph = running ? "" : "";
                 AskStopButton.Visibility = running && AskComposer.Visibility == Visibility.Collapsed
                     ? Visibility.Visible
