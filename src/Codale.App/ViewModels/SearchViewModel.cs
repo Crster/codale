@@ -168,6 +168,9 @@ public sealed partial class SearchViewModel : ObservableObject
         // A new search supersedes the old one; ripgrep and generation are both abandoned.
         await CancelInFlightAsync();
 
+        var keywordOnly = _keywordOnly;
+        _keywordOnly = false;
+
         var cts = new CancellationTokenSource();
         _inFlight = cts;
 
@@ -186,7 +189,8 @@ public sealed partial class SearchViewModel : ObservableObject
         try
         {
             // Without an agent CLI there is no model, and the search stays keyword-only.
-            ISearchModel? model = _helper.IsAvailable ? new HelperSearchModel(_helper) : null;
+            // A references lookup searches for the text itself, so it never asks the model to reinterpret it.
+            ISearchModel? model = _helper.IsAvailable && !keywordOnly ? new HelperSearchModel(_helper) : null;
 
             Status = "Searching…";
 
@@ -211,7 +215,7 @@ public sealed partial class SearchViewModel : ObservableObject
                          _ => $"{count} files",
                      }) +
                      $" · {clock.Elapsed.TotalSeconds:0.0}s" +
-                     (model is null ? " · keyword search, no Claude CLI found" : "");
+                     (model is null && !keywordOnly ? " · keyword search, no Claude CLI found" : "");
         }
         catch (OperationCanceledException)
         {
@@ -231,6 +235,23 @@ public sealed partial class SearchViewModel : ObservableObject
 
             cts.Dispose();
         }
+    }
+
+    /// <summary>Set by <see cref="FindReferences"/> for the next run only.</summary>
+    private bool _keywordOnly;
+
+    /// <summary>Searches the project for usages of <paramref name="text"/> with the keyword pass alone, no model.</summary>
+    public void FindReferences(string text)
+    {
+        Query = text.Trim();
+        _keywordOnly = true;
+        if (!RunCommand.CanExecute(null))
+        {
+            _keywordOnly = false;
+            return;
+        }
+
+        RunCommand.Execute(null);
     }
 
     [RelayCommand]

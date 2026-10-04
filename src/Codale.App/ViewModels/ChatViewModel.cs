@@ -183,6 +183,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private readonly Dictionary<string, RunningTaskItem> _tasksByToolUse = [];
 
+    /// <summary>Explore tool-call tasks already receiving a run's live steps.</summary>
+    private readonly HashSet<RunningTaskItem> _exploreLinked = [];
+
     // Commands Codale itself runs for the agent (codale-tasks). One host per chat, kept
     // across session restarts (DisposeSessionAsync) so a dev server survives a model
     // switch; it dies with the chat (DisposeAsync), or when the conversation is reset.
@@ -237,6 +240,23 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Lists an explore as a task and streams its steps into the peek pane and status bar.</summary>
     private void OnExploreStarted(ExploreRun run)
     {
+        var question = run.Question.Trim();
+
+        // The model's own explore tool call is already listed as a subagent-style task:
+        // stream the steps into that one instead of listing the run a second time.
+        var existing = RunningTasks.LastOrDefault(t => t.Kind == RunningTaskKind.Subagent
+            && t.IsRunning
+            && t.Prompt == question
+            && !_exploreLinked.Contains(t));
+        if (existing is not null)
+        {
+            _exploreLinked.Add(existing);
+            existing.AppendOutput("Searching the code...\n");
+            run.Progress += line => _dispatcher.TryEnqueue(() => existing.AppendOutput(line + "\n"));
+            run.Finished += _ => _dispatcher.TryEnqueue(() => _exploreLinked.Remove(existing));
+            return;
+        }
+
         var item = new RunningTaskItem
         {
             ToolUseId = $"explore:{Guid.NewGuid():N}",

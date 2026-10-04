@@ -33,6 +33,11 @@ public sealed partial class EditorTab
     private MenuFlyoutItem _checkItem = null!;
     private MenuFlyoutItem _previewItem = null!;
 
+    private MenuFlyoutItem _referencesItem = null!;
+
+    /// <summary>Raised with the selected text when the user asks for its usages across the project.</summary>
+    public event EventHandler<string>? FindReferencesRequested;
+
     private bool _modelBusy;
     private bool _previewing;
 
@@ -83,23 +88,25 @@ public sealed partial class EditorTab
 
     private void BuildContextMenu()
     {
-        _undoItem = Item("Undo", FileEditor.Undo, "Ctrl+Z", "");
-        _redoItem = Item("Redo", FileEditor.Redo, "Ctrl+Y", "");
-        _cutItem = Item("Cut", FileEditor.CutToClipboard, "Ctrl+X", "");
-        _copyItem = Item("Copy", FileEditor.CopyToClipboard, "Ctrl+C", "");
-        _pasteItem = Item("Paste", FileEditor.PasteFromClipboard, "Ctrl+V", "");
+        _undoItem = Item("Undo", FileEditor.Undo, "Ctrl+Z", "");
+        _redoItem = Item("Redo", FileEditor.Redo, "Ctrl+Y", "");
+        _cutItem = Item("Cut", FileEditor.CutToClipboard, "Ctrl+X", "");
+        _copyItem = Item("Copy", FileEditor.CopyToClipboard, "Ctrl+C", "");
+        _pasteItem = Item("Paste", FileEditor.PasteFromClipboard, "Ctrl+V", "");
         _deleteItem = Item("Delete", FileEditor.DeleteSelection, null, "");
         var selectAll = Item("Select All", FileEditor.SelectEverything, "Ctrl+A", "");
-        _formatItem = Item("Format Document", () => _ = FormatDocumentAsync(), null, "");
-        _askItem = Item("Ask Claude…", () => _ = AskClaudeAsync(), null, "");
-        _checkItem = Item("Check Issues", () => _ = CheckIssuesAsync(), null, "");
-        _previewItem = Item("Preview", TogglePreview, null, "");
+        _formatItem = Item("Format Document", () => _ = FormatDocumentAsync(), null, "");
+        _askItem = Item("Ask Claude…", () => _ = AskClaudeAsync(), null, "\uE9CE");
+        _checkItem = Item("Check Issues", () => _ = CheckIssuesAsync(), null, "");
+        _referencesItem = Item("Find References", FindReferences, null, "");
+        _previewItem = Item("Preview", TogglePreview, null,"");
 
         var menu = new MenuFlyout();
         foreach (var item in new MenuFlyoutItemBase[]
         {
             _undoItem, _redoItem, new MenuFlyoutSeparator(),
             _cutItem, _copyItem, _pasteItem, _deleteItem, selectAll, new MenuFlyoutSeparator(),
+            _referencesItem, new MenuFlyoutSeparator(),
             _formatItem, _askItem, _checkItem, _previewItem,
         })
         {
@@ -146,6 +153,7 @@ public sealed partial class EditorTab
         _copyItem.IsEnabled = hasSelection;
         _pasteItem.IsEnabled = editable;
         _deleteItem.IsEnabled = editable && hasSelection;
+        _referencesItem.IsEnabled = hasSelection && !string.IsNullOrWhiteSpace(SelectedText());
 
         var canAsk = editable && Helper is { IsAvailable: true } && !IsModelBusy;
         _formatItem.IsEnabled = canAsk;
@@ -157,6 +165,21 @@ public sealed partial class EditorTab
         var kind = PreviewKind();
         _previewItem.Visibility = kind == PreviewTarget.None ? Visibility.Collapsed : Visibility.Visible;
         _previewItem.Text = kind == PreviewTarget.Browser ? "Preview in Browser" : "Preview";
+    }
+
+    private string SelectedText()
+    {
+        var (start, end) = FileEditor.SelectionOffsets;
+        return start == end ? string.Empty : FileEditor.GetText()[start..end];
+    }
+
+    private void FindReferences()
+    {
+        var text = SelectedText().Trim();
+        if (text.Length > 0)
+        {
+            FindReferencesRequested?.Invoke(this, text);
+        }
     }
 
     // ------------------------------------------------------------------ preview
@@ -993,3 +1016,4 @@ public sealed partial class EditorTab
         return line;
     }
 }
+

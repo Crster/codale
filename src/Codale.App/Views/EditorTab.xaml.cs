@@ -131,6 +131,11 @@ public sealed partial class EditorTab : UserControl
     private int _currentHighlight = -1;
     private string _highlightLabel = "";
     private CancellationTokenSource? _focusSearch;
+    private string _focusQuery = "";
+    private IReadOnlyList<string> _focusLines = [];
+
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush WordBrush =
+        new(Windows.UI.Color.FromArgb(0x90, 0xE5, 0xB2, 0x3C));
     private (double Scroll, double LineHeight, double Width, double Height, int Current) _drawn;
 
     // The search result amber, as bands: a faint fill and a stronger edge for the current one.
@@ -169,6 +174,7 @@ public sealed partial class EditorTab : UserControl
     {
         _focusSearch?.Cancel();
         _highlights = [];
+        _focusQuery = "";
         _currentHighlight = -1;
         HighlightLayer.Children.Clear();
         HighlightBar.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
@@ -185,11 +191,11 @@ public sealed partial class EditorTab : UserControl
         _focusSearch = cts;
 
         var lines = FileEditor.GetText().Split('\n').Select(l => l.TrimEnd('\r')).ToList();
-        var instant = FileFocus.Instant(query, lines);
-        var matches = instant.Count == 1 ? "1 match" : $"{instant.Count} matches";
+        _focusQuery = query;
+        _focusLines = lines;
 
-        ShowHighlights(instant, instant.Count > 0 ? $"{matches} · reading the file…" : "Reading the file…",
-                       reveal: instant.Count > 0, busy: true);
+        // Semantic only: no keyword pass to flash misleading bands while the model reads.
+        ShowHighlights([], "Searching the file…", reveal: false, busy: true);
 
         try
         {
@@ -209,10 +215,7 @@ public sealed partial class EditorTab : UserControl
             }
             else
             {
-                ShowHighlights(instant,
-                    (instant.Count > 0 ? matches : "Nothing found") +
-                    (model is null ? " · no Claude CLI found" : spans is null ? "" : " · nothing else related"),
-                    reveal: false);
+                ShowHighlights([], model is null ? "No Claude CLI found" : spans is null ? "Search failed" : "Nothing related", reveal: false);
             }
         }
         catch (OperationCanceledException)
@@ -337,6 +340,35 @@ public sealed partial class EditorTab : UserControl
             };
             Canvas.SetTop(edge, top);
             HighlightLayer.Children.Add(edge);
+
+            // The search's exact words inside the span, only those in view.
+            if (_focusQuery.Length > 0)
+            {
+                foreach (var (line, col, length) in FileFocus.Occurrences(_focusQuery, _focusLines, firstLine, lastLine))
+                {
+                    var start = FileEditor.PositionBounds(line, col);
+                    if (start.Y + start.Height < 0 || start.Y > HighlightLayer.ActualHeight)
+                    {
+                        continue;
+                    }
+
+                    var end = FileEditor.PositionBounds(line, col + length);
+                    // A word folded onto the next wrapped row is marked up to its first row's end only roughly.
+                    var wordWidth = end.Y == start.Y ? end.X - start.X : Math.Max(0, HighlightLayer.ActualWidth - start.X - 14);
+
+                    var mark = new Microsoft.UI.Xaml.Shapes.Rectangle
+                    {
+                        Width = wordWidth,
+                        Height = start.Height,
+                        Fill = WordBrush,
+                        RadiusX = 2,
+                        RadiusY = 2,
+                    };
+                    Canvas.SetLeft(mark, start.X);
+                    Canvas.SetTop(mark, start.Y);
+                    HighlightLayer.Children.Add(mark);
+                }
+            }
         }
     }
 

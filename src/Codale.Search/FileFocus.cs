@@ -121,6 +121,33 @@ public static partial class FileFocus
     public static IReadOnlyList<LineSpan> Instant(string query, IReadOnlyList<string> lines) =>
         Group(Hits(query, lines), gap: 2).Take(20).ToList();
 
+    /// <summary>The search's own words, found exactly where they sit in the given lines (0-based line, column and length).</summary>
+    public static IEnumerable<(int Line, int Col, int Length)> Occurrences(
+        string query, IReadOnlyList<string> lines, int firstLine, int lastLine)
+    {
+        var words = CodeDiscovery.QuestionWords(query);
+        lastLine = Math.Min(lastLine, lines.Count - 1);
+
+        foreach (var word in words)
+        {
+            var wordStart = CodeDiscovery.NeedsWordStart(word);
+            for (var n = Math.Max(0, firstLine); n <= lastLine; n++)
+            {
+                var line = lines[n];
+                var index = line.IndexOf(word, StringComparison.OrdinalIgnoreCase);
+                while (index >= 0)
+                {
+                    if (!wordStart || index == 0 || !IsWordChar(line[index - 1]))
+                    {
+                        yield return (n, index, word.Length);
+                    }
+
+                    index = line.IndexOf(word, index + word.Length, StringComparison.OrdinalIgnoreCase);
+                }
+            }
+        }
+    }
+
     /// <summary>1-based numbers of the lines containing any of the search's own words.</summary>
     private static List<int> Hits(string query, IReadOnlyList<string> lines)
     {

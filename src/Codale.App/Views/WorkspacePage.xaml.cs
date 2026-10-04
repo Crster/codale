@@ -1288,6 +1288,11 @@ public sealed partial class WorkspacePage : Page
 
         var entry = new EditorTabEntry(item, tab);
         tab.Edited += (_, _) => PromoteEditorTab(entry);
+        tab.FindReferencesRequested += (_, text) =>
+        {
+            OpenSearchTab();
+            ViewModel.Search.FindReferences(text);
+        };
         tab.LanguageChanged += (_, _) =>
         {
             if (ReferenceEquals(ActiveEditorTab(), tab))

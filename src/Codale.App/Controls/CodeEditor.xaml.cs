@@ -36,6 +36,7 @@ public sealed partial class CodeEditor : UserControl
 
     private const float DefaultFontSize = 13;
     private const string EditorFontFamily = "Consolas";
+    private const string IconFontFamily = "Segoe MDL2 Assets";
 
     /// <summary>The caret is 2 dip wide, a hair wider than a stroke so it reads.</summary>
     private const float CaretWidth = 2;
@@ -844,6 +845,21 @@ public sealed partial class CodeEditor : UserControl
                     {
                         layout.SetColor(from - start, to - from, CodePalette.Get(token.Kind));
                     }
+                }
+            }
+
+            // Consolas has no glyphs for private-use icons (Segoe MDL2 Assets), which would render as boxes.
+            for (var i = 0; i < text.Length; i++)
+            {
+                if (text[i] is >= '' and <= '')
+                {
+                    var runStart = i;
+                    while (i + 1 < text.Length && text[i + 1] is >= '' and <= '')
+                    {
+                        i++;
+                    }
+
+                    layout.SetFontFamily(runStart, i - runStart + 1, IconFontFamily);
                 }
             }
 
