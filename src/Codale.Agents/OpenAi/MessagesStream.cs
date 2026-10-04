@@ -94,7 +94,7 @@ internal sealed class MessagesStream(string model)
             var text = delta.Prop("content") switch
             {
                 { ValueKind: JsonValueKind.String } s => s.GetString(),
-                { ValueKind: JsonValueKind.Array } parts => string.Concat(parts.EnumerateArray().Select(p => p.Str("text"))),
+                { ValueKind: JsonValueKind.Array } parts => string.Concat(parts.EnumerateArray().Select(p => p.Str("text")).Where(t => t is not null)),
                 _ => null,
             };
             if (!string.IsNullOrEmpty(text))

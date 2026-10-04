@@ -393,7 +393,7 @@ internal static class MessagesTranslator
             var text = message.Prop("content") switch
             {
                 { ValueKind: JsonValueKind.String } s => s.GetString() ?? "",
-                { ValueKind: JsonValueKind.Array } parts => string.Concat(parts.EnumerateArray().Select(p => p.Str("text"))),
+                { ValueKind: JsonValueKind.Array } parts => string.Concat(parts.EnumerateArray().Select(p => p.Str("text")).Where(t => t is not null)),
                 _ => "",
             };
             if (text.Length > 0)

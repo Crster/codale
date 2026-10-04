@@ -34,10 +34,17 @@ public static class OpenAiApiClient
         using var reply = await SendAsync(endpoint, () => BuildRequest(endpoint, systemPrompt, prompt, tools: null, maxTokens), ct, onUsage)
             .ConfigureAwait(false);
 
-        var text = ReplyMessage(reply.RootElement) is { } message ? MessageText(message) : "";
+        var replyJson = reply.RootElement;
+        var text = ReplyMessage(replyJson) is { } message ? MessageText(message) : "";
         if (string.IsNullOrWhiteSpace(text))
         {
-            throw new HelperModelException("The OpenAI-compatible API returned no text.");
+            var responseDebug = replyJson.GetRawText();
+            if (responseDebug.Length > 500)
+            {
+                responseDebug = responseDebug[..500] + "...";
+            }
+
+            throw new HelperModelException($"The OpenAI-compatible API returned no text. Response: {responseDebug}");
         }
 
         return text;
@@ -210,7 +217,7 @@ public static class OpenAiApiClient
     private static string MessageText(JsonElement message) => message.Prop("content") switch
     {
         { ValueKind: JsonValueKind.String } s => s.GetString() ?? "",
-        { ValueKind: JsonValueKind.Array } parts => string.Concat(parts.EnumerateArray().Select(p => p.Str("text"))),
+        { ValueKind: JsonValueKind.Array } parts => string.Concat(parts.EnumerateArray().Select(p => p.Str("text")).Where(t => t is not null)),
         _ => "",
     };
 
