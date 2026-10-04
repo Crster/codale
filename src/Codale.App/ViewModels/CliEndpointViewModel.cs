@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 using Codale.App.Services;
 
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -29,18 +31,60 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial ProviderChoice? Selected { get; set; }
 
-    /// <summary>True when a BYOK provider (not Default) is in use.</summary>
-    public bool IsActive => AppSettings.ActiveByok is not null;
+    /// <summary>The chat in front, whose provider the picker shows and changes; null before one is attached.</summary>
+    private ChatViewModel? _chat;
 
-    /// <summary>The selected provider's name, or "" for Default.</summary>
-    public string ActiveName => AppSettings.ActiveByok?.Name.Trim() ?? "";
+    /// <summary>Follows the chat in front: the picker shows its provider and switches only that chat.</summary>
+    public void Attach(ChatViewModel chat)
+    {
+        if (ReferenceEquals(_chat, chat))
+        {
+            return;
+        }
+
+        if (_chat is not null)
+        {
+            _chat.PropertyChanged -= OnChatPropertyChanged;
+        }
+
+        _chat = chat;
+        chat.PropertyChanged += OnChatPropertyChanged;
+        Reload();
+        OnPropertyChanged(nameof(CanSwitch));
+    }
+
+    private void OnChatPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ChatViewModel.IsBusy))
+        {
+            OnPropertyChanged(nameof(CanSwitch));
+            OnPropertyChanged(nameof(RouteText));
+        }
+        else if (e.PropertyName == nameof(ChatViewModel.EndpointName) && !_loading)
+        {
+            Reload();
+        }
+    }
+
+    private ByokProvider? ActiveProvider => AppSettings.FindByok(_chat?.EndpointName ?? AppSettings.ByokSelected);
+
+    /// <summary>False while the chat in front runs a turn: a switch restarts its CLI and would cut the turn off.</summary>
+    public bool CanSwitch => _chat is not { IsBusy: true };
+
+    /// <summary>True when a BYOK provider (not Default) is in use.</summary>
+    public bool IsActive => ActiveProvider is not null;
+
+    /// <summary>The chat's provider name, or "" for Default.</summary>
+    public string ActiveName => ActiveProvider?.Name.Trim() ?? "";
 
     /// <summary>Where Claude goes with the current choice, in words.</summary>
-    public string RouteText => AppSettings.ActiveByok is not { } provider
-        ? "Claude uses your Claude login."
-        : provider.Model.Length == 0 && provider.SmartModel.Length == 0
-            ? $"Claude uses {provider.Name.Trim()}. It has no model name yet; add one in settings.json."
-            : $"Claude uses {provider.Name.Trim()}. Applies to sessions started from now on.";
+    public string RouteText => !CanSwitch
+        ? "A turn is running. Switch the provider when it finishes."
+        : ActiveProvider is not { } provider
+            ? "Claude uses your Claude login in this chat."
+            : provider.Model.Length == 0 && provider.SmartModel.Length == 0
+                ? $"This chat uses {provider.Name.Trim()}. It has no model name yet; add one in settings.json."
+                : $"This chat uses {provider.Name.Trim()}.";
 
     /// <summary>Re-reads the provider list and the current choice; the flyout calls this when it opens.</summary>
     public void Reload()
@@ -77,11 +121,22 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (!CanSwitch)
+        {
+            Reload();
+            return;
+        }
+
         // Our own write raises Changed; rebuilding the list from inside the ListView's selection change is what to avoid.
+        // The stored choice is what chats opened from now on start with; the chat in front switches at once.
         _loading = true;
         try
         {
             AppSettings.ByokSelected = value.Name;
+            if (_chat is not null)
+            {
+                _ = _chat.SetEndpointAsync(value.Name);
+            }
         }
         finally
         {
@@ -101,5 +156,12 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
         }
     }
 
-    public void Dispose() => AppSettings.Changed -= OnSettingsChanged;
+    public void Dispose()
+    {
+        AppSettings.Changed -= OnSettingsChanged;
+        if (_chat is not null)
+        {
+            _chat.PropertyChanged -= OnChatPropertyChanged;
+        }
+    }
 }

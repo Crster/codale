@@ -62,10 +62,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             if (e.PropertyName == nameof(CliEndpointViewModel.ActiveName))
             {
                 OnPropertyChanged(nameof(EndpointLabel));
-
-                // The provider is fixed when the CLI spawns: restart the chat in front onto
-                // the new one (no-op when it already runs on it).
-                _ = Chat.ApplyProviderChangeAsync();
             }
         };
 
@@ -126,6 +122,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     [NotifyPropertyChangedFor(nameof(IsIsolated))]
     [NotifyPropertyChangedFor(nameof(EndpointLabel))]
     public partial ChatViewModel Chat { get; set; }
+
+    /// <summary>The provider picker follows the chat in front.</summary>
+    partial void OnChatChanged(ChatViewModel value) => CliEndpoint.Attach(value);
 
     /// <summary>The status bar's CLI endpoint button: the selected custom provider's name, else "Default".</summary>
     public string EndpointLabel => CliEndpoint.IsActive && CliEndpoint.ActiveName is { Length: > 0 } name ? name : "Default";

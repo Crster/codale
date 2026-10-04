@@ -2207,7 +2207,10 @@
                         Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
                     <!--  The BYOK provider picker: providers are configured in Settings, here one is chosen  -->
-                    <Button Padding="8,2" ToolTipService.ToolTip="Agent provider">
+                    <Button
+                        Padding="8,2"
+                        IsEnabled="{x:Bind ViewModel.CliEndpoint.CanSwitch, Mode=OneWay}"
+                        ToolTipService.ToolTip="Agent provider for this chat">
                         <Button.Flyout>
                             <Flyout
                                 FlyoutPresenterStyle="{StaticResource EndpointFlyout}"

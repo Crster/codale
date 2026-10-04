@@ -1366,7 +1366,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>The BYOK provider the live session was spawned with ("" for Default); null before the first connect.</summary>
     private string? _connectedProvider;
 
-    private static string SelectedProviderName() => AppSettings.ActiveByok?.Name.Trim() ?? "";
+    /// <summary>
+    /// The BYOK provider this chat uses ("" for Default). Each chat has its own; a new one starts
+    /// on the provider last picked. A change reaches the CLI through <see cref="SetEndpointAsync"/>.
+    /// </summary>
+    public string EndpointName { get; private set; } = AppSettings.ActiveByok?.Name.Trim() ?? "";
+
+    private string SelectedProviderName() => AppSettings.FindByok(EndpointName)?.Name.Trim() ?? "";
 
     public async Task ConnectAsync()
     {
@@ -1438,8 +1444,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         var model = endpointModels.Count > 0 || claudeEndpoint is not null
-            ? RequestedModel is { Length: > 0 } picked ? picked : endpointModels.FirstOrDefault()?.Id
+            ? EndpointModelFor(RequestedModel, endpointModels)
             : LaunchValue(RequestedModel);
+
+        // A stale Claude alias (sonnet, opus...) the provider does not serve is replaced by the
+        // model it maps to, so the picker shows what the session really runs.
+        if (endpointModels.Count > 0 && model is not null && RequestedModel is { Length: > 0 } && RequestedModel != model)
+        {
+            RequestedModel = model;
+        }
 
         // A custom endpoint's models are unknown to the effort tables, so they get only a pick.
         var effort = ClaudeSessionOptions.ClampEffort(claudeEndpoint is not null ? RequestedEffort : LaunchValue(RequestedEffort));
@@ -1706,13 +1719,35 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
          (_readGuardActive && denied.ToolName == "Read" && message.Contains("hook", StringComparison.OrdinalIgnoreCase)));
 
     /// <summary>True when this chat runs against the custom endpoint.</summary>
-    private bool IsEndpointActive => _endpointSettings?.IsActive == true;
+    private bool IsEndpointActive => _endpointSettings?.IsActive(EndpointName) == true;
+
+    /// <summary>
+    /// A saved pick such as "sonnet" or "claude-opus-5-5" means nothing to a custom provider:
+    /// opus / fable become its smart model, anything else not on its list its default model.
+    /// </summary>
+    internal static string? EndpointModelFor(string? requested, IReadOnlyList<AgentModelInfo> endpointModels)
+    {
+        if (endpointModels.Count == 0)
+        {
+            return string.IsNullOrEmpty(requested) ? null : requested;
+        }
+
+        if (!string.IsNullOrEmpty(requested) && endpointModels.Any(m => m.Id == requested))
+        {
+            return requested;
+        }
+
+        var smart = requested is not null &&
+            (requested.Contains("opus", StringComparison.OrdinalIgnoreCase) || requested.Contains("fable", StringComparison.OrdinalIgnoreCase));
+        var fallback = smart ? endpointModels.FirstOrDefault(m => !m.IsDefault) : null;
+        return (fallback ?? endpointModels.FirstOrDefault(m => m.IsDefault) ?? endpointModels[0]).Id;
+    }
 
     /// <summary>The endpoint's default and smart model as a catalogue; empty when it is off or has no names.</summary>
-    private IReadOnlyList<AgentModelInfo> EndpointModels() => _endpointSettings?.Models() ?? [];
+    private IReadOnlyList<AgentModelInfo> EndpointModels() => _endpointSettings?.Models(EndpointName) ?? [];
 
     /// <summary>The endpoint as Claude's spawn environment, or null when it is off.</summary>
-    private IReadOnlyDictionary<string, string>? ClaudeEndpointEnvironment() => _endpointSettings?.ClaudeEnvironment();
+    private IReadOnlyDictionary<string, string>? ClaudeEndpointEnvironment() => _endpointSettings?.ClaudeEnvironment(EndpointName);
 
     /// <summary>The standing instruction followed by the enabled MCP servers' usage note, when there is one.</summary>
     private string WithMcpDirective(string directive, IReadOnlyList<McpServerSpec> servers)
@@ -1859,7 +1894,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             case AssistantMessageCompleted done:
                 if (_status.IsCustomProvider && done.Usage is { } served)
                 {
-                    _status.RecordCustomCall(served, AppSettings.ActiveByok);
+                    _status.RecordCustomCall(served, AppSettings.FindByok(EndpointName));
                 }
 
                 if (done.ParentToolUseId is { } owner && _tasksByToolUse.TryGetValue(owner, out var subagent))
@@ -3461,13 +3496,22 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>
-    /// Moves a connected chat onto the provider now selected in the status bar. The provider
-    /// is part of the CLI's spawn environment, so the CLI restarts and resumes the same
-    /// conversation - also mid turn, which is stopped (the reply so far stays in the history).
-    /// Nothing connected: the next connect reads the selection anyway.
+    /// Moves this chat onto the named provider ("" for Default). The provider is part of the
+    /// CLI's spawn environment, so a connected CLI restarts and resumes the same conversation.
+    /// The picker is disabled while a turn runs, so a turn is never cut off here.
+    /// Nothing connected: the next connect reads the choice anyway.
     /// </summary>
-    public async Task ApplyProviderChangeAsync()
+    public async Task SetEndpointAsync(string name)
     {
+        name = name.Trim();
+        if (string.Equals(EndpointName, name, StringComparison.OrdinalIgnoreCase) || IsBusy)
+        {
+            return;
+        }
+
+        EndpointName = name;
+        OnPropertyChanged(nameof(EndpointName));
+
         if (!IsConnected || _session is null || _connecting || _connectedProvider == SelectedProviderName())
         {
             return;
@@ -3485,7 +3529,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             Add(new NoticeItem
             {
-                Text = $"Switched to {(SelectedProviderName() is { Length: > 0 } name ? name : "the Claude login")}. Any turn in progress was stopped; send your message again.",
+                Text = $"Switched to {(SelectedProviderName() is { Length: > 0 } now ? now : "the Claude login")}. The conversation continues.",
                 Severity = NoticeSeverity.Info,
             });
         }

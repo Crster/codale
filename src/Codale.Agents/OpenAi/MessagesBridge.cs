@@ -235,9 +235,11 @@ public sealed class MessagesBridge : IDisposable
         var smart = route.SmartModel.Length > 0 ? route.SmartModel : route.DefaultModel;
         var normal = route.DefaultModel.Length > 0 ? route.DefaultModel : route.SmartModel;
         if (requested.Length == 0 || requested.StartsWith("claude", StringComparison.OrdinalIgnoreCase) ||
-            requested is "opus" or "sonnet" or "haiku")
+            requested is "opus" or "sonnet" or "haiku" or "fable")
         {
-            var mapped = requested.Contains("opus", StringComparison.OrdinalIgnoreCase) ? smart : normal;
+            var isSmart = requested.Contains("opus", StringComparison.OrdinalIgnoreCase) ||
+                requested.Contains("fable", StringComparison.OrdinalIgnoreCase);
+            var mapped = isSmart ? smart : normal;
             return mapped.Length > 0 ? mapped : requested;
         }
 

@@ -521,21 +521,21 @@ public static class AppSettings
     }
 
     /// <summary>The selected provider (a copy), or null when Default is chosen or the name no longer exists.</summary>
-    public static ByokProvider? ActiveByok
-    {
-        get
-        {
-            var selected = ByokSelected;
-            if (selected.Length == 0)
-            {
-                return null;
-            }
+    public static ByokProvider? ActiveByok => FindByok(ByokSelected);
 
-            lock (FileLock)
-            {
-                var found = Providers().FirstOrDefault(p => string.Equals(p.Name.Trim(), selected, StringComparison.OrdinalIgnoreCase));
-                return found is null ? null : Clone(found);
-            }
+    /// <summary>A provider by name (a copy), or null for Default ("") or a name that no longer exists.</summary>
+    public static ByokProvider? FindByok(string? name)
+    {
+        var wanted = name?.Trim() ?? "";
+        if (wanted.Length == 0)
+        {
+            return null;
+        }
+
+        lock (FileLock)
+        {
+            var found = Providers().FirstOrDefault(p => string.Equals(p.Name.Trim(), wanted, StringComparison.OrdinalIgnoreCase));
+            return found is null ? null : Clone(found);
         }
     }
 
