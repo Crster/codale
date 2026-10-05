@@ -2025,6 +2025,10 @@ public sealed partial class WorkspacePage : Page
     private async Task CycleChatModeAsync()
     {
         var chat = ViewModel.Chat;
+        if (!chat.CanChangeMode)
+        {
+            return;
+        }
 
         // The CLI's older names for manual and full sit at the same stops.
         var current = chat.PermissionMode switch
@@ -3108,6 +3112,11 @@ public sealed partial class WorkspacePage : Page
     /// </summary>
     private void OnModeChipClick(object sender, RoutedEventArgs e)
     {
+        if (!ViewModel.Chat.CanChangeMode)
+        {
+            return;
+        }
+
         var panel = new StackPanel { Spacing = 2, MinWidth = 300 };
         var flyout = PickerFlyout(panel);
         var current = ViewModel.Chat.PermissionMode;

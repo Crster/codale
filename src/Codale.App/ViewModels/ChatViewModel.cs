@@ -127,10 +127,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>This conversation's own status: model, context, cost and the files it changed.</summary>
     public StatusViewModel Status => _status;
 
-    /// <summary>Labels the custom-provider usage button with the chat's selected provider, or "Claude" when none is.</summary>
+    /// <summary>
+    /// Labels the custom-provider usage button with the chat's selected provider; with none,
+    /// the background-task provider (whose calls are what the button then counts), else "Claude".
+    /// </summary>
     public void RefreshCustomProviderName()
     {
-        _status.CustomProviderName = SelectedProviderName() is { Length: > 0 } providerName ? providerName : "Claude";
+        _status.CustomProviderName =
+            SelectedProviderName() is { Length: > 0 } providerName ? providerName
+            : AppSettings.HelperApiProvider?.Provider.Name.Trim() is { Length: > 0 } helperName ? helperName
+            : "Claude";
     }
 
     /// <summary>
@@ -249,9 +255,21 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (existing is not null)
         {
             _exploreLinked.Add(existing);
+            existing.Cancel = run.Cancel;
             existing.AppendOutput("Searching the code...\n");
-            run.Progress += line => _dispatcher.TryEnqueue(() => existing.AppendOutput(line + "\n"));
-            run.Finished += _ => _dispatcher.TryEnqueue(() => _exploreLinked.Remove(existing));
+            existing.AddText("Searching the code...");
+
+            // A subagent's peek shows its transcript entries, not the raw log.
+            run.Progress += line => _dispatcher.TryEnqueue(() =>
+            {
+                existing.AppendOutput(line + "\n");
+                existing.AddText(line);
+            });
+            run.Finished += _ => _dispatcher.TryEnqueue(() =>
+            {
+                _exploreLinked.Remove(existing);
+                existing.Cancel = null;
+            });
             return;
         }
 
@@ -262,13 +280,17 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             Title = "explore: " + run.Question.Trim().ReplaceLineEndings(" "),
             StartedAt = run.StartedAt,
             Header = $"[explore]\n{run.Question.Trim()}\n\n",
+            Cancel = run.Cancel,
         };
         AddTask(item);
         item.AppendOutput("Searching the code...\n");
 
         run.Progress += line => _dispatcher.TryEnqueue(() => item.AppendOutput(line + "\n"));
         run.Finished += failed => _dispatcher.TryEnqueue(() =>
-            item.Status = failed ? RunningTaskStatus.Failed : RunningTaskStatus.Completed);
+        {
+            item.Cancel = null;
+            item.Status = failed ? RunningTaskStatus.Failed : RunningTaskStatus.Completed;
+        });
     }
 
     private void OnHostedTaskStarted(HostedTask hosted)
@@ -718,6 +740,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        if (task.Cancel is { } cancel)
+        {
+            cancel();
+            return;
+        }
+
         if (task.RuntimeId is not { } id || _session is not { } session || !task.IsRunning)
         {
             return;
@@ -903,7 +931,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsBusyWorking))]
     [NotifyPropertyChangedFor(nameof(ShowStop))]
+    [NotifyPropertyChangedFor(nameof(CanChangeMode))]
     public partial bool IsBusy { get; set; }
+
+    /// <summary>The permission mode is locked while a turn is running.</summary>
+    public bool CanChangeMode => !IsBusy;
 
     /// <summary>Running a turn without waiting on anyone: the tab's blue dot. Waiting shows amber instead.</summary>
     public bool IsBusyWorking => IsBusy && !IsWaitingForYou;

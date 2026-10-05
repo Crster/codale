@@ -20,6 +20,23 @@ public sealed class ExploreRun(string question)
     /// <summary>Raised once, with true when the search failed.</summary>
     public event Action<bool>? Finished;
 
+    private readonly CancellationTokenSource _cancel = new();
+
+    internal CancellationToken Token => _cancel.Token;
+
+    /// <summary>Stops the search; the tool call then fails with a cancellation.</summary>
+    public void Cancel()
+    {
+        try
+        {
+            _cancel.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Already finished.
+        }
+    }
+
     internal void Report(string line) => Progress?.Invoke(line);
 
     internal void Finish(bool failed) => Finished?.Invoke(failed);
@@ -70,6 +87,8 @@ public sealed class HelperAssistService(IHelperModel helper, string runDirectory
         }
 
         var run = new ExploreRun(question);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, run.Token);
+        ct = linked.Token;
         ExploreStarted?.Invoke(run);
         run.Report("Searching the code...");
 

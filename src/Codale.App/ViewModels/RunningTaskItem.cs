@@ -155,7 +155,20 @@ public sealed partial class RunningTaskItem : ObservableObject
     public partial bool IsStopping { get; set; }
 
     /// <summary>Only runtime-tracked, still-running tasks can be stopped from here.</summary>
-    public bool CanStop => IsRunning && (RuntimeId is not null || Hosted is not null) && !IsStopping;
+    public bool CanStop => IsRunning && (RuntimeId is not null || Hosted is not null || Cancel is not null) && !IsStopping;
+
+    /// <summary>Ends work Codale runs in-process (an explore); null for tasks stopped another way.</summary>
+    public Action? Cancel
+    {
+        get => _cancel;
+        set
+        {
+            _cancel = value;
+            OnPropertyChanged(nameof(CanStop));
+        }
+    }
+
+    private Action? _cancel;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsRunning))]
