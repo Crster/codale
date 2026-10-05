@@ -491,6 +491,7 @@ public sealed partial class WorkspacePage : Page
         CrashLog.Trace("Chat tab open requested");
 
         var chat = ViewModel.FreshChat();
+        await ViewModel.ApplyDefaultsToEmptyChatAsync(chat);
         ShowChatTab(chat);
 
         // The CLI connects the first time a chat tab exists, not on window load.

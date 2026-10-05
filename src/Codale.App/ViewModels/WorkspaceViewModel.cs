@@ -624,43 +624,52 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         // The conversation in front keeps running in its own tab; the new one gets a
         // tab of its own - unless the one in front never started anything.
         var chat = FreshChat();
-
-        // A reused empty chat may still carry the last session's temporary picks; a new
-        // chat starts from Settings. Picks made later in the session override them again.
-        if (!chat.HasConversation)
-        {
-            var model = AppSettings.DefaultModel is { Length: > 0 } m ? m : null;
-            var effort = AppSettings.DefaultEffort is { Length: > 0 } e ? e : null;
-            if (chat.IsConnected)
-            {
-                if (chat.RequestedModel != model || chat.RequestedEffort != effort)
-                {
-                    chat.RequestedModel = model;
-                    chat.RequestedEffort = effort;
-                    if (!await chat.TryApplyModelEffortLiveAsync(model, effort))
-                    {
-                        await chat.RestartWithCurrentConfigAsync();
-                    }
-                }
-
-                if (AppSettings.DefaultChatMode is { Length: > 0 } mode)
-                {
-                    await chat.SetPermissionModeAsync(mode);
-                }
-            }
-            else
-            {
-                chat.RequestedModel = model;
-                chat.RequestedEffort = effort;
-                chat.PermissionMode = AppSettings.DefaultChatMode;
-            }
-        }
+        await ApplyDefaultsToEmptyChatAsync(chat);
 
         ChatActivationRequested?.Invoke(this, chat);
 
         if (!chat.IsConnected)
         {
             await chat.ConnectAsync();
+        }
+    }
+
+    /// <summary>
+    /// A reused empty chat may still carry the last session's temporary picks (or defaults
+    /// from before Settings changed); a new chat starts from Settings. Picks made later in
+    /// the session override them again. A chat with a conversation is left alone.
+    /// </summary>
+    public async Task ApplyDefaultsToEmptyChatAsync(ChatViewModel chat)
+    {
+        if (chat.HasConversation)
+        {
+            return;
+        }
+
+        var model = AppSettings.DefaultModel is { Length: > 0 } m ? m : null;
+        var effort = AppSettings.DefaultEffort is { Length: > 0 } e ? e : null;
+        if (chat.IsConnected)
+        {
+            if (chat.RequestedModel != model || chat.RequestedEffort != effort)
+            {
+                chat.RequestedModel = model;
+                chat.RequestedEffort = effort;
+                if (!await chat.TryApplyModelEffortLiveAsync(model, effort))
+                {
+                    await chat.RestartWithCurrentConfigAsync();
+                }
+            }
+
+            if (AppSettings.DefaultChatMode is { Length: > 0 } mode)
+            {
+                await chat.SetPermissionModeAsync(mode);
+            }
+        }
+        else
+        {
+            chat.RequestedModel = model;
+            chat.RequestedEffort = effort;
+            chat.PermissionMode = AppSettings.DefaultChatMode;
         }
     }
 

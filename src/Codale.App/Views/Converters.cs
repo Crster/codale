@@ -348,8 +348,16 @@ public sealed partial class PathToImageSourceConverter : IValueConverter
 
         // These render as ~32px chips; decoding at 64px keeps a 4K paste from materialising
         // as a ~33MB bitmap per chip. DecodePixelWidth must be set before UriSource.
-        var image = new BitmapImage { DecodePixelWidth = 64, UriSource = new Uri(path) };
-        return image;
+        // A throw here escapes through XAML binding as an unhandled exception and takes the app down.
+        try
+        {
+            return new BitmapImage { DecodePixelWidth = 64, UriSource = new Uri(path) };
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Error("chat", $"attachment thumbnail failed for {path}", ex);
+            return null;
+        }
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, string language) =>

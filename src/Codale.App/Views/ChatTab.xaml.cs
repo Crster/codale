@@ -1011,6 +1011,7 @@ public sealed partial class ChatTab : UserControl
         }
         catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or TaskCanceledException)
         {
+            CrashLog.Error("chat", "clipboard image could not be saved", ex);
             return null;
         }
     }
