@@ -100,6 +100,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _status = status;
         _endpointSettings = endpointSettings;
         _mcpSettings = mcpSettings;
+        RefreshCustomProviderName();
 
         _turnTimer = _dispatcher.CreateTimer();
         _turnTimer.Interval = TimeSpan.FromMilliseconds(1000);
@@ -126,13 +127,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>This conversation's own status: model, context, cost and the files it changed.</summary>
     public StatusViewModel Status => _status;
 
-    /// <summary>Labels the custom-provider usage button with the Background tasks provider chosen in Settings.</summary>
+    /// <summary>Labels the custom-provider usage button with the chat's selected provider, or "Claude" when none is.</summary>
     public void RefreshCustomProviderName()
     {
-        if (AppSettings.HelperApiProvider?.Provider.Name.Trim() is { Length: > 0 } providerName)
-        {
-            _status.CustomProviderName = providerName;
-        }
+        _status.CustomProviderName = SelectedProviderName() is { Length: > 0 } providerName ? providerName : "Claude";
     }
 
     /// <summary>
@@ -3511,6 +3509,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         EndpointName = name;
         OnPropertyChanged(nameof(EndpointName));
+        RefreshCustomProviderName();
 
         if (!IsConnected || _session is null || _connecting || _connectedProvider == SelectedProviderName())
         {

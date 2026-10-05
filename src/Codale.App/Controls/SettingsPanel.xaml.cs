@@ -485,20 +485,46 @@ public sealed partial class SettingsPanel : UserControl
         };
         panel.Children.Add(key);
 
-        Field("Default model", "e.g. deepseek-chat", provider.Model, v => provider.Model = v);
-        Field("Smart model", "e.g. deepseek-reasoner (optional)", provider.SmartModel, v => provider.SmartModel = v);
+        // Model pickers list what the endpoint's /models returns; typing an id still works.
+        var modelBoxes = new List<ComboBox>();
 
-        void PriceField(string label, decimal value, Action<decimal> apply)
+        ComboBox ModelField(string label, string placeholder, string value, Action<string> apply)
         {
-            Field(label, "USD per 1M tokens (optional)", value > 0 ? value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "", text =>
+            var box = new ComboBox
             {
-                apply(decimal.TryParse(text, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var parsed) && parsed > 0 ? parsed : 0);
-            });
+                Header = label,
+                PlaceholderText = placeholder,
+                IsEditable = true,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Text = value,
+            };
+            if (value.Length > 0)
+            {
+                box.Items.Add(value);
+                box.SelectedIndex = 0;
+            }
+
+            box.TextSubmitted += (_, e) =>
+            {
+                apply(e.Text.Trim());
+                SaveProviders();
+            };
+            box.SelectionChanged += (_, _) =>
+            {
+                if (box.SelectedItem is string id)
+                {
+                    apply(id);
+                    SaveProviders();
+                }
+            };
+            box.DropDownOpened += async (_, _) => await LoadModelsAsync(provider, modelBoxes);
+            panel.Children.Add(box);
+            modelBoxes.Add(box);
+            return box;
         }
 
-        PriceField("Input price", provider.InputPricePerMillion, v => provider.InputPricePerMillion = v);
-        PriceField("Output price", provider.OutputPricePerMillion, v => provider.OutputPricePerMillion = v);
-        PriceField("Cached input price", provider.CachedInputPricePerMillion, v => provider.CachedInputPricePerMillion = v);
+        ModelField("Lite model", "Select a model", provider.LiteModel, v => provider.LiteModel = v);
+        ModelField("Smart model", "Select a model (optional)", provider.SmartModel, v => provider.SmartModel = v);
 
         var remove = new Button { Content = "Remove provider", HorizontalAlignment = HorizontalAlignment.Right };
         remove.Click += (_, _) =>
@@ -521,6 +547,66 @@ public sealed partial class SettingsPanel : UserControl
 
         expander.Content = panel;
         return expander;
+    }
+
+    private static readonly System.Net.Http.HttpClient ModelHttp = new() { Timeout = TimeSpan.FromSeconds(10) };
+
+    /// <summary>Fills the model dropdowns from the endpoint's OpenAI-style GET /models; failures leave the current list.</summary>
+    private static async Task LoadModelsAsync(ByokProvider provider, List<ComboBox> boxes)
+    {
+        if (string.IsNullOrWhiteSpace(provider.BaseUrl))
+        {
+            return;
+        }
+
+        List<string> ids;
+        try
+        {
+            using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, provider.BaseUrl.TrimEnd('/') + "/models");
+            if (provider.ApiKey.Length > 0)
+            {
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", provider.ApiKey);
+            }
+
+            using var response = await ModelHttp.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            using var doc = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            ids = doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == System.Text.Json.JsonValueKind.Array
+                ? data.EnumerateArray()
+                    .Select(m => m.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "")
+                    .Where(id => id.Length > 0)
+                    .Distinct()
+                    .Order()
+                    .ToList()
+                : [];
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        foreach (var box in boxes)
+        {
+            var current = box.Text;
+            box.Items.Clear();
+            foreach (var id in ids)
+            {
+                box.Items.Add(id);
+            }
+
+            if (current.Length > 0)
+            {
+                var index = ids.IndexOf(current);
+                if (index >= 0)
+                {
+                    box.SelectedIndex = index;
+                }
+                else
+                {
+                    box.Text = current;
+                }
+            }
+        }
     }
 
     private void SaveProviders()

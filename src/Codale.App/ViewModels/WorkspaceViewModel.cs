@@ -140,7 +140,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     {
         if (AppSettings.HelperApiProvider is { } api)
         {
-            return api.Provider.Name.Trim() is { Length: > 0 } name ? name : "Custom provider";
+            return api.Provider.Name.Trim() is { Length: > 0 } name ? name : "Claude";
         }
 
         // No usable custom provider: HelperModel falls back to the Claude CLI.

@@ -581,10 +581,29 @@ public sealed partial class EditorTab
     /// <summary>Closed by light dismiss rather than by our own code: treat it as the close button.</summary>
     private void OnAskPopupClosed(object? sender, object e)
     {
-        if (_askShown && IsLoaded)
+        if (!_askShown || !IsLoaded)
         {
-            CloseAskPanel();
+            return;
         }
+
+        // A popup only reads IsLightDismissEnabled when it opens, so a click outside can still
+        // close it after a job started. While one runs, put it back: only Stop or the close
+        // button may end it.
+        if (_session.IsRunning)
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_askShown && IsLoaded && _session.IsRunning)
+                {
+                    RefreshAskLightDismiss();
+                    AskPopup.IsOpen = true;
+                    PositionAskPanel();
+                }
+            });
+            return;
+        }
+
+        CloseAskPanel();
     }
 
     /// <summary>

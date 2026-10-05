@@ -82,7 +82,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
         ? "A turn is running. Switch the provider when it finishes."
         : ActiveProvider is not { } provider
             ? "Claude uses your Claude login in this chat."
-            : provider.Model.Length == 0 && provider.SmartModel.Length == 0
+            : provider.LiteModel.Length == 0 && provider.SmartModel.Length == 0
                 ? $"This chat uses {provider.Name.Trim()}. It has no model name yet; add one in settings.json."
                 : $"This chat uses {provider.Name.Trim()}.";
 

@@ -111,10 +111,10 @@ public sealed partial class StatusViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasClaudeUsage))]
     public partial bool IsCustomProvider { get; set; }
 
-    /// <summary>The active custom provider's own name, as set in settings; labels its usage button.</summary>
+    /// <summary>The chat's selected provider name (or "Claude"); labels its usage button.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CustomButtonText))]
-    public partial string CustomProviderName { get; set; } = "Custom provider";
+    public partial string CustomProviderName { get; set; } = "Claude";
 
     /// <summary>The Claude CLI's subscription meter only applies while talking to Anthropic itself.</summary>
     public bool HasClaudeUsage => HasUsage;

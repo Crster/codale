@@ -15,7 +15,7 @@ namespace Codale.Agents.OpenAi;
 /// The OpenAI-compatible provider a Claude session talks to through the bridge: where to
 /// send, with which key, and the model names to answer Claude's own model ids with.
 /// </summary>
-public sealed record OpenAiRoute(string BaseUrl, string ApiKey, string DefaultModel, string SmartModel);
+public sealed record OpenAiRoute(string BaseUrl, string ApiKey, string LiteModel, string SmartModel);
 
 /// <summary>
 /// A loopback Anthropic Messages API in front of OpenAI-compatible providers, so the Claude
@@ -232,8 +232,8 @@ public sealed class MessagesBridge : IDisposable
     /// </summary>
     internal static string ProviderModel(string requested, OpenAiRoute route)
     {
-        var smart = route.SmartModel.Length > 0 ? route.SmartModel : route.DefaultModel;
-        var normal = route.DefaultModel.Length > 0 ? route.DefaultModel : route.SmartModel;
+        var smart = route.SmartModel.Length > 0 ? route.SmartModel : route.LiteModel;
+        var normal = route.LiteModel.Length > 0 ? route.LiteModel : route.SmartModel;
         if (requested.Length == 0 || requested.StartsWith("claude", StringComparison.OrdinalIgnoreCase) ||
             requested is "opus" or "sonnet" or "haiku" or "fable")
         {

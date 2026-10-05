@@ -16,30 +16,26 @@ public sealed class ByokProvider
     /// <summary>The plain key in memory; settings.json holds it DPAPI-protected (<c>enc:</c> prefix), see <see cref="SecretProtector"/>.</summary>
     public string ApiKey { get; set; } = "";
 
-    /// <summary>The model a session starts with, and the everyday / background one.</summary>
-    public string Model { get; set; } = "";
+    /// <summary>The lite model: what a session starts with, and the everyday / background one.</summary>
+    [System.Text.Json.Serialization.JsonPropertyName("model")]
+    public string LiteModel { get; set; } = "";
 
-    /// <summary>The most capable model, offered next to the default; may be blank.</summary>
+    /// <summary>The most capable model, offered next to the lite model; may be blank.</summary>
     public string SmartModel { get; set; } = "";
 
-    /// <summary>USD per million fresh input tokens, for the usage estimate; 0 when unset.</summary>
-    public decimal InputPricePerMillion { get; set; }
+    // Usage estimates use Claude Sonnet 5.5 rates as the base cost (USD per million tokens).
+    private const decimal InputPricePerMillion = 2m;
+    private const decimal OutputPricePerMillion = 10m;
+    private const decimal CachedInputPricePerMillion = 0.20m;
 
-    /// <summary>USD per million output tokens; 0 when unset.</summary>
-    public decimal OutputPricePerMillion { get; set; }
+    /// <summary>Always true: every provider is estimated at the Sonnet 5.5 base rates.</summary>
+    public bool HasPricing => true;
 
-    /// <summary>USD per million cached input tokens (reads); 0 bills them as fresh input.</summary>
-    public decimal CachedInputPricePerMillion { get; set; }
-
-    /// <summary>True once any price is set, so the cost row can say "not set" instead of $0.</summary>
-    public bool HasPricing => InputPricePerMillion > 0 || OutputPricePerMillion > 0;
-
-    /// <summary>What one request costs at these prices.</summary>
+    /// <summary>What one request costs at the Sonnet 5.5 base rates.</summary>
     public decimal EstimateCost(Codale.Core.Agents.UsageSnapshot usage)
     {
-        var cacheRate = CachedInputPricePerMillion > 0 ? CachedInputPricePerMillion : InputPricePerMillion;
         return (usage.InputTokens + usage.CacheCreationInputTokens) * InputPricePerMillion / 1_000_000m
-            + usage.CacheReadInputTokens * cacheRate / 1_000_000m
+            + usage.CacheReadInputTokens * CachedInputPricePerMillion / 1_000_000m
             + usage.OutputTokens * OutputPricePerMillion / 1_000_000m;
     }
 }

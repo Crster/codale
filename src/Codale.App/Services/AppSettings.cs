@@ -264,7 +264,7 @@ public static class AppSettings
                 : all;
             foreach (var provider in candidates)
             {
-                var model = string.IsNullOrWhiteSpace(provider.Model) ? provider.SmartModel : provider.Model;
+                var model = string.IsNullOrWhiteSpace(provider.LiteModel) ? provider.SmartModel : provider.LiteModel;
                 if (!string.IsNullOrWhiteSpace(provider.BaseUrl) && !string.IsNullOrWhiteSpace(provider.ApiKey) && !string.IsNullOrWhiteSpace(model))
                 {
                     return (provider, (provider.BaseUrl.Trim(), provider.ApiKey.Trim(), model.Trim()));
@@ -427,9 +427,7 @@ public static class AppSettings
 
     private static ByokProvider Clone(ByokProvider p, string? apiKey = null) => new()
     {
-        Name = p.Name, BaseUrl = p.BaseUrl, ApiKey = apiKey ?? p.ApiKey, Model = p.Model, SmartModel = p.SmartModel,
-        InputPricePerMillion = p.InputPricePerMillion, OutputPricePerMillion = p.OutputPricePerMillion,
-        CachedInputPricePerMillion = p.CachedInputPricePerMillion,
+        Name = p.Name, BaseUrl = p.BaseUrl, ApiKey = apiKey ?? p.ApiKey, LiteModel = p.LiteModel, SmartModel = p.SmartModel,
     };
 
     /// <summary>Serialises providers for the file (<paramref name="protect"/>: keys DPAPI-wrapped) or, unprotected, for change comparison.</summary>
@@ -731,7 +729,7 @@ public static class AppSettings
                     Name = "Custom endpoint",
                     BaseUrl = legacyUrl,
                     ApiKey = store.GetSetting("endpoint.apiKey") ?? "",
-                    Model = store.GetSetting("endpoint.model") ?? "",
+                    LiteModel = store.GetSetting("endpoint.model") ?? "",
                     SmartModel = store.GetSetting("endpoint.smartModel") ?? "",
                 });
                 selected = "Custom endpoint";

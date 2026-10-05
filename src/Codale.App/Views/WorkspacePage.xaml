@@ -1210,6 +1210,7 @@
 
                                         <Button
                                             Click="OnModelChipClick"
+                                            IsEnabled="{x:Bind ViewModel.Chat.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
                                             Style="{StaticResource SessionControlButton}"
                                             ToolTipService.ToolTip="{x:Bind ViewModel.Chat.ModelDisplay, Mode=OneWay}">
                                             <Grid ColumnSpacing="6" RowSpacing="2">
@@ -1248,8 +1249,9 @@
                                         <Button
                                             Grid.Column="1"
                                             Click="OnEffortChipClick"
+                                            IsEnabled="{x:Bind ViewModel.Chat.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
                                             Style="{StaticResource SessionControlButton}"
-                                            ToolTipService.ToolTip="How hard the model thinks before it answers">
+                                            ToolTipService.ToolTip="How hard the model thinks before it answers (locked while the agent works)">
                                             <Grid ColumnSpacing="6" RowSpacing="2">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
@@ -2112,7 +2114,7 @@
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock FontSize="13" FontWeight="SemiBold" Text="Cost" />
+                                        <TextBlock FontSize="13" FontWeight="SemiBold" Text="Estimated Cost" />
                                         <TextBlock Grid.Column="1" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind ViewModel.Status.CustomCostText, Mode=OneWay}" />
                                     </Grid>
 

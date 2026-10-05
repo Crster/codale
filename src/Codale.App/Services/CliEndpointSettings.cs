@@ -34,14 +34,14 @@ public sealed class CliEndpointSettings
             return models;
         }
 
-        var defaultModel = Clean(active?.Model);
+        var liteModel = Clean(active?.LiteModel);
         var smartModel = Clean(active?.SmartModel);
-        if (defaultModel.Length > 0)
+        if (liteModel.Length > 0)
         {
-            models.Add(new AgentModelInfo { Id = defaultModel, DisplayName = defaultModel, Description = "Default model", IsDefault = true });
+            models.Add(new AgentModelInfo { Id = liteModel, DisplayName = liteModel, Description = "Lite model", IsDefault = true });
         }
 
-        if (smartModel.Length > 0 && !string.Equals(smartModel, defaultModel, StringComparison.Ordinal))
+        if (smartModel.Length > 0 && !string.Equals(smartModel, liteModel, StringComparison.Ordinal))
         {
             models.Add(new AgentModelInfo { Id = smartModel, DisplayName = smartModel, Description = "Smart model" });
         }
@@ -66,10 +66,10 @@ public sealed class CliEndpointSettings
             return null;
         }
 
-        var defaultModel = Clean(active?.Model);
+        var liteModel = Clean(active?.LiteModel);
         var smartModel = Clean(active?.SmartModel);
-        var def = defaultModel.Length > 0 ? defaultModel : smartModel;
-        var smart = smartModel.Length > 0 ? smartModel : defaultModel;
+        var def = liteModel.Length > 0 ? liteModel : smartModel;
+        var smart = smartModel.Length > 0 ? smartModel : liteModel;
 
         var (bridgeUrl, token) = MessagesBridge.Shared.Register(new OpenAiRoute(baseUrl, Clean(active?.ApiKey), def, smart));
         var env = new Dictionary<string, string>

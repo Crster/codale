@@ -60,12 +60,12 @@
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                 <StackPanel Padding="20,0,20,24">
 
-                    <TextBlock Style="{StaticResource GroupTitle}" Text="BYOK providers" />
+                    <TextBlock Style="{StaticResource GroupTitle}" Text="Custom providers" />
                     <Border Style="{StaticResource Card}">
                         <StackPanel Padding="16,12" Spacing="10">
                             <TextBlock
                                 Style="{StaticResource Hint}"
-                                Text="Your own OpenAI-compatible (Chat Completions) endpoints, used by Claude through a local bridge. The base URL is the one an OpenAI SDK takes, usually ending in /v1. Pick one in the status bar; Default uses the Claude CLI login. Also editable in settings.json." />
+                                Text="Your own OpenAI-compatible endpoints, used by Claude through a local bridge. The base URL is the one an OpenAI SDK takes, usually ending in /v1. Pick one in the status bar; Default uses the Claude CLI login. Also editable in settings.json." />
                             <StackPanel x:Name="ProvidersPanel" Spacing="6" />
                             <Button Click="OnAddProviderClick" Content="Add provider" />
                         </StackPanel>
