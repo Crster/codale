@@ -31,11 +31,29 @@ public static class OpenAiApiClient
         OpenAiEndpoint endpoint, string systemPrompt, string prompt, CancellationToken ct, int maxTokens = MaxTokens,
         Action<UsageSnapshot>? onUsage = null)
     {
-        using var reply = await SendAsync(endpoint, () => BuildRequest(endpoint, systemPrompt, prompt, tools: null, maxTokens), ct, onUsage)
-            .ConfigureAwait(false);
+        var cap = maxTokens;
+        JsonDocument reply;
+        string text;
+        while (true)
+        {
+            reply = await SendAsync(endpoint, () => BuildRequest(endpoint, systemPrompt, prompt, tools: null, cap), ct, onUsage)
+                .ConfigureAwait(false);
+            text = ReplyMessage(reply.RootElement) is { } message ? MessageText(message) : "";
 
+            // A reasoning model can spend the whole cap thinking and cut off before any answer
+            // (finish_reason "length", empty content): retry once with room for both.
+            if (string.IsNullOrWhiteSpace(text) && cap == maxTokens && HitLengthLimit(reply.RootElement))
+            {
+                reply.Dispose();
+                cap = Math.Max(maxTokens * 8, 8192);
+                continue;
+            }
+
+            break;
+        }
+
+        using var _ = reply;
         var replyJson = reply.RootElement;
-        var text = ReplyMessage(replyJson) is { } message ? MessageText(message) : "";
         if (string.IsNullOrWhiteSpace(text))
         {
             var responseDebug = replyJson.GetRawText();
@@ -212,6 +230,10 @@ public static class OpenAiApiClient
         choices[0].Prop("message") is { ValueKind: JsonValueKind.Object } message
             ? message
             : null;
+
+    private static bool HitLengthLimit(JsonElement reply) =>
+        reply.Prop("choices") is { ValueKind: JsonValueKind.Array } choices && choices.GetArrayLength() > 0 &&
+        choices[0].Str("finish_reason") == "length";
 
     /// <summary>A message's text: a plain string, or the text parts some providers send instead.</summary>
     private static string MessageText(JsonElement message) => message.Prop("content") switch
