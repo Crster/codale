@@ -1775,6 +1775,9 @@ public sealed partial class WorkspacePage : Page
 
         var star = new GridLength(1, GridUnitType.Star);
         LiveRow.Height = conversation ? star : GridLength.Auto;
+        // An empty chat folds the live row to nothing; hiding the viewer keeps the
+        // panel from showing a dead band between the controls and History.
+        LiveHost.Visibility = conversation ? Visibility.Visible : Visibility.Collapsed;
         HistoryRow.Height = expanded && !folded ? star : GridLength.Auto;
 
         HistoryShowAllButton.Visibility = conversation ? Visibility.Visible : Visibility.Collapsed;

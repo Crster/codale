@@ -129,31 +129,10 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>The status bar's CLI endpoint button: the selected custom provider's name, else "Default".</summary>
     public string EndpointLabel => CliEndpoint.IsActive && CliEndpoint.ActiveName is { Length: > 0 } name ? name : "Default";
 
-    /// <summary>
-    /// What actually answers background jobs (commit messages, session titles, routing,
-    /// search) right now - Settings' "Background tasks" choice, resolved the same way
-    /// <see cref="HelperModel"/> resolves it: the chosen custom provider, else the Claude CLI.
-    /// </summary>
-    public string BackgroundTaskProviderLabel => $"Background tasks · {ResolveBackgroundTaskProviderName()}";
-
-    private static string ResolveBackgroundTaskProviderName()
-    {
-        if (AppSettings.HelperApiProvider is { } api)
-        {
-            return api.Provider.Name.Trim() is { Length: > 0 } name ? name : "Claude";
-        }
-
-        // No usable custom provider: HelperModel falls back to the Claude CLI.
-        return AppSettings.HelperProvider is { Length: > 0 } incomplete
-            ? $"Claude ({incomplete} needs a key and model)"
-            : "Claude (no custom provider with a key and model)";
-    }
-
     private readonly CustomUsageTally _customUsage = new();
 
     private void OnAppSettingsChanged(object? sender, EventArgs e)
     {
-        OnPropertyChanged(nameof(BackgroundTaskProviderLabel));
         foreach (var chat in Chats)
         {
             chat.RefreshCustomProviderName();

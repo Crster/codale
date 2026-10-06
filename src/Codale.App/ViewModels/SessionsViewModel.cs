@@ -63,6 +63,38 @@ public sealed partial class SessionsViewModel : ObservableObject
 
     private void SyncOpenSessions()
     {
+        // Live sessions the scan has not caught up with yet keep a stand-in row: a
+        // brand-new conversation reaches disk only when its first turn flushes, and
+        // until then the list shows nothing where an open tab clearly is. The real
+        // summary replaces the stand-in the moment the scan sees the transcript.
+        foreach (var id in _open.Keys)
+        {
+            if (_placeholders.TryGetValue(id, out var held))
+            {
+                if (Sessions.Any(s => s.SessionId == id && !ReferenceEquals(s, held)))
+                {
+                    Sessions.Remove(held);
+                    _placeholders.Remove(id);
+                }
+
+                continue;
+            }
+
+            if (!Sessions.Any(s => s.SessionId == id))
+            {
+                var placeholder = CreatePlaceholder(id);
+                _placeholders[id] = placeholder;
+                Sessions.Insert(0, placeholder);
+            }
+        }
+
+        // A tab that closed before its transcript landed takes its stand-in back.
+        foreach (var id in _placeholders.Keys.Where(id => !_open.ContainsKey(id)).ToList())
+        {
+            Sessions.Remove(_placeholders[id]);
+            _placeholders.Remove(id);
+        }
+
         var wanted = Sessions.Where(s => s.IsOpen).ToList();
         if (wanted.SequenceEqual(OpenSessions))
         {
@@ -74,6 +106,30 @@ public sealed partial class SessionsViewModel : ObservableObject
         {
             OpenSessions.Add(item);
         }
+    }
+
+    /// <summary>The stand-ins currently standing in <see cref="Sessions"/>; see <see cref="SyncOpenSessions"/>.</summary>
+    private readonly Dictionary<string, SessionListItem> _placeholders = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// A row for a session that is open in a tab but has no transcript yet. Named
+    /// "session {id}" - the short id, the full one rides the row's tooltip - until
+    /// the scan replaces it with the real summary.
+    /// </summary>
+    private SessionListItem CreatePlaceholder(string sessionId)
+    {
+        var item = new SessionListItem
+        {
+            Summary = new TranscriptSummary
+            {
+                SessionId = sessionId,
+                FilePath = Path.Combine(_reader.HistoryDirectory, sessionId + ".jsonl"),
+                UpdatedAt = DateTimeOffset.Now,
+                CustomTitle = $"session {sessionId[..Math.Min(8, sessionId.Length)]}",
+            },
+        };
+        item.ApplyOpenState(_open);
+        return item;
     }
 
     public ObservableCollection<SessionRecord> Interrupted { get; } = [];
@@ -238,6 +294,10 @@ public sealed partial class SessionsViewModel : ObservableObject
             existing.TryAdd(current.SessionId, current);
         }
 
+        // Placeholders hold the list's top slots - they are the newest conversations -
+        // so every scanned row's target index shifts by however many still stand.
+        var offset = _placeholders.Values.Count(Sessions.Contains);
+
         for (var i = 0; i < wanted.Count; i++)
         {
             var summary = wanted[i];
@@ -246,9 +306,12 @@ public sealed partial class SessionsViewModel : ObservableObject
             if (item is not null && item.Summary == summary)
             {
                 var at = Sessions.IndexOf(item);
-                if (at != i)
+                // A replacement above shrank the list mid-loop; the clamped move still
+                // lands every remaining row in scan order (later rows shift it up).
+                var target = Math.Min(i + offset, Sessions.Count - 1);
+                if (at != target)
                 {
-                    Sessions.Move(at, i);
+                    Sessions.Move(at, target);
                 }
 
                 continue;
@@ -262,10 +325,14 @@ public sealed partial class SessionsViewModel : ObservableObject
                 Sessions.Remove(item);
             }
 
-            Sessions.Insert(Math.Min(i, Sessions.Count), fresh);
+            Sessions.Insert(Math.Min(i + offset, Sessions.Count), fresh);
         }
 
-        while (Sessions.Count > wanted.Count)
+        // Placeholders whose transcript the scan still has not seen survive this pass;
+        // the trim below must not eat real rows to make room for them.
+        var standing = _placeholders.Values.Count(Sessions.Contains);
+
+        while (Sessions.Count > wanted.Count + standing)
         {
             Sessions.RemoveAt(Sessions.Count - 1);
         }

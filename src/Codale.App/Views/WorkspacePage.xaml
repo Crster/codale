@@ -1161,10 +1161,13 @@
                         VerticalAlignment="Bottom"
                         Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
+                    <!--  No RowSpacing: with the chat empty the live sections still measure to
+                          a sliver, and Grid.RowSpacing charges both gaps around that dead band.
+                          Each child carries its own top margin instead, and UpdateHistoryLayout
+                          collapses the viewer outright when there is no conversation.  -->
                     <Grid
                         Grid.Row="1"
-                        Margin="12,10,12,12"
-                        RowSpacing="10">
+                        Margin="12,10,12,12">
                         <Grid.RowDefinitions>
                             <!--  What drives the session: always in view  -->
                             <RowDefinition Height="Auto" />
@@ -1173,7 +1176,7 @@
                             <RowDefinition x:Name="HistoryRow" Height="*" />
                         </Grid.RowDefinitions>
 
-                        <StackPanel Spacing="10">
+                        <StackPanel Grid.Row="0" Spacing="10">
 
                                 <!--  Crash recovery: only shown when a session was left running  -->
                                 <InfoBar
@@ -1407,8 +1410,16 @@
 
                         <!--  The live sections, most pressing first: the plan the agent is
                               working through, what is running now, what it changed, and
-                              what it produced. Each hides until it has something.  -->
-                        <ScrollViewer Grid.Row="1" Margin="-12,0" Padding="12,0">
+                              what it produced. Each hides until it has something; the viewer
+                              itself folds away with the whole row while there is no
+                              conversation (UpdateHistoryLayout). Margin-12,0 undoes the
+                              parent's inset so the bar can reach the panel's edge; Padding
+                              puts the content back.  -->
+                        <ScrollViewer
+                            x:Name="LiveHost"
+                            Grid.Row="1"
+                            Margin="-12,10,-12,0"
+                            Padding="12,0">
                             <StackPanel Spacing="10">
                                     <!--  Todos: collapsed until the agent publishes something  -->
                                     <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Chat.Todos.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
@@ -1748,6 +1759,7 @@
                         <Grid
                             x:Name="HistoryHost"
                             Grid.Row="2"
+                            Margin="0,10,0,0"
                             RowSpacing="2"
                             Visibility="{x:Bind ViewModel.Sessions.Sessions.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
                             <Grid.RowDefinitions>
@@ -2166,12 +2178,7 @@
                         <Button.Flyout>
                             <Flyout FlyoutPresenterStyle="{StaticResource EndpointFlyout}" Placement="TopEdgeAlignedRight">
                                 <StackPanel Width="320" Padding="16,14,16,14" Spacing="12">
-                                    <TextBlock FontSize="14" FontWeight="SemiBold" Text="{x:Bind ViewModel.Status.CustomProviderName, Mode=OneWay}" />
-                                    <TextBlock
-                                        FontSize="12"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Text="{x:Bind ViewModel.BackgroundTaskProviderLabel, Mode=OneWay}"
-                                        ToolTipService.ToolTip="Provider used for background tasks: commit messages, titles, routing, search" />
+                                    <TextBlock FontSize="14" FontWeight="SemiBold" Text="{x:Bind ViewModel.Status.CustomProviderName, Mode=OneWay}" ToolTipService.ToolTip="Provider used for background tasks: commit messages, titles, routing, search" />
 
                                     <Grid ColumnSpacing="12">
                                         <Grid.ColumnDefinitions>
