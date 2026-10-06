@@ -51,6 +51,29 @@ public sealed partial class SessionsViewModel : ObservableObject
         {
             item.ApplyOpenState(_open);
         }
+
+        SyncOpenSessions();
+    }
+
+    /// <summary>
+    /// The sessions open in a chat tab, in history order: what the history list folds
+    /// to once the chat in front holds a conversation.
+    /// </summary>
+    public ObservableCollection<SessionListItem> OpenSessions { get; } = [];
+
+    private void SyncOpenSessions()
+    {
+        var wanted = Sessions.Where(s => s.IsOpen).ToList();
+        if (wanted.SequenceEqual(OpenSessions))
+        {
+            return;
+        }
+
+        OpenSessions.Clear();
+        foreach (var item in wanted)
+        {
+            OpenSessions.Add(item);
+        }
     }
 
     public ObservableCollection<SessionRecord> Interrupted { get; } = [];
@@ -246,6 +269,8 @@ public sealed partial class SessionsViewModel : ObservableObject
         {
             Sessions.RemoveAt(Sessions.Count - 1);
         }
+
+        SyncOpenSessions();
     }
 
     [RelayCommand]

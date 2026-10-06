@@ -99,7 +99,10 @@ public sealed partial class WorkspacePage : Page
         ViewModel = workspace;
         ViewModel.PropertyChanged += OnWorkspacePropertyChanged;
         ViewModel.ChatActivationRequested += OnChatActivationRequested;
+        ViewModel.Sessions.Sessions.CollectionChanged += OnHistoryInputsChanged;
+        ViewModel.Sessions.OpenSessions.CollectionChanged += OnHistoryInputsChanged;
         WatchTodos(ViewModel.Chat);
+        WatchConversation(ViewModel.Chat);
         Bindings.Update();
 
         UpdateEmptyState();
@@ -160,6 +163,9 @@ public sealed partial class WorkspacePage : Page
         {
             ViewModel.PropertyChanged -= OnWorkspacePropertyChanged;
             ViewModel.ChatActivationRequested -= OnChatActivationRequested;
+            ViewModel.Sessions.Sessions.CollectionChanged -= OnHistoryInputsChanged;
+            ViewModel.Sessions.OpenSessions.CollectionChanged -= OnHistoryInputsChanged;
+            UnwatchConversation();
 
             foreach (var entry in _chatTabs)
             {
@@ -1675,7 +1681,116 @@ public sealed partial class WorkspacePage : Page
         else if (e.PropertyName == nameof(WorkspaceViewModel.Chat))
         {
             WatchTodos(ViewModel.Chat);
+            WatchConversation(ViewModel.Chat);
         }
+    }
+
+    /// <summary>The chat whose conversation decides how much room History gets.</summary>
+    private ChatViewModel? _conversationWatched;
+
+    /// <summary>Whether that chat held a conversation at the last layout pass.</summary>
+    private bool _hadConversation;
+
+    /// <summary>The reader unfolded History beside a conversation; reset when the conversation state flips.</summary>
+    private bool _historyShowAll;
+
+    private bool _historyLayoutQueued;
+
+    private void WatchConversation(ChatViewModel chat)
+    {
+        UnwatchConversation();
+
+        _conversationWatched = chat;
+        _hadConversation = chat.HasConversation;
+        _historyShowAll = false;
+        chat.Items.CollectionChanged += OnHistoryInputsChanged;
+        chat.PropertyChanged += OnConversationPropertyChanged;
+        UpdateHistoryLayout();
+    }
+
+    private void UnwatchConversation()
+    {
+        if (_conversationWatched is not null)
+        {
+            _conversationWatched.Items.CollectionChanged -= OnHistoryInputsChanged;
+            _conversationWatched.PropertyChanged -= OnConversationPropertyChanged;
+            _conversationWatched = null;
+        }
+    }
+
+    private void OnConversationPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(ChatViewModel.IsBusy))
+        {
+            QueueHistoryLayout();
+        }
+    }
+
+    private void OnHistoryInputsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>
+        QueueHistoryLayout();
+
+    // A streaming turn changes the transcript many times a second: one pass per burst.
+    private void QueueHistoryLayout()
+    {
+        if (_historyLayoutQueued)
+        {
+            return;
+        }
+
+        _historyLayoutQueued = true;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateHistoryLayout);
+    }
+
+    /// <summary>
+    /// Sizes History against the live sections. With no conversation it fills the panel
+    /// and lists every session; with one it folds to the sessions open in a tab and the
+    /// live sections take the room - unless the reader asked to see them all, when the
+    /// two share it.
+    /// </summary>
+    private void UpdateHistoryLayout()
+    {
+        _historyLayoutQueued = false;
+
+        if (RightPanel is null || ViewModel is null)
+        {
+            return;
+        }
+
+        var sessions = ViewModel.Sessions;
+        var conversation = ViewModel.Chat.HasConversation;
+        if (conversation != _hadConversation)
+        {
+            _hadConversation = conversation;
+            _historyShowAll = false;
+        }
+
+        var folded = conversation && !_historyShowAll;
+        var expanded = HistorySection.IsChecked == true;
+
+        IEnumerable<SessionListItem> source = folded ? sessions.OpenSessions : sessions.Sessions;
+        if (!ReferenceEquals(HistoryList.ItemsSource, source))
+        {
+            HistoryList.ItemsSource = source;
+        }
+
+        var star = new GridLength(1, GridUnitType.Star);
+        LiveRow.Height = conversation ? star : GridLength.Auto;
+        HistoryRow.Height = expanded && !folded ? star : GridLength.Auto;
+
+        HistoryShowAllButton.Visibility = conversation ? Visibility.Visible : Visibility.Collapsed;
+        HistoryShowAllButton.Content = _historyShowAll ? "Show less" : $"Show all ({sessions.Sessions.Count})";
+        HistoryNotListedText.Visibility = folded && expanded && sessions.OpenSessions.Count == 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void OnHistorySectionClick(object sender, RoutedEventArgs e) => UpdateHistoryLayout();
+
+    private void OnHistoryShowAllClick(object sender, RoutedEventArgs e)
+    {
+        _historyShowAll = !_historyShowAll;
+        HistorySection.IsChecked = true;
+        UpdateHistoryLayout();
     }
 
     /// <summary>The chat whose task list the panel is watching.</summary>
@@ -1722,6 +1837,7 @@ public sealed partial class WorkspacePage : Page
             if (RightPanel is null)
             {
                 FindName("RightPanel");
+                UpdateHistoryLayout();
             }
 
             TodosSection.IsChecked = true;
@@ -1744,6 +1860,7 @@ public sealed partial class WorkspacePage : Page
         if (open && RightPanel is null)
         {
             FindName("RightPanel");
+            UpdateHistoryLayout();
         }
 
         _sessionPanelOpen = open;

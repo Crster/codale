@@ -14,7 +14,7 @@
   <Identity
     Name="BB9ADD6B-2E64-46A7-ADF5-885B70F99D51"
     Publisher="CN=Crster"
-    Version="1.0.0.290" />
+    Version="1.0.0.292" />
 
   <mp:PhoneIdentity PhoneProductId="BB9ADD6B-2E64-46A7-ADF5-885B70F99D51" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 

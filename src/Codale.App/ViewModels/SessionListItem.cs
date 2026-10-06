@@ -19,6 +19,8 @@ public sealed partial class SessionListItem : ObservableObject
 
     public int UserTurns => Summary.UserTurns;
 
+    public string TurnsText => UserTurns == 1 ? "1 turn" : $"{UserTurns} turns";
+
     public DateTimeOffset UpdatedAt => Summary.UpdatedAt;
 
     /// <summary>Open in a chat tab: clicking it switches to that tab.</summary>

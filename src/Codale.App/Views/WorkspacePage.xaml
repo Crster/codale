@@ -1161,246 +1161,620 @@
                         VerticalAlignment="Bottom"
                         Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
-                    <ScrollViewer Grid.Row="1" Margin="12,10,12,12">
+                    <Grid
+                        Grid.Row="1"
+                        Margin="12,10,12,12"
+                        RowSpacing="10">
+                        <Grid.RowDefinitions>
+                            <!--  What drives the session: always in view  -->
+                            <RowDefinition Height="Auto" />
+                            <!--  Live work; its row and History's swap the room (UpdateHistoryLayout)  -->
+                            <RowDefinition x:Name="LiveRow" Height="Auto" />
+                            <RowDefinition x:Name="HistoryRow" Height="*" />
+                        </Grid.RowDefinitions>
+
                         <StackPanel Spacing="10">
 
-                            <!--  Crash recovery: only shown when a session was left running  -->
-                            <InfoBar
-                                Title="Session interrupted"
-                                IsClosable="True"
-                                IsOpen="{x:Bind ViewModel.Sessions.HasInterrupted, Mode=OneWay}"
-                                Message="Codale closed while an agent was working."
-                                Severity="Warning">
-                                <InfoBar.ActionButton>
-                                    <Button
-                                        Command="{x:Bind ViewModel.Sessions.ResumeCommand}"
-                                        CommandParameter="{x:Bind ViewModel.Sessions.FirstInterrupted, Mode=OneWay}"
-                                        Content="Resume" />
-                                </InfoBar.ActionButton>
-                            </InfoBar>
-
-                            <!--  Reading an old transcript: make the way back obvious  -->
-                            <InfoBar
-                                IsClosable="False"
-                                IsOpen="{x:Bind ViewModel.IsViewingHistory, Mode=OneWay}"
-                                Message="{x:Bind ViewModel.HistoryTitle, Mode=OneWay}"
-                                Severity="Informational"
-                                Title="Viewing history">
-                                <InfoBar.ActionButton>
-                                    <Button Click="OnReturnToLiveClick" Content="Back to live session" />
-                                </InfoBar.ActionButton>
-                            </InfoBar>
-
-                            <!--  The live session: which CLI, what model, and where it works  -->
-                            <Border
-                                Padding="12,10"
-                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                BorderThickness="1"
-                                CornerRadius="8">
-                                <StackPanel Spacing="10">
-                                    <!--  Model, effort and mode: labelled tiles, each opening a
-                                          picker whose pick switches the live session  -->
-                                    <Grid ColumnSpacing="6">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="1.3*" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-
+                                <!--  Crash recovery: only shown when a session was left running  -->
+                                <InfoBar
+                                    Title="Session interrupted"
+                                    IsClosable="True"
+                                    IsOpen="{x:Bind ViewModel.Sessions.HasInterrupted, Mode=OneWay}"
+                                    Message="Codale closed while an agent was working."
+                                    Severity="Warning">
+                                    <InfoBar.ActionButton>
                                         <Button
-                                            Click="OnModelChipClick"
-                                            IsEnabled="{x:Bind ViewModel.Chat.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
-                                            Style="{StaticResource SessionControlButton}"
-                                            ToolTipService.ToolTip="{x:Bind ViewModel.Chat.ModelDisplay, Mode=OneWay}">
-                                            <Grid ColumnSpacing="6" RowSpacing="2">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="Auto" />
-                                                </Grid.RowDefinitions>
-                                                <TextBlock
-                                                    Grid.ColumnSpan="3"
-                                                    Style="{StaticResource SessionControlCaption}"
-                                                    Text="MODEL" />
-                                                <FontIcon
-                                                    Grid.Row="1"
-                                                    FontSize="12"
-                                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                                    Glyph="&#xE99A;" />
-                                                <TextBlock
-                                                    Grid.Row="1"
-                                                    Grid.Column="1"
-                                                    Style="{StaticResource SessionControlValue}"
-                                                    Text="{x:Bind ViewModel.Chat.ModelDisplay, Mode=OneWay}" />
-                                                <FontIcon
-                                                    Grid.Row="1"
-                                                    Grid.Column="2"
-                                                    FontSize="8"
-                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                    Glyph="&#xE70D;" />
-                                            </Grid>
-                                        </Button>
+                                            Command="{x:Bind ViewModel.Sessions.ResumeCommand}"
+                                            CommandParameter="{x:Bind ViewModel.Sessions.FirstInterrupted, Mode=OneWay}"
+                                            Content="Resume" />
+                                    </InfoBar.ActionButton>
+                                </InfoBar>
 
-                                        <Button
-                                            Grid.Column="1"
-                                            Click="OnEffortChipClick"
-                                            IsEnabled="{x:Bind ViewModel.Chat.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
-                                            Style="{StaticResource SessionControlButton}"
-                                            ToolTipService.ToolTip="How hard the model thinks before it answers (locked while the agent works)">
-                                            <Grid ColumnSpacing="6" RowSpacing="2">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="Auto" />
-                                                </Grid.RowDefinitions>
-                                                <TextBlock
-                                                    Grid.ColumnSpan="3"
-                                                    Style="{StaticResource SessionControlCaption}"
-                                                    Text="EFFORT" />
-                                                <FontIcon
-                                                    Grid.Row="1"
-                                                    FontSize="12"
-                                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                                    Glyph="&#xE9D9;" />
-                                                <TextBlock
-                                                    Grid.Row="1"
-                                                    Grid.Column="1"
-                                                    Style="{StaticResource SessionControlValue}"
-                                                    Text="{x:Bind ViewModel.Chat.EffortDisplay, Mode=OneWay}" />
-                                                <FontIcon
-                                                    Grid.Row="1"
-                                                    Grid.Column="2"
-                                                    FontSize="8"
-                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                    Glyph="&#xE70D;" />
-                                            </Grid>
-                                        </Button>
+                                <!--  Reading an old transcript: make the way back obvious  -->
+                                <InfoBar
+                                    IsClosable="False"
+                                    IsOpen="{x:Bind ViewModel.IsViewingHistory, Mode=OneWay}"
+                                    Message="{x:Bind ViewModel.HistoryTitle, Mode=OneWay}"
+                                    Severity="Informational"
+                                    Title="Viewing history">
+                                    <InfoBar.ActionButton>
+                                        <Button Click="OnReturnToLiveClick" Content="Back to live session" />
+                                    </InfoBar.ActionButton>
+                                </InfoBar>
 
-                                        <Button
-                                            Grid.Column="2"
-                                            Click="OnModeChipClick"
-                                            IsEnabled="{x:Bind ViewModel.Chat.CanChangeMode, Mode=OneWay}"
-                                            Style="{StaticResource SessionControlButton}"
-                                            ToolTipService.ToolTip="How much the agent may do before asking (locked while the agent is working)">
-                                            <Grid ColumnSpacing="6" RowSpacing="2">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="Auto" />
-                                                </Grid.RowDefinitions>
-                                                <TextBlock
-                                                    Grid.ColumnSpan="3"
-                                                    Style="{StaticResource SessionControlCaption}"
-                                                    Text="MODE" />
-                                                <FontIcon
-                                                    Grid.Row="1"
-                                                    FontSize="12"
-                                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                                    Glyph="{x:Bind ViewModel.Chat.ModeGlyph, Mode=OneWay}" />
-                                                <TextBlock
-                                                    Grid.Row="1"
-                                                    Grid.Column="1"
-                                                    Style="{StaticResource SessionControlValue}"
-                                                    Text="{x:Bind ViewModel.Chat.ModeDisplayText, Mode=OneWay}" />
-                                                <FontIcon
-                                                    Grid.Row="1"
-                                                    Grid.Column="2"
-                                                    FontSize="8"
-                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                    Glyph="&#xE70D;" />
-                                            </Grid>
-                                        </Button>
-                                    </Grid>
+                                <!--  The live session: which CLI, what model, and where it works  -->
+                                <Border
+                                    Padding="12,10"
+                                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="8">
+                                    <StackPanel Spacing="10">
+                                        <!--  Model, effort and mode: labelled tiles, each opening a
+                                              picker whose pick switches the live session  -->
+                                        <Grid ColumnSpacing="6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="1.3*" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
 
-                                    <!--  The two ways to start over, side by side: the primary one in accent  -->
-                                    <Grid ColumnSpacing="8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
+                                            <Button
+                                                Click="OnModelChipClick"
+                                                IsEnabled="{x:Bind ViewModel.Chat.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
+                                                Style="{StaticResource SessionControlButton}"
+                                                ToolTipService.ToolTip="{x:Bind ViewModel.Chat.ModelDisplay, Mode=OneWay}">
+                                                <Grid ColumnSpacing="6" RowSpacing="2">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                    </Grid.RowDefinitions>
+                                                    <TextBlock
+                                                        Grid.ColumnSpan="3"
+                                                        Style="{StaticResource SessionControlCaption}"
+                                                        Text="MODEL" />
+                                                    <FontIcon
+                                                        Grid.Row="1"
+                                                        FontSize="12"
+                                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                        Glyph="&#xE99A;" />
+                                                    <TextBlock
+                                                        Grid.Row="1"
+                                                        Grid.Column="1"
+                                                        Style="{StaticResource SessionControlValue}"
+                                                        Text="{x:Bind ViewModel.Chat.ModelDisplay, Mode=OneWay}" />
+                                                    <FontIcon
+                                                        Grid.Row="1"
+                                                        Grid.Column="2"
+                                                        FontSize="8"
+                                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                        Glyph="&#xE70D;" />
+                                                </Grid>
+                                            </Button>
 
-                                        <Button
-                                            HorizontalAlignment="Stretch"
-                                            Click="OnNewSessionClick"
-                                            CornerRadius="8"
-                                            FontSize="12"
-                                            Padding="10,8"
-                                            Style="{StaticResource AccentButtonStyle}"
-                                            ToolTipService.ToolTip="End this conversation and start a fresh one in the project directory">
-                                            <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="8">
-                                                <FontIcon FontSize="12" Glyph="&#xE710;" />
-                                                <TextBlock Text="New session" TextTrimming="CharacterEllipsis" />
-                                            </StackPanel>
-                                        </Button>
+                                            <Button
+                                                Grid.Column="1"
+                                                Click="OnEffortChipClick"
+                                                IsEnabled="{x:Bind ViewModel.Chat.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
+                                                Style="{StaticResource SessionControlButton}"
+                                                ToolTipService.ToolTip="How hard the model thinks before it answers (locked while the agent works)">
+                                                <Grid ColumnSpacing="6" RowSpacing="2">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                    </Grid.RowDefinitions>
+                                                    <TextBlock
+                                                        Grid.ColumnSpan="3"
+                                                        Style="{StaticResource SessionControlCaption}"
+                                                        Text="EFFORT" />
+                                                    <FontIcon
+                                                        Grid.Row="1"
+                                                        FontSize="12"
+                                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                        Glyph="&#xE9D9;" />
+                                                    <TextBlock
+                                                        Grid.Row="1"
+                                                        Grid.Column="1"
+                                                        Style="{StaticResource SessionControlValue}"
+                                                        Text="{x:Bind ViewModel.Chat.EffortDisplay, Mode=OneWay}" />
+                                                    <FontIcon
+                                                        Grid.Row="1"
+                                                        Grid.Column="2"
+                                                        FontSize="8"
+                                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                        Glyph="&#xE70D;" />
+                                                </Grid>
+                                            </Button>
 
+                                            <Button
+                                                Grid.Column="2"
+                                                Click="OnModeChipClick"
+                                                IsEnabled="{x:Bind ViewModel.Chat.CanChangeMode, Mode=OneWay}"
+                                                Style="{StaticResource SessionControlButton}"
+                                                ToolTipService.ToolTip="How much the agent may do before asking (locked while the agent is working)">
+                                                <Grid ColumnSpacing="6" RowSpacing="2">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                    </Grid.RowDefinitions>
+                                                    <TextBlock
+                                                        Grid.ColumnSpan="3"
+                                                        Style="{StaticResource SessionControlCaption}"
+                                                        Text="MODE" />
+                                                    <FontIcon
+                                                        Grid.Row="1"
+                                                        FontSize="12"
+                                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                        Glyph="{x:Bind ViewModel.Chat.ModeGlyph, Mode=OneWay}" />
+                                                    <TextBlock
+                                                        Grid.Row="1"
+                                                        Grid.Column="1"
+                                                        Style="{StaticResource SessionControlValue}"
+                                                        Text="{x:Bind ViewModel.Chat.ModeDisplayText, Mode=OneWay}" />
+                                                    <FontIcon
+                                                        Grid.Row="1"
+                                                        Grid.Column="2"
+                                                        FontSize="8"
+                                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                        Glyph="&#xE70D;" />
+                                                </Grid>
+                                            </Button>
+                                        </Grid>
+
+                                        <!--  The two ways to start over, side by side: the primary one in accent  -->
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <Button
+                                                HorizontalAlignment="Stretch"
+                                                Click="OnNewSessionClick"
+                                                CornerRadius="8"
+                                                FontSize="12"
+                                                Padding="10,8"
+                                                Style="{StaticResource AccentButtonStyle}"
+                                                ToolTipService.ToolTip="End this conversation and start a fresh one in the project directory">
+                                                <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                                                    <FontIcon FontSize="12" Glyph="&#xE710;" />
+                                                    <TextBlock Text="New session" TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                            </Button>
+
+                                            <ToggleButton
+                                                Grid.Column="1"
+                                                HorizontalAlignment="Stretch"
+                                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                Click="OnIsolatedSessionClick"
+                                                IsChecked="{x:Bind ViewModel.IsIsolated, Mode=OneWay}"
+                                                CornerRadius="8"
+                                                FontSize="12"
+                                                IsEnabled="{x:Bind ViewModel.IsStartingWorktree, Mode=OneWay, Converter={StaticResource NotBool}}"
+                                                Padding="10,8"
+                                                ToolTipService.ToolTip="Start a new session on its own branch in a git worktree, leaving your working tree untouched">
+                                                <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                                                    <FontIcon FontSize="12" Glyph="&#xE8EA;" />
+                                                    <TextBlock Text="Isolated" TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                            </ToggleButton>
+                                        </Grid>
+
+                                        <TextBlock
+                                            FontSize="11"
+                                            Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                            Text="{x:Bind ViewModel.WorktreeError, Mode=OneWay}"
+                                            TextWrapping="Wrap"
+                                            Visibility="{x:Bind ViewModel.WorktreeError, Mode=OneWay, Converter={StaticResource NullToVisibility}}" />
+
+                                        <Grid ToolTipService.ToolTip="{x:Bind ViewModel.WorkingDirectory, Mode=OneWay}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <FontIcon
+                                                VerticalAlignment="Center"
+                                                FontSize="11"
+                                                Glyph="&#xE8B7;"
+                                                Opacity="0.55" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                Margin="6,0,0,0"
+                                                FontSize="11"
+                                                Opacity="0.55"
+                                                Text="{x:Bind ViewModel.WorkingDirectory, Mode=OneWay}"
+                                                TextTrimming="CharacterEllipsis" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                        </StackPanel>
+
+                        <!--  The live sections, most pressing first: the plan the agent is
+                              working through, what is running now, what it changed, and
+                              what it produced. Each hides until it has something.  -->
+                        <ScrollViewer Grid.Row="1" Margin="-12,0" Padding="12,0">
+                            <StackPanel Spacing="10">
+                                    <!--  Todos: collapsed until the agent publishes something  -->
+                                    <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Chat.Todos.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
                                         <ToggleButton
-                                            Grid.Column="1"
-                                            HorizontalAlignment="Stretch"
-                                            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                            Click="OnIsolatedSessionClick"
-                                            IsChecked="{x:Bind ViewModel.IsIsolated, Mode=OneWay}"
-                                            CornerRadius="8"
-                                            FontSize="12"
-                                            IsEnabled="{x:Bind ViewModel.IsStartingWorktree, Mode=OneWay, Converter={StaticResource NotBool}}"
-                                            Padding="10,8"
-                                            ToolTipService.ToolTip="Start a new session on its own branch in a git worktree, leaving your working tree untouched">
-                                            <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="8">
-                                                <FontIcon FontSize="12" Glyph="&#xE8EA;" />
-                                                <TextBlock Text="Isolated" TextTrimming="CharacterEllipsis" />
+                                            x:Name="TodosSection"
+                                            IsChecked="True"
+                                            Style="{StaticResource SectionHeader}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <TextBlock Text="Todos" />
+                                                <Border
+                                                    Padding="7,1"
+                                                    VerticalAlignment="Center"
+                                                    Background="{StaticResource KindTodoTintBrush}"
+                                                    CornerRadius="8"
+                                                    Visibility="{x:Bind ViewModel.Chat.TasksTotal, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                                    <TextBlock FontSize="10" Foreground="{StaticResource KindTodoBrush}">
+                                                        <Run Text="{x:Bind ViewModel.Chat.TasksDone, Mode=OneWay}" />
+                                                        <Run Text="/" />
+                                                        <Run Text="{x:Bind ViewModel.Chat.TasksTotal, Mode=OneWay}" />
+                                                    </TextBlock>
+                                                </Border>
                                             </StackPanel>
                                         </ToggleButton>
-                                    </Grid>
 
-                                    <TextBlock
-                                        FontSize="11"
-                                        Foreground="{ThemeResource SystemFillColorCriticalBrush}"
-                                        Text="{x:Bind ViewModel.WorktreeError, Mode=OneWay}"
-                                        TextWrapping="Wrap"
-                                        Visibility="{x:Bind ViewModel.WorktreeError, Mode=OneWay, Converter={StaticResource NullToVisibility}}" />
+                                        <StackPanel
+                                            Margin="14,2,0,4"
+                                            Spacing="4"
+                                            Visibility="{x:Bind TodosSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
+                                            <!--  Progress at a glance: a thin bar over the list.  -->
+                                            <ProgressBar
+                                                Margin="8,0,8,4"
+                                                Maximum="{x:Bind ViewModel.Chat.TasksTotal, Mode=OneWay}"
+                                                Value="{x:Bind ViewModel.Chat.TasksDone, Mode=OneWay}"
+                                                Visibility="{x:Bind ViewModel.Chat.TasksTotal, Mode=OneWay, Converter={StaticResource CountToVisibility}}" />
 
-                                    <Grid ToolTipService.ToolTip="{x:Bind ViewModel.WorkingDirectory, Mode=OneWay}">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <FontIcon
-                                            VerticalAlignment="Center"
-                                            FontSize="11"
-                                            Glyph="&#xE8B7;"
-                                            Opacity="0.55" />
-                                        <TextBlock
-                                            Grid.Column="1"
-                                            Margin="6,0,0,0"
-                                            FontSize="11"
-                                            Opacity="0.55"
-                                            Text="{x:Bind ViewModel.WorkingDirectory, Mode=OneWay}"
-                                            TextTrimming="CharacterEllipsis" />
-                                    </Grid>
-                                </StackPanel>
-                            </Border>
+                                            <ListView
+                                                ItemContainerStyle="{StaticResource PanelItem}"
+                                                ItemsSource="{x:Bind ViewModel.Chat.Todos, Mode=OneWay}"
+                                                SelectionMode="None">
+                                                <ListView.ItemTemplate>
+                                                    <DataTemplate x:DataType="agents:TodoItem">
+                                                        <Grid ColumnSpacing="8">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="*" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <FontIcon
+                                                                VerticalAlignment="Top"
+                                                                Margin="0,2,0,0"
+                                                                FontSize="12"
+                                                                Foreground="{x:Bind Status, Converter={StaticResource TodoBrush}}"
+                                                                Glyph="{x:Bind Status, Converter={StaticResource TodoGlyph}}" />
+                                                            <TextBlock
+                                                                Grid.Column="1"
+                                                                FontSize="12"
+                                                                Foreground="{x:Bind Status, Converter={StaticResource TodoTextBrush}}"
+                                                                Text="{x:Bind Content}"
+                                                                TextWrapping="Wrap" />
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ListView.ItemTemplate>
+                                            </ListView>
+                                        </StackPanel>
+                                    </StackPanel>
 
-                            <!--  History  -->
-                            <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Sessions.Sessions.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                    <!--  Running tasks: background shells and subagents; hidden until
+                                          one starts. Clicking a row splits the centre to peek at it.  -->
+                                    <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Chat.RunningTasks.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                        <ToggleButton
+                                            x:Name="RunningTasksSection"
+                                            IsChecked="True"
+                                            Style="{StaticResource SectionHeader}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <TextBlock Text="Running tasks" />
+                                                <Border
+                                                    Padding="7,1"
+                                                    VerticalAlignment="Center"
+                                                    Background="{StaticResource KindReadTintBrush}"
+                                                    CornerRadius="8">
+                                                    <TextBlock
+                                                        FontSize="10"
+                                                        Foreground="{StaticResource StatusRunningBrush}"
+                                                        Text="{x:Bind ViewModel.Chat.RunningTasks.Count, Mode=OneWay}" />
+                                                </Border>
+                                            </StackPanel>
+                                        </ToggleButton>
+
+                                        <ListView
+                                            Margin="14,2,0,4"
+                                            MaxHeight="260"
+                                            IsItemClickEnabled="True"
+                                            ItemClick="OnRunningTaskClick"
+                                            ItemContainerStyle="{StaticResource PanelItem}"
+                                            ItemsSource="{x:Bind ViewModel.Chat.RunningTasks, Mode=OneWay}"
+                                            SelectionMode="None"
+                                            Visibility="{x:Bind RunningTasksSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
+                                            <ListView.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:RunningTaskItem">
+                                                    <Grid ColumnSpacing="8" ToolTipService.ToolTip="{x:Bind Title}">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <FontIcon
+                                                            VerticalAlignment="Center"
+                                                            FontSize="12"
+                                                            Glyph="{x:Bind KindGlyph}" />
+                                                        <Button
+                                                            Grid.Column="3"
+                                                            Padding="5"
+                                                            VerticalAlignment="Center"
+                                                            Background="Transparent"
+                                                            BorderThickness="0"
+                                                            Click="OnStopTaskClick"
+                                                            Tag="{x:Bind}"
+                                                            ToolTipService.ToolTip="Stop this task"
+                                                            Visibility="{x:Bind CanStop, Mode=OneWay}">
+                                                            <FontIcon FontSize="10" Glyph="&#xE71A;" />
+                                                        </Button>
+                                                        <TextBlock
+                                                            Grid.Column="1"
+                                                            FontSize="12"
+                                                            Text="{x:Bind Title}"
+                                                            TextTrimming="CharacterEllipsis"
+                                                            TextWrapping="NoWrap" />
+                                                        <StackPanel
+                                                            Grid.Column="2"
+                                                            VerticalAlignment="Center"
+                                                            Orientation="Horizontal"
+                                                            Spacing="5">
+                                                            <Ellipse
+                                                                Width="6"
+                                                                Height="6"
+                                                                VerticalAlignment="Center"
+                                                                Fill="{StaticResource StatusRunningBrush}"
+                                                                Visibility="{x:Bind IsRunning, Mode=OneWay}"
+                                                                views:Pulse.IsActive="{x:Bind IsRunning, Mode=OneWay}" />
+                                                            <TextBlock
+                                                                FontSize="10"
+                                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                                Text="{x:Bind StatusLabel, Mode=OneWay}" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ListView.ItemTemplate>
+                                        </ListView>
+                                    </StackPanel>
+
+                                    <!--  Session changes: what the agent itself changed, live, one row
+                                          per file measured from before its first touch. The badge
+                                          pulses while a change is fresh, so an edit landing mid-turn
+                                          is visible without looking at the transcript.  -->
+                                    <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Status.ChangeCount, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                        <ToggleButton
+                                            x:Name="SessionChangesSection"
+                                            IsChecked="True"
+                                            Style="{StaticResource SectionHeader}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <TextBlock Text="Session changes" />
+                                                <Border
+                                                    Padding="7,1"
+                                                    VerticalAlignment="Center"
+                                                    Background="{StaticResource KindEditTintBrush}"
+                                                    CornerRadius="8"
+                                                    Visibility="{x:Bind ViewModel.Status.ChangeCount, Mode=OneWay, Converter={StaticResource CountToVisibility}}"
+                                                    views:Pulse.IsActive="{x:Bind ViewModel.Status.HasFreshChanges, Mode=OneWay}">
+                                                    <TextBlock
+                                                        FontSize="10"
+                                                        Foreground="{StaticResource KindEditBrush}"
+                                                        Text="{x:Bind ViewModel.Status.ChangeCount, Mode=OneWay}" />
+                                                </Border>
+                                            </StackPanel>
+                                        </ToggleButton>
+
+                                        <StackPanel
+                                            Margin="14,2,0,4"
+                                            Spacing="4"
+                                            Visibility="{x:Bind SessionChangesSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
+                                            <TextBlock
+                                                Margin="8,0,8,2"
+                                                FontSize="12"
+                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                Text="{x:Bind ViewModel.Status.ChangeSummary, Mode=OneWay}"
+                                                TextWrapping="Wrap" />
+
+                                            <ListView
+                                                MaxHeight="220"
+                                                IsItemClickEnabled="True"
+                                                ItemClick="OnSessionChangeClick"
+                                                ItemContainerStyle="{StaticResource PanelItem}"
+                                                ItemsSource="{x:Bind ViewModel.Status.Changes, Mode=OneWay}"
+                                                SelectionMode="None">
+                                                <ListView.ItemTemplate>
+                                                    <DataTemplate x:DataType="vm:SessionFileChange">
+                                                        <Grid ColumnSpacing="8" ToolTipService.ToolTip="{x:Bind Path}">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <Ellipse
+                                                                Width="7"
+                                                                Height="7"
+                                                                VerticalAlignment="Center"
+                                                                Fill="{x:Bind Kind, Mode=OneWay, Converter={StaticResource FileChangeBrush}}"
+                                                                views:Pulse.IsActive="{x:Bind IsFresh, Mode=OneWay}" />
+                                                            <StackPanel
+                                                                Grid.Column="1"
+                                                                Orientation="Horizontal"
+                                                                Spacing="6">
+                                                                <TextBlock
+                                                                    VerticalAlignment="Center"
+                                                                    FontSize="12"
+                                                                    Text="{x:Bind Name}"
+                                                                    TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock
+                                                                    VerticalAlignment="Center"
+                                                                    FontSize="11"
+                                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                                    Text="{x:Bind Directory}"
+                                                                    TextTrimming="CharacterEllipsis" />
+                                                            </StackPanel>
+                                                            <StackPanel
+                                                                Grid.Column="2"
+                                                                Orientation="Horizontal"
+                                                                Spacing="6">
+                                                                <TextBlock
+                                                                    VerticalAlignment="Center"
+                                                                    FontSize="10.5"
+                                                                    Foreground="{x:Bind Kind, Mode=OneWay, Converter={StaticResource FileChangeBrush}}"
+                                                                    Text="{x:Bind KindText, Mode=OneWay}" />
+                                                                <TextBlock
+                                                                    VerticalAlignment="Center"
+                                                                    FontFamily="Cascadia Mono, Consolas"
+                                                                    FontSize="11">
+                                                                    <Run Foreground="{StaticResource DiffAddedForegroundBrush}" Text="{x:Bind AddedText, Mode=OneWay}" />
+                                                                    <Run Foreground="{StaticResource DiffRemovedForegroundBrush}" Text="{x:Bind RemovedText, Mode=OneWay}" />
+                                                                </TextBlock>
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ListView.ItemTemplate>
+                                            </ListView>
+                                        </StackPanel>
+                                    </StackPanel>
+
+                                    <!--  Plans: proposed in chat or written to disk, one click away.  -->
+                                    <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Chat.Artifacts.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                        <ToggleButton
+                                            x:Name="PlansSection"
+                                            IsChecked="True"
+                                            Style="{StaticResource SectionHeader}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <TextBlock Text="Artifacts" />
+                                                <Border
+                                                    Padding="7,1"
+                                                    VerticalAlignment="Center"
+                                                    Background="{StaticResource KindPlanTintBrush}"
+                                                    CornerRadius="8"
+                                                    Visibility="{x:Bind ViewModel.Chat.Artifacts.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                                    <TextBlock
+                                                        FontSize="10"
+                                                        Foreground="{StaticResource KindPlanBrush}"
+                                                        Text="{x:Bind ViewModel.Chat.Artifacts.Count, Mode=OneWay}" />
+                                                </Border>
+                                            </StackPanel>
+                                        </ToggleButton>
+
+                                        <StackPanel Margin="14,2,0,4" Visibility="{x:Bind PlansSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
+                                            <ListView
+                                                IsItemClickEnabled="True"
+                                                ItemClick="OnArtifactClick"
+                                                ItemContainerStyle="{StaticResource PanelItem}"
+                                                ItemsSource="{x:Bind ViewModel.Chat.Artifacts, Mode=OneWay}"
+                                                SelectionMode="None">
+                                                <ListView.ItemTemplate>
+                                                    <DataTemplate x:DataType="vm:SessionArtifact">
+                                                        <Grid ColumnSpacing="10">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <Border
+                                                                Width="24"
+                                                                Height="24"
+                                                                Background="{StaticResource KindPlanTintBrush}"
+                                                                CornerRadius="6">
+                                                                <FontIcon
+                                                                    FontSize="11"
+                                                                    Foreground="{StaticResource KindPlanBrush}"
+                                                                    Glyph="{x:Bind Glyph}" />
+                                                            </Border>
+                                                            <StackPanel Grid.Column="1" Spacing="1">
+                                                                <TextBlock
+                                                                    FontSize="12"
+                                                                    FontWeight="SemiBold"
+                                                                    Text="{x:Bind Title, Mode=OneWay}"
+                                                                    TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock
+                                                                    FontSize="11"
+                                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                                    TextTrimming="CharacterEllipsis">
+                                                                    <Run Text="{x:Bind Subtitle}" />
+                                                                    <Run Text=" · " />
+                                                                    <Run Text="{x:Bind UpdatedAt, Mode=OneWay, Converter={StaticResource RelativeTime}}" />
+                                                                </TextBlock>
+                                                            </StackPanel>
+                                                            <Border
+                                                                Grid.Column="2"
+                                                                Padding="7,1"
+                                                                VerticalAlignment="Center"
+                                                                BorderBrush="{x:Bind Status, Mode=OneWay, Converter={StaticResource ArtifactStatusBrush}}"
+                                                                BorderThickness="1"
+                                                                CornerRadius="8">
+                                                                <TextBlock
+                                                                    FontSize="10"
+                                                                    Foreground="{x:Bind Status, Mode=OneWay, Converter={StaticResource ArtifactStatusBrush}}"
+                                                                    Text="{x:Bind StatusText, Mode=OneWay}" />
+                                                            </Border>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ListView.ItemTemplate>
+                                            </ListView>
+                                        </StackPanel>
+                                    </StackPanel>
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <!--  History, last: before the chat holds a conversation it takes the panel's
+                              whole height (picking one is what there is to do); once it does, it
+                              folds to the sessions open in a tab and the live sections above get
+                              the room. "Show all" unfolds it beside them. Rows, item source and the
+                              link are set by UpdateHistoryLayout.  -->
+                        <Grid
+                            x:Name="HistoryHost"
+                            Grid.Row="2"
+                            RowSpacing="2"
+                            Visibility="{x:Bind ViewModel.Sessions.Sessions.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <Grid>
                                 <ToggleButton
                                     x:Name="HistorySection"
+                                    HorizontalAlignment="Stretch"
+                                    Click="OnHistorySectionClick"
                                     IsChecked="True"
                                     Style="{StaticResource SectionHeader}">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
                                         <TextBlock Text="History" />
+                                        <Border
+                                            Padding="7,1"
+                                            VerticalAlignment="Center"
+                                            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                            CornerRadius="8">
+                                            <TextBlock
+                                                FontSize="10"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Text="{x:Bind ViewModel.Sessions.Sessions.Count, Mode=OneWay}" />
+                                        </Border>
                                         <ProgressRing
                                             Width="12"
                                             Height="12"
@@ -1408,435 +1782,142 @@
                                     </StackPanel>
                                 </ToggleButton>
 
-                                <StackPanel Margin="14,2,0,4" Visibility="{x:Bind HistorySection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
-                                    <ListView
-                                        MaxHeight="300"
-                                        IsItemClickEnabled="True"
-                                        ItemClick="OnSessionClick"
-                                        ItemContainerStyle="{StaticResource PanelItemFlush}"
-                                        ItemsSource="{x:Bind ViewModel.Sessions.Sessions}"
-                                        SelectionMode="None">
-                                        <ListView.ItemTemplate>
-                                            <!--  Open sessions say so: "running" with a pulsing dot while
-                                                  their tab works, "open" while it idles. Clicking an open
-                                                  one switches to its tab; any other opens beside it.  -->
-                                            <DataTemplate x:DataType="vm:SessionListItem">
-                                                <StackPanel
-                                                    Padding="8,6"
-                                                    Background="Transparent"
-                                                    Spacing="2"
-                                                    ToolTipService.ToolTip="{x:Bind SessionId}">
-                                                    <StackPanel.ContextFlyout>
-                                                        <MenuFlyout>
-                                                            <MenuFlyoutItem Click="OnCopySessionHandoutClick" Text="Copy handout">
-                                                                <MenuFlyoutItem.Icon>
-                                                                    <FontIcon Glyph="&#xE8C8;" />
-                                                                </MenuFlyoutItem.Icon>
-                                                            </MenuFlyoutItem>
-                                                            <MenuFlyoutItem Click="OnCopySessionIdClick" Text="Copy session ID">
-                                                                <MenuFlyoutItem.Icon>
-                                                                    <FontIcon Glyph="&#xE8C8;" />
-                                                                </MenuFlyoutItem.Icon>
-                                                            </MenuFlyoutItem>
-                                                            <MenuFlyoutItem Click="OnRetitleSessionClick" Text="Change title">
-                                                                <MenuFlyoutItem.Icon>
-                                                                    <FontIcon Glyph="&#xE70F;" />
-                                                                </MenuFlyoutItem.Icon>
-                                                            </MenuFlyoutItem>
-                                                            <MenuFlyoutItem Click="OnForkSessionClick" Text="Fork session">
-                                                                <MenuFlyoutItem.Icon>
-                                                                                                                                <FontIcon Glyph="&#xE8AD;" />
-                                                                </MenuFlyoutItem.Icon>
-                                                            </MenuFlyoutItem>
-                                                            <MenuFlyoutItem Click="OnCompactSessionClick" Text="Compact session">
-                                                                <MenuFlyoutItem.Icon>
-                                                                    <FontIcon Glyph="&#xE73F;" />
-                                                                </MenuFlyoutItem.Icon>
-                                                            </MenuFlyoutItem>
-                                                            <MenuFlyoutSeparator />
-                                                            <MenuFlyoutItem Click="OnDeleteSessionClick" Text="Delete session">
-                                                                <MenuFlyoutItem.Icon>
-                                                                    <FontIcon Glyph="&#xE74D;" />
-                                                                </MenuFlyoutItem.Icon>
-                                                            </MenuFlyoutItem>
-                                                        </MenuFlyout>
-                                                    </StackPanel.ContextFlyout>
-                                                    <TextBlock
-                                                        FontSize="12"
-                                                        Text="{x:Bind Title}"
-                                                        TextTrimming="CharacterEllipsis"
-                                                        TextWrapping="NoWrap" />
-                                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                                        <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}">
-                                                            <Run Text="{x:Bind UserTurns}" />
-                                                            <Run Text=" turns · " />
-                                                            <Run Text="{x:Bind UpdatedAt, Converter={StaticResource RelativeTime}}" />
-                                                        </TextBlock>
-                                                        <Border
-                                                            Padding="7,1"
-                                                            Background="{StaticResource KindReadTintBrush}"
-                                                            CornerRadius="8"
-                                                            Visibility="{x:Bind IsWorking, Mode=OneWay}">
-                                                            <StackPanel Orientation="Horizontal" Spacing="5">
-                                                                <Ellipse
-                                                                    Width="6"
-                                                                    Height="6"
-                                                                    VerticalAlignment="Center"
-                                                                    Fill="{StaticResource StatusRunningBrush}"
-                                                                    views:Pulse.IsActive="{x:Bind IsWorking, Mode=OneWay}" />
-                                                                <TextBlock
-                                                                    FontSize="10"
-                                                                    Foreground="{StaticResource StatusRunningBrush}"
-                                                                    Text="running" />
-                                                            </StackPanel>
-                                                        </Border>
-                                                        <Border
-                                                            Padding="7,1"
-                                                            Background="{StaticResource KindWriteTintBrush}"
-                                                            CornerRadius="8"
-                                                            Visibility="{x:Bind IsOpenIdle, Mode=OneWay}">
-                                                            <TextBlock
-                                                                FontSize="10"
-                                                                Foreground="{StaticResource StatusSuccessBrush}"
-                                                                Text="open" />
-                                                        </Border>
-                                                    </StackPanel>
-                                                </StackPanel>
-                                            </DataTemplate>
-                                        </ListView.ItemTemplate>
-                                    </ListView>
-                                </StackPanel>
-                            </StackPanel>
+                                <HyperlinkButton
+                                    x:Name="HistoryShowAllButton"
+                                    Margin="0,0,2,0"
+                                    Padding="8,2"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center"
+                                    Click="OnHistoryShowAllClick"
+                                    FontSize="11"
+                                    Visibility="Collapsed" />
+                            </Grid>
 
-                            <!--  Session changes: what the agent itself changed, live, one row
-                                  per file measured from before its first touch. The badge
-                                  pulses while a change is fresh, so an edit landing mid-turn
-                                  is visible without looking at the transcript.  -->
-                            <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Status.ChangeCount, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
-                                <ToggleButton
-                                    x:Name="SessionChangesSection"
-                                    IsChecked="True"
-                                    Style="{StaticResource SectionHeader}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <TextBlock Text="Session changes" />
-                                        <Border
-                                            Padding="7,1"
-                                            VerticalAlignment="Center"
-                                            Background="{StaticResource KindEditTintBrush}"
-                                            CornerRadius="8"
-                                            Visibility="{x:Bind ViewModel.Status.ChangeCount, Mode=OneWay, Converter={StaticResource CountToVisibility}}"
-                                            views:Pulse.IsActive="{x:Bind ViewModel.Status.HasFreshChanges, Mode=OneWay}">
-                                            <TextBlock
-                                                FontSize="10"
-                                                Foreground="{StaticResource KindEditBrush}"
-                                                Text="{x:Bind ViewModel.Status.ChangeCount, Mode=OneWay}" />
-                                        </Border>
-                                    </StackPanel>
-                                </ToggleButton>
+                            <!--  Folded, but the conversation in front is not on disk yet  -->
+                            <TextBlock
+                                x:Name="HistoryNotListedText"
+                                Grid.Row="1"
+                                Margin="22,2,8,4"
+                                FontSize="11"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Text="This conversation joins the history after its first reply."
+                                TextWrapping="Wrap"
+                                Visibility="Collapsed" />
 
-                                <StackPanel
-                                    Margin="14,2,0,4"
-                                    Spacing="4"
-                                    Visibility="{x:Bind SessionChangesSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
-                                    <TextBlock
-                                        Margin="8,0,8,2"
-                                        FontSize="12"
-                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                        Text="{x:Bind ViewModel.Status.ChangeSummary, Mode=OneWay}"
-                                        TextWrapping="Wrap" />
+                            <ListView
+                                x:Name="HistoryList"
+                                Grid.Row="2"
+                                Margin="14,0,0,0"
+                                IsItemClickEnabled="True"
+                                ItemClick="OnSessionClick"
+                                ItemContainerStyle="{StaticResource PanelItemFlush}"
+                                SelectionMode="None"
+                                Visibility="{x:Bind HistorySection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
+                                <ListView.ItemTemplate>
+                                    <!--  Open sessions say so: an accent bar, plus "running" with a
+                                          pulsing dot while their tab works, "open" while it idles.
+                                          Clicking an open one switches to its tab; any other opens
+                                          beside it.  -->
+                                    <DataTemplate x:DataType="vm:SessionListItem">
+                                        <Grid
+                                            Padding="8,6"
+                                            Background="Transparent"
+                                            ColumnSpacing="8"
+                                            ToolTipService.ToolTip="{x:Bind SessionId}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.ContextFlyout>
+                                                <MenuFlyout>
+                                                    <MenuFlyoutItem Click="OnCopySessionHandoutClick" Text="Copy handout">
+                                                        <MenuFlyoutItem.Icon>
+                                                            <FontIcon Glyph="&#xE8C8;" />
+                                                        </MenuFlyoutItem.Icon>
+                                                    </MenuFlyoutItem>
+                                                    <MenuFlyoutItem Click="OnCopySessionIdClick" Text="Copy session ID">
+                                                        <MenuFlyoutItem.Icon>
+                                                            <FontIcon Glyph="&#xE8C8;" />
+                                                        </MenuFlyoutItem.Icon>
+                                                    </MenuFlyoutItem>
+                                                    <MenuFlyoutItem Click="OnRetitleSessionClick" Text="Change title">
+                                                        <MenuFlyoutItem.Icon>
+                                                            <FontIcon Glyph="&#xE70F;" />
+                                                        </MenuFlyoutItem.Icon>
+                                                    </MenuFlyoutItem>
+                                                    <MenuFlyoutItem Click="OnForkSessionClick" Text="Fork session">
+                                                        <MenuFlyoutItem.Icon>
+                                                            <FontIcon Glyph="&#xE8AD;" />
+                                                        </MenuFlyoutItem.Icon>
+                                                    </MenuFlyoutItem>
+                                                    <MenuFlyoutItem Click="OnCompactSessionClick" Text="Compact session">
+                                                        <MenuFlyoutItem.Icon>
+                                                            <FontIcon Glyph="&#xE73F;" />
+                                                        </MenuFlyoutItem.Icon>
+                                                    </MenuFlyoutItem>
+                                                    <MenuFlyoutSeparator />
+                                                    <MenuFlyoutItem Click="OnDeleteSessionClick" Text="Delete session">
+                                                        <MenuFlyoutItem.Icon>
+                                                            <FontIcon Glyph="&#xE74D;" />
+                                                        </MenuFlyoutItem.Icon>
+                                                    </MenuFlyoutItem>
+                                                </MenuFlyout>
+                                            </Grid.ContextFlyout>
 
-                                    <ListView
-                                        MaxHeight="220"
-                                        IsItemClickEnabled="True"
-                                        ItemClick="OnSessionChangeClick"
-                                        ItemContainerStyle="{StaticResource PanelItem}"
-                                        ItemsSource="{x:Bind ViewModel.Status.Changes, Mode=OneWay}"
-                                        SelectionMode="None">
-                                        <ListView.ItemTemplate>
-                                            <DataTemplate x:DataType="vm:SessionFileChange">
-                                                <Grid ColumnSpacing="8" ToolTipService.ToolTip="{x:Bind Path}">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="Auto" />
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <Ellipse
-                                                        Width="7"
-                                                        Height="7"
-                                                        VerticalAlignment="Center"
-                                                        Fill="{x:Bind Kind, Mode=OneWay, Converter={StaticResource FileChangeBrush}}"
-                                                        views:Pulse.IsActive="{x:Bind IsFresh, Mode=OneWay}" />
-                                                    <StackPanel
-                                                        Grid.Column="1"
-                                                        Orientation="Horizontal"
-                                                        Spacing="6">
-                                                        <TextBlock
-                                                            VerticalAlignment="Center"
-                                                            FontSize="12"
-                                                            Text="{x:Bind Name}"
-                                                            TextTrimming="CharacterEllipsis" />
-                                                        <TextBlock
-                                                            VerticalAlignment="Center"
-                                                            FontSize="11"
-                                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                            Text="{x:Bind Directory}"
-                                                            TextTrimming="CharacterEllipsis" />
-                                                    </StackPanel>
-                                                    <StackPanel
-                                                        Grid.Column="2"
-                                                        Orientation="Horizontal"
-                                                        Spacing="6">
-                                                        <TextBlock
-                                                            VerticalAlignment="Center"
-                                                            FontSize="10.5"
-                                                            Foreground="{x:Bind Kind, Mode=OneWay, Converter={StaticResource FileChangeBrush}}"
-                                                            Text="{x:Bind KindText, Mode=OneWay}" />
-                                                        <TextBlock
-                                                            VerticalAlignment="Center"
-                                                            FontFamily="Cascadia Mono, Consolas"
-                                                            FontSize="11">
-                                                            <Run Foreground="{StaticResource DiffAddedForegroundBrush}" Text="{x:Bind AddedText, Mode=OneWay}" />
-                                                            <Run Foreground="{StaticResource DiffRemovedForegroundBrush}" Text="{x:Bind RemovedText, Mode=OneWay}" />
-                                                        </TextBlock>
-                                                    </StackPanel>
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ListView.ItemTemplate>
-                                    </ListView>
-                                </StackPanel>
-                            </StackPanel>
+                                            <!--  The fixed-width slot keeps titles aligned whether or not the bar shows  -->
+                                            <Grid Width="3">
+                                                <Border
+                                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                                    CornerRadius="1.5"
+                                                    Visibility="{x:Bind IsOpen, Mode=OneWay}" />
+                                            </Grid>
 
-                            <!--  Plans: proposed in chat or written to disk, one click away.  -->
-                            <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Chat.Artifacts.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
-                                <ToggleButton
-                                    x:Name="PlansSection"
-                                    IsChecked="True"
-                                    Style="{StaticResource SectionHeader}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <TextBlock Text="Artifacts" />
-                                        <Border
-                                            Padding="7,1"
-                                            VerticalAlignment="Center"
-                                            Background="{StaticResource KindPlanTintBrush}"
-                                            CornerRadius="8"
-                                            Visibility="{x:Bind ViewModel.Chat.Artifacts.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
-                                            <TextBlock
-                                                FontSize="10"
-                                                Foreground="{StaticResource KindPlanBrush}"
-                                                Text="{x:Bind ViewModel.Chat.Artifacts.Count, Mode=OneWay}" />
-                                        </Border>
-                                    </StackPanel>
-                                </ToggleButton>
-
-                                <StackPanel Margin="14,2,0,4" Visibility="{x:Bind PlansSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
-                                    <ListView
-                                        IsItemClickEnabled="True"
-                                        ItemClick="OnArtifactClick"
-                                        ItemContainerStyle="{StaticResource PanelItem}"
-                                        ItemsSource="{x:Bind ViewModel.Chat.Artifacts, Mode=OneWay}"
-                                        SelectionMode="None">
-                                        <ListView.ItemTemplate>
-                                            <DataTemplate x:DataType="vm:SessionArtifact">
-                                                <Grid ColumnSpacing="10">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="Auto" />
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <Border
-                                                        Width="24"
-                                                        Height="24"
-                                                        Background="{StaticResource KindPlanTintBrush}"
-                                                        CornerRadius="6">
-                                                        <FontIcon
-                                                            FontSize="11"
-                                                            Foreground="{StaticResource KindPlanBrush}"
-                                                            Glyph="{x:Bind Glyph}" />
-                                                    </Border>
-                                                    <StackPanel Grid.Column="1" Spacing="1">
-                                                        <TextBlock
-                                                            FontSize="12"
-                                                            FontWeight="SemiBold"
-                                                            Text="{x:Bind Title, Mode=OneWay}"
-                                                            TextTrimming="CharacterEllipsis" />
-                                                        <TextBlock
-                                                            FontSize="11"
-                                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                            TextTrimming="CharacterEllipsis">
-                                                            <Run Text="{x:Bind Subtitle}" />
-                                                            <Run Text=" · " />
-                                                            <Run Text="{x:Bind UpdatedAt, Mode=OneWay, Converter={StaticResource RelativeTime}}" />
-                                                        </TextBlock>
-                                                    </StackPanel>
-                                                    <Border
-                                                        Grid.Column="2"
-                                                        Padding="7,1"
-                                                        VerticalAlignment="Center"
-                                                        BorderBrush="{x:Bind Status, Mode=OneWay, Converter={StaticResource ArtifactStatusBrush}}"
-                                                        BorderThickness="1"
-                                                        CornerRadius="8">
-                                                        <TextBlock
-                                                            FontSize="10"
-                                                            Foreground="{x:Bind Status, Mode=OneWay, Converter={StaticResource ArtifactStatusBrush}}"
-                                                            Text="{x:Bind StatusText, Mode=OneWay}" />
-                                                    </Border>
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ListView.ItemTemplate>
-                                    </ListView>
-                                </StackPanel>
-                            </StackPanel>
-
-                            <!--  Running tasks: background shells and subagents; hidden until
-                                  one starts. Clicking a row splits the centre to peek at it.  -->
-                            <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Chat.RunningTasks.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
-                                <ToggleButton
-                                    x:Name="RunningTasksSection"
-                                    IsChecked="True"
-                                    Style="{StaticResource SectionHeader}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <TextBlock Text="Running tasks" />
-                                        <Border
-                                            Padding="7,1"
-                                            VerticalAlignment="Center"
-                                            Background="{StaticResource KindReadTintBrush}"
-                                            CornerRadius="8">
-                                            <TextBlock
-                                                FontSize="10"
-                                                Foreground="{StaticResource StatusRunningBrush}"
-                                                Text="{x:Bind ViewModel.Chat.RunningTasks.Count, Mode=OneWay}" />
-                                        </Border>
-                                    </StackPanel>
-                                </ToggleButton>
-
-                                <ListView
-                                    Margin="14,2,0,4"
-                                    MaxHeight="260"
-                                    IsItemClickEnabled="True"
-                                    ItemClick="OnRunningTaskClick"
-                                    ItemContainerStyle="{StaticResource PanelItem}"
-                                    ItemsSource="{x:Bind ViewModel.Chat.RunningTasks, Mode=OneWay}"
-                                    SelectionMode="None"
-                                    Visibility="{x:Bind RunningTasksSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
-                                    <ListView.ItemTemplate>
-                                        <DataTemplate x:DataType="vm:RunningTaskItem">
-                                            <Grid ColumnSpacing="8" ToolTipService.ToolTip="{x:Bind Title}">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <FontIcon
-                                                    VerticalAlignment="Center"
-                                                    FontSize="12"
-                                                    Glyph="{x:Bind KindGlyph}" />
-                                                <Button
-                                                    Grid.Column="3"
-                                                    Padding="5"
-                                                    VerticalAlignment="Center"
-                                                    Background="Transparent"
-                                                    BorderThickness="0"
-                                                    Click="OnStopTaskClick"
-                                                    Tag="{x:Bind}"
-                                                    ToolTipService.ToolTip="Stop this task"
-                                                    Visibility="{x:Bind CanStop, Mode=OneWay}">
-                                                    <FontIcon FontSize="10" Glyph="&#xE71A;" />
-                                                </Button>
+                                            <StackPanel Grid.Column="1" Spacing="2">
                                                 <TextBlock
-                                                    Grid.Column="1"
                                                     FontSize="12"
                                                     Text="{x:Bind Title}"
                                                     TextTrimming="CharacterEllipsis"
                                                     TextWrapping="NoWrap" />
-                                                <StackPanel
-                                                    Grid.Column="2"
-                                                    VerticalAlignment="Center"
-                                                    Orientation="Horizontal"
-                                                    Spacing="5">
-                                                    <Ellipse
-                                                        Width="6"
-                                                        Height="6"
-                                                        VerticalAlignment="Center"
-                                                        Fill="{StaticResource StatusRunningBrush}"
-                                                        Visibility="{x:Bind IsRunning, Mode=OneWay}"
-                                                        views:Pulse.IsActive="{x:Bind IsRunning, Mode=OneWay}" />
-                                                    <TextBlock
-                                                        FontSize="10"
-                                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                        Text="{x:Bind StatusLabel, Mode=OneWay}" />
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}">
+                                                        <Run Text="{x:Bind TurnsText}" /><Run Text=" · " /><Run Text="{x:Bind UpdatedAt, Converter={StaticResource RelativeTime}}" />
+                                                    </TextBlock>
+                                                    <Border
+                                                        Padding="7,1"
+                                                        Background="{StaticResource KindReadTintBrush}"
+                                                        CornerRadius="8"
+                                                        Visibility="{x:Bind IsWorking, Mode=OneWay}">
+                                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                                            <Ellipse
+                                                                Width="6"
+                                                                Height="6"
+                                                                VerticalAlignment="Center"
+                                                                Fill="{StaticResource StatusRunningBrush}"
+                                                                views:Pulse.IsActive="{x:Bind IsWorking, Mode=OneWay}" />
+                                                            <TextBlock
+                                                                FontSize="10"
+                                                                Foreground="{StaticResource StatusRunningBrush}"
+                                                                Text="running" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                    <Border
+                                                        Padding="7,1"
+                                                        Background="{StaticResource KindWriteTintBrush}"
+                                                        CornerRadius="8"
+                                                        Visibility="{x:Bind IsOpenIdle, Mode=OneWay}">
+                                                        <TextBlock
+                                                            FontSize="10"
+                                                            Foreground="{StaticResource StatusSuccessBrush}"
+                                                            Text="open" />
+                                                    </Border>
                                                 </StackPanel>
-                                            </Grid>
-                                        </DataTemplate>
-                                    </ListView.ItemTemplate>
-                                </ListView>
-                            </StackPanel>
-
-                            <!--  Todos: collapsed until the agent publishes something  -->
-                            <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Chat.Todos.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
-                                <ToggleButton
-                                    x:Name="TodosSection"
-                                    IsChecked="True"
-                                    Style="{StaticResource SectionHeader}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <TextBlock Text="Todos" />
-                                        <Border
-                                            Padding="7,1"
-                                            VerticalAlignment="Center"
-                                            Background="{StaticResource KindTodoTintBrush}"
-                                            CornerRadius="8"
-                                            Visibility="{x:Bind ViewModel.Chat.TasksTotal, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
-                                            <TextBlock FontSize="10" Foreground="{StaticResource KindTodoBrush}">
-                                                <Run Text="{x:Bind ViewModel.Chat.TasksDone, Mode=OneWay}" />
-                                                <Run Text="/" />
-                                                <Run Text="{x:Bind ViewModel.Chat.TasksTotal, Mode=OneWay}" />
-                                            </TextBlock>
-                                        </Border>
-                                    </StackPanel>
-                                </ToggleButton>
-
-                                <StackPanel
-                                    Margin="14,2,0,4"
-                                    Spacing="4"
-                                    Visibility="{x:Bind TodosSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
-                                    <!--  Progress at a glance: a thin bar over the list.  -->
-                                    <ProgressBar
-                                        Margin="8,0,8,4"
-                                        Maximum="{x:Bind ViewModel.Chat.TasksTotal, Mode=OneWay}"
-                                        Value="{x:Bind ViewModel.Chat.TasksDone, Mode=OneWay}"
-                                        Visibility="{x:Bind ViewModel.Chat.TasksTotal, Mode=OneWay, Converter={StaticResource CountToVisibility}}" />
-
-                                    <ListView
-                                        ItemContainerStyle="{StaticResource PanelItem}"
-                                        ItemsSource="{x:Bind ViewModel.Chat.Todos, Mode=OneWay}"
-                                        SelectionMode="None">
-                                        <ListView.ItemTemplate>
-                                            <DataTemplate x:DataType="agents:TodoItem">
-                                                <Grid ColumnSpacing="8">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="Auto" />
-                                                        <ColumnDefinition Width="*" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <FontIcon
-                                                        VerticalAlignment="Top"
-                                                        Margin="0,2,0,0"
-                                                        FontSize="12"
-                                                        Foreground="{x:Bind Status, Converter={StaticResource TodoBrush}}"
-                                                        Glyph="{x:Bind Status, Converter={StaticResource TodoGlyph}}" />
-                                                    <TextBlock
-                                                        Grid.Column="1"
-                                                        FontSize="12"
-                                                        Foreground="{x:Bind Status, Converter={StaticResource TodoTextBrush}}"
-                                                        Text="{x:Bind Content}"
-                                                        TextWrapping="Wrap" />
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ListView.ItemTemplate>
-                                    </ListView>
-                                </StackPanel>
-                            </StackPanel>
-                        </StackPanel>
-                    </ScrollViewer>
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
+                    </Grid>
                 </Grid>
             </Border>
         </Grid>
