@@ -63,7 +63,7 @@ public static partial class SessionTitles
     /// </summary>
     public static string CleanModelTitle(string raw)
     {
-        var text = raw;
+        var text = Text.ModelOutput.CleanText(raw);
         var cut = text.IndexOf("<|", StringComparison.Ordinal);
         if (cut >= 0)
         {

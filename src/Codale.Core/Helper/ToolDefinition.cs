@@ -34,7 +34,8 @@ public sealed record ToolDefinition
         var parameters = Parameters.Count == 0
             ? "no arguments"
             : string.Join(", ", Parameters.Select(p =>
-                $"{p.Name}{(p.Required ? "" : "?")}: {p.Type.ToString().ToLowerInvariant()} - {p.Description}"));
+                $"{p.Name}{(p.Required ? "" : "?")}: {p.Type.ToString().ToLowerInvariant()} - {p.Description}" +
+                (p.AllowedValues is { Count: > 0 } allowed ? $" (one of: {string.Join(", ", allowed)})" : "")));
 
         return $"- {Name}: {Description} ({parameters})";
     }

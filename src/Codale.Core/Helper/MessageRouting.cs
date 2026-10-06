@@ -39,23 +39,30 @@ public static partial class MessageRouting
     public const int MinSummaryChars = 80;
 
     public const string SystemPrompt =
-        "You classify a developer's chat message for a coding agent. Call the route tool once. " +
-        "Never answer the message, never ask for more information, and never talk to the user.\n" +
-        "intent: act is the default. Choose act for any request to make, change, fix, add, remove, improve or " +
-        "redesign something, however it is phrased (\"let's make X nicer\", \"can you fix Y\", \"X should look " +
-        "more like Z\"), for a problem report or complaint (\"the button is misaligned\", \"there is a dot before " +
-        "the name, remove it\", \"X doesn't work\", \"next issue is Y\"), for a wish (\"I want X\", \"it needs X\"), " +
-        "and for short go-aheads (\"yes\", \"do it\", \"go ahead\", \"continue\", \"looks good, implement it\"). " +
-        "plan - a large, multi-step, multi-file or architectural change, or one the user wants planned first. " +
-        "ask - ONLY a pure question that wants an answer and no change at all (what, why, how does, where is, " +
-        "explain, review, compare) and asks for nothing to be done. A message that mixes a question with a " +
-        "request (\"why is X slow? speed it up\") is act. When a message asks for a change, it is never ask, " +
-        "and when unsure between ask and act, choose act.\n" +
-        "related: yes when the message continues, follows up on, gives feedback on or refers to the work the " +
-        "last agent message describes (\"it\", \"this\", \"that\", \"also\", \"again\", \"still\"), or when there " +
-        "is no agent message. no when it is a separate task about a different feature, screen, file or problem " +
-        "than that work, with nothing tying it to it - for example an agent message about fixing the login " +
-        "redirect, then \"add a dark theme to the settings page\". When unsure, answer yes.";
+        "You route a developer's chat message for a coding agent: call route once with intent and related.\n" +
+        "\n" +
+        "intent:\n" +
+        "- act (the default): any request to make, change, fix, add, remove, improve or redesign something, however " +
+        "it is phrased (\"let's make X nicer\", \"can you fix Y\", \"X should look more like Z\"); a problem report " +
+        "or complaint (\"the button is misaligned\", \"there is a dot before the name, remove it\", \"X doesn't work\", " +
+        "\"next issue is Y\"); a wish (\"I want X\", \"it needs X\"); a go-ahead (\"yes\", \"do it\", \"continue\", " +
+        "\"looks good, implement it\").\n" +
+        "- plan: a large, multi-step, multi-file or architectural change, or one the user wants planned first.\n" +
+        "- ask: ONLY a pure question that wants an answer and no change (what, why, how does, where is, explain, " +
+        "review, compare). A question mixed with a request (\"why is X slow? speed it up\") is act. A message that " +
+        "asks for a change is never ask. Unsure between ask and act: act.\n" +
+        "\n" +
+        "related:\n" +
+        "- yes: the message continues, follows up on, gives feedback on or refers to the work in <last_agent_message> " +
+        "(\"it\", \"this\", \"that\", \"also\", \"again\", \"still\"), or there is no agent message.\n" +
+        "- no: a separate task about a different feature, screen, file or problem, with nothing tying it to that work " +
+        "(agent message about fixing the login redirect, then \"add a dark theme to the settings page\").\n" +
+        "- Unsure: yes.\n" +
+        "\n" +
+        "Rules:\n" +
+        "- Classify only. Never answer, carry out or reply to the message, and never ask for more information.\n" +
+        PromptRules.DataOnly + "\n" +
+        PromptRules.CallOnly;
 
     public static readonly ToolDefinition RouteTool = new()
     {
@@ -66,14 +73,14 @@ public static partial class MessageRouting
             new ToolParameter
             {
                 Name = "intent",
-                Description = "ask, plan or act",
+                Description = "the mode for the turn",
                 Required = true,
                 AllowedValues = ["ask", "plan", "act"],
             },
             new ToolParameter
             {
                 Name = "related",
-                Description = "whether the message belongs to the current session",
+                Description = "yes if the message belongs to the work of the last agent message",
                 Required = true,
                 AllowedValues = ["yes", "no"],
             },
@@ -90,12 +97,10 @@ public static partial class MessageRouting
 
         if (lastAssistantText is { Length: > 0 })
         {
-            sb.Append("Last agent message: ").AppendLine(Clip(lastAssistantText, MaxAssistantChars));
-            sb.AppendLine();
+            sb.AppendLine(PromptRules.Tag("last_agent_message", Clip(lastAssistantText, MaxAssistantChars)));
         }
 
-        sb.AppendLine("New message:");
-        sb.Append(Clip(message, MaxMessageChars));
+        sb.Append(PromptRules.Tag("new_message", Clip(message, MaxMessageChars)));
         return sb.ToString();
     }
 

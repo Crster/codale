@@ -375,6 +375,15 @@ public sealed class SearchAgentLoopTests : IDisposable
         Assert.Empty(duplicates);
     }
 
+    [Fact]
+    public void The_seed_grep_keeps_a_quoted_phrase_whole()
+    {
+        var pattern = SearchAgentLoop.SeedPattern("where is \"public static void main\" in the launcher");
+
+        Assert.Equal(@"public\s+static\s+void\s+main|launcher", pattern);
+        Assert.Matches(pattern, "    public  static void main(String[] args)");
+    }
+
     [Theory]
     [InlineData("where do we handle retry on a failed upload?", "retry")]
     [InlineData("what is the RetryPolicy?", "RetryPolicy")]

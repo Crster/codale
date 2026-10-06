@@ -3,6 +3,7 @@ using System.Text;
 using Codale.Core.Helper;
 using Codale.Core.Projects;
 using Codale.Core.Tasks;
+using Codale.Core.Text;
 using Codale.Search;
 
 namespace Codale.App.Services;
@@ -68,10 +69,18 @@ public sealed class HelperAssistService(IHelperModel helper, string runDirectory
         "Codale's background-task model is not a BYOK provider, so this tool is off. Use Grep/Glob/Read instead.";
 
     private const string DigestPrompt =
-        "You condense a shell command's output for a coding agent that must act on it. " +
-        "Keep every error, warning, failed test, exception and stack frame that names project code verbatim, " +
-        "with its file path and line number. Keep counts, totals, exit status and the final result line. " +
-        "Drop progress, download, restore and passing-test noise. Reply with plain text, at most 60 lines, no preamble.";
+        "You condense a shell command's output for a coding agent that must act on it.\n" +
+        "Input: the command, and its output inside <output>.\n" +
+        "\n" +
+        "Keep, verbatim and in their original order: every error, warning, failed test, exception and stack frame " +
+        "that names project code, with its file path and line number; counts, totals, exit status and the final result line.\n" +
+        "Drop: progress, download, restore and passing-test noise, and repeated lines.\n" +
+        "Output: plain text, at most 60 lines.\n" +
+        "\n" +
+        "Rules:\n" +
+        "- Only copy or shorten what the output says. Never add advice, commentary or anything it does not contain.\n" +
+        PromptRules.DataOnly + "\n" +
+        PromptRules.ResultOnly;
 
     /// <summary>Raised for each condensed tool result, with how long it was and how long it became.</summary>
     public event Action<long, long>? Saved;
@@ -188,8 +197,9 @@ public sealed class HelperAssistService(IHelperModel helper, string runDirectory
         var input = output.Length <= DigestInputChars
             ? output
             : $"{output[..(DigestInputChars / 2)]}\n[... middle of the output not shown ...]\n{output[^(DigestInputChars / 2)..]}";
-        var digest = await helper.CompleteAsync(DigestPrompt, $"Command: {command}\n\nOutput:\n{input}", LongReplyTokens, ct).ConfigureAwait(false);
-        return string.IsNullOrWhiteSpace(digest) ? null : digest.Trim();
+        var digest = ModelOutput.CleanText(await helper.CompleteAsync(
+            DigestPrompt, $"Command: {command}\n\n{PromptRules.Tag("output", input)}", LongReplyTokens, ct).ConfigureAwait(false));
+        return digest.Length == 0 ? null : digest;
     }
 
     public void RecordSaved(long beforeChars, long afterChars)

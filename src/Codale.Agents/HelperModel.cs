@@ -69,7 +69,7 @@ public sealed class HelperModel(Func<OpenAiEndpoint?>? api = null) : IHelperMode
     {
         if (ApiEndpoint is { } endpoint)
         {
-            return (await OpenAiApiClient.CompleteAsync(endpoint, systemPrompt, prompt, ct, maxTokens, OnApiRequestServed).ConfigureAwait(false)).Trim();
+            return ModelOutput.Clean(await OpenAiApiClient.CompleteAsync(endpoint, systemPrompt, prompt, ct, maxTokens, OnApiRequestServed).ConfigureAwait(false));
         }
 
         if (!ClaudeInstalled)
@@ -77,8 +77,8 @@ public sealed class HelperModel(Func<OpenAiEndpoint?>? api = null) : IHelperMode
             throw new HelperModelException("The Claude CLI is not installed.");
         }
 
-        var reply = await RunAsync(systemPrompt, prompt, ct).ConfigureAwait(false);
-        return reply.Trim();
+        // Leaked reasoning or template tokens are never part of the answer.
+        return ModelOutput.Clean(await RunAsync(systemPrompt, prompt, ct).ConfigureAwait(false));
     }
 
     public async Task<ToolCall?> CallToolAsync(

@@ -29,7 +29,8 @@ public sealed class OpenAiApiClientTests
         Assert.Equal("deepseek-chat", root.GetProperty("model").GetString());
         Assert.Equal("system", root.GetProperty("messages")[0].GetProperty("role").GetString());
         Assert.Equal("Be brief.", root.GetProperty("messages")[0].GetProperty("content").GetString());
-        Assert.Equal("hello", root.GetProperty("messages")[1].GetProperty("content").GetString());
+        Assert.Equal("hello" + OpenAiApiClient.NoThink, root.GetProperty("messages")[1].GetProperty("content").GetString());
+        Assert.Equal(0, root.GetProperty("temperature").GetInt32());
 
         var choice = root.GetProperty("tool_choice");
         Assert.Equal("function", choice.GetProperty("type").GetString());
@@ -52,6 +53,14 @@ public sealed class OpenAiApiClientTests
             Endpoint, "s", "p", [MessageRouting.RouteTool, new ToolDefinition { Name = "answer", Description = "Finish." }]));
 
         Assert.Equal("required", request.RootElement.GetProperty("tool_choice").GetString());
+    }
+
+    [Fact]
+    public void An_untuned_request_leaves_temperature_to_the_model()
+    {
+        using var request = JsonDocument.Parse(OpenAiApiClient.BuildRequest(Endpoint, "s", "p", tools: null, tuned: false));
+
+        Assert.False(request.RootElement.TryGetProperty("temperature", out _));
     }
 
     [Fact]

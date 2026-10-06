@@ -4,6 +4,7 @@ using System.Text.Json;
 
 using Codale.Agents.Claude;
 using Codale.Core.Agents;
+using Codale.Core.Text;
 
 namespace Codale.Agents.OpenAi;
 
@@ -33,6 +34,9 @@ internal sealed class MessagesStream(string model)
     }
 
     private readonly List<PendingCall> _calls = [];
+
+    /// <summary>A small model may write its reasoning into the text as &lt;think&gt;; it is shown as thinking, not as the answer.</summary>
+    private readonly InlineReasoningSplitter _inline = new();
     private readonly Stopwatch _sincePing = Stopwatch.StartNew();
     private Block _open = Block.None;
     private int _nextIndex;
@@ -99,8 +103,7 @@ internal sealed class MessagesStream(string model)
             };
             if (!string.IsNullOrEmpty(text))
             {
-                Open(output, Block.Text);
-                output.Append(Delta("text_delta", "text", text));
+                Append(output, _inline.Feed(text));
             }
 
             foreach (var call in delta.Items("tool_calls"))
@@ -186,6 +189,7 @@ internal sealed class MessagesStream(string model)
 
         _finished = true;
         var output = new StringBuilder();
+        Append(output, _inline.Flush());
         Close(output);
 
         var hadTools = false;
@@ -236,6 +240,16 @@ internal sealed class MessagesStream(string model)
         json.WriteString("message", message);
         json.WriteEndObject();
     });
+
+    /// <summary>Content text as blocks: inline reasoning as thinking, the rest as text.</summary>
+    private void Append(StringBuilder output, IReadOnlyList<(bool Thinking, string Text)> parts)
+    {
+        foreach (var (thinking, text) in parts)
+        {
+            Open(output, thinking ? Block.Thinking : Block.Text);
+            output.Append(thinking ? Delta("thinking_delta", "thinking", text) : Delta("text_delta", "text", text));
+        }
+    }
 
     /// <summary>Makes <paramref name="kind"/> the open block, closing another first.</summary>
     private void Open(StringBuilder output, Block kind)

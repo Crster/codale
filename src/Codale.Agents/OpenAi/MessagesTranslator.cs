@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 
 using Codale.Agents.Claude;
+using Codale.Core.Text;
 
 namespace Codale.Agents.OpenAi;
 
@@ -380,8 +381,19 @@ internal static class MessagesTranslator
             json.WriteString("role", "assistant");
             json.WriteString("model", model);
 
+            var content = message.Prop("content") switch
+            {
+                { ValueKind: JsonValueKind.String } s => s.GetString() ?? "",
+                { ValueKind: JsonValueKind.Array } parts => string.Concat(parts.EnumerateArray().Select(p => p.Str("text")).Where(t => t is not null)),
+                _ => "",
+            };
+
+            // A small model may write its reasoning into the text as <think>: it is thinking, not the answer.
+            var (inline, text) = InlineReasoningSplitter.Split(content);
+            var reasoning = string.Join("\n\n", new[] { Reasoning(message), inline }.Where(r => !string.IsNullOrEmpty(r)));
+
             json.WriteStartArray("content");
-            if (Reasoning(message) is { Length: > 0 } reasoning)
+            if (reasoning.Length > 0)
             {
                 json.WriteStartObject();
                 json.WriteString("type", "thinking");
@@ -390,12 +402,6 @@ internal static class MessagesTranslator
                 json.WriteEndObject();
             }
 
-            var text = message.Prop("content") switch
-            {
-                { ValueKind: JsonValueKind.String } s => s.GetString() ?? "",
-                { ValueKind: JsonValueKind.Array } parts => string.Concat(parts.EnumerateArray().Select(p => p.Str("text")).Where(t => t is not null)),
-                _ => "",
-            };
             if (text.Length > 0)
             {
                 json.WriteStartObject();

@@ -136,11 +136,13 @@ public sealed class SourceExplorer
 
             allTerms.AddRange(fresh.Select(k => new ExploreTerm(k, 1.0)));
 
-            // The model's words lead; the question's own words only break ties.
+            // The model's words lead; the question's own words only break ties - except
+            // the text it quotes, which the user asked for as written.
             var terms = Resolve(snapshot, [
+                .. questionTerms.Where(q => q.Exact),
                 .. fresh.Select(k => new ExploreTerm(k, 1.0)),
                 .. questionTerms
-                    .Where(q => !fresh.Contains(q.Text, StringComparer.OrdinalIgnoreCase))
+                    .Where(q => !q.Exact && !fresh.Contains(q.Text, StringComparer.OrdinalIgnoreCase))
                     .Select(q => q with { Weight = q.Weight * 0.3 }),
             ]);
 
@@ -232,32 +234,42 @@ public sealed class SourceExplorer
     /// A lift rather than a requirement: a file without it is not "missing a term". The
     /// compound identifiers built from the other terms are bonuses.
     /// </param>
-    internal sealed record ExploreTerm(string Text, double Weight, bool Bonus = false);
+    /// <param name="Exact">
+    /// Quoted by the user: a phrase is wanted with its words together and in order, not
+    /// each word anywhere in the file.
+    /// </param>
+    internal sealed record ExploreTerm(string Text, double Weight, bool Bonus = false, bool Exact = false);
 
     /// <summary>
     /// A term as the index knows it: the tokens it matches (itself, or failing that the
     /// tokens that start like its stem), how specific it is, and the regex that marks
     /// its lines.
     /// </summary>
-    internal sealed record ResolvedTerm(ExploreTerm Term, IReadOnlyList<(string Key, double Factor)> Keys, double Idf, Regex Line)
+    /// <param name="PhraseFiles">
+    /// For a quoted phrase: the files that hold it whole, misspellings corrected. Empty
+    /// when no file does, and the phrase falls back to its words.
+    /// </param>
+    internal sealed record ResolvedTerm(
+        ExploreTerm Term, IReadOnlyList<(string Key, double Factor)> Keys, double Idf, Regex Line, IReadOnlySet<int>? PhraseFiles = null)
     {
         public double Weight => Term.Weight;
     }
 
     /// <summary>
     /// The question's content words; identifiers written as such (<c>RetryPolicy</c>,
-    /// <c>max_retries</c>) and quoted text count more than plain words.
+    /// <c>max_retries</c>) and quoted text count more than plain words. Quoted text is one
+    /// term - "public static void main" is not public, static, void and main.
     /// </summary>
     internal static List<ExploreTerm> QueryTerms(string query)
     {
         var terms = new List<ExploreTerm>();
 
-        foreach (Match quoted in Regex.Matches(query, "[\"`]([^\"`]{2,60})[\"`]"))
+        foreach (var quoted in CodeDiscovery.QuotedPhrases(query))
         {
-            terms.Add(new ExploreTerm(quoted.Groups[1].Value.Trim(), 1.5));
+            terms.Add(new ExploreTerm(quoted, 1.5, Exact: true));
         }
 
-        foreach (var word in CodeDiscovery.QuestionWords(query))
+        foreach (var word in CodeDiscovery.QuestionWords(CodeDiscovery.WithoutQuoted(query)))
         {
             if (terms.Any(t => string.Equals(t.Text, word, StringComparison.OrdinalIgnoreCase)))
             {
@@ -291,6 +303,12 @@ public sealed class SourceExplorer
             var keys = new List<(string Key, double Factor)>();
             var phrase = text.Any(char.IsWhiteSpace);
 
+            if (phrase && term.Exact)
+            {
+                resolved.Add(ResolvePhrase(snapshot, term, text));
+                continue;
+            }
+
             if (phrase)
             {
                 // Each word of a phrase ("save changes") counts, at a share of the whole.
@@ -318,6 +336,12 @@ public sealed class SourceExplorer
                     }
                 }
 
+                // A misspelling: "RetryPolcy" is the RetryPolicy the code has.
+                if (keys.Count == 0 && Closest(snapshot, whole) is { } corrected)
+                {
+                    keys.Add((corrected, PrimaryFactor));
+                }
+
                 // Last resort for a compound the code spells differently: its words.
                 if (keys.Count == 0 && tokens.Count > 1)
                 {
@@ -334,6 +358,190 @@ public sealed class SourceExplorer
 
         resolved.AddRange(Compounds(snapshot, resolved));
         return resolved;
+    }
+
+    private const int MaxPhraseCandidates = 5_000;
+
+    private static readonly Regex PhraseWord = new(@"\w+", RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// A quoted phrase: its words find the files that could hold it, and only the files
+    /// holding the words together, in order, count as having it. A word the code does not
+    /// contain is taken as misspelled and read as the closest token it does, so
+    /// "pubilc static void main" still finds <c>public static void main</c>. When no file
+    /// holds the phrase even so, its words stand in for it, as for any phrase.
+    /// </summary>
+    private static ResolvedTerm ResolvePhrase(SourceSnapshot snapshot, ExploreTerm term, string text)
+    {
+        var spelled = new StringBuilder(text.Length);
+        var words = new List<string>();
+        var last = 0;
+        var complete = true;
+
+        foreach (Match match in PhraseWord.Matches(text))
+        {
+            // A word the index never keeps (one letter, a number) is matched by the regex alone.
+            var word = match.Value.ToLowerInvariant();
+            var indexed = SourceTokens.Of(match.Value) is [var first, ..] && first == word;
+            var known = !indexed || snapshot.Contains(word) ? word : Closest(snapshot, word);
+
+            spelled.Append(text, last, match.Index - last).Append(known ?? match.Value);
+            last = match.Index + match.Length;
+
+            if (known is null)
+            {
+                complete = false;
+            }
+            else if (indexed)
+            {
+                words.Add(known);
+            }
+        }
+
+        spelled.Append(text, last, text.Length - last);
+        words = words.Distinct().ToList();
+
+        var keys = words.Select(w => (w, 1.0 / Math.Max(1, words.Count))).ToList();
+        var forms = new List<string> { text, spelled.ToString() };
+
+        var found = complete && words.Count > 0 ? FilesWithPhrase(snapshot, words, LineMatcher(forms, phrase: true)) : [];
+        if (found.Count == 0)
+        {
+            forms.AddRange(words);
+        }
+
+        var idf = found.Count > 0
+            ? Idf(snapshot.Files.Count, found.Count)
+            : keys.Count == 0 ? 0 : keys.Max(k => Idf(snapshot, k.w));
+
+        return new ResolvedTerm(term, keys, idf, LineMatcher(forms.Distinct(StringComparer.OrdinalIgnoreCase), phrase: true), found);
+    }
+
+    /// <summary>The files holding every word that also hold the phrase itself, checked in parallel.</summary>
+    private static HashSet<int> FilesWithPhrase(SourceSnapshot snapshot, IReadOnlyList<string> words, Regex phrase)
+    {
+        HashSet<int>? candidates = null;
+        foreach (var word in words.OrderBy(snapshot.DocumentFrequency))
+        {
+            if (snapshot.PostingOf(word) is not { } posting)
+            {
+                return [];
+            }
+
+            if (candidates is null)
+            {
+                candidates = [.. posting.Files];
+            }
+            else
+            {
+                candidates.IntersectWith(posting.Files);
+            }
+
+            if (candidates.Count == 0)
+            {
+                return [];
+            }
+        }
+
+        var found = new HashSet<int>();
+        Parallel.ForEach(candidates!.Take(MaxPhraseCandidates), id =>
+        {
+            try
+            {
+                if (snapshot.Files[id].ReadText() is { } content && phrase.IsMatch(content))
+                {
+                    lock (found)
+                    {
+                        found.Add(id);
+                    }
+                }
+            }
+            catch (RegexMatchTimeoutException)
+            {
+            }
+        });
+
+        return found;
+    }
+
+    /// <summary>
+    /// The indexed token a misspelled word most likely means: one edit away (two for a
+    /// long word), the most widespread on a tie. Short words are left alone - too many
+    /// tokens sit one letter from "map" for a guess to mean anything.
+    /// </summary>
+    internal static string? Closest(SourceSnapshot snapshot, string word)
+    {
+        word = word.ToLowerInvariant();
+        if (word.Length < 4)
+        {
+            return null;
+        }
+
+        var limit = word.Length <= 7 ? 1 : 2;
+        string? best = null;
+        var bestDistance = int.MaxValue;
+        var bestFrequency = 0;
+
+        foreach (var token in snapshot.Vocabulary)
+        {
+            if (Math.Abs(token.Length - word.Length) > limit || token == word)
+            {
+                continue;
+            }
+
+            var distance = EditDistance(word, token, limit);
+            if (distance > limit)
+            {
+                continue;
+            }
+
+            var frequency = snapshot.DocumentFrequency(token);
+            if (distance < bestDistance || (distance == bestDistance && frequency > bestFrequency))
+            {
+                (best, bestDistance, bestFrequency) = (token, distance, frequency);
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>Edits from one word to the other - a swap of neighbours is one - or <paramref name="limit"/> + 1 once past it.</summary>
+    internal static int EditDistance(string a, string b, int limit)
+    {
+        var previous2 = new int[b.Length + 1];
+        var previous = new int[b.Length + 1];
+        var current = new int[b.Length + 1];
+        for (var j = 0; j <= b.Length; j++)
+        {
+            previous[j] = j;
+        }
+
+        for (var i = 1; i <= a.Length; i++)
+        {
+            current[0] = i;
+            var rowBest = current[0];
+            for (var j = 1; j <= b.Length; j++)
+            {
+                var cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                var value = Math.Min(Math.Min(previous[j] + 1, current[j - 1] + 1), previous[j - 1] + cost);
+                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1])
+                {
+                    value = Math.Min(value, previous2[j - 2] + 1);
+                }
+
+                current[j] = value;
+                rowBest = Math.Min(rowBest, value);
+            }
+
+            if (rowBest > limit)
+            {
+                return limit + 1;
+            }
+
+            (previous2, previous, current) = (previous, current, previous2);
+        }
+
+        return previous[b.Length];
     }
 
     private const int MaxCompounds = 8;
@@ -426,12 +634,10 @@ public sealed class SourceExplorer
         return new Regex(string.Join("|", parts), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
     }
 
-    private static double Idf(SourceSnapshot snapshot, string key)
-    {
-        var n = snapshot.Files.Count;
-        var df = snapshot.DocumentFrequency(key);
-        return Math.Log(1 + (n - df + 0.5) / (df + 0.5));
-    }
+    private static double Idf(SourceSnapshot snapshot, string key) =>
+        Idf(snapshot.Files.Count, snapshot.DocumentFrequency(key));
+
+    private static double Idf(int n, int df) => Math.Log(1 + (n - df + 0.5) / (df + 0.5));
 
     // ---------------------------------------------------------------- ranking
 
@@ -509,6 +715,18 @@ public sealed class SourceExplorer
                         var lift = factor * idf * (location.Symbol.Kind == SourceSymbolKind.Type ? 1.6 : 1.0);
                         perFile[id] = perFile.GetValueOrDefault(id) + lift;
                     }
+                }
+            }
+
+            // A quoted phrase: the files holding it whole are the matches, worth the phrase's
+            // rarest word in full and its own rarity besides; the words scattered barely count.
+            if (term.PhraseFiles is { Count: > 0 } phraseFiles)
+            {
+                foreach (var id in perFile.Keys.ToList())
+                {
+                    perFile[id] = phraseFiles.Contains(id)
+                        ? perFile[id] * term.Keys.Count + term.Idf
+                        : perFile[id] * 0.25;
                 }
             }
 

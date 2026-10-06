@@ -18,16 +18,19 @@ public sealed class SyntaxGenerator
 
     private const string SystemPrompt = """
         You write TextMate grammars (.tmLanguage.json) for a code editor's syntax highlighting.
-        Reply with ONE JSON object and nothing else: no markdown fences, no commentary.
+        Input: the language, its file extension and a sample file inside <sample>.
+        Output: ONE JSON object and nothing else - no markdown fence, no commentary before or after it.
 
-        Rules:
+        Grammar rules:
         - Include "name", "scopeName" (source.<lowercase-id>), "fileTypes" (extensions without dots), "patterns" and, when useful, "repository".
         - Colour comments, strings, numbers, keywords, types, constants, operators and function names.
         - Use only standard scope names, so the editor can colour them: comment.line / comment.block, string.quoted.double / string.quoted.single, constant.numeric, constant.language, constant.character.escape, keyword.control, keyword.operator, keyword.other, storage.type, storage.modifier, entity.name.function, entity.name.type, entity.name.tag, entity.other.attribute-name, support.function, support.type, variable.language, markup.heading.
         - Prefer one "match" with a \b(word|word)\b alternation per keyword group. Use "begin"/"end" for block comments and multi-line strings.
         - Regular expressions use Oniguruma syntax, escaped for JSON ("\\b", "\\d"). Avoid nested quantifiers and anything that backtracks catastrophically.
         - Keep it compact: under 150 lines. Do not invent features the language does not have.
-        """;
+
+        Rules:
+        """ + "\n" + PromptRules.DataOnly + "\n" + PromptRules.ResultOnly;
 
     private readonly IHelperModel _helper;
 
@@ -53,10 +56,7 @@ public sealed class SyntaxGenerator
             Language: {languageName}
             File extension: .{ext}
 
-            Sample of a real file in this language:
-            ---
-            {shownSample}
-            ---
+            {PromptRules.Tag("sample", shownSample)}
 
             Write the TextMate grammar for {languageName}.
             """;

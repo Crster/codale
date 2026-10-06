@@ -1,5 +1,7 @@
 using System.Text.Json;
 
+using Codale.Core.Text;
+
 namespace Codale.Core.Helper;
 
 /// <summary>
@@ -69,10 +71,11 @@ public static class HelperToolCalls
     /// <summary>The system prompt with the tool contract appended.</summary>
     public static string BuildSystemPrompt(string systemPrompt, IReadOnlyList<ToolDefinition> tools) =>
         systemPrompt +
-        "\n\nRespond with a single call to one of these tools, and nothing else:\n" +
+        "\n\nTools:\n" +
         string.Join("\n", tools.Select(t => t.ToPromptLine())) +
-        "\n\nThe entire reply must be one JSON object, with no markdown fences and no commentary: " +
-        "{\"tool\": \"<tool name>\", \"arguments\": {\"<parameter>\": <value>}}. " +
+        "\n\nReply format: exactly one JSON object calling one tool, and nothing else - no markdown fence, " +
+        "no text before or after it:\n" +
+        "{\"tool\": \"<tool name>\", \"arguments\": {\"<parameter>\": <value>}}\n" +
         "Where a parameter lists allowed values, use exactly one of them.";
 
     /// <summary>
@@ -82,7 +85,8 @@ public static class HelperToolCalls
     /// </summary>
     public static ToolCall? Parse(string? reply, IReadOnlyList<ToolDefinition> tools)
     {
-        if (ExtractObject(reply) is not { } json)
+        // A small model's leaked <think> block may hold braces of its own: drop it before looking for the call.
+        if (ExtractObject(ModelOutput.CleanCall(reply)) is not { } json)
         {
             return null;
         }

@@ -172,6 +172,71 @@ public sealed class SourceExplorerTests : IDisposable
         Assert.True(result.IsFinal);
     }
 
+    [Theory]
+    [InlineData("\"public static void main\"")]
+    [InlineData("where is \"pubilc static void mian\"")]
+    public async Task A_quoted_phrase_is_found_whole_even_misspelled(string query)
+    {
+        Write("src/App.java", """
+            public class App
+            {
+                public static void main(String[] args)
+                {
+                    System.out.println("hi");
+                }
+            }
+            """);
+        Write("src/Scattered.cs", """
+            public class Scattered
+            {
+                static int main;
+                void Run() { }
+            }
+            """);
+
+        var result = await Explorer().RunAsync(query);
+
+        var paths = result.Files.Select(f => f.RelativePath).ToList();
+        Assert.Equal(P("src/App.java"), paths[0]);
+        Assert.DoesNotContain(P("src/Scattered.cs"), paths);
+        Assert.Contains(3, result.Files[0].Ranges.SelectMany(r => r.MatchLines));
+    }
+
+    [Fact]
+    public void Quoted_words_are_not_searched_apart()
+    {
+        var terms = SourceExplorer.QueryTerms("where is \"public static void main\" called");
+
+        var phrase = Assert.Single(terms, t => t.Exact);
+        Assert.Equal("public static void main", phrase.Text);
+        Assert.DoesNotContain(terms, t => t.Text is "public" or "static" or "void" or "main");
+        Assert.Contains(terms, t => t.Text == "called");
+    }
+
+    [Fact]
+    public async Task A_quoted_phrase_no_file_holds_falls_back_to_its_words()
+    {
+        var result = await Explorer().RunAsync("\"backoff retry upload\"");
+
+        Assert.NotEmpty(result.Files);
+    }
+
+    [Fact]
+    public async Task A_misspelled_identifier_finds_the_one_the_code_has()
+    {
+        var result = await Explorer().RunAsync("RetryPolcy");
+
+        Assert.Equal(P("src/RetryPolicy.cs"), result.Files[0].RelativePath);
+    }
+
+    [Theory]
+    [InlineData("main", "mian", 1)]
+    [InlineData("public", "pubilc", 1)]
+    [InlineData("upload", "uplaod", 1)]
+    [InlineData("retry", "entry", 2)]
+    public void Edit_distance_counts_a_swap_as_one(string a, string b, int expected) =>
+        Assert.Equal(expected, SourceExplorer.EditDistance(a, b, limit: 2));
+
     [Fact]
     public async Task Dependencies_secrets_and_noise_never_surface()
     {

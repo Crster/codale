@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -23,6 +24,15 @@ public static class OpenAiApiClient
     /// <summary>The reply cap for one-line jobs; longer write-ups (a handoff, a file answer) pass their own.</summary>
     internal const int MaxTokens = 1024;
 
+    /// <summary>
+    /// Qwen3, GLM and SmolLM3 skip their reasoning pass when the user turn ends with this
+    /// switch; other models ignore it. These jobs are one-liners and latency is what the user feels.
+    /// </summary>
+    internal const string NoThink = "\n\n/no_think";
+
+    /// <summary>Endpoints (URL and model) that refused <c>temperature</c>: they are not offered it again.</summary>
+    private static readonly ConcurrentDictionary<string, bool> Untuned = new(StringComparer.OrdinalIgnoreCase);
+
     // One client for the app: its pooled connection is what makes the second call fast.
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(60) };
 
@@ -36,9 +46,11 @@ public static class OpenAiApiClient
         string text;
         while (true)
         {
-            reply = await SendAsync(endpoint, () => BuildRequest(endpoint, systemPrompt, prompt, tools: null, cap), ct, onUsage)
+            reply = await SendAsync(endpoint, tuned => BuildRequest(endpoint, systemPrompt, prompt, tools: null, cap, tuned), ct, onUsage)
                 .ConfigureAwait(false);
-            text = ReplyMessage(reply.RootElement) is { } message ? MessageText(message) : "";
+
+            // Reasoning a small model leaked into the text is not an answer either.
+            text = ReplyMessage(reply.RootElement) is { } message ? ModelOutput.Clean(MessageText(message)) : "";
 
             // A reasoning model can spend the whole cap thinking and cut off before any answer
             // (finish_reason "length", empty content): retry once with room for both.
@@ -80,7 +92,7 @@ public static class OpenAiApiClient
         CancellationToken ct,
         Action<UsageSnapshot>? onUsage = null)
     {
-        using var reply = await SendAsync(endpoint, () => BuildRequest(endpoint, systemPrompt, conversation, tools), ct, onUsage)
+        using var reply = await SendAsync(endpoint, tuned => BuildRequest(endpoint, systemPrompt, conversation, tools, tuned: tuned), ct, onUsage)
             .ConfigureAwait(false);
         return ReadToolCall(reply.RootElement, tools);
     }
@@ -97,7 +109,7 @@ public static class OpenAiApiClient
         CancellationToken ct,
         Action<UsageSnapshot>? onUsage = null)
     {
-        using var reply = await SendAsync(endpoint, () => BuildRequest(endpoint, systemPrompt, conversation, tools), ct, onUsage)
+        using var reply = await SendAsync(endpoint, tuned => BuildRequest(endpoint, systemPrompt, conversation, tools, tuned: tuned), ct, onUsage)
             .ConfigureAwait(false);
         return ReadToolCalls(reply.RootElement, tools);
     }
@@ -112,14 +124,24 @@ public static class OpenAiApiClient
         return trimmed.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase) ? trimmed : trimmed + "/chat/completions";
     }
 
+    /// <summary>
+    /// The request body. <paramref name="tuned"/> adds <c>temperature: 0</c>: these jobs want the
+    /// same answer every time, not a creative one. A model that rejects it (a reasoning model
+    /// allows only its default) is asked again without, see <see cref="SendAsync"/>.
+    /// </summary>
     internal static string BuildRequest(
-        OpenAiEndpoint endpoint, string systemPrompt, string prompt, IReadOnlyList<ToolDefinition>? tools, int maxTokens = MaxTokens)
+        OpenAiEndpoint endpoint, string systemPrompt, string prompt, IReadOnlyList<ToolDefinition>? tools, int maxTokens = MaxTokens,
+        bool tuned = true)
     {
         return WriteJson(json =>
         {
             json.WriteStartObject();
             json.WriteString("model", endpoint.Model);
             json.WriteNumber("max_tokens", maxTokens);
+            if (tuned)
+            {
+                json.WriteNumber("temperature", 0);
+            }
 
             json.WriteStartArray("messages");
             json.WriteStartObject();
@@ -128,7 +150,7 @@ public static class OpenAiApiClient
             json.WriteEndObject();
             json.WriteStartObject();
             json.WriteString("role", "user");
-            json.WriteString("content", prompt);
+            json.WriteString("content", prompt + NoThink);
             json.WriteEndObject();
             json.WriteEndArray();
 
@@ -316,7 +338,23 @@ public static class OpenAiApiClient
         url.Scheme == Uri.UriSchemeHttps || (url.Scheme == Uri.UriSchemeHttp && url.IsLoopback);
 
     private static async Task<JsonDocument> SendAsync(
-        OpenAiEndpoint endpoint, Func<string> buildBody, CancellationToken ct, Action<UsageSnapshot>? onUsage = null)
+        OpenAiEndpoint endpoint, Func<bool, string> buildBody, CancellationToken ct, Action<UsageSnapshot>? onUsage = null)
+    {
+        var key = endpoint.BaseUrl.Trim() + "|" + endpoint.Model;
+        var tuned = !Untuned.ContainsKey(key);
+        try
+        {
+            return await SendOnceAsync(endpoint, () => buildBody(tuned), ct, onUsage).ConfigureAwait(false);
+        }
+        catch (HelperModelException ex) when (tuned && ex.Message.Contains("temperature", StringComparison.OrdinalIgnoreCase))
+        {
+            Untuned[key] = true;
+            return await SendOnceAsync(endpoint, () => buildBody(false), ct, onUsage).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<JsonDocument> SendOnceAsync(
+        OpenAiEndpoint endpoint, Func<string> buildBody, CancellationToken ct, Action<UsageSnapshot>? onUsage)
     {
         try
         {
