@@ -126,23 +126,45 @@ function Confirm-CertificateTrusted {
 # ---------------------------------------------------------------------------
 # ripgrep payload
 # ---------------------------------------------------------------------------
-# The search tab and the model's exploration loop run rg beside the app exe when it is
-# there (RipgrepSearch.ResolveRipgrep), falling back to PATH. Shipping a copy makes
+# The search tab, the source index and the model's exploration loop all run the rg
+# shipped beside the app exe (RipgrepSearch.ResolveRipgrep). It is required: the index
+# lists the project with it, and the build fails without it. Shipping a copy makes
 # search independent of what the user installed - and independent of winget's rg.exe,
 # which is a 0-byte alias reparse point that some AV software refuses to spawn. The
-# resolved real target is cached under tools\rg (not src - it is a payload, not source).
+# resolved real target is cached under tools\rg (not src - it is a payload, not source):
+# from PATH when ripgrep is installed, else the pinned release, checked against its
+# published SHA-256.
+$rgVersion = "15.2.0"
+$rgZipSha256 = "71B2FEF860ABE467217A538FF31DE02F5258807C0129F771846F87BD029AAFC5"
 $rgTarget = Join-Path $PSScriptRoot "tools\rg\rg.exe"
 if (-not (Test-Path $rgTarget)) {
+    New-Item -ItemType Directory -Force -Path (Split-Path $rgTarget) | Out-Null
     $rgOnPath = (Get-Command rg.exe -ErrorAction SilentlyContinue).Source
     if ($rgOnPath) {
         $rgResolved = (Get-Item $rgOnPath).Target
         if (-not $rgResolved) { $rgResolved = $rgOnPath }
 
         Write-Host "Caching ripgrep payload from $rgResolved ..."
-        New-Item -ItemType Directory -Force -Path (Split-Path $rgTarget) | Out-Null
         Copy-Item $rgResolved $rgTarget
     } else {
-        Write-Host "ripgrep not found on PATH; the app will rely on whatever the user has."
+        $rgName = "ripgrep-$rgVersion-x86_64-pc-windows-msvc"
+        $rgWork = Join-Path ([System.IO.Path]::GetTempPath()) ("codale-rg-" + [guid]::NewGuid())
+        New-Item -ItemType Directory -Path $rgWork | Out-Null
+        try {
+            $rgZip = Join-Path $rgWork "$rgName.zip"
+            Write-Host "Downloading ripgrep $rgVersion ..."
+            Invoke-WebRequest "https://github.com/BurntSushi/ripgrep/releases/download/$rgVersion/$rgName.zip" -OutFile $rgZip -UseBasicParsing
+
+            if ((Get-FileHash $rgZip -Algorithm SHA256).Hash -ne $rgZipSha256) {
+                Write-Error "ripgrep $rgVersion download does not match its published SHA-256; not using it."
+                exit 1
+            }
+
+            Expand-Archive $rgZip -DestinationPath $rgWork
+            Copy-Item (Join-Path $rgWork "$rgName\rg.exe") $rgTarget
+        } finally {
+            Remove-Item -Recurse -Force $rgWork -ErrorAction SilentlyContinue
+        }
     }
 }
 

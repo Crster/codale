@@ -18,6 +18,15 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- The bundled ripgrep, as the app ships it, so the search tests do not depend on PATH. -->
+  <ItemGroup>
+    <None Include="..\..\tools\rg\rg.exe" Link="rg.exe" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="RequireRipgrep" BeforeTargets="BeforeBuild" Condition="!Exists('..\..\tools\rg\rg.exe')">
+    <Error Text="tools\rg\rg.exe is missing. Run run.ps1 once (it caches ripgrep from PATH or downloads the pinned release), or copy rg.exe there." />
+  </Target>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\Codale.Search\Codale.Search.csproj" />
     <ProjectReference Include="..\..\src\Codale.Core\Codale.Core.csproj" />

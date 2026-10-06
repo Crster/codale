@@ -3,7 +3,7 @@ using Codale.Core.Helper;
 namespace Codale.Search;
 
 /// <summary>
-/// Backs <see cref="SearchAgentLoop"/> and <see cref="CodeDiscovery"/> with the helper
+/// Backs <see cref="SearchAgentLoop"/> and <see cref="SourceExplorer"/> with the helper
 /// model, so the loop runs in the app - where the UI traces it and where its grep and
 /// file tools live - while each generation is a one-shot agent CLI call.
 /// </summary>

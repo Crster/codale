@@ -80,15 +80,19 @@
   </ItemGroup>
 
   <!--
-    Bundled ripgrep, cached by run.ps1 into tools\rg. Optional: without it the app
-    falls back to whatever rg is on PATH at runtime.
+    Bundled ripgrep, cached by run.ps1 into tools\rg. Required: the source index lists
+    the project with it, so a build without it would ship a search that cannot run.
   -->
   <ItemGroup>
-    <Content Include="..\..\tools\rg\rg.exe" Condition="Exists('..\..\tools\rg\rg.exe')">
+    <Content Include="..\..\tools\rg\rg.exe">
       <Link>rg.exe</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+
+  <Target Name="RequireRipgrep" BeforeTargets="BeforeBuild" Condition="!Exists('..\..\tools\rg\rg.exe')">
+    <Error Text="tools\rg\rg.exe is missing. Run run.ps1 once (it caches ripgrep from PATH or downloads the pinned release), or copy rg.exe there." />
+  </Target>
 
   <!--
     Defining the "Msix" ProjectCapability here allows the Single-project MSIX Packaging

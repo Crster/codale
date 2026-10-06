@@ -148,6 +148,17 @@ public sealed partial class SearchAgentLoop
     /// <summary>Called with each step as it is recorded, so a caller can show the search live.</summary>
     public Action<SearchStep>? OnStep { get; init; }
 
+    /// <summary>
+    /// The project's source index. With it the opening move is the index's ranking of the
+    /// whole project - matches plus the code they use and are used by - instead of one
+    /// grep; grep and find_files run in memory; and the model gets a symbol tool to jump
+    /// from a name to its declaration and its users. Null keeps the ripgrep-only loop.
+    /// </summary>
+    public SourceIndex? Index { get; init; }
+
+    /// <summary>The index's snapshot for the run in progress, or null without an index.</summary>
+    private SourceSnapshot? _snapshot;
+
     public static IReadOnlyList<ToolDefinition> Tools { get; } =
     [
         new ToolDefinition
@@ -180,16 +191,36 @@ public sealed partial class SearchAgentLoop
                 new ToolParameter { Name = "end", Description = "last line", Type = ToolParameterType.Integer },
             ],
         },
+        AnswerTool,
+    ];
+
+    private static ToolDefinition AnswerTool => new()
+    {
+        Name = "answer",
+        Description = "Finish and report what was found. Call this as soon as the question can be answered.",
+        Parameters =
+        [
+            new ToolParameter { Name = "summary", Description = "the answer in a sentence or two", Required = true },
+        ],
+    };
+
+    /// <summary>The tools with a source index behind them: the same, plus symbol lookup.</summary>
+    public static IReadOnlyList<ToolDefinition> IndexedTools { get; } =
+    [
+        .. Tools.Where(t => t.Name != "answer"),
         new ToolDefinition
         {
-            Name = "answer",
-            Description = "Finish and report what was found. Call this as soon as the question can be answered.",
+            Name = "symbol",
+            Description = "Where a name (class, method, function, property) is declared, and which files use it most.",
             Parameters =
             [
-                new ToolParameter { Name = "summary", Description = "the answer in a sentence or two", Required = true },
+                new ToolParameter { Name = "name", Description = "the exact identifier, e.g. RetryPolicy", Required = true },
             ],
         },
+        .. Tools.Where(t => t.Name == "answer"),
     ];
+
+    private IReadOnlyList<ToolDefinition> ActiveTools => Index is null ? Tools : IndexedTools;
 
     public async Task<SearchAnswer> RunAsync(string query, CancellationToken ct = default)
     {
@@ -203,20 +234,39 @@ public sealed partial class SearchAgentLoop
         var stepNumber = 0;
         var consecutiveRepeats = 0;
         var reads = new List<(string Path, int Start, int End)>();
+        var ranked = new List<(string Path, int Start, int End, string Reason)>();
+
+        _snapshot = await SnapshotAsync(budget.Token).ConfigureAwait(false);
 
         // Deterministic opening move: whatever the model does next, the user already has
         // something useful, and the model has real context instead of an empty history.
-        var seed = await SeedGrepAsync(query, budget.Token).ConfigureAwait(false);
-        hits.AddRange(seed);
-        Record(new SearchStep
+        if (_snapshot is not null && await IndexSeedAsync(query, budget.Token).ConfigureAwait(false) is { } indexed)
         {
-            Number = ++stepNumber,
-            Kind = SearchStepKind.Tool,
-            Description = $"grep \"{KeywordsFrom(query)}\"",
-            ResultCount = seed.Count,
-        });
-        findings.AppendLine($"grep \"{KeywordsFrom(query)}\" returned {seed.Count} matches:");
-        findings.AppendLine(Summarise(seed));
+            hits.AddRange(indexed.Hits);
+            ranked.AddRange(indexed.Ranges);
+            Record(new SearchStep
+            {
+                Number = ++stepNumber,
+                Kind = SearchStepKind.Tool,
+                Description = $"rank source for \"{string.Join(" ", indexed.Terms)}\"",
+                ResultCount = indexed.FileCount,
+            });
+            findings.Append(indexed.Text);
+        }
+        else
+        {
+            var seed = await SeedGrepAsync(query, budget.Token).ConfigureAwait(false);
+            hits.AddRange(seed);
+            Record(new SearchStep
+            {
+                Number = ++stepNumber,
+                Kind = SearchStepKind.Tool,
+                Description = $"grep \"{KeywordsFrom(query)}\"",
+                ResultCount = seed.Count,
+            });
+            findings.AppendLine($"grep \"{KeywordsFrom(query)}\" returned {seed.Count} matches:");
+            findings.AppendLine(Summarise(seed));
+        }
 
         // The files a person would open first - README, manifests, entry points. Folded
         // into the findings rather than traced as a step: it costs no model time, and it
@@ -228,7 +278,7 @@ public sealed partial class SearchAgentLoop
             findings.AppendLine(string.Join("\n", landmarks));
         }
 
-        var systemPrompt = BuildSystemPrompt();
+        var systemPrompt = BuildSystemPrompt(ActiveTools, _snapshot is not null);
 
         var repeatedOut = false;
 
@@ -241,7 +291,7 @@ public sealed partial class SearchAgentLoop
                 calls = await _model.NextCallsAsync(
                     systemPrompt,
                     BuildConversation(query, findings.ToString()),
-                    Tools,
+                    ActiveTools,
                     budget.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -334,7 +384,7 @@ public sealed partial class SearchAgentLoop
         return await ComposeAsync(
             query,
             hits.Count > 0 ? "Stopped before reaching an answer; showing what was found." : "Nothing found.",
-            Rank(hits), reads, landmarks, trace, stoppedEarly: true, ct).ConfigureAwait(false);
+            Rank(hits), reads, landmarks, trace, stoppedEarly: true, ct, ranked).ConfigureAwait(false);
 
         async Task<SearchAnswer> AnswerAsync(string summary)
         {
@@ -345,7 +395,7 @@ public sealed partial class SearchAgentLoop
                 Description = summary,
             });
 
-            return await ComposeAsync(query, summary, Rank(hits), reads, landmarks, trace, stoppedEarly: false, ct)
+            return await ComposeAsync(query, summary, Rank(hits), reads, landmarks, trace, stoppedEarly: false, ct, ranked)
                 .ConfigureAwait(false);
         }
 
@@ -397,9 +447,10 @@ public sealed partial class SearchAgentLoop
         IReadOnlyList<string> landmarks,
         IReadOnlyList<SearchStep> trace,
         bool stoppedEarly,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyList<(string Path, int Start, int End, string Reason)>? ranked = null)
     {
-        var sections = BuildSections(query, hits, reads, landmarks);
+        var sections = BuildSections(query, hits, reads, landmarks, ranked);
         var explanation = "";
 
         if (sections.Count > 0 && !ct.IsCancellationRequested)
@@ -437,13 +488,21 @@ public sealed partial class SearchAgentLoop
         string query,
         IReadOnlyList<SearchHit> hits,
         IReadOnlyList<(string Path, int Start, int End)> reads,
-        IReadOnlyList<string> landmarks)
+        IReadOnlyList<string> landmarks,
+        IReadOnlyList<(string Path, int Start, int End, string Reason)>? ranked = null)
     {
         var picked = new List<(string Path, int Start, int End, string Reason)>();
 
         foreach (var (path, start, end) in reads)
         {
             picked.Add((path, start, Math.Min(end, start + MaxSectionLines - 1), "read by the model"));
+        }
+
+        // The index's best slices - whole functions, and the declarations they use - come
+        // before raw grep clusters, which only know where words repeat.
+        foreach (var (path, start, end, reason) in ranked ?? [])
+        {
+            picked.Add((path, start, Math.Min(end, start + MaxSectionLines - 1), reason));
         }
 
         if (IsSetupQuestion(query))
@@ -574,7 +633,7 @@ public sealed partial class SearchAgentLoop
     {
         try
         {
-            var files = await _search.ListFilesAsync(ct: ct).ConfigureAwait(false);
+            var files = _snapshot?.AllFiles ?? await _search.ListFilesAsync(ct: ct).ConfigureAwait(false);
             var matcher = new Microsoft.Extensions.FileSystemGlobbing.Matcher(StringComparison.OrdinalIgnoreCase);
             foreach (var depth in new[] { "", "*/", "*/*/", "*/*/*/" })
             {
@@ -708,7 +767,7 @@ public sealed partial class SearchAgentLoop
                 var glob = call.GetString("glob");
 
                 string? error = null;
-                var results = await CollectAsync(new SearchQuery
+                var results = GrepIndex(pattern, glob, 30, ct) ?? await CollectAsync(new SearchQuery
                 {
                     Text = pattern,
                     IsRegex = true,
@@ -728,7 +787,7 @@ public sealed partial class SearchAgentLoop
             case "find_files":
             {
                 var glob = call.GetString("glob") ?? "*";
-                var files = await FindFilesAsync(glob, ct).ConfigureAwait(false);
+                var files = _snapshot?.FindFiles(glob) ?? await FindFilesAsync(glob, ct).ConfigureAwait(false);
 
                 return ($"find_files {glob}",
                         [],
@@ -743,6 +802,13 @@ public sealed partial class SearchAgentLoop
 
                 var text = ReadLines(path, start, end);
                 return ($"read {path}:{start}-{end}", [], text);
+            }
+
+            case "symbol" when _snapshot is not null:
+            {
+                var name = (call.GetString("name") ?? "").Trim();
+                var (results, text) = DescribeSymbol(_snapshot, name);
+                return ($"symbol {name}", results, text);
             }
 
             default:
@@ -937,10 +1003,15 @@ public sealed partial class SearchAgentLoop
             .ToList();
     }
 
-    private static string BuildSystemPrompt()
+    private static string BuildSystemPrompt(IReadOnlyList<ToolDefinition> tools, bool indexed)
     {
         var builder = new StringBuilder();
         builder.AppendLine("You are searching a code repository to answer a question.");
+        if (indexed)
+        {
+            builder.AppendLine("The first findings are the source index's ranking of the whole project for the question: start from those files, and use symbol to jump from a name to where it is declared and who uses it.");
+        }
+
         builder.AppendLine($"Use the findings so far to decide the next calls. Make up to {MaxCallsPerStep} calls at once when they do not depend on each other (for example a grep and the reads of files already found): each reply costs time, so batch.");
         builder.AppendLine("Call answer as soon as you can answer; do not keep searching once you know.");
         builder.AppendLine("Before answering, read_file the lines that actually handle the question, so they can be shown.");
@@ -948,7 +1019,7 @@ public sealed partial class SearchAgentLoop
         builder.AppendLine();
         builder.AppendLine("Tools:");
 
-        foreach (var tool in Tools)
+        foreach (var tool in tools)
         {
             builder.AppendLine(tool.ToPromptLine());
         }

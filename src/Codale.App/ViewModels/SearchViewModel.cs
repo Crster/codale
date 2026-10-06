@@ -100,7 +100,8 @@ public sealed class SearchFileItem
         Terms = terms,
         FilePath = file.FilePath,
         RelativePath = file.RelativePath.Replace('\\', '/'),
-        Detail = file.MatchCount switch
+        // A related file is listed for what it is to the matches, not for a count.
+        Detail = file.Reason.Length > 0 ? file.Reason : file.MatchCount switch
         {
             0 => "",
             1 => "1 match",
@@ -124,24 +125,29 @@ public sealed class SearchFileItem
 
 /// <summary>
 /// Code discovery, driven from the title bar box. The query is a plain description of
-/// what to find; <see cref="CodeDiscovery"/> has the helper model turn it into keywords,
-/// greps, lets the model pick the files that really answer it and retries when none do.
-/// The result is files and code only - no write-up. Provisional matches stream in first
-/// so the list fills while the model is still working. Without a helper model the same
-/// pipeline runs its keyword pass alone, so the box is never a dead end.
+/// what to find; <see cref="SourceExplorer"/> ranks the project's source index for it,
+/// has the background-task model turn it into keywords and pick the files that really
+/// answer it, and adds the code those files use and are used by. The result is files and
+/// code only - no write-up. Provisional matches stream in first so the list fills while
+/// the model is still working. Without a helper model the ranked pass runs alone, so the
+/// box is never a dead end.
 /// </summary>
 public sealed partial class SearchViewModel : ObservableObject
 {
-    private readonly string _projectPath;
     private readonly IHelperModel _helper;
+    private readonly SourceIndex _index;
     private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
 
     private CancellationTokenSource? _inFlight;
 
     public SearchViewModel(string projectPath, IHelperModel helper)
     {
-        _projectPath = projectPath;
         _helper = helper;
+
+        // The scan runs in the background from the moment the project opens, so the
+        // first search is answered from memory.
+        _index = SourceIndex.For(projectPath);
+        _index.Warm();
     }
 
     public RangeObservableCollection<SearchFileItem> Files { get; } = [];
@@ -194,7 +200,12 @@ public sealed partial class SearchViewModel : ObservableObject
 
             Status = "Searching…";
 
-            var discovery = new CodeDiscovery(_projectPath, model);
+            var discovery = new SourceExplorer(_index, model)
+            {
+                // A references lookup lists every user, not the best few.
+                MaxRankedResults = keywordOnly ? 40 : 12,
+                MaxRelated = keywordOnly ? 0 : 4,
+            };
             discovery.Progress += (_, result) => _dispatcher.TryEnqueue(() =>
             {
                 if (_inFlight == cts)
@@ -302,7 +313,7 @@ public sealed partial class SearchViewModel : ObservableObject
         }
         else
         {
-            CodeDiscovery.Prewarm(model);
+            SourceExplorer.Prewarm(_index, model);
         }
     }
 

@@ -444,6 +444,7 @@ public sealed partial class EditorTab
                 "(definitions, callers, related types, conventions).";
             var loop = new Codale.Search.SearchAgentLoop(ProjectRoot, new Codale.Search.HelperSearchModel(helper))
             {
+                Index = Codale.Search.SourceIndex.For(ProjectRoot),
                 Budget = TimeSpan.FromSeconds(75),
                 MaxSteps = 8,
                 OnStep = step => _session.Log(

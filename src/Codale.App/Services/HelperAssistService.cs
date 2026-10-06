@@ -94,6 +94,7 @@ public sealed class HelperAssistService(IHelperModel helper, string runDirectory
 
         var loop = new SearchAgentLoop(runDirectory, new HelperSearchModel(helper))
         {
+            Index = SourceIndex.For(runDirectory),
             Budget = ExploreBudget,
             MaxSteps = ExploreSteps,
             OnStep = step => run.Report(DescribeStep(step)),
