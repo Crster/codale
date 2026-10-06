@@ -503,10 +503,16 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             WorktreeError = null;
             CrashLog.Trace($"Isolated session: worktree={path}");
 
-            // Its own tab when the one in front is busy with a conversation.
-            var chat = FreshChat();
+            // Same rule as New session: its own tab unless the chat in front holds nothing.
+            // The reused chat is reset below, so anything on screen - a notice, a task,
+            // an artifact - counts as something, not just a conversation.
+            var chat = IsBlank(Chat) ? Chat
+                : Chats.FirstOrDefault(c => IsBlank(c) && !c.IsConnected) ?? CreateChat();
             await chat.DisposeSessionAsync();
             chat.ResetForNewSession();
+            chat.RequestedModel = AppSettings.DefaultModel is { Length: > 0 } model ? model : null;
+            chat.RequestedEffort = AppSettings.DefaultEffort is { Length: > 0 } effort ? effort : null;
+            chat.PermissionMode = AppSettings.DefaultChatMode;
             chat.WorktreePath = path;
             ChatActivationRequested?.Invoke(this, chat);
 
@@ -518,6 +524,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             IsStartingWorktree = false;
         }
     }
+
+    /// <summary>True when resetting the chat would lose nothing: no conversation, no running turn, an empty transcript.</summary>
+    private static bool IsBlank(ChatViewModel chat) => !chat.HasConversation && !chat.IsBusy && chat.Items.Count == 0;
 
     /// <summary>True while the chat in front works in its own worktree.</summary>
     public bool IsIsolated => Chat.IsIsolated;

@@ -111,7 +111,7 @@ public sealed partial class StatusViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasClaudeUsage))]
     public partial bool IsCustomProvider { get; set; }
 
-    /// <summary>The chat's selected provider name (or "Claude"); labels its usage button.</summary>
+    /// <summary>The background-task provider's name (or "Claude"); labels its usage button.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CustomButtonText))]
     public partial string CustomProviderName { get; set; } = "Claude";

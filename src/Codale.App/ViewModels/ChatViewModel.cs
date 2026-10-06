@@ -128,16 +128,21 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public StatusViewModel Status => _status;
 
     /// <summary>
-    /// Labels the custom-provider usage button with the chat's selected provider; with none,
-    /// the background-task provider (whose calls are what the button then counts), else "Claude".
+    /// Labels the custom-provider usage button with the background-task provider, else "Claude".
+    /// Never follows the chat's CLI provider override: the button counts what that provider serves.
     /// </summary>
     public void RefreshCustomProviderName()
     {
         _status.CustomProviderName =
-            SelectedProviderName() is { Length: > 0 } providerName ? providerName
-            : AppSettings.HelperApiProvider?.Provider.Name.Trim() is { Length: > 0 } helperName ? helperName
+            AppSettings.HelperApiProvider?.Provider.Name.Trim() is { Length: > 0 } helperName ? helperName
             : "Claude";
     }
+
+    /// <summary>True when this chat's turns go to the same BYOK provider background tasks use, so they share its tally.</summary>
+    private bool ServedByHelperProvider() =>
+        AppSettings.FindByok(EndpointName) is { } byok &&
+        AppSettings.HelperApiProvider?.Provider is { } helper &&
+        string.Equals(byok.Name.Trim(), helper.Name.Trim(), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// A name for the conversation's tab: the session's title when it came from history,
@@ -1922,7 +1927,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             case AssistantMessageCompleted done:
-                if (_status.IsCustomProvider && done.Usage is { } served)
+                if (_status.IsCustomProvider && done.Usage is { } served && ServedByHelperProvider())
                 {
                     _status.RecordCustomCall(served, AppSettings.FindByok(EndpointName));
                 }

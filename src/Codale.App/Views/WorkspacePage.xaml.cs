@@ -3027,13 +3027,14 @@ public sealed partial class WorkspacePage : Page
 
     /// <summary>
     /// Off to on starts an isolated session. On to off is never silent: the worktree's
-    /// work is merged back into the project, discarded, or the toggle stays on.
+    /// work is merged back into the project, discarded, or the toggle stays on. While
+    /// an isolated turn is running it is left alone and another isolated session opens.
     /// </summary>
     private async void OnIsolatedSessionClick(object sender, RoutedEventArgs e)
     {
         var toggle = (ToggleButton)sender;
 
-        if (!ViewModel.IsIsolated)
+        if (!ViewModel.IsIsolated || ViewModel.Chat.IsBusy)
         {
             await ViewModel.StartIsolatedSessionAsync();
             toggle.IsChecked = ViewModel.IsIsolated;

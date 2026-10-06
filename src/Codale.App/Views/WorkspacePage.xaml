@@ -2080,7 +2080,7 @@
                         </StackPanel>
                     </Button>
 
-                    <!--  Custom provider: labeled with its own name; what it has served since the window opened, chat and background tasks alike  -->
+                    <!--  Background-task provider: labeled with its name, never the chat's CLI override; what it has served since the window opened, background tasks and chats on the same provider alike  -->
                     <Button Padding="8,2">
                         <Button.Flyout>
                             <Flyout FlyoutPresenterStyle="{StaticResource EndpointFlyout}" Placement="TopEdgeAlignedRight">
