@@ -2285,6 +2285,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 Add(new NoticeItem { Text = "Conversation cleared.", Severity = NoticeSeverity.Info });
                 break;
 
+            case ConversationCompacted compacted:
+                Add(new NoticeItem
+                {
+                    Text = "Conversation compacted" +
+                        (compacted.Trigger == "auto" ? " automatically" : "") +
+                        (compacted.PreTokens is { } before ? $" (was {before:N0} tokens)." : "."),
+                    Severity = NoticeSeverity.Info,
+                });
+                break;
+
             case UnknownEvent unknown:
                 // Surfaced rather than swallowed: this is how CLI protocol drift becomes visible.
                 Add(new NoticeItem

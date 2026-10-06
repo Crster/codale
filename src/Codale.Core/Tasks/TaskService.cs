@@ -310,7 +310,7 @@ public sealed class TaskPipeClient(string pipeName, string token) : ITaskService
     /// The hard limit on one explore. Claude sessions Codale starts raise the CLI's 120 s
     /// background cut-over past this, so the agent waits for the answer itself.
     /// </summary>
-    public static readonly TimeSpan ExploreTimeout = TimeSpan.FromMinutes(15);
+    public static readonly TimeSpan ExploreTimeout = TimeSpan.FromMinutes(30);
 
     /// <summary>A hook holds the agent up while it waits, so a slow digest is given up on.</summary>
     public static readonly TimeSpan DigestTimeout = TimeSpan.FromSeconds(25);

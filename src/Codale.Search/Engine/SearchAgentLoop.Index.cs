@@ -9,7 +9,7 @@ namespace Codale.Search;
 public sealed partial class SearchAgentLoop
 {
     private const int MaxSeedChars = 3_500;
-    private const int MaxSeedFiles = 8;
+    private const int MaxSeedFiles = 16;
 
     /// <summary>The opening move with an index: its ranking, as findings, hits and sections.</summary>
     private sealed record IndexSeed(
@@ -101,7 +101,7 @@ public sealed partial class SearchAgentLoop
                 }
             }
 
-            if (ranges.Count < 4 && file.Ranges.Count > 0)
+            if (ranges.Count < 16 && file.Ranges.Count > 0)
             {
                 var first = file.Ranges[0];
                 ranges.Add((file.RelativePath, first.StartLine, first.EndLine, file.Reason.Length > 0 ? file.Reason : "ranked by the source index"));
@@ -115,6 +115,7 @@ public sealed partial class SearchAgentLoop
             text.Append(block);
         }
 
+        _terms = result.Keywords;
         return new IndexSeed(result.Keywords, result.Files.Count, text.ToString(), hits, ranges);
     }
 

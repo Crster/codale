@@ -79,6 +79,20 @@ public sealed record SearchSection
     public string Reason { get; init; } = "";
 }
 
+/// <summary>A file the answer points at, without its content.</summary>
+public sealed record SearchReference
+{
+    public string RelativePath { get; init; } = "";
+
+    /// <summary>Where to start reading, and where the relevant stretch ends.</summary>
+    public int StartLine { get; init; }
+    public int EndLine { get; init; }
+    public string Reason { get; init; } = "";
+
+    /// <summary>Words to grep for inside the file to find the relevant lines.</summary>
+    public IReadOnlyList<string> Find { get; init; } = [];
+}
+
 public sealed record SearchAnswer
 {
     public string Summary { get; init; } = "";
@@ -87,6 +101,9 @@ public sealed record SearchAnswer
     public string Explanation { get; init; } = "";
 
     public IReadOnlyList<SearchSection> Sections { get; init; } = [];
+
+    /// <summary>Every file the search touched, as pointers only: where to start and what to search for.</summary>
+    public IReadOnlyList<SearchReference> References { get; init; } = [];
 
     /// <summary>The terms that were searched for, so the UI can highlight them.</summary>
     public IReadOnlyList<string> Keywords { get; init; } = [];
@@ -473,6 +490,8 @@ public sealed partial class SearchAgentLoop
             Summary = summary,
             Explanation = explanation,
             Sections = sections,
+            References = BuildReferences(hits, reads, ranked),
+            Keywords = _terms,
             Hits = hits,
             Trace = trace,
             StoppedEarly = stoppedEarly,
@@ -481,6 +500,62 @@ public sealed partial class SearchAgentLoop
 
     private const int MaxSections = 6;
     private const int MaxSectionLines = 40;
+    private const int MaxReferences = 40;
+
+    /// <summary>The terms the index ranked the project for; they locate a file's lines once it is open.</summary>
+    private IReadOnlyList<string> _terms = [];
+
+    /// <summary>
+    /// Every file the search touched, as a pointer and not as content: where to start
+    /// reading and which words to search for there. Files the model read or the index
+    /// ranked come first, then the rest by how many lines matched.
+    /// </summary>
+    internal IReadOnlyList<SearchReference> BuildReferences(
+        IReadOnlyList<SearchHit> hits,
+        IReadOnlyList<(string Path, int Start, int End)> reads,
+        IReadOnlyList<(string Path, int Start, int End, string Reason)>? ranked)
+    {
+        var references = new Dictionary<string, SearchReference>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(string path, int start, int end, string reason)
+        {
+            var relative = NormaliseRelative(path);
+            if (references.Count >= MaxReferences || references.ContainsKey(relative) || SensitivePaths.IsSensitive(relative))
+            {
+                return;
+            }
+
+            var lines = hits.Where(h => string.Equals(NormaliseRelative(h.RelativePath), relative, StringComparison.OrdinalIgnoreCase)).ToList();
+            var text = string.Join(" ", lines.Select(h => h.Line));
+            var find = _terms.Where(t => text.Contains(t, StringComparison.OrdinalIgnoreCase)).Take(4).ToList();
+            references[relative] = new SearchReference
+            {
+                RelativePath = relative,
+                StartLine = start,
+                EndLine = end,
+                Reason = reason,
+                Find = find.Count > 0 ? find : _terms.Take(3).ToList(),
+            };
+        }
+
+        foreach (var (path, start, end, reason) in ranked ?? [])
+        {
+            Add(path, start, end, reason);
+        }
+
+        foreach (var (path, start, end) in reads)
+        {
+            Add(path, start, end, "read by the model");
+        }
+
+        foreach (var file in hits.GroupBy(h => h.RelativePath, StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()))
+        {
+            var first = file.Min(h => h.LineNumber);
+            Add(file.Key, first, file.Max(h => h.LineNumber), file.Count() == 1 ? "1 match" : $"{file.Count()} matches");
+        }
+
+        return [.. references.Values];
+    }
 
     /// <summary>
     /// Picks the slices worth showing: what the model chose to read first, then - for

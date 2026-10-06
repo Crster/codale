@@ -58,10 +58,8 @@ public sealed class HelperAssistService(IHelperModel helper, string runDirectory
     private static readonly TimeSpan ExploreBudget = TaskPipeClient.ExploreTimeout - TimeSpan.FromMinutes(3);
 
     /// <summary>Model rounds may each make several calls; a wide cap lets a hard question finish.</summary>
-    private const int ExploreSteps = 30;
+    private const int ExploreSteps = 60;
 
-    private const int ExploreChars = 6_000;
-    private const int SectionLines = 40;
     private const int DigestInputChars = 150_000;
     private const int LongReplyTokens = 2048;
 
@@ -149,27 +147,29 @@ public sealed class HelperAssistService(IHelperModel helper, string runDirectory
             text.AppendLine().AppendLine(answer.Explanation.Trim());
         }
 
-        foreach (var section in answer.Sections)
+        // Pointers, not content: the caller reads what it needs from the start line.
+        if (answer.References.Count > 0)
         {
-            if (text.Length > ExploreChars)
+            text.AppendLine().AppendLine("Files (path:start-end - why; find: words to grep inside):");
+            foreach (var reference in answer.References)
             {
-                text.AppendLine().Append("(more sections omitted)");
-                break;
-            }
+                text.Append(reference.RelativePath.Replace('\\', '/')).Append(':').Append(reference.StartLine);
+                if (reference.EndLine > reference.StartLine)
+                {
+                    text.Append('-').Append(reference.EndLine);
+                }
 
-            var path = section.RelativePath.Length > 0 ? section.RelativePath : section.FilePath;
-            text.AppendLine().Append(path).Append(':').Append(section.StartLine).Append('-').Append(section.EndLine);
-            if (section.Reason.Length > 0)
-            {
-                text.Append("  (").Append(section.Reason).Append(')');
-            }
+                if (reference.Reason.Length > 0)
+                {
+                    text.Append(" - ").Append(reference.Reason);
+                }
 
-            text.AppendLine();
-            var code = section.Code.Replace("\r\n", "\n").Split('\n');
-            text.AppendLine(string.Join('\n', code.Take(SectionLines)));
-            if (code.Length > SectionLines)
-            {
-                text.AppendLine($"... ({code.Length - SectionLines} more lines in this range)");
+                if (reference.Find.Count > 0)
+                {
+                    text.Append(" | find: ").Append(string.Join(", ", reference.Find));
+                }
+
+                text.AppendLine();
             }
         }
 
