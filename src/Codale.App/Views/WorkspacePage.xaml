@@ -1991,15 +1991,15 @@
                                                 <MenuFlyout>
                                                     <MenuFlyoutItem Click="OnCopySessionHandoutClick" Text="Copy handout">
                                                         <MenuFlyoutItem.Icon>
-                                                            <FontIcon Glyph="&#xE8C8;" />
+                                                            <FontIcon Glyph="&#xE8A5;" />
                                                         </MenuFlyoutItem.Icon>
                                                     </MenuFlyoutItem>
                                                     <MenuFlyoutItem Click="OnCopySessionIdClick" Text="Copy session ID">
                                                         <MenuFlyoutItem.Icon>
-                                                            <FontIcon Glyph="&#xE8C8;" />
+                                                            <FontIcon Glyph="&#xE8EC;" />
                                                         </MenuFlyoutItem.Icon>
                                                     </MenuFlyoutItem>
-                                                    <MenuFlyoutItem Click="OnRetitleSessionClick" Text="Change title">
+                                                    <MenuFlyoutItem Click="OnRetitleSessionClick" Text="Rename session">
                                                         <MenuFlyoutItem.Icon>
                                                             <FontIcon Glyph="&#xE70F;" />
                                                         </MenuFlyoutItem.Icon>
@@ -2009,15 +2009,15 @@
                                                             <FontIcon Glyph="&#xE8AD;" />
                                                         </MenuFlyoutItem.Icon>
                                                     </MenuFlyoutItem>
-                                                    <MenuFlyoutItem Click="OnCompactSessionClick" Text="Compact session">
+                                                    <MenuFlyoutItem Click="OnCompactSessionClick" Text="Compact context">
                                                         <MenuFlyoutItem.Icon>
                                                             <FontIcon Glyph="&#xE73F;" />
                                                         </MenuFlyoutItem.Icon>
                                                     </MenuFlyoutItem>
                                                     <MenuFlyoutSeparator />
-                                                    <MenuFlyoutItem Click="OnDeleteSessionClick" Text="Delete session">
+                                                    <MenuFlyoutItem Click="OnDeleteSessionClick" Foreground="{ThemeResource SystemFillColorCriticalBrush}" Text="Delete session">
                                                         <MenuFlyoutItem.Icon>
-                                                            <FontIcon Glyph="&#xE74D;" />
+                                                            <FontIcon Foreground="{ThemeResource SystemFillColorCriticalBrush}" Glyph="&#xE74D;" />
                                                         </MenuFlyoutItem.Icon>
                                                     </MenuFlyoutItem>
                                                 </MenuFlyout>

@@ -362,11 +362,39 @@ public sealed partial class TerminalView : UserControl
         InvalidateAll();
     }
 
-    private static void SetClipboard(string text)
+    /// <summary>Sets the clipboard, retrying: another process briefly holding it open makes SetContent throw (CLIPBRD_E_CANT_OPEN), which is what made copy hit or miss.</summary>
+    private static bool SetClipboard(string text)
     {
-        var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
-        package.SetText(text);
-        Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
+        if (text.Length == 0)
+        {
+            return false;
+        }
+
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            try
+            {
+                var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
+                package.SetText(text);
+                Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
+                try
+                {
+                    Windows.ApplicationModel.DataTransfer.Clipboard.Flush();
+                }
+                catch (Exception)
+                {
+                    // Flush is best effort; the content is already set.
+                }
+
+                return true;
+            }
+            catch (Exception)
+            {
+                System.Threading.Thread.Sleep(30);
+            }
+        }
+
+        return false;
     }
 
     // ------------------------------------------------------------------ metrics
@@ -1381,6 +1409,14 @@ public sealed partial class TerminalView : UserControl
         // Clipboard shortcuts win over sending control characters - with a selection,
         // Ctrl+C copies instead of interrupting the shell.
         if (ctrl && e.Key == VirtualKey.C && HasSelection)
+        {
+            CopySelection();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+Insert copies too, and never interrupts the shell.
+        if (ctrl && e.Key == VirtualKey.Insert)
         {
             CopySelection();
             e.Handled = true;
