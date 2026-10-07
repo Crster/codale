@@ -1510,6 +1510,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             string? shellGuard = null;
             var hooks = new ClaudeHookSettings { DenyRules = AppSettings.TokenSaverDenyRules };
             var environment = claudeEndpoint is null ? new Dictionary<string, string>() : new Dictionary<string, string>(claudeEndpoint);
+            if (AppSettings.FindByok(EndpointName) is { IsAccount: true } account)
+            {
+                environment["CLAUDE_CONFIG_DIR"] = account.ConfigDir;
+            }
+
             var assist = Helper is not null && AppSettings.HasHelperApi;
             var tasksHost = _mcpSettings is { TasksAvailable: true } ? EnsureTaskHost(workingDirectory) : null;
             if (tasksHost is { } host &&
@@ -1601,9 +1606,17 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception ex)
         {
+            // The CLI has no stored conversation for the id (the session died before its first
+            // turn was saved, or ran under another provider): start a fresh one instead.
+            var resumeLost = ResumeSessionId is not null &&
+                ex.Message.Contains("No conversation found with session ID", StringComparison.OrdinalIgnoreCase);
+
             CrashLog.Error("chat", "Connect FAILED", ex);
-            Add(new NoticeItem { Text = $"Could not start {ProviderName}: {ex.Message}", Severity = NoticeSeverity.Error });
-            CheckLoginRequired(ex.Message);
+            if (!resumeLost)
+            {
+                Add(new NoticeItem { Text = $"Could not start {ProviderName}: {ex.Message}", Severity = NoticeSeverity.Error });
+                CheckLoginRequired(ex.Message);
+            }
 
             // A session that never started is not this chat's session: leaving it in place
             // would make the chat look connected-less but unreplaceable, and keep its process.
@@ -1622,6 +1635,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 {
                     CrashLog.Debug("chat", $"disposing the failed session threw: {disposeError.Message}");
                 }
+            }
+
+            if (resumeLost)
+            {
+                ResumeSessionId = null;
+                Add(new NoticeItem { Text = "The previous CLI conversation could not be resumed; started a new one.", Severity = NoticeSeverity.Info });
+                await ConnectCoreAsync();
             }
         }
     }

@@ -427,6 +427,7 @@ public static class AppSettings
     private static ByokProvider Clone(ByokProvider p, string? apiKey = null) => new()
     {
         Name = p.Name, BaseUrl = p.BaseUrl, ApiKey = apiKey ?? p.ApiKey, LiteModel = p.LiteModel, SmartModel = p.SmartModel,
+        ConfigDir = p.ConfigDir,
     };
 
     /// <summary>Serialises providers for the file (<paramref name="protect"/>: keys DPAPI-wrapped) or, unprotected, for change comparison.</summary>

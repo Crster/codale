@@ -23,6 +23,16 @@ public sealed class ByokProvider
     /// <summary>The most capable model, offered next to the lite model; may be blank.</summary>
     public string SmartModel { get; set; } = "";
 
+    /// <summary>
+    /// Set for a Claude account (personal, work...): a separate Claude CLI login kept in this
+    /// directory and passed as CLAUDE_CONFIG_DIR. An account has no base URL, key or models.
+    /// </summary>
+    public string ConfigDir { get; set; } = "";
+
+    /// <summary>True for a Claude account rather than a BYOK endpoint.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsAccount => ConfigDir.Length > 0;
+
     // Usage estimates use Claude Sonnet 5.5 rates as the base cost (USD per million tokens).
     private const decimal InputPricePerMillion = 2m;
     private const decimal OutputPricePerMillion = 10m;

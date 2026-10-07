@@ -67,7 +67,10 @@
                                 Style="{StaticResource Hint}"
                                 Text="Your own OpenAI-compatible endpoints, used by Claude through a local bridge. The base URL is the one an OpenAI SDK takes, usually ending in /v1. Pick one in the status bar; Default uses the Claude CLI login. Also editable in settings.json." />
                             <StackPanel x:Name="ProvidersPanel" Spacing="6" />
-                            <Button Click="OnAddProviderClick" Content="Add provider" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Click="OnAddProviderClick" Content="Add provider" />
+                                <Button Click="OnAddAccountClick" Content="Add account" ToolTipService.ToolTip="Add another Claude login, such as personal or work" />
+                            </StackPanel>
                         </StackPanel>
                     </Border>
 

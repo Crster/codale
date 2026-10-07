@@ -334,7 +334,7 @@ public sealed partial class SettingsPanel : UserControl
         {
             var wanted = AppSettings.HelperProvider;
             HelperProviderBox.Items.Clear();
-            var named = _providers.Where(p => p.Name.Trim().Length > 0).ToList();
+            var named = _providers.Where(p => p.Name.Trim().Length > 0 && !p.IsAccount).ToList();
 
             // No custom provider to call: background tasks run on the Claude CLI, so say so.
             HelperProviderBox.IsEnabled = named.Count > 0;
@@ -468,6 +468,35 @@ public sealed partial class SettingsPanel : UserControl
                 previousName = provider.Name;
             }
         });
+
+        if (provider.IsAccount)
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = "A separate Claude CLI login. Sign in once, then pick it in the provider picker.",
+                TextWrapping = TextWrapping.Wrap,
+                Opacity = 0.7,
+            });
+
+            var signIn = new Button { Content = "Sign in" };
+            signIn.Click += (_, _) => SignInAccount(provider);
+            var removeAccount = new Button { Content = "Remove account", HorizontalAlignment = HorizontalAlignment.Right };
+            removeAccount.Click += (_, _) =>
+            {
+                _providers.Remove(provider);
+                SaveProviders();
+                BuildProviderEditors();
+            };
+            var buttons = new Grid { ColumnDefinitions = { new ColumnDefinition(), new ColumnDefinition { Width = GridLength.Auto } } };
+            buttons.Children.Add(signIn);
+            Grid.SetColumn(removeAccount, 1);
+            buttons.Children.Add(removeAccount);
+            panel.Children.Add(buttons);
+
+            expander.Content = panel;
+            return expander;
+        }
+
         Field("OpenAI-compatible base URL", "https://api.example.com/v1", provider.BaseUrl, v => provider.BaseUrl = v);
 
         var key = new PasswordBox { Header = "API key", Password = provider.ApiKey };
@@ -657,6 +686,45 @@ public sealed partial class SettingsPanel : UserControl
         _providers.Add(provider);
         SaveProviders();
         ProvidersPanel.Children.Add(BuildProviderEditor(provider, expanded: true));
+    }
+
+    private void OnAddAccountClick(object sender, RoutedEventArgs e)
+    {
+        var number = _providers.Count(p => p.IsAccount) + 1;
+        string name;
+        do
+        {
+            name = $"Default {number++}";
+        }
+        while (_providers.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)));
+
+        var root = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale", "accounts");
+        var dir = System.IO.Path.Combine(root,Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(dir);
+
+        var account = new ByokProvider { Name = name, ConfigDir = dir };
+        _providers.Add(account);
+        SaveProviders();
+        ProvidersPanel.Children.Add(BuildProviderEditor(account, expanded: true));
+    }
+
+    /// <summary>Opens a console running the Claude CLI's login against the account's own config directory.</summary>
+    private static void SignInAccount(ByokProvider account)
+    {
+        try
+        {
+            var start = new System.Diagnostics.ProcessStartInfo("cmd.exe", "/k claude auth login")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = false,
+            };
+            start.Environment["CLAUDE_CONFIG_DIR"] = account.ConfigDir;
+            System.Diagnostics.Process.Start(start);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Error("settings", "Account sign-in failed to start", ex);
+        }
     }
 
     /// <summary>The chat reading fonts worth offering; a stored custom family stays selectable.</summary>

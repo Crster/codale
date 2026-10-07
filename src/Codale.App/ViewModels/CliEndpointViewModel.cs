@@ -82,6 +82,8 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
         ? "A turn is running. Switch the provider when it finishes."
         : ActiveProvider is not { } provider
             ? "Claude uses your Claude login in this chat."
+            : provider.IsAccount
+                ? $"Claude uses the {provider.Name.Trim()} account in this chat."
             : provider.LiteModel.Length == 0 && provider.SmartModel.Length == 0
                 ? $"This chat uses {provider.Name.Trim()}. It has no model name yet; add one in settings.json."
                 : $"This chat uses {provider.Name.Trim()}.";
@@ -94,10 +96,13 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
         // Rebuild the rows only when the providers changed: replacing them under the open
         // flyout's ListView drops its selection and focus (typing in Settings fires this per keystroke).
         var wanted = new List<ProviderChoice> { new("", "Default", "Claude CLI login") };
-        foreach (var provider in AppSettings.ByokProviders)
+
+        // Extra Claude logins sit right under Default, before the BYOK endpoints.
+        foreach (var provider in AppSettings.ByokProviders.OrderByDescending(p => p.IsAccount))
         {
             var name = provider.Name.Trim();
-            wanted.Add(new ProviderChoice(name, name, provider.BaseUrl.Length > 0 ? provider.BaseUrl : "No base URL set"));
+            var detail = provider.IsAccount ? "Claude CLI login" : provider.BaseUrl.Length > 0 ? provider.BaseUrl : "No base URL set";
+            wanted.Add(new ProviderChoice(name, name, detail));
         }
 
         if (!wanted.SequenceEqual(Choices))

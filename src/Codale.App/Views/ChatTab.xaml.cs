@@ -967,6 +967,14 @@ public sealed partial class ChatTab : UserControl
             {
                 ViewModel.TryAddAttachment(path);
             }
+            else
+            {
+                ViewModel.ComposerNotice = new NoticeItem
+                {
+                    Text = "Couldn't read the image from the clipboard - it may be in use by another app. Try pasting again.",
+                    Severity = NoticeSeverity.Error,
+                };
+            }
         }
         catch (Exception ex)
         {
@@ -993,8 +1001,24 @@ public sealed partial class ChatTab : UserControl
     {
         try
         {
-            var reference = await content.GetBitmapAsync();
-            using var clipboard = await reference.OpenReadAsync();
+            // The clipboard is often still locked by the app that just wrote it (a
+            // screenshot tool, a browser), so a first read can fail; retry briefly.
+            Windows.Storage.Streams.IRandomAccessStreamWithContentType? clipboard = null;
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    var reference = await content.GetBitmapAsync();
+                    clipboard = await reference.OpenReadAsync();
+                    break;
+                }
+                catch (Exception ex) when (attempt < 5 && ex is System.Runtime.InteropServices.COMException or InvalidOperationException or UnauthorizedAccessException or IOException)
+                {
+                    await Task.Delay(150 * (attempt + 1));
+                }
+            }
+
+            using var _ = clipboard;
 
             var name = $"codale-clipboard-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..6]}.png";
             var tempFolder = await Windows.Storage.StorageFolder.GetFolderFromPathAsync(Path.GetTempPath());
@@ -1018,7 +1042,8 @@ public sealed partial class ChatTab : UserControl
 
             return file.Path;
         }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or TaskCanceledException)
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or TaskCanceledException
+            or InvalidOperationException or UnauthorizedAccessException or IOException)
         {
             CrashLog.Error("chat", "clipboard image could not be saved", ex);
             return null;
