@@ -47,8 +47,10 @@ public static class ClaudeSubagents
     }
 
     private static string AssistLine(bool assist) => assist
-        ? "For an open-ended question (where is X, how does Y work) call mcp__codale-tasks__explore first; it runs on a separate model and costs you almost nothing. " +
-          "If it is not directly available, load it with one ToolSearch (select:mcp__codale-tasks__explore). "
+        ? "For any question about this project's code that you cannot answer from a file you already have open (where is X, how does Y work, " +
+          "which files are involved) call mcp__codale-tasks__explore first: it runs on a separate model, costs you almost nothing, and replies " +
+          "with the files to read as path:lines and what each range declares. If it is not directly available, load it with one ToolSearch " +
+          "(select:mcp__codale-tasks__explore). "
         : "";
 
     private const string ReadEconomy =

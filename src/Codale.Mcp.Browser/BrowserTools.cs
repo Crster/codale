@@ -5,10 +5,10 @@ namespace Codale.Mcp.Browser;
 internal static class BrowserTools
 {
     private static readonly (string, string, string) Target =
-        ("target", "string", "Element ref from browser_snapshot (e.g. e12), or a CSS selector. Also accepted as 'ref' or 'selector'.");
+        ("target", "string", "The element: a ref from the latest browser_snapshot (e.g. e12) or a CSS selector. Also accepted as 'ref' or 'selector'.");
 
     private static readonly (string, string, string) Element =
-        ("element", "string", "Optional human description of the element, for the log only.");
+        ("element", "string", "Optional plain-language description of the element, e.g. \"Save button\"; shown to the user, not used to find it.");
 
     private static string Tgt(McpArgs a) =>
         a.String("target") ?? a.String("ref") ?? a.String("selector")
@@ -58,8 +58,8 @@ internal static class BrowserTools
 
         return
         [
-            Tool("browser_navigate", "Open a URL in the current tab and wait for it to load. Use this to view a local dev server or a deployed page.",
-                Schema([("url", "string", "Absolute URL, e.g. http://localhost:3000")], "url"),
+            Tool("browser_navigate", "Open a URL in the automation browser's current tab and wait for it to load. The first step for checking a local dev server or a deployed page. Returns the HTTP status, final URL and page title; follow with browser_snapshot to read the page.",
+                Schema([("url", "string", "Absolute http(s) URL, e.g. http://localhost:3000/settings")], "url"),
                 (a, _) => b.WithPageAsync(async p =>
                 {
                     var response = await p.GotoAsync(BrowserSession.RequireWebUrl(a.RequiredString("url")));
@@ -67,7 +67,7 @@ internal static class BrowserTools
                     return (IReadOnlyList<McpContent>)[McpContent.FromText($"{response?.Status} {p.Url}\nTitle: {await p.TitleAsync()}{note}")];
                 })),
 
-            Tool("browser_snapshot", "Outline the page as text with a ref for every interactive element. Prefer this over screenshots for deciding what to click; refs are only valid until the next snapshot.",
+            Tool("browser_snapshot", "Read the current page as a text outline: headings, text, and a ref (e12) for every link, button, input and other interactive element. Use it to learn what is on the page and what to click or type into; it is cheaper and more precise than a screenshot. Refs are valid only until the next snapshot.",
                 Schema(),
                 (_, _) => b.WithPageAsync(async p =>
                 {
@@ -76,8 +76,8 @@ internal static class BrowserTools
                     return (IReadOnlyList<McpContent>)[McpContent.FromText($"Page: {await p.TitleAsync()} ({p.Url}){loginNote}\n{outline}")];
                 })),
 
-            Tool("browser_screenshot", "Capture a PNG of the viewport (or the whole page, or one element) to check how the UI actually looks.",
-                Schema([("fullPage", "boolean", "Capture the full scrollable page."), Target]),
+            Tool("browser_screenshot", "Capture a PNG of what the page looks like: the visible viewport by default, the whole scrollable page with fullPage, or a single element with target. Use it to check layout, styling and visual state; use browser_snapshot instead to read text or find elements.",
+                Schema([("fullPage", "boolean", "Capture the full scrollable page instead of just the viewport."), Target]),
                 (a, _) => b.WithPageAsync(async p =>
                 {
                     byte[] png = a.String("target") is { Length: > 0 } t
@@ -86,8 +86,8 @@ internal static class BrowserTools
                     return (IReadOnlyList<McpContent>)[McpContent.FromImage(png)];
                 })),
 
-            Tool("browser_click", "Click an element.",
-                Schema([Target, Element, ("doubleClick", "boolean", "Double-click instead."), ("button", "string", "left (default), right or middle")]),
+            Tool("browser_click", "Click an element on the page, found by its ref from browser_snapshot or a CSS selector. Waits for it to be visible and enabled. Returns the URL afterwards, so a navigation shows up.",
+                Schema([Target, Element, ("doubleClick", "boolean", "Double-click instead of a single click."), ("button", "string", "Mouse button: left (default), right or middle.")]),
                 (a, _) => b.WithPageAsync(async p =>
                 {
                     var loc = await Locate(p, a);
@@ -96,8 +96,8 @@ internal static class BrowserTools
                     return (IReadOnlyList<McpContent>)[McpContent.FromText($"Clicked. Now at {p.Url}")];
                 })),
 
-            Tool("browser_type", "Type text into an input, textarea or editable element, replacing its content.",
-                Schema([Target, Element, ("text", "string", "Text to enter."), ("submit", "boolean", "Press Enter afterwards.")], "text"),
+            Tool("browser_type", "Set the text of one input, textarea or contenteditable element, replacing whatever it held. For several fields at once use browser_fill_form; to press a key without typing use browser_press_key.",
+                Schema([Target, Element, ("text", "string", "The text the field should contain afterwards."), ("submit", "boolean", "Press Enter in the field afterwards, e.g. to submit a search.")], "text"),
                 (a, _) => b.WithPageAsync(async p =>
                 {
                     var loc = await Locate(p, a);
@@ -106,16 +106,16 @@ internal static class BrowserTools
                     return (IReadOnlyList<McpContent>)[McpContent.FromText("Typed.")];
                 })),
 
-            Tool("browser_press_key", "Press a key or chord on the page, e.g. Enter, Escape, Control+A.",
-                Schema([("key", "string", "Key name as in Playwright.")], "key"),
+            Tool("browser_press_key", "Press one key or chord in the page, sent to whatever element has focus: Enter, Escape, Tab, ArrowDown, Control+A, Shift+Enter. Not for entering text; use browser_type for that.",
+                Schema([("key", "string", "Playwright key name, e.g. Enter, Escape, Tab, ArrowDown, Control+A.")], "key"),
                 (a, _) => b.WithPageAsync(async p =>
                 {
                     await p.Keyboard.PressAsync(a.RequiredString("key"));
                     return (IReadOnlyList<McpContent>)[McpContent.FromText("Pressed.")];
                 })),
 
-            Tool("browser_select_option", "Choose an option in a <select> by value or label.",
-                Schema([Target, Element, ("value", "string", "Option value or visible label.")], "value"),
+            Tool("browser_select_option", "Choose an option in a native <select> dropdown by its value or its visible label. For custom dropdowns built from divs, click them with browser_click instead.",
+                Schema([Target, Element, ("value", "string", "The option's value attribute or its visible label text.")], "value"),
                 (a, _) => b.WithPageAsync(async p =>
                 {
                     var v = a.RequiredString("value");
@@ -124,7 +124,7 @@ internal static class BrowserTools
                     return (IReadOnlyList<McpContent>)[McpContent.FromText("Selected.")];
                 })),
 
-            Tool("browser_hover", "Hover the pointer over an element.",
+            Tool("browser_hover", "Move the pointer over an element without clicking, to open hover menus, tooltips and hover styles before a snapshot or screenshot.",
                 Schema([Target, Element]),
                 (a, _) => b.WithPageAsync(async p =>
                 {
@@ -134,16 +134,16 @@ internal static class BrowserTools
 
             // Deliberately unrestricted: running script in the page is this tool's purpose. It acts with the
             // page's own privileges and any logins held by the browser, never with the host's.
-            Tool("browser_evaluate", "Run a JavaScript expression or arrow function in the page and return its JSON result. Use it to assert on state, e.g. () => document.title.",
-                Schema([("script", "string", "Expression or function, e.g. () => document.querySelectorAll('li').length. Also accepted as 'function' or 'expression'.")]),
+            Tool("browser_evaluate", "Run JavaScript inside the page and return its result as JSON. Use it to read state the outline does not show (a store, localStorage, computed styles, element counts) or to assert a condition. Runs with the page's privileges; the user approves each call.",
+                Schema([("script", "string", "A JavaScript expression or arrow function, e.g. () => document.querySelectorAll('li').length or () => localStorage.getItem('token') !== null. Also accepted as 'function' or 'expression'.")]),
                 (a, _) => b.WithPageAsync(async p =>
                 {
                     var result = await p.EvaluateAsync<System.Text.Json.JsonElement?>(Script(a));
                     return (IReadOnlyList<McpContent>)[McpContent.FromText(result?.ToString() ?? "undefined")];
                 })),
 
-            Tool("browser_wait_for", "Wait until text appears or disappears, an element appears, the address contains something, or for a number of seconds.",
-                Schema([("text", "string", "Text that must become visible."), ("textGone", "string", "Text that must disappear."), ("selector", "string", "CSS selector that must become visible."), ("urlContains", "string", "Address fragment to wait for."), ("seconds", "number", "Fixed delay instead (max 30).")]),
+            Tool("browser_wait_for", "Pause until the page reaches a state: some text appears or disappears, an element appears, the URL contains a fragment, or a fixed number of seconds pass. Use it after an action that loads or re-renders, instead of taking repeated snapshots. Give exactly one condition.",
+                Schema([("text", "string", "Wait until this text is visible on the page."), ("textGone", "string", "Wait until this text is no longer visible, e.g. \"Loading...\"."), ("selector", "string", "Wait until an element matching this CSS selector is visible."), ("urlContains", "string", "Wait until the address contains this fragment, e.g. /dashboard."), ("seconds", "number", "Just wait this many seconds (max 30) when there is nothing to watch for.")]),
                 (a, ct) => b.WithPageAsync(async p =>
                 {
                     if (a.String("textGone") is { Length: > 0 } gone)
@@ -175,19 +175,19 @@ internal static class BrowserTools
                     return (IReadOnlyList<McpContent>)[McpContent.FromText($"Waited {seconds}s.")];
                 })),
 
-            Tool("browser_console_messages", "Console output and uncaught page errors since the last clear (last 200).",
-                Schema([("clear", "boolean", "Clear the log after reading.")]),
+            Tool("browser_console_messages", "Read the page's console output (log, warn, error) and uncaught JavaScript errors collected since the last clear, newest 200. Check it after exercising a flow, before reporting the UI as working; an empty result means no errors.",
+                Schema([("clear", "boolean", "Empty the log after reading, so the next read shows only new messages.")]),
                 (a, _) => b.WithPageAsync(p => BrowserTools.TextResult(b.ConsoleLog(p, a.Bool("clear") ?? false)))),
 
-            Tool("browser_network_requests", "Responses and failed requests since the last clear (last 200).",
-                Schema([("clear", "boolean", "Clear the log after reading.")]),
+            Tool("browser_network_requests", "Read the HTTP requests the page made since the last clear, newest 200: method, URL, status, and failures. Use it to find a failing API call, a 404 asset or a request that never went out.",
+                Schema([("clear", "boolean", "Empty the log after reading, so the next read shows only new requests.")]),
                 (a, _) => b.WithPageAsync(p => BrowserTools.TextResult(b.NetworkLog(p, a.Bool("clear") ?? false)))),
 
-            Tool("browser_resize", "Resize the viewport to a custom size. For device profiles (mobile, tablet, laptop, desktop, 4k) use browser_set_viewport.",
-                Schema([("width", "number", "Pixels."), ("height", "number", "Pixels.")], "width", "height"),
+            Tool("browser_resize", "Set the viewport to an exact width and height in pixels, e.g. to test one specific breakpoint. For named device profiles (mobile, tablet, laptop, desktop, 4k) with touch and pixel-ratio emulation use browser_set_viewport.",
+                Schema([("width", "number", "Viewport width in pixels."), ("height", "number", "Viewport height in pixels.")], "width", "height"),
                 async (a, _) => await Text(b.SetViewportAsync(null, (a.RequiredInt("width"), a.RequiredInt("height"))))),
 
-            Tool("browser_navigate_back", "Go back in the current tab's history.",
+            Tool("browser_navigate_back", "Go back one page in the current tab's history, like the browser's Back button. browser_history also offers forward and reload.",
                 Schema(),
                 (_, _) => b.WithPageAsync(async p =>
                 {
@@ -195,8 +195,8 @@ internal static class BrowserTools
                     return (IReadOnlyList<McpContent>)[McpContent.FromText($"At {p.Url}")];
                 })),
 
-            Tool("browser_tabs", "List, open, select or close tabs.",
-                Schema([("action", "string", "list | new | select | close"), ("index", "number", "Tab index for select/close."), ("url", "string", "URL for new.")], "action"),
+            Tool("browser_tabs", "Manage the automation browser's tabs: list them with their index and URL, open a new one, switch to one, or close one. Every other browser tool acts on the selected tab.",
+                Schema([("action", "string", "list | new | select | close"), ("index", "number", "Tab index (from list) for select and close; close defaults to the current tab."), ("url", "string", "URL to open in the new tab; optional.")], "action"),
                 async (a, _) => (IReadOnlyList<McpContent>)[McpContent.FromText(a.RequiredString("action") switch
                 {
                     "list" => await b.ListTabsAsync(),
@@ -207,9 +207,9 @@ internal static class BrowserTools
                 })]),
 
             Tool("browser_set_viewport",
-                "Switch the browser to a device profile to test responsive layouts: " + ViewportPreset.Names + ". Mobile and tablet presets also emulate touch, pixel ratio and the device user agent, and reload open tabs. " +
-                "Or give a custom width and height. device=reset returns to the default.",
-                Schema([("device", "string", "Preset name (mobile, mobile-small, tablet, laptop, desktop, 4k) or reset."), ("width", "number", "Custom width in pixels."), ("height", "number", "Custom height in pixels.")]),
+                "Switch the browser to a device profile to test a responsive layout at one size: " + ViewportPreset.Names + ". Mobile and tablet presets also emulate touch, pixel ratio and the device user agent, and reload open tabs. " +
+                "Give either device or a custom width and height; device=reset returns to the default desktop size. To compare several sizes in one call use browser_responsive_check.",
+                Schema([("device", "string", "Preset name (" + ViewportPreset.Names + ") or reset."), ("width", "number", "Custom viewport width in pixels, used when device is omitted."), ("height", "number", "Custom viewport height in pixels, used when device is omitted.")]),
                 async (a, _) =>
                 {
                     if (a.String("device") is { Length: > 0 } name)
@@ -228,8 +228,8 @@ internal static class BrowserTools
                 }),
 
             Tool("browser_responsive_check",
-                "Take a screenshot of the current page at several device sizes in one call (default mobile, tablet, laptop, desktop), then restore the previous size. Use it to verify a layout across breakpoints.",
-                Schema([("devices", "string", "Comma-separated presets: " + ViewportPreset.Names + ". Default: mobile,tablet,laptop,desktop."), ("fullPage", "boolean", "Capture each full scrollable page.")]),
+                "Screenshot the current page at several device sizes in one call (default mobile, tablet, laptop, desktop) and restore the previous size afterwards. The quickest way to verify a layout across breakpoints after a CSS change.",
+                Schema([("devices", "string", "Comma-separated presets to capture: " + ViewportPreset.Names + ". Default: mobile,tablet,laptop,desktop."), ("fullPage", "boolean", "Capture each full scrollable page instead of just the viewport.")]),
                 (a, _) =>
                 {
                     var names = (a.String("devices") ?? "mobile,tablet,laptop,desktop")
@@ -239,17 +239,17 @@ internal static class BrowserTools
                     return b.ResponsiveShotsAsync(presets, a.Bool("fullPage") ?? false);
                 }),
 
-            Tool("browser_emulate", "Emulate page conditions: dark or light colour scheme, reduced motion, or offline mode.",
-                Schema([("colorScheme", "string", "dark | light | default"), ("reducedMotion", "string", "reduce | default"), ("offline", "boolean", "Cut the network.")]),
+            Tool("browser_emulate", "Change what the page believes about its environment: prefers-color-scheme (dark or light), prefers-reduced-motion, or an offline network. Use it to check a dark theme, a motion-free variant or offline handling without changing the app.",
+                Schema([("colorScheme", "string", "dark | light | default"), ("reducedMotion", "string", "reduce | default"), ("offline", "boolean", "true cuts the network for the page; false restores it.")]),
                 (a, _) => Text(b.EmulateAsync(a.String("colorScheme"), a.String("reducedMotion"), a.Bool("offline")))),
 
             Tool("browser_handoff",
-                "Use when a page needs a sign-in, captcha, 2FA or any step only the user can do. Do NOT give up or guess credentials: this opens a visible browser window for the user, waits until they finish, saves the login and returns to the hidden browser signed in. " +
-                "It waits until the password field is gone or the address changes, or until untilUrl / untilText is met.",
-                Schema([("url", "string", "Page to open for the user; defaults to the current tab."), ("untilUrl", "string", "Finished when the address contains this."), ("untilText", "string", "Finished when this text is visible."), ("timeoutSeconds", "number", "How long to wait (default 300, max 900)."), ("returnToHidden", "boolean", "Hide the window again afterwards (default true).")]),
+                "Hand the browser to the user for a step only they can do: a sign-in, captcha, 2FA code, payment or consent screen. Do NOT give up, ask for credentials or guess them: this opens the page in a visible window, waits until the user finishes, saves the resulting login and returns the hidden browser to you signed in. " +
+                "By default it considers the step done when the password field disappears or the address changes; untilUrl / untilText give a precise end condition.",
+                Schema([("url", "string", "Page to open for the user; defaults to the current tab's page."), ("untilUrl", "string", "Done when the address contains this fragment, e.g. /dashboard."), ("untilText", "string", "Done when this text is visible, e.g. \"Sign out\"."), ("timeoutSeconds", "number", "How long to wait for the user (default 300, max 900)."), ("returnToHidden", "boolean", "Hide the window again afterwards (default true).")]),
                 (a, ct) => Text(b.HandoffAsync(a.String("url"), a.String("untilUrl"), a.String("untilText"), a.Int("timeoutSeconds") ?? 300, a.Bool("returnToHidden") ?? true, ct))),
 
-            Tool("browser_mode", "Show or hide the automation browser. It is hidden (headless) by default; logins and tabs are kept when switching.",
+            Tool("browser_mode", "Show the automation browser window on the user's screen, or hide it again. It is hidden (headless) by default; switch to visible when the user wants to watch what you do. Logins and tabs survive the switch. For a sign-in step use browser_handoff instead.",
                 Schema([("mode", "string", "visible | hidden")], "mode"),
                 (a, _) => Text(b.SetModeAsync(a.RequiredKeyword("mode") switch
                 {
@@ -258,11 +258,11 @@ internal static class BrowserTools
                     var other => throw new McpToolException($"Unknown mode '{other}': use visible or hidden."),
                 }))),
 
-            Tool("browser_session", "Manage saved logins: info (which domains have cookies), save, or clear.",
+            Tool("browser_session", "Manage the logins the automation browser keeps between runs: info lists the domains with saved cookies, save stores the current ones now, clear signs out of everything. Use info to check whether a site is already signed in before navigating.",
                 Schema([("action", "string", "info | save | clear")], "action"),
                 (a, _) => Text(b.SessionAsync(a.RequiredKeyword("action")))),
 
-            Tool("browser_history", "Go back, forward or reload the current tab.",
+            Tool("browser_history", "Use the current tab's Back or Forward button, or reload the page (e.g. after a dev-server rebuild). Returns the URL afterwards.",
                 Schema([("action", "string", "back | forward | reload")], "action"),
                 (a, _) => b.WithPageAsync(async p =>
                 {
@@ -277,8 +277,8 @@ internal static class BrowserTools
                     return (IReadOnlyList<McpContent>)[McpContent.FromText($"At {p.Url}")];
                 })),
 
-            Tool("browser_scroll", "Scroll an element into view, or scroll the page to the top or bottom or by some pixels.",
-                Schema([Target, Element, ("to", "string", "top | bottom | up | down"), ("pixels", "number", "Amount for up/down (default one screen).")]),
+            Tool("browser_scroll", "Scroll the page: give target to bring one element into view, or to for the page itself (top, bottom, or up/down by one screen or a number of pixels). Needed before screenshotting content below the fold or triggering infinite-scroll loading.",
+                Schema([Target, Element, ("to", "string", "top | bottom | up | down; used when no target is given."), ("pixels", "number", "Distance for up/down in pixels; default is about one screen.")]),
                 (a, _) => b.WithPageAsync(async p =>
                 {
                     if (HasTarget(a))
@@ -301,8 +301,8 @@ internal static class BrowserTools
                     return (IReadOnlyList<McpContent>)[McpContent.FromText($"Scrolled; page offset is now {y:0}px.")];
                 })),
 
-            Tool("browser_drag", "Drag one element onto another.",
-                Schema([("from", "string", "Ref or selector of the element to drag."), ("to", "string", "Ref or selector of the drop target.")], "from", "to"),
+            Tool("browser_drag", "Drag one element and drop it on another, for sortable lists, kanban boards and drop zones. Both are refs from browser_snapshot or CSS selectors.",
+                Schema([("from", "string", "Ref or selector of the element to pick up."), ("to", "string", "Ref or selector of the element to drop it on.")], "from", "to"),
                 (a, _) => b.WithPageAsync(async p =>
                 {
                     await BrowserSession.EnsureRefExistsAsync(p, a.RequiredString("from"));
@@ -311,8 +311,8 @@ internal static class BrowserTools
                     return (IReadOnlyList<McpContent>)[McpContent.FromText("Dragged.")];
                 })),
 
-            Tool("browser_upload", "Attach one or more local files to a file input. Only files inside the project folder can be attached.",
-                Schema([Target, Element, ("paths", "string", "File path, or several separated by | .")], "paths"),
+            Tool("browser_upload", "Attach one or more files from the project folder to an <input type=file> on the page, as if chosen in the file dialog. Files outside the project folder are refused. The user approves each call.",
+                Schema([Target, Element, ("paths", "string", "Path of the file to attach, relative to the project root or absolute within it; several paths separated by | .")], "paths"),
                 (a, _) => b.WithPageAsync(async p =>
                 {
                     var files = (a.Array("paths")?.Select(e => e.GetString() ?? "").ToArray()
@@ -327,8 +327,8 @@ internal static class BrowserTools
                     return (IReadOnlyList<McpContent>)[McpContent.FromText($"Attached {files.Length} file(s).")];
                 })),
 
-            Tool("browser_dialog", "Set how alert/confirm/prompt dialogs are answered from now on (default: accept). Dialogs that appear are noted in browser_console_messages.",
-                Schema([("action", "string", "accept | dismiss"), ("promptText", "string", "Text to enter for prompt dialogs.")], "action"),
+            Tool("browser_dialog", "Decide in advance how the page's alert(), confirm() and prompt() dialogs are answered from now on; default is accept. Set it before an action that will show a confirm, e.g. dismiss to test the cancel path. Each dialog that appears is recorded in browser_console_messages.",
+                Schema([("action", "string", "accept | dismiss"), ("promptText", "string", "Text to answer prompt() dialogs with, when accepting.")], "action"),
                 (a, _) =>
                 {
                     var accept = a.RequiredKeyword("action") switch
@@ -341,7 +341,7 @@ internal static class BrowserTools
                     return TextResult($"Dialogs will be {(accept ? "accepted" : "dismissed")}.");
                 }),
 
-            Tool("browser_get_text", "Read the visible text of an element, or of the whole page.",
+            Tool("browser_get_text", "Read the rendered text of one element, or of the whole page when no target is given, without the outline and refs that browser_snapshot adds. Use it to check a message, a table's contents or a generated value exactly.",
                 Schema([Target, Element]),
                 (a, _) => b.WithPageAsync(async p =>
                 {
@@ -349,7 +349,7 @@ internal static class BrowserTools
                     return (IReadOnlyList<McpContent>)[McpContent.FromText(text.Length > 20000 ? text[..20000] + "\n...(truncated)" : text)];
                 })),
 
-            Tool("browser_fill_form", "Fill several fields at once. Each field is a target and a value; use it for login and sign-up forms.",
+            Tool("browser_fill_form", "Fill several form fields in one call, in order, then optionally press Enter in the last one. Each field is a target (ref or selector) and a value; true/false toggles a checkbox or radio. Use it for login, sign-up and settings forms instead of repeated browser_type calls.",
                 new System.Text.Json.Nodes.JsonObject
                 {
                     ["type"] = "object",
@@ -358,19 +358,19 @@ internal static class BrowserTools
                         ["fields"] = new System.Text.Json.Nodes.JsonObject
                         {
                             ["type"] = "array",
-                            ["description"] = "Fields to fill, in order.",
+                            ["description"] = "The fields to fill, in the order to fill them.",
                             ["items"] = new System.Text.Json.Nodes.JsonObject
                             {
                                 ["type"] = "object",
                                 ["properties"] = new System.Text.Json.Nodes.JsonObject
                                 {
-                                    ["target"] = new System.Text.Json.Nodes.JsonObject { ["type"] = "string", ["description"] = "Ref or selector." },
-                                    ["value"] = new System.Text.Json.Nodes.JsonObject { ["type"] = "string", ["description"] = "Text to enter, or true/false for a checkbox." },
+                                    ["target"] = new System.Text.Json.Nodes.JsonObject { ["type"] = "string", ["description"] = "Ref from browser_snapshot (e12) or a CSS selector." },
+                                    ["value"] = new System.Text.Json.Nodes.JsonObject { ["type"] = "string", ["description"] = "Text to enter, or true/false to check or uncheck a checkbox or radio." },
                                 },
                                 ["required"] = new System.Text.Json.Nodes.JsonArray("target", "value"),
                             },
                         },
-                        ["submit"] = new System.Text.Json.Nodes.JsonObject { ["type"] = "boolean", ["description"] = "Press Enter in the last field." },
+                        ["submit"] = new System.Text.Json.Nodes.JsonObject { ["type"] = "boolean", ["description"] = "Press Enter in the last field afterwards, to submit the form." },
                     },
                     ["required"] = new System.Text.Json.Nodes.JsonArray("fields"),
                 },
@@ -400,7 +400,7 @@ internal static class BrowserTools
                     return (IReadOnlyList<McpContent>)[McpContent.FromText($"Filled {fields.Count} field(s).")];
                 })),
 
-            Tool("browser_close", "Close the browser. The next browser tool call starts a fresh one.",
+            Tool("browser_close", "Close the automation browser and all its tabs. Saved logins are kept; the next browser tool call starts a fresh browser. Usually unnecessary; call it only when the user asks or the browser is wedged.",
                 Schema(),
                 async (_, _) =>
                 {

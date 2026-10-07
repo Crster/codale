@@ -1,0 +1,339 @@
+<UserControl
+    x:Class="Codale.App.Controls.HexViewer"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Codale.App.Controls"
+    IsTabStop="True"
+    KeyDown="OnViewerKeyDown">
+
+    <UserControl.Resources>
+        <!--  One size for every square toolbar button so the row lines up with the 32px inputs  -->
+        <Style x:Key="ToolbarIconButton" BasedOn="{StaticResource DefaultButtonStyle}" TargetType="Button">
+            <Setter Property="Width" Value="32" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style x:Key="ToolbarIconToggle" BasedOn="{StaticResource DefaultToggleButtonStyle}" TargetType="ToggleButton">
+            <Setter Property="Width" Value="32" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid RowSpacing="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!--  Toolbar: where to go, what to find, how to lay the bytes out  -->
+        <Grid ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBox
+                    x:Name="GoToBox"
+                    Width="130"
+                    PlaceholderText="Go to  0x1F0 / 496"
+                    KeyDown="OnGoToKeyDown"
+                    ToolTipService.ToolTip="Go to offset: hex (0x…), decimal, or +/- relative to the selection (Ctrl+G)" />
+                <Button
+                    Click="OnGoToClick"
+                    Style="{StaticResource ToolbarIconButton}"
+                    ToolTipService.ToolTip="Go to offset">
+                    <FontIcon FontSize="12" Glyph="&#xE751;" />
+                </Button>
+            </StackPanel>
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                <TextBox
+                    x:Name="FindBox"
+                    Width="220"
+                    PlaceholderText="Find"
+                    KeyDown="OnFindKeyDown"
+                    ToolTipService.ToolTip="Find (Ctrl+F). Enter: next, Shift+Enter: previous" />
+                <ComboBox
+                    x:Name="FindMode"
+                    Width="104"
+                    SelectedIndex="0"
+                    SelectionChanged="OnFindModeChanged">
+                    <ComboBoxItem Content="Hex bytes" />
+                    <ComboBoxItem Content="Text" />
+                    <ComboBoxItem Content="UTF-16 text" />
+                </ComboBox>
+                <ToggleButton
+                    x:Name="MatchCase"
+                    Content="Aa"
+                    Style="{StaticResource ToolbarIconToggle}"
+                    ToolTipService.ToolTip="Match case (text searches)" />
+                <Button
+                    Click="OnFindPreviousClick"
+                    Style="{StaticResource ToolbarIconButton}"
+                    ToolTipService.ToolTip="Previous match (Shift+F3)">
+                    <FontIcon FontSize="12" Glyph="&#xE70E;" />
+                </Button>
+                <Button
+                    Click="OnFindNextClick"
+                    Style="{StaticResource ToolbarIconButton}"
+                    ToolTipService.ToolTip="Next match (F3)">
+                    <FontIcon FontSize="12" Glyph="&#xE70D;" />
+                </Button>
+                <ProgressRing
+                    x:Name="FindProgress"
+                    Width="16"
+                    Height="16"
+                    VerticalAlignment="Center"
+                    IsActive="False"
+                    Visibility="Collapsed" />
+                <TextBlock
+                    x:Name="FindStatus"
+                    MaxWidth="240"
+                    VerticalAlignment="Center"
+                    FontSize="12"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
+                <ComboBox
+                    x:Name="RowWidth"
+                    Width="108"
+                    SelectedIndex="1"
+                    SelectionChanged="OnRowWidthChanged"
+                    ToolTipService.ToolTip="Bytes per row">
+                    <ComboBoxItem Content="8 / row" Tag="8" />
+                    <ComboBoxItem Content="16 / row" Tag="16" />
+                    <ComboBoxItem Content="24 / row" Tag="24" />
+                    <ComboBoxItem Content="32 / row" Tag="32" />
+                </ComboBox>
+                <DropDownButton
+                    x:Name="CopyButton"
+                    Height="32"
+                    Content="Copy"
+                    ToolTipService.ToolTip="Copy the selection (Ctrl+C copies hex)">
+                    <DropDownButton.Flyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem Click="OnCopyHexClick" Text="As hex" />
+                            <MenuFlyoutItem Click="OnCopyAsciiClick" Text="As text (ASCII)" />
+                            <MenuFlyoutItem Click="OnCopyCArrayClick" Text="As C array" />
+                            <MenuFlyoutItem Click="OnCopyBase64Click" Text="As Base64" />
+                            <MenuFlyoutSeparator />
+                            <MenuFlyoutItem Click="OnCopyOffsetClick" Text="Offset of selection" />
+                        </MenuFlyout>
+                    </DropDownButton.Flyout>
+                </DropDownButton>
+                <ToggleButton
+                    x:Name="InspectorToggle"
+                    Checked="OnInspectorToggled"
+                    IsChecked="True"
+                    Style="{StaticResource ToolbarIconToggle}"
+                    Unchecked="OnInspectorToggled"
+                    ToolTipService.ToolTip="Data inspector">
+                    <FontIcon FontSize="12" Glyph="&#xE9D9;" />
+                </ToggleButton>
+            </StackPanel>
+        </Grid>
+
+        <!--  The dump and the inspector  -->
+        <Grid Grid.Row="1" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition x:Name="InspectorColumn" Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <Border
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="6">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!--  Column ruler, rebuilt when the row width changes  -->
+                    <Grid
+                        x:Name="RulerGrid"
+                        Padding="12,6,12,6"
+                        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                        BorderThickness="0,0,0,1"
+                        ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            x:Name="RulerOffset"
+                            FontFamily="Cascadia Mono, Consolas"
+                            FontSize="13"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Text="Offset  " />
+                        <TextBlock
+                            x:Name="RulerHex"
+                            Grid.Column="1"
+                            FontFamily="Cascadia Mono, Consolas"
+                            FontSize="13"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                        <TextBlock
+                            x:Name="RulerAscii"
+                            Grid.Column="2"
+                            FontFamily="Cascadia Mono, Consolas"
+                            FontSize="13"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Text="Decoded text" />
+                    </Grid>
+
+                    <ListView
+                        x:Name="Rows"
+                        Grid.Row="1"
+                        Padding="0"
+                        IsItemClickEnabled="False"
+                        SelectionMode="None">
+                        <ListView.ItemContainerStyle>
+                            <Style BasedOn="{StaticResource DefaultListViewItemStyle}" TargetType="ListViewItem">
+                                <Setter Property="MinHeight" Value="0" />
+                                <Setter Property="Padding" Value="12,0,12,0" />
+                                <Setter Property="IsTabStop" Value="False" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="local:HexRow">
+                                <Grid Height="20" ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock
+                                        VerticalAlignment="Center"
+                                        FontFamily="Cascadia Mono, Consolas"
+                                        FontSize="13"
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                        Text="{x:Bind OffsetText}" />
+
+                                    <Grid
+                                        Grid.Column="1"
+                                        Background="Transparent"
+                                        PointerPressed="OnHexPointerPressed"
+                                        PointerCaptureLost="OnPointerCaptureLost"
+                                        PointerMoved="OnHexPointerMoved"
+                                        PointerReleased="OnPointerReleased">
+                                        <Border
+                                            Width="{x:Bind HexHighlightWidth, Mode=OneWay}"
+                                            Margin="{x:Bind HexHighlightMargin, Mode=OneWay}"
+                                            HorizontalAlignment="Left"
+                                            Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                            CornerRadius="2"
+                                            IsHitTestVisible="False"
+                                            Opacity="0.4"
+                                            Visibility="{x:Bind HighlightVisibility, Mode=OneWay}" />
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            FontFamily="Cascadia Mono, Consolas"
+                                            FontSize="13"
+                                            IsHitTestVisible="False"
+                                            Text="{x:Bind HexText}" />
+                                    </Grid>
+
+                                    <Grid
+                                        Grid.Column="2"
+                                        Background="Transparent"
+                                        PointerPressed="OnAsciiPointerPressed"
+                                        PointerCaptureLost="OnPointerCaptureLost"
+                                        PointerMoved="OnAsciiPointerMoved"
+                                        PointerReleased="OnPointerReleased">
+                                        <Border
+                                            Width="{x:Bind AsciiHighlightWidth, Mode=OneWay}"
+                                            Margin="{x:Bind AsciiHighlightMargin, Mode=OneWay}"
+                                            HorizontalAlignment="Left"
+                                            Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                            CornerRadius="2"
+                                            IsHitTestVisible="False"
+                                            Opacity="0.4"
+                                            Visibility="{x:Bind HighlightVisibility, Mode=OneWay}" />
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            FontFamily="Cascadia Mono, Consolas"
+                                            FontSize="13"
+                                            IsHitTestVisible="False"
+                                            Text="{x:Bind AsciiText}" />
+                                    </Grid>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+            </Border>
+
+            <!--  Data inspector: the selected bytes read as numbers, both byte orders  -->
+            <Border
+                x:Name="InspectorPanel"
+                Grid.Column="1"
+                Width="270"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="6">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Padding="12,10,12,12" Spacing="10">
+                        <TextBlock
+                            FontSize="13"
+                            FontWeight="SemiBold"
+                            Text="Data inspector" />
+                        <TextBlock
+                            x:Name="InspectorHint"
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="Click a byte to inspect it."
+                            TextWrapping="Wrap" />
+                        <Grid x:Name="InspectorGrid" ColumnSpacing="10" RowSpacing="3">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+
+        <!--  Status line  -->
+        <Grid Grid.Row="2" ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock
+                x:Name="SizeText"
+                FontSize="12"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock
+                x:Name="SelectionText"
+                Grid.Column="1"
+                FontFamily="Cascadia Mono, Consolas"
+                FontSize="12"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock
+                x:Name="TypeText"
+                Grid.Column="2"
+                FontSize="12"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                TextTrimming="CharacterEllipsis" />
+            <Button
+                Grid.Column="3"
+                Padding="8,2"
+                Click="OnOpenExternallyClick"
+                Content="Open with default app" />
+        </Grid>
+    </Grid>
+</UserControl>

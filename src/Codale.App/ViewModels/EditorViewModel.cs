@@ -11,7 +11,7 @@ namespace Codale.App.ViewModels;
 /// <remarks>
 /// The view model deliberately knows only text and paths; highlighting is the control's
 /// own (its built-in language set), chosen in the view by extension. Files beyond the
-/// size guard and binary files are shown as a message rather than loaded.
+/// size guard are shown as a message rather than loaded; binary files open in the hex viewer.
 /// </remarks>
 public sealed partial class EditorViewModel : ObservableObject
 {
@@ -41,12 +41,12 @@ public sealed partial class EditorViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsBinaryPlaceholder))]
     public partial bool IsImage { get; set; }
 
-    /// <summary>Set for non-image binary files: shown as a placeholder with an "open" action.</summary>
+    /// <summary>Set for non-image binary files: shown in the hex viewer.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsBinaryPlaceholder))]
     public partial bool IsBinary { get; set; }
 
-    /// <summary>True when the centre shows neither the editor nor an image, only the file message.</summary>
+    /// <summary>True when the centre shows the hex viewer instead of the editor or an image.</summary>
     public bool IsBinaryPlaceholder => IsBinary && !IsImage;
 
     private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -266,7 +266,7 @@ public sealed partial class EditorViewModel : ObservableObject
 
             if (BinaryExtensions.Contains(Path.GetExtension(path)))
             {
-                Message = $"{FormatSize(info.Length)} · binary file; not shown.";
+                Message = null; // the hex viewer shows the file; it carries its own size line
                 HasFile = true;
                 CanEdit = false;
                 IsBinary = true;
@@ -292,7 +292,7 @@ public sealed partial class EditorViewModel : ObservableObject
 
             if (LooksBinary(text))
             {
-                Message = $"{FormatSize(info.Length)} · binary file; not shown.";
+                Message = null; // the hex viewer shows the file; it carries its own size line
                 HasFile = true;
                 CanEdit = false;
                 IsBinary = true;
@@ -445,13 +445,6 @@ public sealed partial class EditorViewModel : ObservableObject
             // A stray temp file is harmless.
         }
     }
-
-    private static string FormatSize(long bytes) => bytes switch
-    {
-        < 1024 => $"{bytes} B",
-        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
-        _ => $"{bytes / 1024.0 / 1024.0:0.#} MB",
-    };
 
     /// <summary>A NUL byte in the first chunk is the usual heuristic for "not text".</summary>
     private static bool LooksBinary(string text)

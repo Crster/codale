@@ -91,6 +91,9 @@ public sealed record SearchReference
 
     /// <summary>Words to grep for inside the file to find the relevant lines.</summary>
     public IReadOnlyList<string> Find { get; init; } = [];
+
+    /// <summary>What the relevant stretch declares, e.g. "type `SourceExplorer`", "methods `Rank`, `Widen`"; empty for non-code.</summary>
+    public IReadOnlyList<string> Contains { get; init; } = [];
 }
 
 public sealed record SearchAnswer
@@ -500,15 +503,18 @@ public sealed partial class SearchAgentLoop
 
     private const int MaxSections = 6;
     private const int MaxSectionLines = 40;
-    private const int MaxReferences = 40;
+    private const int MaxReferences = 8;
+    private const int MinReferencesBeforeStrays = 4;
+    private const int MaxListedSymbols = 5;
 
     /// <summary>The terms the index ranked the project for; they locate a file's lines once it is open.</summary>
     private IReadOnlyList<string> _terms = [];
 
     /// <summary>
-    /// Every file the search touched, as a pointer and not as content: where to start
-    /// reading and which words to search for there. Files the model read or the index
-    /// ranked come first, then the rest by how many lines matched.
+    /// The files worth opening, as pointers and not as content: where to start reading
+    /// and which words to search for there. Files the model read or the index ranked
+    /// come first; grep-only files follow by match count, and a single stray match only
+    /// gets in while the list is still short.
     /// </summary>
     internal IReadOnlyList<SearchReference> BuildReferences(
         IReadOnlyList<SearchHit> hits,
@@ -535,6 +541,7 @@ public sealed partial class SearchAgentLoop
                 EndLine = end,
                 Reason = reason,
                 Find = find.Count > 0 ? find : _terms.Take(3).ToList(),
+                Contains = DescribeContents(relative, start, end),
             };
         }
 
@@ -550,11 +557,49 @@ public sealed partial class SearchAgentLoop
 
         foreach (var file in hits.GroupBy(h => h.RelativePath, StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()))
         {
+            if (file.Count() < 2 && references.Count >= MinReferencesBeforeStrays)
+            {
+                break;
+            }
+
             var first = file.Min(h => h.LineNumber);
             Add(file.Key, first, file.Max(h => h.LineNumber), file.Count() == 1 ? "1 match" : $"{file.Count()} matches");
         }
 
         return [.. references.Values];
+    }
+
+    /// <summary>
+    /// The declarations inside a line range, grouped by kind, so the caller can tell what it
+    /// would find there. The file's own types stand in when the range declares nothing.
+    /// </summary>
+    private IReadOnlyList<string> DescribeContents(string relative, int start, int end)
+    {
+        if (_snapshot?.Find(relative) is not { } file)
+        {
+            return [];
+        }
+
+        var inRange = file.Symbols.Where(s => s.Line >= start && s.Line <= end).ToList();
+        var symbols = inRange.Count > 0 ? inRange : [.. file.Symbols.Where(s => s.Kind == SourceSymbolKind.Type)];
+
+        var parts = new List<string>();
+        foreach (var (kind, label) in new[]
+        {
+            (SourceSymbolKind.Type, "types"),
+            (SourceSymbolKind.Function, "methods"),
+            (SourceSymbolKind.Property, "properties"),
+        })
+        {
+            var names = symbols.Where(s => s.Kind == kind).Select(s => s.Name).Distinct().ToList();
+            if (names.Count > 0)
+            {
+                var shown = string.Join(", ", names.Take(MaxListedSymbols).Select(n => $"`{n}`"));
+                parts.Add($"{label} {shown}{(names.Count > MaxListedSymbols ? $" +{names.Count - MaxListedSymbols} more" : "")}");
+            }
+        }
+
+        return parts;
     }
 
     /// <summary>

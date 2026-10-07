@@ -97,11 +97,12 @@ public sealed class McpServerSettings
 
     /// <summary>Standing instruction that sends exploration to the background-task model.</summary>
     public const string AssistDirective =
-        "To save context, codebase exploration goes through Codale's helper model: for an open-ended question " +
-        "(where is X handled, how does Y work, which files are involved) call mcp__codale-tasks__explore first, instead of a chain " +
-        "of Grep/Glob/Read calls or an Explore/Task subagent. When you already know the file or symbol, Grep and Read it " +
-        "directly, including large files when you need them. This tool is deferred: load it first with one ToolSearch " +
-        "(select:mcp__codale-tasks__explore).";
+        "To save context, codebase exploration goes through Codale's helper model: for any question about this project's code " +
+        "that you cannot answer from a file you already have open (where is X handled, how does Y work, which files are involved in Z) " +
+        "call mcp__codale-tasks__explore FIRST, instead of a chain of Grep/Glob/Read calls or an Explore/Task subagent. It answers " +
+        "with the files to read as path:lines and what each range declares; then Read only those ranges. When you already know the " +
+        "file or symbol, Grep and Read it directly, including large files when you need them. The tool is deferred: load it first " +
+        "with one ToolSearch (select:mcp__codale-tasks__explore).";
 
     /// <summary>Standing instruction for short replies, when the user turned it on.</summary>
     public const string TerseDirective =
@@ -121,18 +122,18 @@ public sealed class McpServerSettings
 
     /// <summary>Standing instruction that sends long-running commands to the task tools.</summary>
     public const string TasksDirective =
-        "Shell tools cannot run commands in the background here (run_in_background and async modes are refused). " +
-        "For a dev server, watcher or any command that keeps running, use the codale-tasks start_task tool " +
-        "(mcp__codale-tasks__start_task), then read_task for its output and stop_task when you are done. " +
-        "Codale shows the task and its live output to the user. Short commands still run normally in the foreground. " +
-        "The project also keeps a saved command list that the user sees in Codale's commands menu: list_commands shows it, " +
-        "add_command saves a new run command to it, and run_command runs a saved one by name (as a task). " +
-        "Codale's session panel is fed by two codale-tasks tools, and they are the only way to fill it. " +
-        "Keep your task list with mcp__codale-tasks__todos_set: pass the whole list every time (2-6 short steps, one in_progress, " +
-        "finished ones completed) when you start, as you begin each step and as you finish it. The built-in task tools " +
+        "Shell tools cannot run commands in the background here (run_in_background, &, Start-Job and nohup are refused). " +
+        "For a dev server, watcher, watch-mode build or any command that keeps running, call mcp__codale-tasks__start_task; " +
+        "it returns a task id, read_task follows the output and stop_task ends it. Codale shows the task and its live output " +
+        "to the user. Quick commands that finish in seconds still run normally in the foreground shell. " +
+        "The project keeps a saved command list that the user sees in Codale's commands menu: list_commands shows it, " +
+        "add_command saves a reusable run command to it (saving only, nothing runs), and run_command runs a saved one by name as a task. " +
+        "Codale's session panel is fed by two codale-tasks tools and nothing else. " +
+        "Show your progress with mcp__codale-tasks__todos_set: pass the whole step list every call (2-6 short steps, one in_progress, " +
+        "finished ones completed) when you start, as you begin each step and when the last one finishes. The built-in task-list tools " +
         "(TodoWrite, TaskCreate, TaskUpdate) are switched off; do not look for them. " +
-        "Use mcp__codale-tasks__artifact_add for anything you produce that is output rather than project source " +
-        "(a report, document or image): pass a path or markdown and it is listed for the user. " +
+        "Use mcp__codale-tasks__artifact_add for a deliverable that is not project source (a report, document, image or data file): " +
+        "pass a path or markdown and it is listed for the user to open; do not add source files you edited. " +
         "If these tools are not directly available, load them with one ToolSearch (select:mcp__codale-tasks__todos_set,mcp__codale-tasks__artifact_add).";
 
     /// <summary>The servers to attach to a session started now; a server whose exe did not ship is left out.</summary>
@@ -181,20 +182,22 @@ public sealed class McpServerSettings
         if (servers.Any(s => s.Name == BrowserName))
         {
             parts.Add(
-                $"You can drive a real browser with the {McpServerSpec.PrefixOf(BrowserName)}* tools. After you change something " +
-                "a browser can show (a web page, UI, or a local dev server), open it, use browser_snapshot to read the " +
-                "page and browser_screenshot to look at it, exercise the changed flow, and check browser_console_messages, " +
-                "before you report the work as done. The browser is hidden by default and keeps logins between runs. When a page needs a sign-in, " +
-                "captcha or 2FA, do not give up or ask for credentials: call browser_handoff and the user completes it in a visible window. " +
-                "To check responsive layouts use browser_set_viewport (mobile, tablet, laptop, desktop, 4k) or browser_responsive_check for a screenshot at several sizes at once; " +
-                "browser_emulate switches dark mode. Element refs come from the latest browser_snapshot.");
+                $"You can drive a real Chromium browser with the {McpServerSpec.PrefixOf(BrowserName)}* tools (Codale's own automation " +
+                "browser, not the user's). After you change something a browser can show (a web page, UI, or a local dev server), open it with " +
+                "browser_navigate, read it with browser_snapshot, look at it with browser_screenshot, exercise the changed flow, and check " +
+                "browser_console_messages for errors, before you report the work as done. The browser is hidden by default and keeps logins " +
+                "between runs. When a page needs a sign-in, captcha or 2FA, do not give up or ask for credentials: call browser_handoff and the " +
+                "user completes it in a visible window. To check responsive layouts use browser_set_viewport (mobile, tablet, laptop, desktop, 4k) " +
+                "or browser_responsive_check for screenshots at several sizes in one call; browser_emulate switches dark mode. " +
+                "Element refs (e12) come from the latest browser_snapshot and expire at the next one.");
         }
 
         if (servers.Any(s => s.Name == ComputerName))
         {
             parts.Add(
-                $"You can also see and control the desktop with the {McpServerSpec.PrefixOf(ComputerName)}* tools, for what a browser cannot reach " +
-                "(native apps, dialogs). Take a computer_screenshot before every click; the user approves each action.");
+                $"You can also see and control the user's Windows desktop with the {McpServerSpec.PrefixOf(ComputerName)}* tools, for what " +
+                "the browser tools cannot reach: native apps, installers, system dialogs, the running build of a desktop app. They act on the " +
+                "real screen, so take a computer_screenshot before every click (coordinates refer to the latest screenshot) and the user approves each action.");
         }
 
         return parts.Count == 0 ? null : string.Join(' ', parts);

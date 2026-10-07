@@ -174,8 +174,8 @@ public sealed partial class StatusViewModel : ObservableObject
     /// <summary>Tallies one request served by the custom endpoint.</summary>
     public void RecordCustomCall(UsageSnapshot usage, ByokProvider? provider = null) => _custom.Record(usage, provider);
 
-    /// <summary>"≈$0.0123" at the providers' configured prices, or a hint to set them.</summary>
-    public string CustomCostText => _custom.CostUsd > 0 ? $"≈${_custom.CostUsd:0.0000}" : "Set prices in Settings";
+    /// <summary>"≈$0.0123": what the custom provider's requests have cost so far.</summary>
+    public string CustomCostText => $"≈${_custom.CostUsd:0.0000}";
 
     internal static string FormatLong(long tokens) => Format((int)Math.Min(tokens, int.MaxValue));
 

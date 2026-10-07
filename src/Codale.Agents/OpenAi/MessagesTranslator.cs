@@ -156,7 +156,7 @@ internal static class MessagesTranslator
                 case "tool_result":
                     json.WriteStartObject();
                     json.WriteString("role", "tool");
-                    json.WriteString("tool_call_id", block.Str("tool_use_id") ?? "");
+                    json.WriteString("tool_call_id", SplitCallId(block.Str("tool_use_id") ?? "").Id);
                     json.WriteString("content", ToolResultText(block, parts));
                     json.WriteEndObject();
                     break;
@@ -291,12 +291,23 @@ internal static class MessagesTranslator
             foreach (var call in calls)
             {
                 json.WriteStartObject();
-                json.WriteString("id", call.Str("id") ?? NewId("call_"));
+                var (callId, signature) = SplitCallId(call.Str("id") ?? NewId("call_"));
+                json.WriteString("id", callId);
                 json.WriteString("type", "function");
                 json.WriteStartObject("function");
                 json.WriteString("name", call.Str("name"));
                 json.WriteString("arguments", call.Prop("input") is { ValueKind: JsonValueKind.Object } input ? input.GetRawText() : "{}");
                 json.WriteEndObject();
+                if (signature is not null)
+                {
+                    // Gemini rejects the next request unless the call echoes its thought signature.
+                    json.WriteStartObject("extra_content");
+                    json.WriteStartObject("google");
+                    json.WriteString("thought_signature", signature);
+                    json.WriteEndObject();
+                    json.WriteEndObject();
+                }
+
                 json.WriteEndObject();
             }
 
@@ -421,7 +432,7 @@ internal static class MessagesTranslator
                 hadTools = true;
                 json.WriteStartObject();
                 json.WriteString("type", "tool_use");
-                json.WriteString("id", call.Str("id") ?? NewId("toolu_"));
+                json.WriteString("id", WithSignature(call.Str("id") ?? NewId("toolu_"), ThoughtSignature(call)));
                 json.WriteString("name", name);
                 json.WritePropertyName("input");
                 json.WriteRawValue(Arguments(function.Prop("arguments")));
@@ -435,6 +446,25 @@ internal static class MessagesTranslator
             WriteUsage(json, usage);
             json.WriteEndObject();
         });
+    }
+
+    private const string SignatureMarker = "~ts~";
+
+    /// <summary>
+    /// Gemini's OpenAI endpoint attaches a thought signature to a tool call and wants it back on the
+    /// next request. Claude only round-trips a tool_use block's id, so the signature rides along in it.
+    /// </summary>
+    internal static string? ThoughtSignature(JsonElement call) =>
+        call.Prop("extra_content")?.Prop("google")?.Str("thought_signature") is { Length: > 0 } signature ? signature : null;
+
+    internal static string WithSignature(string id, string? signature) =>
+        signature is null ? id : id + SignatureMarker + signature;
+
+    /// <summary>Splits an id made by <see cref="WithSignature"/> back into the provider's id and signature.</summary>
+    internal static (string Id, string? Signature) SplitCallId(string id)
+    {
+        var at = id.IndexOf(SignatureMarker, StringComparison.Ordinal);
+        return at < 0 ? (id, null) : (id[..at], id[(at + SignatureMarker.Length)..]);
     }
 
     /// <summary>A message's or delta's reasoning text, under either name providers use for it.</summary>

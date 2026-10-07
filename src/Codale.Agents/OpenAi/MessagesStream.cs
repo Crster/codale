@@ -30,6 +30,7 @@ internal sealed class MessagesStream(string model)
     {
         public string? Id;
         public string? Name;
+        public string? Signature;
         public readonly StringBuilder Arguments = new();
     }
 
@@ -160,6 +161,7 @@ internal sealed class MessagesStream(string model)
         }
 
         call.Id ??= id;
+        call.Signature ??= MessagesTranslator.ThoughtSignature(piece);
         if (piece.Prop("function") is { ValueKind: JsonValueKind.Object } function)
         {
             if (function.Str("name") is { Length: > 0 } name)
@@ -202,7 +204,7 @@ internal sealed class MessagesStream(string model)
                 json.WriteNumber("index", index);
                 json.WriteStartObject("content_block");
                 json.WriteString("type", "tool_use");
-                json.WriteString("id", call.Id ?? MessagesTranslator.NewId("toolu_"));
+                json.WriteString("id", MessagesTranslator.WithSignature(call.Id ?? MessagesTranslator.NewId("toolu_"), call.Signature));
                 json.WriteString("name", call.Name);
                 json.WriteStartObject("input");
                 json.WriteEndObject();

@@ -134,44 +134,35 @@ public sealed class HelperAssistService(IHelperModel helper, string runDirectory
         return step.ResultCount > 0 ? $"{text} ({step.ResultCount} results)" : text;
     }
 
-    /// <summary>A pipe or a line break inside a cell would split the row.</summary>
-    private static string TableCell(string value) =>
-        value.ReplaceLineEndings(" ").Replace("|", "\\|").Trim();
-
     private static string FormatExplore(SearchAnswer answer)
     {
         var text = new StringBuilder();
-        if (answer.Summary.Length > 0)
+
+        // The write-up opens with the direct answer and was given the summary as input,
+        // so printing both says the same thing twice; the summary stands in only when
+        // there is no write-up.
+        if (answer.Explanation.Trim() is { Length: > 0 } explanation)
+        {
+            text.AppendLine(explanation);
+        }
+        else if (answer.Summary.Length > 0)
         {
             text.AppendLine(answer.Summary.Trim());
         }
 
-        if (answer.Explanation.Length > 0 && answer.Explanation.Trim() != answer.Summary.Trim())
-        {
-            text.AppendLine().AppendLine(answer.Explanation.Trim());
-        }
-
         // Pointers, not content: the caller reads what it needs from the start line.
-        // A table, so a person reads it as easily as the agent does: one row per file.
+        // A list, so a person reads it as easily as the agent does: one line per file.
         if (answer.References.Count > 0)
         {
-            text.AppendLine().AppendLine("### Files to read");
-            text.AppendLine().AppendLine("`Lines` is where to start reading; `Search for` lists words to Grep inside that file.").AppendLine();
-            text.AppendLine("| File | Lines | Why | Search for |");
-            text.AppendLine("| --- | --- | --- | --- |");
+            text.AppendLine().AppendLine("### Files to read (path:lines - what is declared there)");
             foreach (var reference in answer.References)
             {
-                var lines = reference.EndLine > reference.StartLine
-                    ? $"{reference.StartLine}-{reference.EndLine}"
-                    : reference.StartLine.ToString();
-                var find = reference.Find.Count > 0
-                    ? string.Join(", ", reference.Find.Select(word => $"`{TableCell(word)}`"))
+                var path = reference.RelativePath.Replace('\\', '/');
+                var range = reference.StartLine > 0
+                    ? reference.EndLine > reference.StartLine ? $":{reference.StartLine}-{reference.EndLine}" : $":{reference.StartLine}"
                     : "";
-
-                text.Append("| `").Append(TableCell(reference.RelativePath.Replace('\\', '/'))).Append("` | ")
-                    .Append(lines).Append(" | ")
-                    .Append(TableCell(reference.Reason)).Append(" | ")
-                    .Append(find).AppendLine(" |");
+                text.Append("- ").Append(path).Append(range).Append(" - ")
+                    .AppendLine(DescribeReference(reference));
             }
         }
 
@@ -186,6 +177,37 @@ public sealed class HelperAssistService(IHelperModel helper, string runDirectory
         }
 
         return text.ToString().TrimEnd();
+    }
+
+    /// <summary>
+    /// What the caller gets by opening the file: the declarations in the listed lines, the
+    /// search's own reason when it says something about the question, and the words that
+    /// find the lines - never bookkeeping such as "ranked by the source index" or "3 matches".
+    /// </summary>
+    private static string DescribeReference(SearchReference reference)
+    {
+        var reason = reference.Reason.ReplaceLineEndings(" ").Trim();
+        var bookkeeping = reason.Length == 0
+            || reason is "ranked by the source index" or "read by the model" or "project setup"
+            || System.Text.RegularExpressions.Regex.IsMatch(reason, @"^\d+ (matches|match|matching lines)$");
+
+        var parts = new List<string>();
+        if (reference.Contains.Count > 0)
+        {
+            parts.Add($"declares {string.Join("; ", reference.Contains)}");
+        }
+
+        if (!bookkeeping)
+        {
+            parts.Add(reason);
+        }
+
+        if (reference.Find.Count > 0)
+        {
+            parts.Add($"grep {string.Join(", ", reference.Find.Select(k => $"`{k}`"))} to locate the lines");
+        }
+
+        return parts.Count > 0 ? string.Join(". ", parts) : "matched the question";
     }
 
     public async Task<string?> DigestAsync(string command, string output, CancellationToken ct)

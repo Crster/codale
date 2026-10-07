@@ -1117,30 +1117,26 @@
                                 FontSize="14"
                                 Glyph="&#xE77B;"
                                 Opacity="0.7" />
-                            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Agent session" />
-                        </StackPanel>
-
-                        <StackPanel
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Center"
-                            Orientation="Horizontal"
-                            Spacing="6">
-                            <Ellipse
-                                Width="6"
-                                Height="6"
-                                VerticalAlignment="Center"
-                                Fill="SeaGreen"
-                                Visibility="{x:Bind ViewModel.Chat.IsConnected, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                             <!--  Per-session provider: chosen here, never stored; a new session starts on Default  -->
                             <Button
-                                Padding="8,2" Height="24" VerticalAlignment="Center"
+                                Padding="0" Height="24" VerticalAlignment="Center"
+                                Background="Transparent"
+                                BorderThickness="0"
                                 IsEnabled="{x:Bind ViewModel.CliEndpoint.CanSwitch, Mode=OneWay}"
                                 ToolTipService.ToolTip="Agent provider for this chat">
+                                <Button.Resources>
+                                    <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="Transparent" />
+                                    <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="Transparent" />
+                                    <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
+                                    <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
+                                    <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
+                                    <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
+                                </Button.Resources>
                                 <Button.Flyout>
                                     <Flyout
                                         FlyoutPresenterStyle="{StaticResource EndpointFlyout}"
                                         Opening="OnCliEndpointFlyoutOpening"
-                                        Placement="BottomEdgeAlignedRight">
+                                        Placement="BottomEdgeAlignedLeft">
                                         <StackPanel Width="320" Padding="16,14,16,14" Spacing="12">
                                             <StackPanel Spacing="4">
                                                 <TextBlock FontSize="14" FontWeight="SemiBold" Text="Provider" />
@@ -1189,14 +1185,27 @@
                                     </Flyout>
                                 </Button.Flyout>
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="10" Glyph="&#xF22C;" Opacity="0.6" />
                                     <TextBlock
                                         VerticalAlignment="Center"
-                                        FontSize="12"
-                                        Opacity="0.8"
-                                        Text="{x:Bind ViewModel.EndpointLabel, Mode=OneWay}" />
+                                        Style="{StaticResource BodyStrongTextBlockStyle}">
+                                        <Run Text="{x:Bind ViewModel.EndpointLabel, Mode=OneWay}" /><Run Text=" session" />
+                                    </TextBlock>
+                                    <FontIcon VerticalAlignment="Center" Margin="0,1,0,0" FontSize="10" Glyph="&#xE70D;" Opacity="0.6" />
                                 </StackPanel>
                             </Button>
+                        </StackPanel>
+
+                        <StackPanel
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Orientation="Horizontal"
+                            Spacing="6">
+                            <Ellipse
+                                Width="6"
+                                Height="6"
+                                VerticalAlignment="Center"
+                                Fill="SeaGreen"
+                                Visibility="{x:Bind ViewModel.Chat.IsConnected, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                             <TextBlock
                                 VerticalAlignment="Center"
                                 FontSize="12"

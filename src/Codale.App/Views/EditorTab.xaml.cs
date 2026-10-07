@@ -387,6 +387,7 @@ public sealed partial class EditorTab : UserControl
         // Highlights belong to the file they were found in.
         ClearHighlights();
         ImagePreview.Source = null;
+        HexView.Close();
 
         var sequence = ++_loadSequence;
         await ViewModel.LoadAsync(path);
@@ -399,6 +400,10 @@ public sealed partial class EditorTab : UserControl
         if (ViewModel.IsImage)
         {
             _ = ShowImageAsync(path);
+        }
+        else if (ViewModel.IsBinaryPlaceholder)
+        {
+            HexView.Open(path);
         }
 
         if (ViewModel.LoadedText is { } text)

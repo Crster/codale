@@ -432,7 +432,16 @@ public sealed class ClaudeAgentSession : IAgentSession
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             // The read loop failed the request (process died); surface it as a timeout.
-            throw new TimeoutException($"claude did not answer the '{id}' control request.");
+            // Give the stderr reader a moment to drain: the exit reason is usually the only clue.
+            if (_errorLoop is { } errorLoop)
+            {
+                await Task.WhenAny(errorLoop, Task.Delay(500, CancellationToken.None)).ConfigureAwait(false);
+            }
+
+            var stderr = string.Join(Environment.NewLine, StderrSnapshot().TakeLast(8));
+            throw new TimeoutException(
+                $"claude did not answer the '{id}' control request." +
+                (stderr.Length > 0 ? $" It exited with: {stderr}" : " It exited without any error output."));
         }
         finally
         {
