@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8" ?>
 <Page
     x:Class="Codale.App.Views.WorkspacePage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -1131,6 +1131,72 @@
                                 VerticalAlignment="Center"
                                 Fill="SeaGreen"
                                 Visibility="{x:Bind ViewModel.Chat.IsConnected, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                            <!--  Per-session provider: chosen here, never stored; a new session starts on Default  -->
+                            <Button
+                                Padding="8,2" Height="24" VerticalAlignment="Center"
+                                IsEnabled="{x:Bind ViewModel.CliEndpoint.CanSwitch, Mode=OneWay}"
+                                ToolTipService.ToolTip="Agent provider for this chat">
+                                <Button.Flyout>
+                                    <Flyout
+                                        FlyoutPresenterStyle="{StaticResource EndpointFlyout}"
+                                        Opening="OnCliEndpointFlyoutOpening"
+                                        Placement="BottomEdgeAlignedRight">
+                                        <StackPanel Width="320" Padding="16,14,16,14" Spacing="12">
+                                            <StackPanel Spacing="4">
+                                                <TextBlock FontSize="14" FontWeight="SemiBold" Text="Provider" />
+                                                <TextBlock
+                                                    FontSize="12"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="{x:Bind ViewModel.CliEndpoint.RouteText, Mode=OneWay}"
+                                                    TextWrapping="Wrap" />
+                                            </StackPanel>
+        
+                                            <ListView
+                                                ItemsSource="{x:Bind ViewModel.CliEndpoint.Choices}"
+                                                SelectedItem="{x:Bind ViewModel.CliEndpoint.Selected, Mode=TwoWay}"
+                                                SelectionMode="Single">
+                                                <ListView.ItemTemplate>
+                                                    <DataTemplate x:DataType="vm:ProviderChoice">
+                                                        <StackPanel Padding="0,6" Spacing="1">
+                                                            <TextBlock Text="{x:Bind Label}" />
+                                                            <TextBlock
+                                                                FontSize="11"
+                                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                Text="{x:Bind Detail}"
+                                                                TextTrimming="CharacterEllipsis" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ListView.ItemTemplate>
+                                            </ListView>
+        
+                                            <Grid ColumnSpacing="12">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    VerticalAlignment="Center"
+                                                    FontSize="12"
+                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                    Text="Add or edit providers in Settings."
+                                                    TextWrapping="Wrap" />
+                                                <Button
+                                                    Grid.Column="1"
+                                                    Click="OnOpenProviderSettingsClick"
+                                                    Content="Settings" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </Flyout>
+                                </Button.Flyout>
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="10" Glyph="&#xF22C;" Opacity="0.6" />
+                                    <TextBlock
+                                        VerticalAlignment="Center"
+                                        FontSize="12"
+                                        Opacity="0.8"
+                                        Text="{x:Bind ViewModel.EndpointLabel, Mode=OneWay}" />
+                                </StackPanel>
+                            </Button>
                             <TextBlock
                                 VerticalAlignment="Center"
                                 FontSize="12"
@@ -2278,30 +2344,6 @@
                                         <TextBlock FontSize="13" FontWeight="SemiBold" Text="Estimated Cost" />
                                         <TextBlock Grid.Column="1" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind ViewModel.Status.CustomCostText, Mode=OneWay}" />
                                     </Grid>
-
-                                    <StackPanel Spacing="6" Visibility="{x:Bind ViewModel.Status.HasContext, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                        <Grid ColumnSpacing="12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="Context" />
-                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                                                <TextBlock FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind ViewModel.Status.ContextText, Mode=OneWay}" />
-                                                <TextBlock
-                                                    FontSize="12"
-                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                    Text="{x:Bind ViewModel.Status.ContextPercentText, Mode=OneWay}"
-                                                    Visibility="{x:Bind ViewModel.Status.HasContextWindow, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
-                                            </StackPanel>
-                                        </Grid>
-                                        <ProgressBar
-                                            MinHeight="4"
-                                            CornerRadius="2"
-                                            Foreground="{x:Bind ViewModel.Status.ContextPercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}"
-                                            Maximum="100"
-                                            Value="{x:Bind ViewModel.Status.ContextPercent, Mode=OneWay}" />
-                                    </StackPanel>
                                 </StackPanel>
                             </Flyout>
                         </Button.Flyout>
@@ -2399,80 +2441,6 @@
                             </Flyout>
                         </FlyoutBase.AttachedFlyout>
                     </Border>
-
-                    <Rectangle
-                        Margin="8,0"
-                        VerticalAlignment="Center"
-                        Width="1"
-                        Height="14"
-                        Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
-
-                    <!--  The BYOK provider picker: providers are configured in Settings, here one is chosen  -->
-                    <Button
-                        Padding="8,2"
-                        IsEnabled="{x:Bind ViewModel.CliEndpoint.CanSwitch, Mode=OneWay}"
-                        ToolTipService.ToolTip="Agent provider for this chat">
-                        <Button.Flyout>
-                            <Flyout
-                                FlyoutPresenterStyle="{StaticResource EndpointFlyout}"
-                                Opening="OnCliEndpointFlyoutOpening"
-                                Placement="TopEdgeAlignedRight">
-                                <StackPanel Width="320" Padding="16,14,16,14" Spacing="12">
-                                    <StackPanel Spacing="4">
-                                        <TextBlock FontSize="14" FontWeight="SemiBold" Text="Provider" />
-                                        <TextBlock
-                                            FontSize="12"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            Text="{x:Bind ViewModel.CliEndpoint.RouteText, Mode=OneWay}"
-                                            TextWrapping="Wrap" />
-                                    </StackPanel>
-
-                                    <ListView
-                                        ItemsSource="{x:Bind ViewModel.CliEndpoint.Choices}"
-                                        SelectedItem="{x:Bind ViewModel.CliEndpoint.Selected, Mode=TwoWay}"
-                                        SelectionMode="Single">
-                                        <ListView.ItemTemplate>
-                                            <DataTemplate x:DataType="vm:ProviderChoice">
-                                                <StackPanel Padding="0,6" Spacing="1">
-                                                    <TextBlock Text="{x:Bind Label}" />
-                                                    <TextBlock
-                                                        FontSize="11"
-                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                        Text="{x:Bind Detail}"
-                                                        TextTrimming="CharacterEllipsis" />
-                                                </StackPanel>
-                                            </DataTemplate>
-                                        </ListView.ItemTemplate>
-                                    </ListView>
-
-                                    <Grid ColumnSpacing="12">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock
-                                            VerticalAlignment="Center"
-                                            FontSize="12"
-                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                            Text="Add or edit providers in Settings."
-                                            TextWrapping="Wrap" />
-                                        <Button
-                                            Grid.Column="1"
-                                            Click="OnOpenProviderSettingsClick"
-                                            Content="Settings" />
-                                    </Grid>
-                                </StackPanel>
-                            </Flyout>
-                        </Button.Flyout>
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="10" Glyph="&#xF22C;" Opacity="0.6" />
-                            <TextBlock
-                                VerticalAlignment="Center"
-                                FontSize="12"
-                                Opacity="0.8"
-                                Text="{x:Bind ViewModel.EndpointLabel, Mode=OneWay}" />
-                        </StackPanel>
-                    </Button>
                 </StackPanel>
             </Grid>
         </Border>

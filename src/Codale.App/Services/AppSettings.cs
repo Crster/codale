@@ -414,7 +414,6 @@ public static class AppSettings
     }
 
     private const string ProvidersKey = "byok.providers";
-    private const string SelectedKey = "byok.selected";
 
     /// <summary>Dropped on load: the agent choice died with the other CLIs.</summary>
     private const string LegacyAgentKey = "chat.defaultAgent";
@@ -510,16 +509,6 @@ public static class AppSettings
             return [];
         }
     }
-
-    /// <summary>The name of the provider in use, or "" for the default (Claude login).</summary>
-    public static string ByokSelected
-    {
-        get => Get(SelectedKey, () => Read(SelectedKey, ""));
-        set => Set(SelectedKey, value?.Trim() ?? "", FormatText);
-    }
-
-    /// <summary>The selected provider (a copy), or null when Default is chosen or the name no longer exists.</summary>
-    public static ByokProvider? ActiveByok => FindByok(ByokSelected);
 
     /// <summary>A provider by name (a copy), or null for Default ("") or a name that no longer exists.</summary>
     public static ByokProvider? FindByok(string? name)
@@ -708,7 +697,6 @@ public static class AppSettings
     {
         var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
         var providers = new List<ByokProvider>();
-        var selected = "";
         try
         {
             using var store = new CodaleStore(CodaleStore.DefaultDatabasePath);
@@ -732,7 +720,6 @@ public static class AppSettings
                     LiteModel = store.GetSetting("endpoint.model") ?? "",
                     SmartModel = store.GetSetting("endpoint.smartModel") ?? "",
                 });
-                selected = "Custom endpoint";
             }
         }
         catch (StoreSchemaException ex)
@@ -764,7 +751,6 @@ public static class AppSettings
         result["chat.defaultEffort"] = result["chat.defaultEffort"].Trim();
 
         result[ProvidersKey] = SerializeProviders(providers, protect: true);
-        result[SelectedKey] = selected;
         Persist(result);
         return result;
     }

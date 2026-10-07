@@ -456,13 +456,6 @@ public sealed partial class SettingsPanel : UserControl
         {
             header.Text = provider.Name;
 
-            // Renaming the provider in use keeps it selected.
-            if (string.Equals(AppSettings.ByokSelected, previousName, StringComparison.OrdinalIgnoreCase) &&
-                provider.Name.Length > 0)
-            {
-                WriteSettings(() => AppSettings.ByokSelected = provider.Name);
-            }
-
             if (string.Equals(AppSettings.HelperProvider, previousName, StringComparison.OrdinalIgnoreCase) &&
                 provider.Name.Length > 0)
             {
@@ -530,11 +523,6 @@ public sealed partial class SettingsPanel : UserControl
         remove.Click += (_, _) =>
         {
             _providers.Remove(provider);
-            if (string.Equals(AppSettings.ByokSelected, provider.Name, StringComparison.OrdinalIgnoreCase))
-            {
-                WriteSettings(() => AppSettings.ByokSelected = "");
-            }
-
             if (string.Equals(AppSettings.HelperProvider, provider.Name, StringComparison.OrdinalIgnoreCase))
             {
                 WriteSettings(() => AppSettings.HelperProvider = "");

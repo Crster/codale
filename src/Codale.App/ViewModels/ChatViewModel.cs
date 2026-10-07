@@ -1405,7 +1405,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// The BYOK provider this chat uses ("" for Default). Each chat has its own; a new one starts
     /// on the provider last picked. A change reaches the CLI through <see cref="SetEndpointAsync"/>.
     /// </summary>
-    public string EndpointName { get; private set; } = AppSettings.ActiveByok?.Name.Trim() ?? "";
+    public string EndpointName { get; private set; } = "";
 
     private string SelectedProviderName() => AppSettings.FindByok(EndpointName)?.Name.Trim() ?? "";
 
@@ -2282,7 +2282,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 ShowTodos([]);
                 Artifacts.Clear();
                 _status.ClearSessionChanges();
-                Add(new NoticeItem { Text = "Conversation cleared.", Severity = NoticeSeverity.Info });
                 break;
 
             case ConversationCompacted compacted:
@@ -3537,8 +3536,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         // The session only: a dev server Codale runs for the agent outlives a model switch.
         await DisposeSessionAsync();
+        // The transcript stays: the CLI resumes the same conversation, so the view must too.
         EndTurn(TurnOutcome.Stopped, end: null);
-        Items.Clear();
+        _streaming = null;
         ResumeSessionId = resumeId;
 
         await ConnectAsync();

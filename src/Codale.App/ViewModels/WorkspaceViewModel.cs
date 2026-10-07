@@ -1184,10 +1184,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             WorktreePath = scratch,
         };
 
-        if (!CliEndpoint.IsActive)
-        {
-            worker.RequestedModel = SummaryModel;
-        }
+        // A fresh chat starts on Default, whatever the chat in front uses.
+        worker.RequestedModel = SummaryModel;
 
         var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         worker.TurnFinished += (_, _) => finished.TrySetResult();

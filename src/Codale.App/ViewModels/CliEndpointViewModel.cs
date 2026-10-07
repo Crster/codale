@@ -66,7 +66,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
         }
     }
 
-    private ByokProvider? ActiveProvider => AppSettings.FindByok(_chat?.EndpointName ?? AppSettings.ByokSelected);
+    private ByokProvider? ActiveProvider => AppSettings.FindByok(_chat?.EndpointName);
 
     /// <summary>False while the chat in front runs a turn: a switch restarts its CLI and would cut the turn off.</summary>
     public bool CanSwitch => _chat is not { IsBusy: true };
@@ -128,11 +128,10 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
         }
 
         // Our own write raises Changed; rebuilding the list from inside the ListView's selection change is what to avoid.
-        // The stored choice is what chats opened from now on start with; the chat in front switches at once.
+        // Per chat and never stored: a new chat starts on Default.
         _loading = true;
         try
         {
-            AppSettings.ByokSelected = value.Name;
             if (_chat is not null)
             {
                 _ = _chat.SetEndpointAsync(value.Name);
