@@ -9,6 +9,7 @@ using Codale.Commands;
 using Codale.Core.Agents;
 using Codale.Core.Helper;
 using Codale.Core.Projects;
+using Codale.Core.Tasks;
 using Codale.Git;
 using Codale.Storage;
 
@@ -173,7 +174,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>A new conversation with its own status, wired to the workspace's refreshes.</summary>
     public ChatViewModel CreateChat()
     {
-        var chat = new ChatViewModel(ProjectPath, new StatusViewModel(_customUsage), _endpoints, _mcp) { Router = _router, Helper = _helper, ExtraFolders = ExtraFolders };
+        var chat = new ChatViewModel(ProjectPath, new StatusViewModel(_customUsage), _endpoints, _mcp) { Router = _router, Helper = _helper, ExtraFolders = ExtraFolders, Terminals = new TerminalSource(this) };
 
         // App-level defaults from Settings. Resume and fork paths assign their own
         // model/effort right after this, so they always win over the defaults.
@@ -273,8 +274,50 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     public TerminalViewModel CreateTerminal()
     {
         var terminal = new TerminalViewModel(ProjectPath);
-        _terminals.Add(terminal);
+        lock (_terminals)
+        {
+            _terminals.Add(terminal);
+        }
+
         return terminal;
+    }
+
+    /// <summary>The open terminals as the agent's terminal tools read them; safe to call off the UI thread.</summary>
+    private sealed class TerminalSource(WorkspaceViewModel workspace) : ITerminalSource
+    {
+        public IReadOnlyList<TaskSnapshot> List() => [.. workspace.TerminalsSnapshot().Select(t => Snapshot(t, null, 0))];
+
+        public TaskSnapshot? Read(string id, long? since, int? tailChars) =>
+            workspace.TerminalsSnapshot().FirstOrDefault(t => t.Id == id) is { } terminal ? Snapshot(terminal, since, tailChars) : null;
+
+        private static TaskSnapshot Snapshot(TerminalViewModel t, long? since, int? tailChars)
+        {
+            var (text, next) = tailChars == 0 ? ("", t.Transcript.Read().NextOffset) : t.Transcript.Read(since, tailChars);
+
+            // A command tab's shell outlives its command, so "idle" there means the command has finished.
+            var state = t.Activity switch
+            {
+                TerminalActivity.Busy => "running",
+                TerminalActivity.Idle => "idle",
+                _ => "exited",
+            };
+            return new TaskSnapshot(
+                t.Id,
+                t.CommandName ?? "shell",
+                t.CommandText ?? "(interactive shell)",
+                state,
+                t.ExitCode,
+                text,
+                next);
+        }
+    }
+
+    private TerminalViewModel[] TerminalsSnapshot()
+    {
+        lock (_terminals)
+        {
+            return [.. _terminals];
+        }
     }
 
     /// <summary>The tab was closed: stop tracking (and killing) this shell.</summary>
@@ -282,7 +325,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     {
         terminal.PropertyChanged -= OnCommandTerminalPropertyChanged;
         terminal.Close();
-        _terminals.Remove(terminal);
+        lock (_terminals)
+        {
+            _terminals.Remove(terminal);
+        }
+
         UpdateRunningCommandCount();
     }
 
@@ -315,7 +362,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
         var terminal = new TerminalViewModel(ResolveCommandDirectory(command), command.Command, command.Name);
         terminal.PropertyChanged += OnCommandTerminalPropertyChanged;
-        _terminals.Add(terminal);
+        lock (_terminals)
+        {
+            _terminals.Add(terminal);
+        }
+
         UpdateRunningCommandCount();
 
         return terminal;
@@ -1410,12 +1461,17 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
         // Runs do not outlive the project window, dev servers included; every terminal
         // tab is disposed here too, command ones and plain ones alike.
-        foreach (var terminal in _terminals)
+        foreach (var terminal in TerminalsSnapshot())
         {
             terminal.PropertyChanged -= OnCommandTerminalPropertyChanged;
             terminal.Dispose();
         }
-        _terminals.Clear();
+
+        lock (_terminals)
+        {
+            _terminals.Clear();
+        }
+
         UpdateRunningCommandCount();
         Git.Dispose();
 

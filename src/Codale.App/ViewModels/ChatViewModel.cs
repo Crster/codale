@@ -203,6 +203,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private string? _taskManagerDir;
     private DispatcherQueueTimer? _hostedTimer;
 
+    /// <summary>The workspace's terminal tabs, readable by the agent's terminal tools; null for a chat without a workspace.</summary>
+    public ITerminalSource? Terminals { get; init; }
+
     /// <summary>The pipe and secret the codale-tasks MCP exe uses to reach this chat's manager, created on first use.</summary>
     private (string Pipe, string Token)? EnsureTaskHost(string workingDirectory)
     {
@@ -224,7 +227,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 assist.ExploreStarted += run => _dispatcher.TryEnqueue(() => OnExploreStarted(run));
             }
 
-            _taskPipe = new TaskPipeServer(new LocalTaskService(_taskManager), assist);
+            _taskPipe = new TaskPipeServer(new LocalTaskService(_taskManager, Terminals), assist);
             _taskPipe.Start();
         }
 

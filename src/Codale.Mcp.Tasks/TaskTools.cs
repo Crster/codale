@@ -277,6 +277,38 @@ public static class TaskTools
             }),
 
         new McpTool(
+            "list_terminals",
+            "List the terminal tabs the USER has open in Codale (plain shells and commands run from the commands menu), with id, state " +
+            "(running or exited), exit code and the command line. Use it when the user says a command in their terminal failed or asks " +
+            "you to look at it; then read_terminal to diagnose the output. Read-only: you cannot type into these terminals.",
+            McpTool.Schema(),
+            async (_, ct) =>
+            {
+                var all = await Call(() => tasks.ListTerminalsAsync(ct));
+                return await McpTool.Text(all.Count == 0
+                    ? "No terminals open."
+                    : string.Join('\n', all.Select(t => $"{t.Id}  {t.State}{(t.ExitCode is { } c ? $" (exit {c})" : "")}  {t.Name}")));
+            }),
+
+        new McpTool(
+            "read_terminal",
+            "Read what one of the user's terminal tabs printed, as plain text, with its state and exit code. Use it to diagnose a failed " +
+            "build, test run or server the user ran themselves. Pass the next_offset from the previous reply as since to get only newer " +
+            "output; tail_chars caps the size of the reply (default 8000, the end of the output is what you usually want).",
+            McpTool.Schema(
+                [
+                    ("id", "string", "The terminal id from list_terminals."),
+                    ("since", "integer", "Return only output after this offset: the next_offset from the previous read of this terminal."),
+                    ("tail_chars", "integer", "Cap the reply to the last N characters (default 8000)."),
+                ],
+                "id"),
+            async (a, ct) =>
+            {
+                var since = a.Int("since");
+                return Format(await Call(() => tasks.ReadTerminalAsync(a.RequiredString("id"), since, a.Int("tail_chars"), ct)));
+            }),
+
+        new McpTool(
             "stop_task",
             "Stop a running task and every process it spawned. Use it when the user is done with a server or watcher you started, " +
             "and before starting a replacement that needs the same port.",

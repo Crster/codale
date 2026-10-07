@@ -1,4 +1,5 @@
 using Codale.App.Services;
+using Codale.Core.Tasks;
 using Codale.Terminal;
 
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -68,6 +69,17 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
         // The consumer feeds a UI-bound renderer, so state changes are posted to the UI thread.
         _uiContext = SynchronizationContext.Current;
     }
+
+    private static int _nextId;
+
+    /// <summary>The handle the agent's terminal tools use.</summary>
+    public string Id { get; } = "term-" + Interlocked.Increment(ref _nextId);
+
+    /// <summary>Everything the shell printed, as plain text, so the agent can read a run's result.</summary>
+    public TerminalTranscript Transcript { get; } = new();
+
+    /// <summary>The shell's exit code once it has ended.</summary>
+    public int? ExitCode { get; private set; }
 
     /// <summary>The command line this tab runs; null when the tab is a plain shell.</summary>
     public string? CommandText { get; }
@@ -143,9 +155,14 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
 
             // Created on the UI thread, so the session delivers output there.
             _session = new TerminalSession();
-            _session.OutputReceived += (_, text) => OutputReceived?.Invoke(this, text);
+            _session.OutputReceived += (_, text) =>
+            {
+                Transcript.Append(text);
+                OutputReceived?.Invoke(this, text);
+            };
             _session.Exited += (_, exitCode) =>
             {
+                ExitCode = exitCode;
                 IsRunning = false;
                 Activity = exitCode == 0 ? TerminalActivity.Terminated : TerminalActivity.Error;
                 Exited?.Invoke(this, EventArgs.Empty);

@@ -28,6 +28,12 @@ public sealed class TaskToolsTests
 
         public Task<TaskSnapshot> StopAsync(string id, CancellationToken ct) =>
             Task.FromResult(new TaskSnapshot(id, "dev", "npm run dev", "stopped", null, "", 15));
+
+        public Task<IReadOnlyList<TaskSnapshot>> ListTerminalsAsync(CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<TaskSnapshot>>([new TaskSnapshot("term-1", "build", "npm run build", "exited", 1, "", 0)]);
+
+        public Task<TaskSnapshot> ReadTerminalAsync(string id, long? since, int? tailChars, CancellationToken ct) =>
+            Task.FromResult(new TaskSnapshot(id, "build", "npm run build", "exited", 1, "error TS2322\n", 13));
     }
 
     private static McpServer Server(FakeTasks fake, string? projectRoot = null) =>

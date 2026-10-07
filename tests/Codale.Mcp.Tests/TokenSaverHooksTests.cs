@@ -252,6 +252,8 @@ public sealed class TokenSaverHooksTests : IDisposable
         public Task<TaskSnapshot> ReadAsync(string id, long? since, int? tailChars, CancellationToken ct) => throw new NotSupportedException();
         public Task<IReadOnlyList<TaskSnapshot>> ListAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<TaskSnapshot>>([]);
         public Task<TaskSnapshot> StopAsync(string id, CancellationToken ct) => throw new NotSupportedException();
+        public Task<IReadOnlyList<TaskSnapshot>> ListTerminalsAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<TaskSnapshot>>([]);
+        public Task<TaskSnapshot> ReadTerminalAsync(string id, long? since, int? tailChars, CancellationToken ct) => throw new NotSupportedException();
     }
 
     private static async Task<List<string?>> ToolNames(McpServer server)

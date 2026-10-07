@@ -128,6 +128,8 @@ public sealed class McpServerSettings
         "to the user. Quick commands that finish in seconds still run normally in the foreground shell. " +
         "The project keeps a saved command list that the user sees in Codale's commands menu: list_commands shows it, " +
         "add_command saves a reusable run command to it (saving only, nothing runs), and run_command runs a saved one by name as a task. " +
+        "The user's own terminal tabs are readable too: when they say a command in their terminal failed or ask you to look at its " +
+        "result, call list_terminals and then read_terminal to diagnose the output (read-only). " +
         "Codale's session panel is fed by two codale-tasks tools and nothing else. " +
         "Show your progress with mcp__codale-tasks__todos_set: pass the whole step list every call (2-6 short steps, one in_progress, " +
         "finished ones completed) when you start, as you begin each step and when the last one finishes. The built-in task-list tools " +

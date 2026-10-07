@@ -34,6 +34,12 @@ public interface ITaskService
     Task<IReadOnlyList<TaskSnapshot>> ListAsync(CancellationToken ct);
 
     Task<TaskSnapshot> StopAsync(string id, CancellationToken ct);
+
+    /// <summary>The terminal tabs the user has open (command runs and plain shells).</summary>
+    Task<IReadOnlyList<TaskSnapshot>> ListTerminalsAsync(CancellationToken ct);
+
+    /// <summary>What a terminal tab printed, read-only; the same offset scheme as <see cref="ReadAsync"/>.</summary>
+    Task<TaskSnapshot> ReadTerminalAsync(string id, long? since, int? tailChars, CancellationToken ct);
 }
 
 /// <summary>
@@ -55,8 +61,15 @@ public interface ITaskAssist
 }
 
 /// <summary><see cref="ITaskService"/> straight over the manager that owns the processes.</summary>
-public sealed class LocalTaskService(HostedTaskManager manager) : ITaskService
+public sealed class LocalTaskService(HostedTaskManager manager, ITerminalSource? terminals = null) : ITaskService
 {
+    public Task<IReadOnlyList<TaskSnapshot>> ListTerminalsAsync(CancellationToken ct) =>
+        Task.FromResult(terminals?.List() ?? []);
+
+    public Task<TaskSnapshot> ReadTerminalAsync(string id, long? since, int? tailChars, CancellationToken ct) =>
+        Task.FromResult(terminals?.Read(id, since, tailChars ?? 8000)
+            ?? throw new TaskServiceException($"No terminal '{id}'. Use list_terminals to see the open ones."));
+
     public async Task<TaskSnapshot> StartAsync(string command, string? name, int waitSeconds, CancellationToken ct)
     {
         var task = manager.Start(command, name);
@@ -242,6 +255,21 @@ public sealed class TaskPipeServer : IDisposable
                         ["tasks"] = new JsonArray([.. all.Select(t => (JsonNode)Json(t))]),
                     };
 
+                case "terminals":
+                    var open = await _service.ListTerminalsAsync(ct).ConfigureAwait(false);
+                    return new JsonObject
+                    {
+                        ["ok"] = true,
+                        ["tasks"] = new JsonArray([.. open.Select(t => (JsonNode)Json(t))]),
+                    };
+
+                case "terminal":
+                    return Ok(await _service.ReadTerminalAsync(
+                        request["id"]?.GetValue<string>() ?? throw new TaskServiceException("id is required."),
+                        request["since"]?.GetValue<long>(),
+                        request["tailChars"]?.GetValue<int>(),
+                        ct).ConfigureAwait(false));
+
                 case "explore":
                     return Text(await Assist.ExploreAsync(
                         request["question"]?.GetValue<string>() ?? throw new TaskServiceException("question is required."),
@@ -366,6 +394,15 @@ public sealed class TaskPipeClient(string pipeName, string token) : ITaskService
         var response = await CallAsync(new JsonObject { ["op"] = "list" }, ct).ConfigureAwait(false);
         return [.. response["tasks"]!.AsArray().Select(n => Parse(n!.AsObject()))];
     }
+
+    public async Task<IReadOnlyList<TaskSnapshot>> ListTerminalsAsync(CancellationToken ct)
+    {
+        var response = await CallAsync(new JsonObject { ["op"] = "terminals" }, ct).ConfigureAwait(false);
+        return [.. response["tasks"]!.AsArray().Select(n => Parse(n!.AsObject()))];
+    }
+
+    public Task<TaskSnapshot> ReadTerminalAsync(string id, long? since, int? tailChars, CancellationToken ct) =>
+        CallOneAsync(new JsonObject { ["op"] = "terminal", ["id"] = id, ["since"] = since, ["tailChars"] = tailChars }, ct);
 
     private async Task<TaskSnapshot> CallOneAsync(JsonObject request, CancellationToken ct) =>
         Parse(await CallAsync(request, ct).ConfigureAwait(false));
