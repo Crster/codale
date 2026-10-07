@@ -2320,43 +2320,81 @@
                     <Border x:Name="McpToolsHost" Width="0" Height="0">
                         <FlyoutBase.AttachedFlyout>
                             <Flyout FlyoutPresenterStyle="{StaticResource EndpointFlyout}" Placement="BottomEdgeAlignedRight">
-                                <StackPanel Width="360" Padding="16,14,16,14" Spacing="14">
-                                    <StackPanel Spacing="4">
+                                <StackPanel Width="320" Padding="16,14,16,14" Spacing="14">
+                                    <StackPanel Spacing="2">
                                         <TextBlock FontSize="14" FontWeight="SemiBold" Text="Agent tools" />
                                         <TextBlock
                                             FontSize="12"
                                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            Text="Let Claude test and verify their own work. Applies to sessions started from now on."
-                                            TextWrapping="Wrap" />
+                                            Text="Applies to new sessions" />
                                     </StackPanel>
 
-                                    <StackPanel Spacing="4">
-                                        <ToggleSwitch
-                                            Header="Browser"
-                                            IsEnabled="{x:Bind ViewModel.McpTools.BrowserAvailable}"
-                                            IsOn="{x:Bind ViewModel.McpTools.BrowserEnabled, Mode=TwoWay}" />
-                                        <TextBlock
-                                            FontSize="12"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            Text="{x:Bind ViewModel.McpTools.BrowserNote}"
-                                            TextWrapping="Wrap" />
+                                    <StackPanel Spacing="8">
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <FontIcon
+                                                VerticalAlignment="Center"
+                                                FontSize="18"
+                                                Glyph="&#xE774;"
+                                                Opacity="0.8" />
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                                                <TextBlock FontSize="13" FontWeight="SemiBold" Text="Browser" />
+                                                <TextBlock
+                                                    FontSize="12"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="{x:Bind ViewModel.McpTools.BrowserNote}"
+                                                    TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <ToggleSwitch
+                                                Grid.Column="2"
+                                                MinWidth="0"
+                                                VerticalAlignment="Center"
+                                                IsEnabled="{x:Bind ViewModel.McpTools.BrowserAvailable}"
+                                                IsOn="{x:Bind ViewModel.McpTools.BrowserEnabled, Mode=TwoWay}"
+                                                OffContent=""
+                                                OnContent="" />
+                                        </Grid>
                                         <Button
+                                            HorizontalAlignment="Stretch"
                                             Command="{x:Bind ViewModel.McpTools.OpenBrowserCommand}"
-                                            Content="Open browser"
+                                            Content="Open browser window"
                                             IsEnabled="{x:Bind ViewModel.McpTools.BrowserAvailable}" />
                                     </StackPanel>
 
-                                    <StackPanel Spacing="4">
+                                    <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <FontIcon
+                                            VerticalAlignment="Center"
+                                            FontSize="18"
+                                            Glyph="&#xE7F4;"
+                                            Opacity="0.8" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="Desktop control" />
+                                            <TextBlock
+                                                FontSize="12"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Text="{x:Bind ViewModel.McpTools.ComputerNote}"
+                                                TextWrapping="Wrap" />
+                                        </StackPanel>
                                         <ToggleSwitch
-                                            Header="Desktop control"
+                                            Grid.Column="2"
+                                            MinWidth="0"
+                                            VerticalAlignment="Center"
                                             IsEnabled="{x:Bind ViewModel.McpTools.ComputerAvailable}"
-                                            IsOn="{x:Bind ViewModel.McpTools.ComputerEnabled, Mode=TwoWay}" />
-                                        <TextBlock
-                                            FontSize="12"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            Text="{x:Bind ViewModel.McpTools.ComputerNote}"
-                                            TextWrapping="Wrap" />
-                                    </StackPanel>
+                                            IsOn="{x:Bind ViewModel.McpTools.ComputerEnabled, Mode=TwoWay}"
+                                            OffContent=""
+                                            OnContent="" />
+                                    </Grid>
                                 </StackPanel>
                             </Flyout>
                         </FlyoutBase.AttachedFlyout>
