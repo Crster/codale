@@ -251,11 +251,17 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     }
 
     /// <summary>Tells the history list which sessions are open in a tab, and which are working.</summary>
-    private void PublishOpenSessions() =>
-        Sessions.UpdateOpenSessions(Chats
+    private void PublishOpenSessions()
+    {
+        var open = Chats
             .Where(c => c.IsConnected && (c.SessionId ?? c.ResumeSessionId) is { Length: > 0 })
-            .GroupBy(c => (c.SessionId ?? c.ResumeSessionId)!)
-            .ToDictionary(g => g.Key, g => g.Any(c => c.IsBusy)));
+            .ToList();
+
+        Sessions.UpdateOpenSessions(
+            open.GroupBy(c => (c.SessionId ?? c.ResumeSessionId)!)
+                .ToDictionary(g => g.Key, g => g.Any(c => c.IsBusy)),
+            open.Where(c => c.IsIsolated).Select(c => (c.SessionId ?? c.ResumeSessionId)!).ToHashSet(StringComparer.Ordinal));
+    }
 
     /// <summary>Every open terminal, each with its own shell; closed ones are removed.</summary>
     private readonly List<TerminalViewModel> _terminals = [];
@@ -532,6 +538,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
                 ? await worktrees.MergeBackAsync(path)
                 : await worktrees.RemoveAsync(path, force: true);
 
+            // A plain git merge gives up on a dirty project or a conflict; hand it to an agent.
+            if (!result.Success && merge)
+            {
+                IsMergingWithAgent = true;
+                WorktreeError = null;
+                result = await MergeWithAgentAsync(worktrees, path, result.Error);
+            }
+
             if (!result.Success)
             {
                 WorktreeError = merge
@@ -552,11 +566,98 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         finally
         {
             IsStartingWorktree = false;
+            IsMergingWithAgent = false;
         }
     }
 
+    /// <summary>
+    /// Merges an isolated branch with an agent working in the project directory, for the
+    /// cases plain git refuses: uncommitted local changes the merge would overwrite, or
+    /// conflicts. The result is checked with git rather than trusted from the agent's reply.
+    /// </summary>
+    private async Task<GitRepository.GitWriteResult> MergeWithAgentAsync(GitWorktrees worktrees, string worktreePath, string? gitError)
+    {
+        var branch = await worktrees.BranchOfAsync(worktreePath);
+        if (branch is null)
+        {
+            return new GitRepository.GitWriteResult(false, "That worktree has no Codale branch to merge.");
+        }
+
+        // The agent merges the branch, so the session's pending edits must be on it.
+        if (await worktrees.CommitPendingAsync(worktreePath) is { } commitError)
+        {
+            return new GitRepository.GitWriteResult(false, commitError);
+        }
+
+        var worker = new ChatViewModel(ProjectPath, new StatusViewModel(), _endpoints)
+        {
+            PermissionMode = "auto",
+        };
+
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        worker.TurnFinished += (_, _) => finished.TrySetResult();
+        worker.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ChatViewModel.IsConnected) && !worker.IsConnected)
+            {
+                finished.TrySetResult();
+            }
+        };
+
+        try
+        {
+            await worker.ConnectAsync();
+            if (!worker.IsConnected)
+            {
+                return new GitRepository.GitWriteResult(false, $"Could not start a {worker.ProviderName} session to merge. {gitError}");
+            }
+
+            worker.Draft = MergePrompt(branch, gitError);
+            await worker.SendCommand.ExecuteAsync(null);
+            await finished.Task.WaitAsync(TimeSpan.FromMinutes(10));
+
+            if (!await worktrees.IsMergedAsync(branch))
+            {
+                var reply = worker.Items.OfType<AssistantMessageItem>().LastOrDefault()?.Text.Trim();
+                return new GitRepository.GitWriteResult(false, reply is { Length: > 0 }
+                    ? $"The agent could not finish the merge: {reply}"
+                    : "The agent could not finish the merge.");
+            }
+
+            return await worktrees.RemoveAsync(worktreePath, force: true);
+        }
+        catch (TimeoutException)
+        {
+            return new GitRepository.GitWriteResult(false, "The agent took too long to merge; the worktree was kept.");
+        }
+        finally
+        {
+            await worker.DisposeAsync();
+        }
+    }
+
+    private static string MergePrompt(string branch, string? gitError) =>
+        $"""
+        Merge the git branch `{branch}` into the branch currently checked out in this directory. It holds the work of an isolated session and everything on it is committed.
+
+        A plain `git merge --no-ff {branch}` already failed with: {gitError ?? "an unknown error"}
+
+        Do this carefully so nothing is lost:
+        1. Run `git status` first. If there are uncommitted local changes, keep them: stash them (`git stash push -u`), merge, then `git stash pop` and resolve anything that clashes. Never discard them.
+        2. Merge with `git merge --no-ff {branch}`.
+        3. Resolve every conflict by reading both sides and keeping the intent of both changes. Do not just take one side. Stage the files and complete the merge commit.
+        4. If the project has a quick build or test command, run it to check the result.
+        5. Finish with no merge in progress and no leftover stash.
+
+        Do not use `git reset --hard`, `git checkout -- .`, `git clean`, or force anything. Do not delete the branch or the worktree; that is handled afterwards. Reply with one short line saying what you did.
+        """;
+
     [ObservableProperty]
     public partial bool IsStartingWorktree { get; set; }
+
+    /// <summary>True while an agent is merging an isolated branch back, for the card to say so.</summary>
+    [ObservableProperty]
+    public partial bool IsMergingWithAgent { get; set; }
 
     [ObservableProperty]
     public partial string? WorktreeError { get; set; }

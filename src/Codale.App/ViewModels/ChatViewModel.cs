@@ -2297,11 +2297,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             case UnknownEvent unknown:
                 // Surfaced rather than swallowed: this is how CLI protocol drift becomes visible.
-                Add(new NoticeItem
+                // It goes to the notice above the composer, not the transcript: the same
+                // message can repeat every turn, and one notice replaces the last instead of
+                // stacking. A notice that is already showing something else is left alone.
+                var unrecognised = $"Unrecognised message from the CLI: {unknown.RawType}";
+                if (ComposerNotice is null || ComposerNotice.Text.StartsWith("Unrecognised message from the CLI", StringComparison.Ordinal))
                 {
-                    Text = $"Unrecognised message from the CLI: {unknown.RawType}",
-                    Severity = NoticeSeverity.Warning,
-                });
+                    ComposerNotice = new NoticeItem { Text = unrecognised, Severity = NoticeSeverity.Warning };
+                }
+
                 break;
         }
     }

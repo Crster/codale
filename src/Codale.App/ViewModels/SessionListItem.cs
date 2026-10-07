@@ -15,7 +15,12 @@ public sealed partial class SessionListItem : ObservableObject
 
     public string SessionId => Summary.SessionId;
 
-    public string Title => Summary.Title;
+    /// <summary>Ran in its own git worktree: the title carries a lock.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Title))]
+    public partial bool IsIsolated { get; set; }
+
+    public string Title => IsIsolated ? "\U0001F512 " + Summary.Title : Summary.Title;
 
     public int UserTurns => Summary.UserTurns;
 
@@ -35,9 +40,10 @@ public sealed partial class SessionListItem : ObservableObject
 
     public bool IsOpenIdle => IsOpen && !IsWorking;
 
-    public void ApplyOpenState(IReadOnlyDictionary<string, bool> open)
+    public void ApplyOpenState(IReadOnlyDictionary<string, bool> open, IReadOnlySet<string> isolated)
     {
         IsOpen = open.TryGetValue(SessionId, out var working);
         IsWorking = IsOpen && working;
+        IsIsolated = isolated.Contains(SessionId);
     }
 }

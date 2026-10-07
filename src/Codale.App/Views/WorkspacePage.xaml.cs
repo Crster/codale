@@ -591,6 +591,7 @@ public sealed partial class WorkspacePage : Page
             var tab = new ChatTab { ViewModel = chat };
             tab.ToolFileRequested += OnChatToolFileRequested;
             tab.PlanOpenRequested += OnChatPlanOpenRequested;
+            tab.TaskPeekRequested += OnChatTaskPeekRequested;
             chat.LoginRequired += OnChatLoginRequired;
             chat.AttentionNeeded += OnChatAttentionNeeded;
             chat.PropertyChanged += OnChatPropertyChanged;
@@ -1098,6 +1099,16 @@ public sealed partial class WorkspacePage : Page
         if (e.ClickedItem is SessionFileChange change)
         {
             ShowAgentDiff(change.Path, change.CumulativeDiff());
+        }
+    }
+
+    /// <summary>Clicking an explore or subagent entry in the chat opens its peek, as selecting it in the task list does.</summary>
+    private void OnChatTaskPeekRequested(object? sender, ToolCallItem call)
+    {
+        if (sender is ChatTab { ViewModel: { } chat } &&
+            chat.RunningTasks.FirstOrDefault(t => t.ToolUseId == call.ToolUseId) is { } task)
+        {
+            SetPeek(task);
         }
     }
 
@@ -3145,41 +3156,39 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
-    /// <summary>
-    /// Off to on starts an isolated session. On to off is never silent: the worktree's
-    /// work is merged back into the project, discarded, or the toggle stays on. While
-    /// an isolated turn is running it is left alone and another isolated session opens.
-    /// </summary>
-    private async void OnIsolatedSessionClick(object sender, RoutedEventArgs e)
-    {
-        var toggle = (ToggleButton)sender;
+    /// <summary>Starts an isolated session. While isolated the card shows merge/discard instead.</summary>
+    private async void OnIsolatedSessionClick(object sender, RoutedEventArgs e) =>
+        await ViewModel.StartIsolatedSessionAsync();
 
-        if (!ViewModel.IsIsolated || ViewModel.Chat.IsBusy)
+    /// <summary>Merges the isolated session's branch back into the project.</summary>
+    private async void OnMergeIsolatedClick(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.Chat.IsBusy)
         {
-            await ViewModel.StartIsolatedSessionAsync();
-            toggle.IsChecked = ViewModel.IsIsolated;
+            ViewModel.WorktreeError = "Wait for the current turn to finish before merging.";
             return;
         }
 
+        await ViewModel.LeaveIsolationAsync(merge: true);
+    }
+
+    /// <summary>Discards the isolated session's work, after confirming.</summary>
+    private async void OnDiscardIsolatedClick(object sender, RoutedEventArgs e)
+    {
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
-            Title = "Leave the isolated session?",
-            Content = "Merge its branch back into your project, or discard the work done in the worktree. " +
-                      "Either way this chat starts a fresh session in the project.",
-            PrimaryButtonText = "Merge back",
-            SecondaryButtonText = "Discard",
-            CloseButtonText = "Stay isolated",
-            DefaultButton = ContentDialogButton.Primary,
+            Title = "Discard the isolated session?",
+            Content = "The work done in the worktree is thrown away and this chat starts a fresh session in the project.",
+            PrimaryButtonText = "Discard",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
         };
 
-        var choice = await dialog.ShowAsync();
-        if (choice != ContentDialogResult.None)
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
         {
-            await ViewModel.LeaveIsolationAsync(merge: choice == ContentDialogResult.Primary);
+            await ViewModel.LeaveIsolationAsync(merge: false);
         }
-
-        toggle.IsChecked = ViewModel.IsIsolated;
     }
 
     /// <summary>

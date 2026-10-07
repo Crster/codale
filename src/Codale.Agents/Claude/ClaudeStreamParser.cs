@@ -36,6 +36,7 @@ public sealed class ClaudeStreamParser
         "session_state_changed",
         "files_persisted",
         "post_turn_summary",
+        "permission_check_status",
     ];
 
     /// <summary>

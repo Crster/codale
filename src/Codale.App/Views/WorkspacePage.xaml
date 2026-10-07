@@ -1132,10 +1132,12 @@
                                 Fill="SeaGreen"
                                 Visibility="{x:Bind ViewModel.Chat.IsConnected, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                             <TextBlock
+                                VerticalAlignment="Center"
                                 FontSize="12"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                 Text="{x:Bind ViewModel.Chat.ProviderName, Mode=OneWay}" />
                             <TextBlock
+                                VerticalAlignment="Center"
                                 FontSize="12"
                                 Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                 Text="{x:Bind CliUpdate.VersionText, Mode=OneWay}"
@@ -1340,7 +1342,7 @@
                                         </Grid>
 
                                         <!--  The two ways to start over, side by side: the primary one in accent  -->
-                                        <Grid ColumnSpacing="8">
+                                        <Grid ColumnSpacing="8" Visibility="{x:Bind ViewModel.IsIsolated, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="*" />
@@ -1360,13 +1362,12 @@
                                                 </StackPanel>
                                             </Button>
 
-                                            <ToggleButton
+                                            <Button
                                                 Grid.Column="1"
                                                 HorizontalAlignment="Stretch"
                                                 Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                                 Click="OnIsolatedSessionClick"
-                                                IsChecked="{x:Bind ViewModel.IsIsolated, Mode=OneWay}"
                                                 CornerRadius="8"
                                                 FontSize="12"
                                                 IsEnabled="{x:Bind ViewModel.IsStartingWorktree, Mode=OneWay, Converter={StaticResource NotBool}}"
@@ -1376,8 +1377,79 @@
                                                     <FontIcon FontSize="12" Glyph="&#xE8EA;" />
                                                     <TextBlock Text="Isolated" TextTrimming="CharacterEllipsis" />
                                                 </StackPanel>
-                                            </ToggleButton>
+                                            </Button>
                                         </Grid>
+
+                                        <!--  Isolated: tagged, with the way out - merge back to the project, or discard  -->
+                                        <StackPanel Spacing="8" Visibility="{x:Bind ViewModel.IsIsolated, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                            <Border
+                                                HorizontalAlignment="Left"
+                                                Background="{ThemeResource AccentFillColorSecondaryBrush}"
+                                                CornerRadius="10"
+                                                Padding="8,2">
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <FontIcon
+                                                        FontSize="10"
+                                                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                                        Glyph="&#xE8EA;" />
+                                                    <TextBlock
+                                                        FontSize="11"
+                                                        FontWeight="SemiBold"
+                                                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                                        Text="Isolated" />
+                                                </StackPanel>
+                                            </Border>
+
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <Button
+                                                    HorizontalAlignment="Stretch"
+                                                    Click="OnMergeIsolatedClick"
+                                                    CornerRadius="8"
+                                                    FontSize="12"
+                                                    IsEnabled="{x:Bind ViewModel.IsStartingWorktree, Mode=OneWay, Converter={StaticResource NotBool}}"
+                                                    Padding="10,8"
+                                                    Style="{StaticResource AccentButtonStyle}"
+                                                    ToolTipService.ToolTip="Merge this session's branch into your project and remove the worktree">
+                                                    <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                                                        <FontIcon FontSize="12" Glyph="&#xEA3C;" />
+                                                        <TextBlock Text="Merge back" TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+                                                </Button>
+
+                                                <Button
+                                                    Grid.Column="1"
+                                                    HorizontalAlignment="Stretch"
+                                                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                    Click="OnDiscardIsolatedClick"
+                                                    CornerRadius="8"
+                                                    FontSize="12"
+                                                    IsEnabled="{x:Bind ViewModel.IsStartingWorktree, Mode=OneWay, Converter={StaticResource NotBool}}"
+                                                    Padding="10,8"
+                                                    ToolTipService.ToolTip="Throw away the work done in this worktree">
+                                                    <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                                                        <FontIcon FontSize="12" Glyph="&#xE74D;" />
+                                                        <TextBlock Text="Discard" TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </Grid>
+                                        </StackPanel>
+
+                                        <StackPanel
+                                            Orientation="Horizontal"
+                                            Spacing="8"
+                                            Visibility="{x:Bind ViewModel.IsMergingWithAgent, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                            <ProgressRing Width="14" Height="14" IsActive="True" />
+                                            <TextBlock
+                                                FontSize="11"
+                                                Text="Git could not merge cleanly - an agent is merging it for you..."
+                                                TextWrapping="Wrap" />
+                                        </StackPanel>
 
                                         <TextBlock
                                             FontSize="11"
@@ -1544,7 +1616,7 @@
                                                         <TextBlock
                                                             Grid.Column="1"
                                                             FontSize="12"
-                                                            Text="{x:Bind Title}"
+                                                            Text="{x:Bind Title, Mode=OneWay}"
                                                             TextTrimming="CharacterEllipsis"
                                                             TextWrapping="NoWrap" />
                                                         <StackPanel
@@ -1887,7 +1959,7 @@
                                             <StackPanel Grid.Column="1" Spacing="2">
                                                 <TextBlock
                                                     FontSize="12"
-                                                    Text="{x:Bind Title}"
+                                                    Text="{x:Bind Title, Mode=OneWay}"
                                                     TextTrimming="CharacterEllipsis"
                                                     TextWrapping="NoWrap" />
                                                 <StackPanel Orientation="Horizontal" Spacing="6">

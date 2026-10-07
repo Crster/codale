@@ -204,6 +204,14 @@ public sealed class ClaudeStreamParserTests
     }
 
     [Fact]
+    public void Permission_check_status_ping_is_recognised_but_not_shown()
+    {
+        var parser = new ClaudeStreamParser();
+
+        Assert.IsType<CliMessageIgnored>(Assert.Single(parser.Parse("""{"type":"system","subtype":"permission_check_status"}""")));
+    }
+
+    [Fact]
     public void Slash_command_discovery_ping_is_recognised_but_not_shown()
     {
         // commands_changed fires when the CLI's slash-command scan settles, usually

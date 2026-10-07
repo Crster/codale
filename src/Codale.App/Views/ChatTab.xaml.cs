@@ -342,8 +342,17 @@ public sealed partial class ChatTab : UserControl
         if (((FrameworkElement)sender).Tag is ToolCallItem call)
         {
             call.ToggleExpanded();
+
+            // An explore or a subagent is also a task in the session panel: show its peek.
+            if (BackgroundTaskDetector.IsSubagentTool(call.ToolName) || BackgroundTaskDetector.IsHelperTool(call.ToolName))
+            {
+                TaskPeekRequested?.Invoke(this, call);
+            }
         }
     }
+
+    /// <summary>An explore or subagent row was clicked: the workspace opens its peek pane.</summary>
+    public event EventHandler<ToolCallItem>? TaskPeekRequested;
 
     /// <summary>A turn's header: opens the folded timeline, or folds it again.</summary>
     private void OnTurnToggleClick(object sender, RoutedEventArgs e)

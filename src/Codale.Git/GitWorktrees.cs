@@ -155,6 +155,42 @@ public sealed class GitWorktrees
         return await RemoveAsync(worktreePath, force: true, ct).ConfigureAwait(false);
     }
 
+    /// <summary>The <c>codale/*</c> branch a worktree was created on, or null for any other worktree.</summary>
+    public async Task<string?> BranchOfAsync(string worktreePath, CancellationToken ct = default)
+    {
+        var branch = (await ListAsync(ct).ConfigureAwait(false))
+            .FirstOrDefault(w => !w.IsMain && SamePath(w.Path, worktreePath))?.Branch;
+
+        return branch is not null && branch.StartsWith(BranchPrefix, StringComparison.Ordinal) && GitProcess.IsSafeRef(branch)
+            ? branch
+            : null;
+    }
+
+    /// <summary>True when every commit on <paramref name="branch"/> is already in the project's current branch.</summary>
+    public async Task<bool> IsMergedAsync(string branch, CancellationToken ct = default) =>
+        GitProcess.IsSafeRef(branch) &&
+        (await RunAsync(ct, readOnly: true, "merge-base", "--is-ancestor", branch, "HEAD").ConfigureAwait(false)).Success;
+
+    /// <summary>
+    /// Commits whatever is pending in the worktree, so an agent merging its branch sees
+    /// all of the session's work. Returns an error, or null when the worktree is clean or committed.
+    /// </summary>
+    public async Task<string?> CommitPendingAsync(string worktreePath, CancellationToken ct = default)
+    {
+        var status = await GitProcess.RunAsync(worktreePath, ["status", "--porcelain"], true, GitProcess.ReadTimeout, ct).ConfigureAwait(false);
+        if (!status.Success || status.StandardOutput.Trim().Length == 0)
+        {
+            return null;
+        }
+
+        var add = await GitProcess.RunAsync(worktreePath, ["add", "-A"], false, GitProcess.WriteTimeout, ct).ConfigureAwait(false);
+        var commit = add.Success
+            ? await GitProcess.RunAsync(worktreePath, ["commit", "-m", "Isolated session changes"], false, GitProcess.WriteTimeout, ct).ConfigureAwait(false)
+            : add;
+
+        return commit.Success ? null : ErrorOf(commit);
+    }
+
     /// <summary>git lists paths with forward slashes; the caller's may use backslashes.</summary>
     private static bool SamePath(string a, string b) =>
         string.Equals(

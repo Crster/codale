@@ -134,6 +134,10 @@ public sealed class HelperAssistService(IHelperModel helper, string runDirectory
         return step.ResultCount > 0 ? $"{text} ({step.ResultCount} results)" : text;
     }
 
+    /// <summary>A pipe or a line break inside a cell would split the row.</summary>
+    private static string TableCell(string value) =>
+        value.ReplaceLineEndings(" ").Replace("|", "\\|").Trim();
+
     private static string FormatExplore(SearchAnswer answer)
     {
         var text = new StringBuilder();
@@ -148,28 +152,26 @@ public sealed class HelperAssistService(IHelperModel helper, string runDirectory
         }
 
         // Pointers, not content: the caller reads what it needs from the start line.
+        // A table, so a person reads it as easily as the agent does: one row per file.
         if (answer.References.Count > 0)
         {
-            text.AppendLine().AppendLine("Files (path:start-end - why; find: words to grep inside):");
+            text.AppendLine().AppendLine("### Files to read");
+            text.AppendLine().AppendLine("`Lines` is where to start reading; `Search for` lists words to Grep inside that file.").AppendLine();
+            text.AppendLine("| File | Lines | Why | Search for |");
+            text.AppendLine("| --- | --- | --- | --- |");
             foreach (var reference in answer.References)
             {
-                text.Append(reference.RelativePath.Replace('\\', '/')).Append(':').Append(reference.StartLine);
-                if (reference.EndLine > reference.StartLine)
-                {
-                    text.Append('-').Append(reference.EndLine);
-                }
+                var lines = reference.EndLine > reference.StartLine
+                    ? $"{reference.StartLine}-{reference.EndLine}"
+                    : reference.StartLine.ToString();
+                var find = reference.Find.Count > 0
+                    ? string.Join(", ", reference.Find.Select(word => $"`{TableCell(word)}`"))
+                    : "";
 
-                if (reference.Reason.Length > 0)
-                {
-                    text.Append(" - ").Append(reference.Reason);
-                }
-
-                if (reference.Find.Count > 0)
-                {
-                    text.Append(" | find: ").Append(string.Join(", ", reference.Find));
-                }
-
-                text.AppendLine();
+                text.Append("| `").Append(TableCell(reference.RelativePath.Replace('\\', '/'))).Append("` | ")
+                    .Append(lines).Append(" | ")
+                    .Append(TableCell(reference.Reason)).Append(" | ")
+                    .Append(find).AppendLine(" |");
             }
         }
 

@@ -44,12 +44,16 @@ public sealed partial class SessionsViewModel : ObservableObject
     /// </summary>
     private IReadOnlyDictionary<string, bool> _open = new Dictionary<string, bool>();
 
-    public void UpdateOpenSessions(IReadOnlyDictionary<string, bool> open)
+    /// <summary>Open sessions running in their own worktree; their rows get a lock in the title.</summary>
+    private IReadOnlySet<string> _isolated = new HashSet<string>();
+
+    public void UpdateOpenSessions(IReadOnlyDictionary<string, bool> open, IReadOnlySet<string> isolated)
     {
         _open = open;
+        _isolated = isolated;
         foreach (var item in Sessions)
         {
-            item.ApplyOpenState(_open);
+            item.ApplyOpenState(_open, _isolated);
         }
 
         SyncOpenSessions();
@@ -112,9 +116,8 @@ public sealed partial class SessionsViewModel : ObservableObject
     private readonly Dictionary<string, SessionListItem> _placeholders = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// A row for a session that is open in a tab but has no transcript yet. Named
-    /// "session {id}" - the short id, the full one rides the row's tooltip - until
-    /// the scan replaces it with the real summary.
+    /// A row for a session that is open in a tab but has no transcript yet. Titled
+    /// "(New session)", like an empty one, until the scan replaces it with the real summary.
     /// </summary>
     private SessionListItem CreatePlaceholder(string sessionId)
     {
@@ -125,10 +128,10 @@ public sealed partial class SessionsViewModel : ObservableObject
                 SessionId = sessionId,
                 FilePath = Path.Combine(_reader.HistoryDirectory, sessionId + ".jsonl"),
                 UpdatedAt = DateTimeOffset.Now,
-                CustomTitle = $"session {sessionId[..Math.Min(8, sessionId.Length)]}",
+                CustomTitle = "(New session)",
             },
         };
-        item.ApplyOpenState(_open);
+        item.ApplyOpenState(_open, _isolated);
         return item;
     }
 
@@ -318,7 +321,7 @@ public sealed partial class SessionsViewModel : ObservableObject
             }
 
             var fresh = new SessionListItem { Summary = summary };
-            fresh.ApplyOpenState(_open);
+            fresh.ApplyOpenState(_open, _isolated);
 
             if (item is not null)
             {
