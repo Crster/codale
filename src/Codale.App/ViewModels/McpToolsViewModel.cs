@@ -47,11 +47,11 @@ public sealed partial class McpToolsViewModel : ObservableObject
     };
 
     public string BrowserNote => BrowserAvailable
-        ? "Lets the agent open pages, read them, click, type and take screenshots to test its own work. Runs hidden unless you open a browser below; the agent then uses that one."
+        ? "Open, click and screenshot pages"
         : "Not installed with this build.";
 
     public string ComputerNote => ComputerAvailable
-        ? "Screenshots, mouse and keyboard on your real desktop. Every action asks for your approval. This project only."
+        ? "Mouse and keyboard, asks every time"
         : "Not installed with this build.";
 
     /// <summary>
