@@ -31,6 +31,7 @@ public sealed partial class StatusViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(ContextPercentText))]
     [NotifyPropertyChangedFor(nameof(HasContextWindow))]
     [NotifyPropertyChangedFor(nameof(HasContext))]
+    [NotifyPropertyChangedFor(nameof(HasUsageMeter))]
     public partial int ContextTokens { get; set; }
 
     [ObservableProperty]
@@ -50,10 +51,12 @@ public sealed partial class StatusViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasUsage))]
     [NotifyPropertyChangedFor(nameof(HasClaudeUsage))]
     [NotifyPropertyChangedFor(nameof(HasFiveHour))]
+    [NotifyPropertyChangedFor(nameof(HasUsageMeter))]
     [NotifyPropertyChangedFor(nameof(FiveHourPercent))]
     [NotifyPropertyChangedFor(nameof(FiveHourText))]
     [NotifyPropertyChangedFor(nameof(FiveHourSummary))]
     [NotifyPropertyChangedFor(nameof(UsageSummary))]
+    [NotifyPropertyChangedFor(nameof(UsageMeterText))]
     public partial double? FiveHourUtilization { get; set; }
 
     [ObservableProperty]
@@ -108,8 +111,32 @@ public sealed partial class StatusViewModel : ObservableObject
 
     /// <summary>True while this chat talks to a custom endpoint; the second status bar shows only then.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasClaudeUsage))]
     public partial bool IsCustomProvider { get; set; }
+
+    /// <summary>
+    /// True while this chat's CLI talks to a third-party endpoint - Codale's bridge, or an
+    /// ANTHROPIC_BASE_URL override inherited from the environment (a Z.ai-style session
+    /// override): no Claude subscription sits behind it, so only context is metered.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasUsage))]
+    [NotifyPropertyChangedFor(nameof(HasUsageMeter))]
+    [NotifyPropertyChangedFor(nameof(UsageMeterLabel))]
+    [NotifyPropertyChangedFor(nameof(UsageMeterText))]
+    public partial bool IsOverrideCli { get; set; }
+
+    partial void OnIsOverrideCliChanged(bool value)
+    {
+        if (value)
+        {
+            // Windows left behind by an earlier Claude-login session are not this
+            // endpoint's: drop them so only context shows.
+            FiveHourUtilization = null;
+            SevenDayUtilization = null;
+            FiveHourResetsAt = null;
+            SevenDayResetsAt = null;
+        }
+    }
 
     /// <summary>The background-task provider's name (or "Claude"); labels its usage button.</summary>
     [ObservableProperty]
@@ -179,11 +206,26 @@ public sealed partial class StatusViewModel : ObservableObject
 
     internal static string FormatLong(long tokens) => Format((int)Math.Min(tokens, int.MaxValue));
 
-    /// <summary>A rate-limit reading has arrived (the five-hour window is the one that always comes first).</summary>
-    public bool HasUsage => FiveHourUtilization is not null;
+    /// <summary>
+    /// A subscription reading has arrived. Under a CLI override there is no subscription to
+    /// read - the meter shows context only - so rate-limit windows are never applied.
+    /// </summary>
+    public bool HasUsage => FiveHourUtilization is not null && !IsOverrideCli;
 
-    /// <summary>Same as <see cref="HasUsage"/>; the XAML binds both names.</summary>
+    /// <summary>Same as <see cref="HasUsage"/>; the XAML binds the name.</summary>
     public bool HasFiveHour => HasUsage;
+
+    /// <summary>The status bar's usage button: Claude subscription windows, or context only under an override.</summary>
+    public bool HasUsageMeter => HasUsage || HasContext;
+
+    /// <summary>The button's fixed label: the CLI, or the override when one is active.</summary>
+    public string UsageMeterLabel => IsOverrideCli ? "Context" : "Claude CLI";
+
+    /// <summary>Summary beside the label: the window percentages, or empty under an override.</summary>
+    public string UsageMeterText => IsOverrideCli ? "" : UsageSummary;
+
+    /// <summary>The flyout's title: the subscription windows exist only without an override.</summary>
+    public string UsageFlyoutTitle => IsOverrideCli ? "Context" : "Usage limits";
 
     public string ContextText => ContextWindow > 0
         ? $"{Format(ContextTokens)} / {Format(ContextWindow)}"
@@ -271,6 +313,13 @@ public sealed partial class StatusViewModel : ObservableObject
 
     public void Apply(RateLimitSnapshot limits)
     {
+        if (IsOverrideCli)
+        {
+            // The endpoint in front of the CLI is not the subscription these windows
+            // describe; the numbers would sit beside a meter that never spends it.
+            return;
+        }
+
         FiveHourUtilization = limits.FiveHourUtilization;
         SevenDayUtilization = limits.SevenDayUtilization;
         FiveHourResetsAt = limits.FiveHourResetsAt;

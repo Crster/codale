@@ -2293,11 +2293,11 @@
                     <!--  Usage: a percentage summary here, the full breakdown on click  -->
                     <Button
                         Padding="8,2"
-                        Visibility="{x:Bind ViewModel.Status.HasClaudeUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                        Visibility="{x:Bind ViewModel.Status.HasUsageMeter, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                         <Button.Flyout>
                             <Flyout FlyoutPresenterStyle="{StaticResource EndpointFlyout}" Placement="TopEdgeAlignedRight">
                                 <StackPanel Width="320" Padding="16,14,16,14" Spacing="16">
-                                    <TextBlock FontSize="14" FontWeight="SemiBold" Text="Usage limits" />
+                                    <TextBlock FontSize="14" FontWeight="SemiBold" Text="{x:Bind ViewModel.Status.UsageFlyoutTitle, Mode=OneWay}" />
 
                                     <!--  5-hour window  -->
                                     <StackPanel Spacing="6" Visibility="{x:Bind ViewModel.Status.HasFiveHour, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
@@ -2375,12 +2375,12 @@
                         </Button.Flyout>
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="10" Glyph="&#xEC4A;" Opacity="0.6" />
-                            <TextBlock VerticalAlignment="Center" FontSize="12" Opacity="0.6" Text="Claude CLI" />
+                            <TextBlock VerticalAlignment="Center" FontSize="12" Opacity="0.6" Text="{x:Bind ViewModel.Status.UsageMeterLabel, Mode=OneWay}" />
                             <TextBlock
                                 VerticalAlignment="Center"
                                 FontSize="12"
                                 Opacity="0.8"
-                                Text="{x:Bind ViewModel.Status.UsageSummary, Mode=OneWay}" />
+                                Text="{x:Bind ViewModel.Status.UsageMeterText, Mode=OneWay}" />
                         </StackPanel>
                     </Button>
 

@@ -75,11 +75,11 @@ public sealed partial class ArtifactTab : UserControl
 
         _annotationBar.BorderBrush = (Brush)Application.Current.Resources["TimelineRailBrush"];
         _annotationBar.Background = (Brush)Application.Current.Resources["LayerFillColorDefaultBrush"];
-        _annotationBar.SendRequested += (_, message) =>
+        _annotationBar.SendRequested += (_, sent) =>
         {
             if (Artifact is { } plan)
             {
-                RevisionRequested?.Invoke(plan, message);
+                RevisionRequested?.Invoke(plan, sent.Message);
             }
         };
 

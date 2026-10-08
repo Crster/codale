@@ -282,8 +282,11 @@ public sealed partial class PlanAnnotationBar : Grid
 
     private SessionArtifact? _plan;
 
-    /// <summary>The reader sent the annotations (already cleared); the text is them as one revision request.</summary>
-    public event EventHandler<string>? SendRequested;
+    /// <summary>
+    /// The reader sent the annotations (already cleared). The text is them as one
+    /// revision request; the plan is passed along so the sender knows what is revised.
+    /// </summary>
+    public event EventHandler<(SessionArtifact Plan, string Message)>? SendRequested;
 
     public PlanAnnotationBar()
     {
@@ -409,6 +412,6 @@ public sealed partial class PlanAnnotationBar : Grid
         var message = plan.RevisionMessage();
         plan.SentNotes = plan.Annotations.ToList();
         plan.Annotations.Clear();
-        SendRequested?.Invoke(this, message);
+        SendRequested?.Invoke(this, (plan, message));
     }
 }

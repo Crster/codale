@@ -145,7 +145,8 @@ public sealed class ClaudeStreamParser
                 var meta = root.Prop("compact_metadata");
                 yield return new ConversationCompacted(
                     meta?.Str("trigger"),
-                    meta?.Int("pre_tokens"));
+                    meta?.Int("pre_tokens"),
+                    meta?.Int("post_tokens"));
                 break;
 
             case "hook_response":

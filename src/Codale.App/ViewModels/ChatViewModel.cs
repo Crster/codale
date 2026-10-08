@@ -849,6 +849,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Plans this conversation produced - proposed in chat or written to disk - newest first.</summary>
     public ObservableCollection<SessionArtifact> Artifacts { get; } = [];
 
+    /// <summary>
+    /// A proposal took over a listed plan's entry (the plan-file takeover): raised so a
+    /// view showing the old plan - the artifact tab - can follow the replacement.
+    /// </summary>
+    public event EventHandler<(SessionArtifact OldPlan, SessionArtifact NewPlan)>? PlanReplaced;
+
     /// <summary>Files staged in the composer for the next turn.</summary>
     public ObservableCollection<ComposerAttachment> Attachments { get; } = [];
 
@@ -1603,8 +1609,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             RunInBackground(() => PollTasksAsync(session), "task poll");
             _ = LoadModelsAsync();
 
-            // Usage otherwise arrives only with a turn's rate_limit_event; a BYOK endpoint has no subscription.
-            if (claudeEndpoint is null)
+            // Usage otherwise arrives only with a turn's rate_limit_event; a BYOK endpoint or
+            // an inherited ANTHROPIC_* override has no Claude subscription behind it.
+            var overrideCli = claudeEndpoint is not null || EnvironmentOverridesEndpoint();
+            _status.IsOverrideCli = overrideCli;
+            if (!overrideCli)
             {
                 RunInBackground(LoadUsageAsync, "usage fetch");
             }
@@ -1808,6 +1817,25 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>The endpoint as Claude's spawn environment, or null when it is off.</summary>
     private IReadOnlyDictionary<string, string>? ClaudeEndpointEnvironment() => _endpointSettings?.ClaudeEnvironment(EndpointName);
+
+    /// <summary>
+    /// True when the ambient environment points the CLI away from Anthropic - an
+    /// ANTHROPIC_BASE_URL (or an auth override) set outside Codale, e.g. a Z.ai-style
+    /// session override CLI. The spawn environment Codale builds never contains them,
+    /// so this reads only what the app itself was launched with.
+    /// </summary>
+    private static bool EnvironmentOverridesEndpoint()
+    {
+        static bool Flag(string name) =>
+            Environment.GetEnvironmentVariable(name) is { Length: > 0 } value
+            && (value == "1" || value.Equals("true", StringComparison.OrdinalIgnoreCase));
+
+        return Environment.GetEnvironmentVariable("ANTHROPIC_BASE_URL") is { Length: > 0 }
+            || Environment.GetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN") is { Length: > 0 }
+            || Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY") is { Length: > 0 }
+            || Flag("CLAUDE_CODE_USE_BEDROCK")
+            || Flag("CLAUDE_CODE_USE_VERTEX");
+    }
 
     /// <summary>The standing instruction followed by the enabled MCP servers' usage note, when there is one.</summary>
     private string WithMcpDirective(string directive, IReadOnlyList<McpServerSpec> servers)
@@ -2310,6 +2338,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             case ConversationCompacted compacted:
+                // The boundary carries the window's new occupancy, and the turn it sits in
+                // ends with no assistant message: the stale pre-compact reading below would
+                // otherwise be re-applied at turn end and the meter would never drop.
+                _lastMessageUsage = null;
+                if (compacted.PostTokens is { } post and > 0)
+                {
+                    _status.Apply(new UsageSnapshot { InputTokens = (int)Math.Min(post, int.MaxValue) });
+                }
+
                 Add(new NoticeItem
                 {
                     Text = "Conversation compacted" +
@@ -2471,8 +2508,20 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    /// <summary>The plan a refused ExitPlanMode asked to have revised, and what was asked, until the next plan arrives.</summary>
-    private (SessionArtifact Plan, IReadOnlyList<PlanAnnotation> Notes)? _pendingRevision;
+    /// <summary>
+    /// What the next plan is a revision of: the plan the reader annotated, its text at
+    /// that moment (the agent may overwrite the plan file before re-proposing, so the
+    /// old wording is snapshot here rather than read back later), and what was asked.
+    /// </summary>
+    private (SessionArtifact Plan, string PreviousMarkdown, IReadOnlyList<PlanAnnotation> Notes)? _pendingRevision;
+
+    /// <summary>
+    /// The turn the revision request rides on: the one blocked on the refused approval,
+    /// the running turn a steered message joined, or the next turn to begin. When that
+    /// turn ends without proposing a plan, the request is spent - a plan the agent
+    /// proposes much later, unprompted, is not a revision of it.
+    /// </summary>
+    private TurnActivityItem? _revisionTurn;
 
     private void NoteRevisionRequest(ToolCallItem call, ApprovalDecision decision)
     {
@@ -2486,7 +2535,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             ? sent
             : decision.Message is { Length: > 0 } message ? [new PlanAnnotation("", message)] : [];
         plan.SentNotes = null;
-        _pendingRevision = (plan, notes);
+        _pendingRevision = (plan, plan.Markdown, notes);
+        _revisionTurn = _activeTurn;
     }
 
     /// <summary>
@@ -2501,6 +2551,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        var asked = _pendingRevision;
         var source = PlanSourceOf(item);
         var plan = new SessionArtifact
         {
@@ -2510,9 +2561,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             Markdown = item.PlanText ?? "",
             UpdatedAt = item.Timestamp,
             Status = SessionArtifactStatus.Proposed,
-            Revision = _pendingRevision is { } asked ? new PlanRevision(asked.Plan.Markdown, asked.Notes) : null,
+            Revision = asked is { } from ? new PlanRevision(from.PreviousMarkdown, from.Notes) : null,
         };
         _pendingRevision = null;
+        _revisionTurn = null;
 
         if (source is not null)
         {
@@ -2525,6 +2577,18 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         Artifacts.Insert(0, plan);
+
+        // Views showing the plan this one replaced follow it: the file row it took over,
+        // and - when that is another row - the plan the annotations were sent on.
+        if (source is not null && !ReferenceEquals(source, plan))
+        {
+            PlanReplaced?.Invoke(this, (source, plan));
+        }
+
+        if (asked?.Plan is { } annotated && !ReferenceEquals(annotated, source) && !ReferenceEquals(annotated, plan))
+        {
+            PlanReplaced?.Invoke(this, (annotated, plan));
+        }
     }
 
     /// <summary>
@@ -2968,16 +3032,21 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             // restore: the session stays in the chosen mode after the turn, so the
             // saved "back to manual" would clobber their pick. The switch goes out
             // after the approval answer - the CLI is blocked on that answer first.
+            // "chosen" is a host mode id; the CLI half goes through CliMode, so Auto
+            // ("automatic") lands on the CLI's "auto" and Full on "bypassPermissions".
             _planSession = null;
             _planRestoreMode = null;
             PermissionMode = chosen;
             RestorePlanEffort();
 
+            var cliChosen = CliMode(chosen);
             if (_session is { } live)
             {
                 try
                 {
-                    await live.TrySetPermissionModeAsync(chosen);
+                    // The CLI is on "plan" while the plan turn runs, so the work mode
+                    // always differs; the only no-op case is a session already gone.
+                    await live.TrySetPermissionModeAsync(cliChosen);
                 }
                 catch (Exception ex)
                 {
@@ -3005,7 +3074,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// blocked on it, so the annotations answer that approval as a revision (the old plan
     /// is replaced and the turn carries on). Otherwise they go out as a new plan turn.
     /// </summary>
-    public Task SendPlanRevisionAsync(string message)
+    /// <param name="annotated">The plan the annotations were taken on, when the sender knows it.</param>
+    public Task SendPlanRevisionAsync(string message, SessionArtifact? annotated = null)
     {
         var pending = _toolCalls.Values
             .Select(c => c.Approval)
@@ -3013,6 +3083,21 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         if (pending is null)
         {
+            // No approval to answer: the annotated plan's turn is over, so the revision
+            // travels as a fresh plan turn. Remember what is being revised - the plan and
+            // its text as it stands now, before the agent overwrites the file - or the
+            // next proposal arrives with no Revision and shows no markers. The request
+            // rides the turn this message joins: the running one when it steers, else
+            // the turn it opens (BeginTurn binds that one).
+            if (annotated is { } plan)
+            {
+                IReadOnlyList<PlanAnnotation> notes = plan.SentNotes is { Count: > 0 } sent
+                    ? sent
+                    : plan.Annotations.ToList();
+                _pendingRevision = (plan, plan.Markdown, notes);
+                _revisionTurn = IsBusy && _activeTurn is not null ? _activeTurn : null;
+            }
+
             return SendRoutedAsync(message, [], RouteIntent.Plan);
         }
 
@@ -3347,6 +3432,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _turnPlanFile = null;
 
         _activeTurn = new TurnActivityItem { HasClock = !_replayingHistory || eventStart is not null };
+
+        // A revision request that has not met its plan yet rides on this new turn; an
+        // older one not bound to a turn (its plan's turn ended long ago) does not.
+        if (_pendingRevision is not null && _revisionTurn is null)
+        {
+            _revisionTurn = _activeTurn;
+        }
+
         Add(_activeTurn);
 
         if (!_replayingHistory)
@@ -3411,6 +3504,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             LiftOutDeliverables(turn);
             turn.Finish(outcome);
             _activeTurn = null;
+
+            // The turn the revision request rode on ended without proposing a plan: the
+            // agent answered in prose or went off to work. A plan it proposes later,
+            // unprompted, is not a revision of that request - the markers must not say so.
+            if (ReferenceEquals(_revisionTurn, turn))
+            {
+                _pendingRevision = null;
+                _revisionTurn = null;
+            }
         }
 
         _turnTodo = null;

@@ -600,7 +600,7 @@
                                     ToolTipService.ToolTip="Build it, asking before each file change" />
                                 <Button
                                     Click="OnApprovalPlanAccept"
-                                    CommandParameter="auto"
+                                    CommandParameter="automatic"
                                     Content="Accept · auto"
                                     Style="{StaticResource QuietButton}"
                                     Tag="{x:Bind Approval, Mode=OneWay}"

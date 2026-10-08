@@ -143,8 +143,12 @@ public sealed record CommandsChanged(IReadOnlyList<string> Commands) : AgentEven
 /// <summary>The CLI cleared the conversation (/clear): the transcript starts over.</summary>
 public sealed record ConversationReset : AgentEvent;
 
-/// <summary>The CLI compacted the conversation (manually or because the context filled).</summary>
-public sealed record ConversationCompacted(string? Trigger, long? PreTokens) : AgentEvent;
+/// <summary>
+/// The CLI compacted the conversation (manually or because the context filled).
+/// PostTokens is what the window holds after the boundary - the meter's new reading,
+/// since a compact turn ends with no assistant message to take usage from.
+/// </summary>
+public sealed record ConversationCompacted(string? Trigger, long? PreTokens, long? PostTokens) : AgentEvent;
 
 /// <summary>A provider-level failure that is not tied to a particular tool call.</summary>
 public sealed record AgentError(string Message) : AgentEvent;

@@ -338,8 +338,9 @@ public sealed partial class ChatTab : UserControl
     private void AttachPlanBar(PlanAnnotationBar bar) => bar.Plan = PlanArtifactOf(bar);
 
     /// <summary>The card's annotations go back as a plan-mode revision request, as from the plan tab.</summary>
-    private void OnPlanAnnotationsSend(object? sender, string message) =>
-        _ = ViewModel?.SendPlanRevisionAsync(message);
+    private void OnPlanAnnotationsSend(object? sender, (SessionArtifact Plan, string Message) sent) =>
+        _ = ViewModel?.SendPlanRevisionAsync(sent.Message, sent.Plan);
+
 
     /// <summary>A step's row: fold or unfold its body. Once done by hand, the step stays as the reader left it.</summary>
     private void OnToolToggleClick(object sender, RoutedEventArgs e)
@@ -509,6 +510,8 @@ public sealed partial class ChatTab : UserControl
     /// <summary>
     /// Plan flow: "Accept (edit mode)" / "Accept (auto)" approve the plan and put the
     /// session straight into the chosen work mode, so the follow-up turn runs under it.
+    /// The parameter is a host mode id ("acceptEdits", <see cref="ChatViewModel.AutomaticMode"/>);
+    /// the CLI half is translated at the switch, not stored raw.
     /// </summary>
     private void OnApprovalPlanAccept(object sender, RoutedEventArgs e)
     {

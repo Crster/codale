@@ -167,6 +167,11 @@ public sealed partial class WorkspacePage : Page
             ViewModel.ChatActivationRequested -= OnChatActivationRequested;
             ViewModel.Sessions.Sessions.CollectionChanged -= OnHistoryInputsChanged;
             ViewModel.Sessions.OpenSessions.CollectionChanged -= OnHistoryInputsChanged;
+            if (_planWatchedChat is not null)
+            {
+                _planWatchedChat.PlanReplaced -= OnPlanReplaced;
+                _planWatchedChat = null;
+            }
             UnwatchConversation();
 
             foreach (var entry in _chatTabs)
@@ -1157,7 +1162,7 @@ public sealed partial class WorkspacePage : Page
         {
             _artifactTab = new ArtifactTab();
             _artifactTab.RevisionRequested += (plan, message) =>
-                _ = ViewModel.Chat.SendPlanRevisionAsync(message);
+                _ = ViewModel.Chat.SendPlanRevisionAsync(message, plan);
             _artifactTabItem = new TabViewItem
             {
                 IsClosable = true,
@@ -1171,6 +1176,30 @@ public sealed partial class WorkspacePage : Page
         _artifactTab.Show(artifact);
         _artifactTabItem!.Header = artifact.Title.Length > 28 ? artifact.Title[..28] + "…" : artifact.Title;
         CentreTabs.SelectedItem = _artifactTabItem;
+
+        // The tab follows plan takeovers, so it must listen to the chat the plan came
+        // from; switching to another chat's plan re-aims the subscription.
+        if (!ReferenceEquals(_planWatchedChat, ViewModel.Chat))
+        {
+            if (_planWatchedChat is not null)
+            {
+                _planWatchedChat.PlanReplaced -= OnPlanReplaced;
+            }
+
+            _planWatchedChat = ViewModel.Chat;
+            _planWatchedChat.PlanReplaced += OnPlanReplaced;
+        }
+    }
+
+    private ChatViewModel? _planWatchedChat;
+
+    /// <summary>A proposal replaced a listed plan: a tab still showing the old one follows it.</summary>
+    private void OnPlanReplaced(object? sender, (SessionArtifact OldPlan, SessionArtifact NewPlan) e)
+    {
+        if (_artifactTab is not null && ReferenceEquals(_artifactTab.Artifact, e.OldPlan))
+        {
+            ShowArtifact(e.NewPlan);
+        }
     }
 
     /// <summary>Tool paths may be bare relative names; they live under the project.</summary>
@@ -1466,6 +1495,11 @@ public sealed partial class WorkspacePage : Page
         {
             _artifactTab = null;
             _artifactTabItem = null;
+            if (_planWatchedChat is not null)
+            {
+                _planWatchedChat.PlanReplaced -= OnPlanReplaced;
+                _planWatchedChat = null;
+            }
         }
         else if (_terminalTabs.FirstOrDefault(t => ReferenceEquals(t.Item, args.Item)) is { } terminalEntry)
         {
