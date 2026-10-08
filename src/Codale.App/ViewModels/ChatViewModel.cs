@@ -71,6 +71,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     private IAgentSession? _planSession;
     private string? _planRestoreMode;
+    private string? _planRestoreEffort;
+    private bool _planEffortRaised;
 
     /// <summary>Relative workspace paths for @-references, built on first use per connect.</summary>
     private IReadOnlyList<string>? _workspaceFiles;
@@ -2969,6 +2971,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             _planSession = null;
             _planRestoreMode = null;
             PermissionMode = chosen;
+            RestorePlanEffort();
 
             if (_session is { } live)
             {
@@ -3461,6 +3464,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     private async Task<bool> EnterPlanModeAsync()
     {
+        // Planning twice in a row keeps the first pick: the second would save "high".
+        if (!_planEffortRaised)
+        {
+            _planRestoreEffort = RequestedEffort;
+            _planEffortRaised = true;
+        }
+
         RequestedEffort = "high";
 
         // Mid-turn there is nothing to restart without killing the running turn: the
@@ -3518,9 +3528,33 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         return true;
     }
 
+    /// <summary>Planning is done: puts the effort Ctrl+Enter raised back to what it was.</summary>
+    private void RestorePlanEffort()
+    {
+        if (!_planEffortRaised)
+        {
+            return;
+        }
+
+        var effort = _planRestoreEffort;
+        _planEffortRaised = false;
+        _planRestoreEffort = null;
+        RequestedEffort = effort;
+
+        if (_session is null || !IsConnected)
+        {
+            return;
+        }
+
+        // When the live switch is refused the next spawn picks the effort up.
+        _ = Task.Run(() => TryApplyModelEffortLiveAsync(RequestedModel, effort));
+    }
+
     /// <summary>Ends a plan turn: hands the session back its previous permission mode.</summary>
     private void RestoreAfterPlanTurn()
     {
+        RestorePlanEffort();
+
         if (_planSession is null)
         {
             return;
