@@ -3799,7 +3799,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         var kind = TurnAttachment.KindOf(path);
         if (kind is null)
         {
-            ComposerNotice = new NoticeItem { Text = "Only images (png, jpg, gif, webp) and PDFs can be attached.", Severity = NoticeSeverity.Warning };
+            ComposerNotice = new NoticeItem { Text = "Only images (png, jpg, gif, webp), PDFs, and text or code files can be attached.", Severity = NoticeSeverity.Warning };
             return false;
         }
 

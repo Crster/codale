@@ -151,7 +151,7 @@ public sealed class ClaudeAgentSession : IAgentSession
         foreach (var attachment in turn.Attachments)
         {
             var bytes = await readAllBytes(attachment.Path, ct).ConfigureAwait(false);
-            payloads.Add(new AttachmentPayload(attachment, Convert.ToBase64String(bytes)));
+            payloads.Add(new AttachmentPayload(attachment, bytes));
         }
 
         await WriteLineAsync(BuildUserMessageFrame(turn.ProviderText, payloads), ct).ConfigureAwait(false);
@@ -260,13 +260,15 @@ public sealed class ClaudeAgentSession : IAgentSession
         BuildControlRequestFrame(requestId, "apply_flag_settings", request =>
             request["settings"] = new Dictionary<string, object?> { ["effortLevel"] = effort });
 
-    /// <summary>An attachment with its bytes already base64-encoded, ready for the frame builder.</summary>
-    public readonly record struct AttachmentPayload(TurnAttachment Attachment, string Base64);
+    /// <summary>An attachment with its raw bytes, encoded for the wire by the frame builder.</summary>
+    public readonly record struct AttachmentPayload(TurnAttachment Attachment, byte[] Bytes);
 
     /// <summary>
-    /// Builds the <c>user</c> frame: the text block plus one base64 block per
-    /// attachment - <c>image</c> for pictures, <c>document</c> for PDFs - in API
-    /// content-block shape, which is what stream-json input forwards.
+    /// Builds the <c>user</c> frame: the text block plus one content block per
+    /// attachment - <c>image</c> for pictures, <c>document</c> for PDFs and text
+    /// files - in API content-block shape, which is what stream-json input forwards.
+    /// Images and PDFs travel base64; text documents take a plain-text source with
+    /// the raw UTF-8 in <c>data</c>, which is what the API expects for text/plain.
     /// Exposed for the regression test that pins the shape.
     /// </summary>
     public static object BuildUserMessageFrame(string text, IReadOnlyList<AttachmentPayload> payloads)
@@ -280,18 +282,34 @@ public sealed class ClaudeAgentSession : IAgentSession
 
         foreach (var payload in payloads)
         {
-            var mediaType = payload.Attachment.Kind switch
+            switch (payload.Attachment.Kind)
             {
-                TurnAttachmentKind.Image => MediaTypes.TryGetValue(
-                    System.IO.Path.GetExtension(payload.Attachment.Path).ToLowerInvariant(), out var image) ? image : "image/png",
-                _ => "application/pdf",
-            };
+                case TurnAttachmentKind.Image:
+                    var imageType = MediaTypes.TryGetValue(
+                        System.IO.Path.GetExtension(payload.Attachment.Path).ToLowerInvariant(), out var image) ? image : "image/png";
+                    content.Add(new
+                    {
+                        type = "image",
+                        source = new { type = "base64", media_type = imageType, data = Convert.ToBase64String(payload.Bytes) },
+                    });
+                    break;
 
-            content.Add(new
-            {
-                type = payload.Attachment.Kind == TurnAttachmentKind.Image ? "image" : "document",
-                source = new { type = "base64", media_type = mediaType, data = payload.Base64 },
-            });
+                case TurnAttachmentKind.Pdf:
+                    content.Add(new
+                    {
+                        type = "document",
+                        source = new { type = "base64", media_type = "application/pdf", data = Convert.ToBase64String(payload.Bytes) },
+                    });
+                    break;
+
+                default: // Text
+                    content.Add(new
+                    {
+                        type = "document",
+                        source = new { type = "text", media_type = "text/plain", data = Encoding.UTF8.GetString(payload.Bytes) },
+                    });
+                    break;
+            }
         }
 
         return new

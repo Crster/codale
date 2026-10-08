@@ -20,13 +20,12 @@ public sealed class ClaudeAttachmentFrameTests
     private static ClaudeAgentSession.AttachmentPayload Payload(string path) => new(
         new TurnAttachment
         {
-            Kind = path.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)
-                ? TurnAttachmentKind.Pdf
-                : TurnAttachmentKind.Image,
+            Kind = TurnAttachment.KindOf(path)
+                ?? throw new ArgumentException($"Test paths must be attachable: {path}"),
             Name = Path.GetFileName(path),
             Path = path,
         },
-        Convert.ToBase64String("fake-bytes"u8.ToArray()));
+        "fake-bytes"u8.ToArray());
 
     [Fact]
     public void Text_and_image_arrive_as_separate_content_blocks()
@@ -65,6 +64,22 @@ public sealed class ClaudeAttachmentFrameTests
         Assert.Equal(
             "application/pdf",
             document.GetProperty("source").GetProperty("media_type").GetString());
+    }
+
+    [Fact]
+    public void A_text_file_travels_as_a_document_block_with_a_plain_text_source()
+    {
+        var root = Frame("review this", Payload(@"C:\src\Program.cs"));
+
+        var document = root.GetProperty("message").GetProperty("content")[1];
+
+        Assert.Equal("document", document.GetProperty("type").GetString());
+
+        var source = document.GetProperty("source");
+        Assert.Equal("text", source.GetProperty("type").GetString());
+        Assert.Equal("text/plain", source.GetProperty("media_type").GetString());
+        // Plain-text sources carry the raw string, not base64 - the API rejects the alternative.
+        Assert.Equal("fake-bytes", source.GetProperty("data").GetString());
     }
 
     [Fact]

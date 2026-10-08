@@ -836,7 +836,7 @@ public sealed partial class ChatTab : UserControl
     {
         var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
 
-        foreach (var type in new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf" })
+        foreach (var type in TurnAttachment.PickerExtensions)
         {
             picker.FileTypeFilter.Add(type);
         }
@@ -863,9 +863,17 @@ public sealed partial class ChatTab : UserControl
     private void OnDraftPaste(object sender, TextControlPasteEventArgs e)
     {
         DataPackageView content;
+        bool files, text, image;
         try
         {
             content = Clipboard.GetContent();
+
+            // Contains reads the clipboard like GetContent does - it throws under the
+            // same lock contention, so it stays inside the same guard. An exception
+            // leaving this handler is a stowed one: no managed handler ever sees it.
+            files = content.Contains(StandardDataFormats.StorageItems);
+            text = !files && content.Contains(StandardDataFormats.Text);
+            image = !files && !text && content.Contains(StandardDataFormats.Bitmap);
         }
         catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException)
         {
@@ -873,23 +881,34 @@ public sealed partial class ChatTab : UserControl
             return;
         }
 
-        if (content.Contains(StandardDataFormats.StorageItems))
+        if (!files && !text && !image)
         {
-            e.Handled = true;
-            _ = PasteFilesAsync(content);
+            return;
         }
-        else if (content.Contains(StandardDataFormats.Bitmap) && !content.Contains(StandardDataFormats.Text))
+
+        e.Handled = true;
+
+        // Nothing touches the TextBox from inside this event: XAML is still unwinding
+        // the paste here, and a mutation in that window - the SelectedText insert, or
+        // the suggestion popup that TextChanged opens - stows an exception in XAML
+        // internals and takes the process down with 0xC000027B, before any managed
+        // handler could log it. The next dispatcher pass is past the paste; the async
+        // reads below then complete in frames of their own.
+        _ = DispatcherQueue.TryEnqueue(() =>
         {
-            e.Handled = true;
-            _ = PasteImageAsync(content);
-        }
-        else if (content.Contains(StandardDataFormats.Text))
-        {
-            // The text has to be read asynchronously, so the native paste is always
-            // suppressed and PasteTextAsync inserts it (or swaps a huge block for a file).
-            e.Handled = true;
-            _ = PasteTextAsync(content);
-        }
+            if (files)
+            {
+                _ = PasteFilesAsync(content);
+            }
+            else if (image)
+            {
+                _ = PasteImageAsync(content);
+            }
+            else
+            {
+                _ = PasteTextAsync(content);
+            }
+        });
     }
 
     /// <summary>Longest clipboard text, in characters, that goes straight into the composer.</summary>
@@ -912,9 +931,10 @@ public sealed partial class ChatTab : UserControl
 
             if (text.Length <= MaxInlinePasteChars)
             {
-                DraftBox.SelectedText = text;
-                DraftBox.SelectionStart += DraftBox.SelectedText.Length;
-                DraftBox.SelectionLength = 0;
+                // Not SelectedText: setting it while the TextBox is anywhere near paste
+                // processing crashes XAML internally (a stowed 0xC000027B, unloggable).
+                // The caret insert composes the new string in managed code instead.
+                InsertAtCaret(text);
                 return;
             }
 

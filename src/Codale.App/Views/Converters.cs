@@ -371,6 +371,7 @@ public sealed partial class AttachmentGlyphConverter : IValueConverter
     {
         TurnAttachmentKind.Image => "",
         TurnAttachmentKind.Pdf => "",
+        TurnAttachmentKind.Text => "",
         _ => "",
     };
 

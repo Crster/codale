@@ -1562,7 +1562,7 @@
                                             FontSize="14"
                                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                             Glyph="{x:Bind Kind, Converter={StaticResource AttachmentGlyph}}"
-                                            Visibility="{x:Bind IsPdf, Converter={StaticResource BoolToVisibility}}" />
+                                            Visibility="{x:Bind IsDocument, Converter={StaticResource BoolToVisibility}}" />
                                         <TextBlock
                                             MaxWidth="150"
                                             VerticalAlignment="Center"

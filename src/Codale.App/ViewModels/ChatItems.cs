@@ -145,6 +145,9 @@ public sealed partial class ComposerAttachment
 
     public bool IsPdf => Kind == TurnAttachmentKind.Pdf;
 
+    /// <summary>PDFs and text files both render with a glyph instead of a thumbnail.</summary>
+    public bool IsDocument => Kind is TurnAttachmentKind.Pdf or TurnAttachmentKind.Text;
+
     public TurnAttachment ToTurnAttachment() => new() { Kind = Kind, Name = Name, Path = Path };
 }
 
