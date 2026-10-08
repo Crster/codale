@@ -53,7 +53,7 @@ public sealed partial class SessionsViewModel : ObservableObject
         _isolated = isolated;
         foreach (var item in Sessions)
         {
-            item.ApplyOpenState(_open, _isolated);
+            item.ApplyOpenState(_open, _isolated, _worktrees);
         }
 
         SyncOpenSessions();
@@ -131,7 +131,7 @@ public sealed partial class SessionsViewModel : ObservableObject
                 CustomTitle = "(New session)",
             },
         };
-        item.ApplyOpenState(_open, _isolated);
+        item.ApplyOpenState(_open, _isolated, _worktrees);
         return item;
     }
 
@@ -223,11 +223,25 @@ public sealed partial class SessionsViewModel : ObservableObject
         // Reading every transcript in a busy project is disk-bound, and each row also
         // wants its stored title: all of it stays off the UI thread so opening the panel
         // never stutters.
-        Merge(await Task.Run(ReadSessions));
+        var scanned = await Task.Run(ReadSessions);
+        _worktrees = scanned.Worktrees;
+        Merge(scanned.Sessions);
+
+        foreach (var item in Sessions)
+        {
+            item.ApplyOpenState(_open, _isolated, _worktrees);
+        }
     }
 
-    private List<TranscriptSummary> ReadSessions()
+    /// <summary>Stored worktree paths of past isolated sessions that still exist on disk, by session id.</summary>
+    private IReadOnlyDictionary<string, string> _worktrees = new Dictionary<string, string>();
+
+    /// <summary>The worktree a past session ran in, if it ran isolated and the worktree is still there.</summary>
+    public string? WorktreeOf(string sessionId) => _worktrees.GetValueOrDefault(sessionId);
+
+    private (List<TranscriptSummary> Sessions, Dictionary<string, string> Worktrees) ReadSessions()
     {
+        var worktrees = new Dictionary<string, string>(StringComparer.Ordinal);
         var sessions = _reader.ListSessions().OrderByDescending(s => s.UpdatedAt).ToList();
 
         // The shared connection belongs to the UI thread; this read gets its own (WAL lets
@@ -246,18 +260,28 @@ public sealed partial class SessionsViewModel : ObservableObject
         {
             if (reader is null)
             {
-                return sessions;
+                return (sessions, worktrees);
+            }
+
+            var stored = reader.GetSessions(_projectPath, limit: int.MaxValue);
+
+            foreach (var record in stored)
+            {
+                if (record.WorktreePath is { Length: > 0 } worktree && Directory.Exists(worktree))
+                {
+                    worktrees.TryAdd(record.SessionId, worktree);
+                }
             }
 
             // Titles the helper model generated live in Codale's own database; show them
             // for sessions the CLI itself has not named, then the opening prompt.
-            var titles = reader.GetSessions(_projectPath)
+            var titles = stored
                 .Where(s => s.Title is { Length: > 0 })
                 .GroupBy(s => s.SessionId)
                 .ToDictionary(g => g.Key, g => g.First().Title!, StringComparer.Ordinal);
 
             // A title the user typed beats every other source.
-            return sessions.Select(session =>
+            var retitled = sessions.Select(session =>
             {
                 if (reader.GetUiState(_projectPath, RetitleKey(session.SessionId)) is { Length: > 0 } chosen)
                 {
@@ -268,6 +292,8 @@ public sealed partial class SessionsViewModel : ObservableObject
                     ? session with { CustomTitle = title }
                     : session;
             }).ToList();
+
+            return (retitled, worktrees);
         }
     }
 
@@ -321,7 +347,7 @@ public sealed partial class SessionsViewModel : ObservableObject
             }
 
             var fresh = new SessionListItem { Summary = summary };
-            fresh.ApplyOpenState(_open, _isolated);
+            fresh.ApplyOpenState(_open, _isolated, _worktrees);
 
             if (item is not null)
             {

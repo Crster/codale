@@ -100,6 +100,28 @@ public sealed class GitWorktrees
             : ["worktree", "remove", "--end-of-options", worktreePath];
 
         var result = await RunAsync(ct, readOnly: false, args).ConfigureAwait(false);
+
+        // A just-stopped agent or indexer can hold the folder for a moment on Windows.
+        for (var attempt = 0; attempt < 4 && !result.Success && Directory.Exists(worktreePath); attempt++)
+        {
+            await Task.Delay(500, ct).ConfigureAwait(false);
+            result = await RunAsync(ct, readOnly: false, args).ConfigureAwait(false);
+        }
+
+        if (!result.Success && force && Directory.Exists(worktreePath))
+        {
+            // git deletes the files but may fail on the directory itself; finish it and let git forget the entry.
+            try
+            {
+                Directory.Delete(worktreePath, recursive: true);
+                result = await RunAsync(ct, readOnly: false, "worktree", "prune").ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Keep git's own error below.
+            }
+        }
+
         if (!result.Success)
         {
             return new GitRepository.GitWriteResult(false, ErrorOf(result));
@@ -121,8 +143,15 @@ public sealed class GitWorktrees
     /// </summary>
     public async Task<GitRepository.GitWriteResult> MergeBackAsync(string worktreePath, CancellationToken ct = default)
     {
-        var branch = (await ListAsync(ct).ConfigureAwait(false))
-            .FirstOrDefault(w => !w.IsMain && SamePath(w.Path, worktreePath))?.Branch;
+        var listed = (await ListAsync(ct).ConfigureAwait(false))
+            .FirstOrDefault(w => !w.IsMain && SamePath(w.Path, worktreePath));
+
+        if (listed is null)
+        {
+            return await FinishVanishedAsync(worktreePath, ct).ConfigureAwait(false);
+        }
+
+        var branch = listed.Branch;
 
         if (branch is null || !branch.StartsWith(BranchPrefix, StringComparison.Ordinal) || !GitProcess.IsSafeRef(branch))
         {
@@ -153,6 +182,43 @@ public sealed class GitWorktrees
         }
 
         return await RemoveAsync(worktreePath, force: true, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Git no longer lists the worktree - a merge that went through but whose cleanup was
+    /// cut short leaves the session still pointing at it. Nothing is left to merge when its
+    /// branch is already in the project's branch (or gone); an unmerged one is reported.
+    /// </summary>
+    private async Task<GitRepository.GitWriteResult> FinishVanishedAsync(string worktreePath, CancellationToken ct)
+    {
+        var branch = BranchPrefix + Path.GetFileName(Path.TrimEndingDirectorySeparator(worktreePath));
+
+        if (GitProcess.IsSafeRef(branch) &&
+            (await RunAsync(ct, readOnly: true, "rev-parse", "--verify", "--quiet", "--end-of-options", $"refs/heads/{branch}").ConfigureAwait(false)).Success)
+        {
+            if (!await IsMergedAsync(branch, ct).ConfigureAwait(false))
+            {
+                return new GitRepository.GitWriteResult(false, $"The worktree is gone but branch {branch} still has unmerged work.");
+            }
+
+            await RunAsync(ct, readOnly: false, "branch", "-d", "--end-of-options", branch).ConfigureAwait(false);
+        }
+
+        // Best effort: an empty leftover folder or a stale registration.
+        try
+        {
+            if (Directory.Exists(worktreePath) && !Directory.EnumerateFileSystemEntries(worktreePath).Any())
+            {
+                Directory.Delete(worktreePath);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+
+        await RunAsync(ct, readOnly: false, "worktree", "prune").ConfigureAwait(false);
+
+        return GitRepository.GitWriteResult.Ok;
     }
 
     /// <summary>The <c>codale/*</c> branch a worktree was created on, or null for any other worktree.</summary>

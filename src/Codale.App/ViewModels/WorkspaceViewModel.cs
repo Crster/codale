@@ -670,9 +670,20 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
         IsStartingWorktree = true;
 
+        var sessionStopped = false;
+
         try
         {
             var worktrees = new GitWorktrees(ProjectPath);
+
+            // The agent runs with the worktree as its working directory; Windows will not
+            // delete a folder a live process is sitting in ("Permission denied").
+            if (!merge)
+            {
+                await chat.DisposeSessionAsync();
+                sessionStopped = true;
+            }
+
             var result = merge
                 ? await worktrees.MergeBackAsync(path)
                 : await worktrees.RemoveAsync(path, force: true);
@@ -690,6 +701,13 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
                 WorktreeError = merge
                     ? $"Could not merge back: {result.Error}"
                     : $"Could not remove the worktree: {result.Error}";
+
+                if (sessionStopped)
+                {
+                    // Still isolated: bring the agent back in the worktree.
+                    await chat.ConnectAsync();
+                }
+
                 return;
             }
 
@@ -1434,7 +1452,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
         var events = await Sessions.LoadTranscriptAsync(summary);
         var title = summary.Title.Length > 28 ? summary.Title[..28].TrimEnd() + "…" : summary.Title;
-        return await ResumeInChatAsync(summary.SessionId, events, worktreePath: null, title);
+        return await ResumeInChatAsync(summary.SessionId, events, Sessions.WorktreeOf(summary.SessionId), title);
     }
 
     private async void OnSessionResumed(object? sender, SessionRecord record)

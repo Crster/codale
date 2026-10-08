@@ -1263,6 +1263,25 @@
                             VerticalAlignment="Center"
                             Orientation="Horizontal"
                             Spacing="6">
+                            <Border
+                                VerticalAlignment="Center"
+                                Background="{ThemeResource AccentFillColorSecondaryBrush}"
+                                CornerRadius="10"
+                                Padding="8,2"
+                                Margin="0,0,6,0"
+                                Visibility="{x:Bind ViewModel.IsIsolated, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon
+                                        FontSize="10"
+                                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                        Glyph="&#xE8EA;" />
+                                    <TextBlock
+                                        FontSize="11"
+                                        FontWeight="SemiBold"
+                                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                        Text="Isolated" />
+                                </StackPanel>
+                            </Border>
                             <Ellipse
                                 Width="6"
                                 Height="6"
@@ -1520,24 +1539,6 @@
 
                                         <!--  Isolated: tagged, with the way out - merge back to the project, or discard  -->
                                         <StackPanel Spacing="8" Visibility="{x:Bind ViewModel.IsIsolated, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                            <Border
-                                                HorizontalAlignment="Left"
-                                                Background="{ThemeResource AccentFillColorSecondaryBrush}"
-                                                CornerRadius="10"
-                                                Padding="8,2">
-                                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                                    <FontIcon
-                                                        FontSize="10"
-                                                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
-                                                        Glyph="&#xE8EA;" />
-                                                    <TextBlock
-                                                        FontSize="11"
-                                                        FontWeight="SemiBold"
-                                                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
-                                                        Text="Isolated" />
-                                                </StackPanel>
-                                            </Border>
-
                                             <Grid ColumnSpacing="8">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*" />

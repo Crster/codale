@@ -40,10 +40,11 @@ public sealed partial class SessionListItem : ObservableObject
 
     public bool IsOpenIdle => IsOpen && !IsWorking;
 
-    public void ApplyOpenState(IReadOnlyDictionary<string, bool> open, IReadOnlySet<string> isolated)
+    public void ApplyOpenState(
+        IReadOnlyDictionary<string, bool> open, IReadOnlySet<string> isolated, IReadOnlyDictionary<string, string> worktrees)
     {
         IsOpen = open.TryGetValue(SessionId, out var working);
         IsWorking = IsOpen && working;
-        IsIsolated = isolated.Contains(SessionId);
+        IsIsolated = isolated.Contains(SessionId) || worktrees.ContainsKey(SessionId);
     }
 }
