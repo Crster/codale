@@ -75,6 +75,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         Sessions.SessionOpened += OnSessionOpened;
         Sessions.SessionResumed += OnSessionResumed;
         Git.SnapshotRefreshed += OnGitSnapshotRefreshed;
+        Git.NestedSnapshotsRefreshed += OnNestedSnapshotsRefreshed;
         Git.WorkingTreeChanged += OnGitWorkingTreeChanged;
 
         Chat = CreateChat();
@@ -282,9 +283,96 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         return terminal;
     }
 
+    /// <summary>Raised on the UI thread for a command tab the agent started; the page shows it as a tab.</summary>
+    public event Action<TerminalViewModel>? AgentTerminalStarted;
+
+    /// <summary>Command tabs the agent started, so list_tasks and stop_task can tell them from the user's.</summary>
+    private readonly HashSet<string> _agentTerminalIds = [];
+
+    private Task<TerminalViewModel?> OpenAgentTerminalAsync(string command, string? name)
+    {
+        if (_uiContext is null || AgentTerminalStarted is null)
+        {
+            return Task.FromResult<TerminalViewModel?>(null);
+        }
+
+        var opened = new TaskCompletionSource<TerminalViewModel?>();
+        _uiContext.Post(_ =>
+        {
+            try
+            {
+                // Built on the UI thread: the terminal posts its state changes back to where it was made.
+                var terminal = new TerminalViewModel(ProjectPath, command, name);
+                terminal.PropertyChanged += OnCommandTerminalPropertyChanged;
+                lock (_terminals)
+                {
+                    _terminals.Add(terminal);
+                    _agentTerminalIds.Add(terminal.Id);
+                }
+
+                UpdateRunningCommandCount();
+                AgentTerminalStarted?.Invoke(terminal);
+                opened.SetResult(terminal);
+            }
+            catch (Exception ex)
+            {
+                opened.SetException(ex);
+            }
+        }, null);
+        return opened.Task;
+    }
+
+    private bool IsAgentTerminal(TerminalViewModel terminal)
+    {
+        lock (_terminals)
+        {
+            return _agentTerminalIds.Contains(terminal.Id);
+        }
+    }
+
     /// <summary>The open terminals as the agent's terminal tools read them; safe to call off the UI thread.</summary>
     private sealed class TerminalSource(WorkspaceViewModel workspace) : ITerminalSource
     {
+        public async Task<TaskSnapshot?> StartAsync(string command, string? name, int waitSeconds, CancellationToken ct)
+        {
+            if (await workspace.OpenAgentTerminalAsync(command, name).ConfigureAwait(false) is not { } terminal)
+            {
+                return null;
+            }
+
+            // Early output (a port number, a compile error) is what the agent needs next.
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(Math.Clamp(waitSeconds, 0, 60));
+            while (terminal.Activity == TerminalActivity.Busy && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(100, ct).ConfigureAwait(false);
+            }
+
+            return Started(terminal, null, 8000);
+        }
+
+        public async Task<TaskSnapshot?> StopAsync(string id, CancellationToken ct)
+        {
+            if (workspace.TerminalsSnapshot().FirstOrDefault(t => t.Id == id && workspace.IsAgentTerminal(t)) is not { } terminal)
+            {
+                return null;
+            }
+
+            // Ctrl+C ends the command and leaves the tab, with what it printed, for the user.
+            await terminal.WriteAsync("\u0003").ConfigureAwait(false);
+            await Task.Delay(1500, ct).ConfigureAwait(false);
+            return Started(terminal, null, 2000);
+        }
+
+        public IReadOnlyList<TaskSnapshot> ListStarted() =>
+            [.. workspace.TerminalsSnapshot().Where(workspace.IsAgentTerminal).Select(t => Started(t, null, 0))];
+
+        /// <summary>A tab's shell outlives its command: for a command the agent started, idle means it finished.</summary>
+        private static TaskSnapshot Started(TerminalViewModel t, long? since, int? tailChars)
+        {
+            var snapshot = Snapshot(t, since, tailChars);
+            return snapshot.State == "idle" ? snapshot with { State = "exited" } : snapshot;
+        }
+
         public IReadOnlyList<TaskSnapshot> List() => [.. workspace.TerminalsSnapshot().Select(t => Snapshot(t, null, 0))];
 
         public TaskSnapshot? Read(string id, long? since, int? tailChars) =>
@@ -1165,6 +1253,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>Every git poll re-colours the file tree from the same snapshot.</summary>
     private void OnGitSnapshotRefreshed(object? sender, GitSnapshot snapshot) => Files.ApplyGitStatus(snapshot);
 
+    private void OnNestedSnapshotsRefreshed(object? sender, IReadOnlyList<GitSnapshot> snapshots) => Files.ApplyNestedGitStatus(snapshots);
+
     /// <summary>A stage, commit, checkout... just landed: the diff panel follows git's new state.</summary>
     private async void OnGitWorkingTreeChanged(object? sender, EventArgs e)
     {
@@ -1457,6 +1547,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         Sessions.SessionOpened -= OnSessionOpened;
         Sessions.SessionResumed -= OnSessionResumed;
         Git.SnapshotRefreshed -= OnGitSnapshotRefreshed;
+        Git.NestedSnapshotsRefreshed -= OnNestedSnapshotsRefreshed;
         Git.WorkingTreeChanged -= OnGitWorkingTreeChanged;
 
         // Runs do not outlive the project window, dev servers included; every terminal

@@ -20,6 +20,9 @@ public enum SessionArtifactKind
 /// <summary>A note on a plan: the passage it is about (empty for the plan as a whole) and the change asked for.</summary>
 public sealed record PlanAnnotation(string Quote, string Note);
 
+/// <summary>What a revised plan was revised from: the plan it replaced and what the reader asked for.</summary>
+public sealed record PlanRevision(string PreviousMarkdown, IReadOnlyList<PlanAnnotation> Notes);
+
 public enum SessionArtifactStatus
 {
     Proposed,
@@ -84,6 +87,12 @@ public sealed partial class SessionArtifact : ObservableObject
     /// chat card and the plan tab share one list until it is sent.
     /// </summary>
     public System.Collections.ObjectModel.ObservableCollection<PlanAnnotation> Annotations { get; } = [];
+
+    /// <summary>The annotations last sent for this plan (they are cleared from the list on send), kept so the revision can show what was asked.</summary>
+    public IReadOnlyList<PlanAnnotation>? SentNotes { get; set; }
+
+    /// <summary>Set on a plan that replaced an earlier one after the reader asked for changes.</summary>
+    public PlanRevision? Revision { get; set; }
 
     /// <summary>The annotations as one request for the agent to revise the plan.</summary>
     public string RevisionMessage()

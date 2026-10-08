@@ -98,6 +98,7 @@ public sealed partial class WorkspacePage : Page
 
         ViewModel = workspace;
         ViewModel.PropertyChanged += OnWorkspacePropertyChanged;
+        ViewModel.AgentTerminalStarted += AddTerminalTab;
         ViewModel.ChatActivationRequested += OnChatActivationRequested;
         ViewModel.Sessions.Sessions.CollectionChanged += OnHistoryInputsChanged;
         ViewModel.Sessions.OpenSessions.CollectionChanged += OnHistoryInputsChanged;
@@ -162,6 +163,7 @@ public sealed partial class WorkspacePage : Page
         if (ViewModel is not null)
         {
             ViewModel.PropertyChanged -= OnWorkspacePropertyChanged;
+            ViewModel.AgentTerminalStarted -= AddTerminalTab;
             ViewModel.ChatActivationRequested -= OnChatActivationRequested;
             ViewModel.Sessions.Sessions.CollectionChanged -= OnHistoryInputsChanged;
             ViewModel.Sessions.OpenSessions.CollectionChanged -= OnHistoryInputsChanged;
@@ -942,6 +944,8 @@ public sealed partial class WorkspacePage : Page
     {
         if (e.ClickedItem is GitFileStatus change)
         {
+            // The Staged list has no selection of its own; clicking there still targets the toolbar.
+            ViewModel.Git.SelectedChange = change;
             await ShowChangeDiffAsync(change);
         }
     }
@@ -1153,7 +1157,7 @@ public sealed partial class WorkspacePage : Page
         {
             _artifactTab = new ArtifactTab();
             _artifactTab.RevisionRequested += (plan, message) =>
-                _ = ViewModel.Chat.SendRoutedAsync(message, [], Codale.Core.Helper.RouteIntent.Plan);
+                _ = ViewModel.Chat.SendPlanRevisionAsync(message);
             _artifactTabItem = new TabViewItem
             {
                 IsClosable = true,
@@ -1799,6 +1803,10 @@ public sealed partial class WorkspacePage : Page
     }
 
     private void OnHistorySectionClick(object sender, RoutedEventArgs e) => UpdateHistoryLayout();
+
+    /// <summary>Git panel's History: a collapsed list must give its star row back, not leave a blank band.</summary>
+    private void OnGitHistorySectionClick(object sender, RoutedEventArgs e) =>
+        GitHistoryRow.Height = GitHistorySection.IsChecked == true ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
 
     private void OnHistoryShowAllClick(object sender, RoutedEventArgs e)
     {
@@ -3065,9 +3073,15 @@ public sealed partial class WorkspacePage : Page
     /// </summary>
     private void OnChangeMenuOpening(object? sender, object e)
     {
-        _changeMenuItem = (sender as MenuFlyout)?.Target is FrameworkElement { DataContext: GitFileStatus change }
+        var target = (sender as MenuFlyout)?.Target as FrameworkElement;
+        _changeMenuItem = target is { DataContext: GitFileStatus change }
             ? change
             : ViewModel.Git.SelectedChange;
+
+        // Rows in the Staged list carry Tag="staged": they can only be unstaged.
+        var staged = target?.Tag is "staged";
+        StageItem.Visibility = staged ? Visibility.Collapsed : Visibility.Visible;
+        UnstageItem.Visibility = staged ? Visibility.Visible : Visibility.Collapsed;
 
         // Folder ignores only make sense for a nested path: "folder" is the entry's own
         // directory, "root folder" the top-level one, hidden when that is the same thing.

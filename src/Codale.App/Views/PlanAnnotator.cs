@@ -407,6 +407,7 @@ public sealed partial class PlanAnnotationBar : Grid
         }
 
         var message = plan.RevisionMessage();
+        plan.SentNotes = plan.Annotations.ToList();
         plan.Annotations.Clear();
         SendRequested?.Invoke(this, message);
     }

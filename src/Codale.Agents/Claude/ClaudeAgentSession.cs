@@ -667,7 +667,7 @@ public sealed class ClaudeAgentSession : IAgentSession
         },
         new()
         {
-            Id = "claude-haiku-4-5-20251001", DisplayName = "Haiku", Description = "Fastest responses—ideal for quick answers",
+            Id = "claude-haiku-5-5", DisplayName = "Haiku", Description = "Fastest responses—ideal for quick answers",
         },
     ];
 

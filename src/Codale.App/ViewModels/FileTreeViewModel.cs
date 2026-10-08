@@ -167,6 +167,9 @@ public sealed partial class FileTreeViewModel : ObservableObject
     /// <summary>The most recent git snapshot, re-applied whenever more of the tree loads.</summary>
     private GitSnapshot? _snapshot;
 
+    /// <summary>Repositories found in sub folders when the project root is not one.</summary>
+    private IReadOnlyList<(string Root, GitStatusMap Map)> _nested = [];
+
     private readonly WorkspaceFolders? _extraFolders;
 
     public FileTreeViewModel(string projectPath, WorkspaceFolders? extraFolders = null)
@@ -255,6 +258,17 @@ public sealed partial class FileTreeViewModel : ObservableObject
         RefreshGitStatus();
     }
 
+    /// <summary>
+    /// Colours the tree from the repositories that live in sub folders, for a project
+    /// whose own root is not a repository (a parent holding an app and a server repo).
+    /// </summary>
+    public void ApplyNestedGitStatus(IReadOnlyList<GitSnapshot> snapshots)
+    {
+        _nested = [.. snapshots.Where(s => s is { IsRepository: true, RepositoryRoot: not null })
+            .Select(s => (Root: s.RepositoryRoot!, Map: GitStatusMap.Build(s.Changes, s.Ignored)))];
+        RefreshGitStatus();
+    }
+
     /// <summary>Re-applies the last snapshot, after lazily loading more of the tree.</summary>
     public void RefreshGitStatus()
     {
@@ -262,7 +276,7 @@ public sealed partial class FileTreeViewModel : ObservableObject
         {
             foreach (var node in Nodes)
             {
-                Walk(node, null, null);
+                WalkNested(node);
             }
 
             return;
@@ -353,6 +367,39 @@ public sealed partial class FileTreeViewModel : ObservableObject
         }
 
         return string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase) < 0;
+    }
+
+    /// <summary>
+    /// Walks nodes above any nested repository uncoloured, and hands each nested
+    /// repository's folder to <see cref="Walk"/> with that repository's own status map.
+    /// </summary>
+    private void WalkNested(FileNode node)
+    {
+        foreach (var (root, map) in _nested)
+        {
+            if (string.Equals(node.FullPath.TrimEnd('\\'), root.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)
+                || node.FullPath.StartsWith(root.TrimEnd('\\') + '\\', StringComparison.OrdinalIgnoreCase))
+            {
+                Walk(node, map, root);
+                return;
+            }
+        }
+
+        node.GitStatus = null;
+        node.IsIgnored = false;
+
+        if (!node.IsDirectory)
+        {
+            return;
+        }
+
+        foreach (var child in node.Children.ToList())
+        {
+            if (!child.IsPlaceholder)
+            {
+                WalkNested(child);
+            }
+        }
     }
 
     /// <summary>

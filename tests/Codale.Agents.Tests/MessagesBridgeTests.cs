@@ -221,7 +221,7 @@ public sealed class MessagesBridgeTests
 
     [Theory]
     [InlineData("claude-opus-5-5", "smart")]
-    [InlineData("claude-haiku-4-5-20251001", "default")]
+    [InlineData("claude-haiku-5-5", "default")]
     [InlineData("sonnet", "default")]
     [InlineData("", "default")]
     [InlineData("qwen3-coder", "qwen3-coder")]

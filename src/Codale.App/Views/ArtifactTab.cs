@@ -33,6 +33,13 @@ public sealed partial class ArtifactTab : UserControl
 
     private readonly MarkdownView _markdown = new() { HostOwnsTextMenu = true };
 
+    private readonly TextBlock _revisionNote = new()
+    {
+        FontSize = 12,
+        TextWrapping = TextWrapping.Wrap,
+        Visibility = Visibility.Collapsed,
+    };
+
     private readonly Image _image = new() { Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left, Visibility = Visibility.Collapsed };
 
     private readonly PlanAnnotationBar _annotationBar = new()
@@ -56,6 +63,8 @@ public sealed partial class ArtifactTab : UserControl
         var page = new StackPanel { MaxWidth = 860, Spacing = 14, Padding = new Thickness(32, 24, 32, 40) };
         page.Children.Add(_title);
         page.Children.Add(meta);
+        _revisionNote.Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
+        page.Children.Add(_revisionNote);
         page.Children.Add(new Rectangle
         {
             Height = 1,
@@ -131,9 +140,26 @@ public sealed partial class ArtifactTab : UserControl
         {
             // A missing image must not leave the previous artifact's picture behind.
             _image.Source = null;
+            _markdown.SetRevision(artifact.Revision);
+            ShowRevisionNote(artifact.Revision, artifact.Markdown);
             _markdown.BasePath = artifact.SourcePath is { } source ? System.IO.Path.GetDirectoryName(source) : null;
             _markdown.Markdown = artifact.IsImage ? "_The image file is no longer available._" : ReadMarkdown(artifact);
         }
+    }
+
+    private void ShowRevisionNote(PlanRevision? revision, string markdown)
+    {
+        if (revision is null)
+        {
+            _revisionNote.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var changes = Codale.Core.Markdown.PlanDiff.Compute(revision.PreviousMarkdown, markdown).Count;
+        _revisionNote.Text = changes == 0
+            ? "Revised, but no wording differs from the previous version."
+            : $"Revised: {changes} changed {(changes == 1 ? "block" : "blocks")}. Hover the coloured bars in the margin to see the old wording and what you asked.";
+        _revisionNote.Visibility = Visibility.Visible;
     }
 
     /// <summary>A plan document is read from disk each time it is shown, so an edit by the agent is not stale.</summary>

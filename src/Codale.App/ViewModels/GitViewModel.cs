@@ -26,6 +26,7 @@ namespace Codale.App.ViewModels;
 /// </remarks>
 public sealed partial class GitViewModel : ObservableObject, IDisposable
 {
+    private readonly string _projectPath;
     private readonly GitRepository _repository;
     private readonly IHelperModel _helper;
     private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
@@ -37,6 +38,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
 
     public GitViewModel(string projectPath, IHelperModel helper)
     {
+        _projectPath = projectPath;
         _repository = new GitRepository(projectPath);
         _helper = helper;
 
@@ -45,7 +47,11 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         _timer.Tick += (_, _) => _ = RefreshAsyncSafe();
     }
 
+    /// <summary>Working-tree changes not yet staged (untracked files included).</summary>
     public RangeObservableCollection<GitFileStatus> Changes { get; } = [];
+
+    /// <summary>Entries with something in the index, ready for the next commit.</summary>
+    public RangeObservableCollection<GitFileStatus> StagedChanges { get; } = [];
 
     public RangeObservableCollection<GitCommit> Log { get; } = [];
 
@@ -57,6 +63,9 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     /// before this fires.
     /// </summary>
     public event EventHandler<GitSnapshot>? SnapshotRefreshed;
+
+    /// <summary>Snapshots of the repositories in the project's sub folders; empty when the project is itself one.</summary>
+    public event EventHandler<IReadOnlyList<GitSnapshot>>? NestedSnapshotsRefreshed;
 
     /// <summary>
     /// Raised after a write (stage, commit, checkout...) actually changed the repository.
@@ -255,6 +264,23 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     /// a write (<paramref name="waitForRunning"/>) must see the write's result, which a
     /// refresh already in flight may have read git before, so it waits its turn.
     /// </summary>
+    private async Task<IReadOnlyList<GitSnapshot>> GetNestedSnapshotsAsync()
+    {
+        try
+        {
+            var folders = Directory.EnumerateDirectories(_projectPath)
+                .Where(folder => Directory.Exists(Path.Combine(folder, ".git")) || File.Exists(Path.Combine(folder, ".git")))
+                .ToList();
+
+            var snapshots = await Task.WhenAll(folders.Select(folder => new GitRepository(folder).GetSnapshotAsync())).ConfigureAwait(true);
+            return snapshots;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
     private async Task RefreshCoreAsync(bool waitForRunning)
     {
         if (waitForRunning)
@@ -287,6 +313,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
             if (!snapshot.IsRepository)
             {
                 Changes.Clear();
+                StagedChanges.Clear();
                 Log.Clear();
                 Branches.Clear();
                 ChangeCount = 0;
@@ -304,19 +331,27 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
                 StagedCount = snapshot.Changes.Count(c => c.IsStaged);
 
                 var previouslySelected = SelectedChange?.Path;
-                Replace(Changes, snapshot.Changes);
+
+                // A file edited after staging belongs to both lists, as in `git status`.
+                Replace(StagedChanges, [.. snapshot.Changes.Where(c => c.IsStaged && !c.IsConflicted)]);
+                Replace(Changes, [.. snapshot.Changes.Where(c => c.IsConflicted || c.WorkTree is not GitChangeKind.Unmodified)]);
 
                 // Selection is reference-based, and every refresh builds new records;
                 // put it back on the same path so the toolbar keeps its target.
                 SelectedChange = previouslySelected is null
                     ? null
-                    : Changes.FirstOrDefault(c => c.Path == previouslySelected);
+                    : Changes.FirstOrDefault(c => c.Path == previouslySelected)
+                        ?? StagedChanges.FirstOrDefault(c => c.Path == previouslySelected);
 
                 Replace(Log, snapshot.Log, CommitKey);
                 Replace(Branches, snapshot.Branches, b => b.Name);
             }
 
             SnapshotRefreshed?.Invoke(this, snapshot);
+
+            // A project folder that is not itself a repository may hold some one level down;
+            // the panel stays on the root, but the file tree can still show their status.
+            NestedSnapshotsRefreshed?.Invoke(this, snapshot.IsRepository ? [] : await GetNestedSnapshotsAsync().ConfigureAwait(true));
         }
         finally
         {

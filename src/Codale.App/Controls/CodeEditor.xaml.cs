@@ -1152,6 +1152,19 @@ public sealed partial class CodeEditor : UserControl
         e.Handled = true;
     }
 
+    // The text area shows the I-beam; the scrollbars above the canvas keep the default arrow
+    // because the pointer leaves the canvas when it moves onto them.
+    private void OnPointerEntered(object sender, PointerRoutedEventArgs e) =>
+        ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.IBeam);
+
+    private void OnPointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if (!IsPointerCaptured(e))
+        {
+            ProtectedCursor = null;
+        }
+    }
+
     private void OnPointerMoved(object sender, PointerRoutedEventArgs e)
     {
         if (!IsPointerCaptured(e))
@@ -1174,6 +1187,12 @@ public sealed partial class CodeEditor : UserControl
     {
         _autoScrollTimer?.Stop();
         Canvas.ReleasePointerCapture(e.Pointer);
+
+        var position = e.GetCurrentPoint(Canvas).Position;
+        if (position.X < 0 || position.Y < 0 || position.X > Canvas.ActualWidth || position.Y > Canvas.ActualHeight)
+        {
+            ProtectedCursor = null;
+        }
     }
 
     // Dragging a selection past the top or bottom edge keeps scrolling that way, even

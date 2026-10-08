@@ -266,6 +266,8 @@ public sealed partial class TerminalView : UserControl
             if (_selectionAnchor.Line < 0 || _selectionHead.Line < 0)
             {
                 _selectionAnchor = _selectionHead = default;
+                _singleCell = false;
+                _selectedSnapshot = null;
             }
         }
     }
@@ -284,7 +286,13 @@ public sealed partial class TerminalView : UserControl
     /// <summary>The emulator's title event (OSC 0/2), re-raised for anything that wants it.</summary>
     public event EventHandler<string>? TitleChanged;
 
-    public bool HasSelection => _selectionAnchor != _selectionHead;
+    /// <summary>A one-cell selection (a single-character word) has the same anchor and head, so it is flagged apart.</summary>
+    private bool _singleCell;
+
+    /// <summary>What the selection read when it was made, so the copy is that text even if output has since changed the cells under it.</summary>
+    private string? _selectedSnapshot;
+
+    public bool HasSelection => _selectionAnchor != _selectionHead || _singleCell;
 
     /// <summary>Clears the screen and scrollback, and the selection with it (the menu's Clear).</summary>
     public void Clear()
@@ -298,14 +306,17 @@ public sealed partial class TerminalView : UserControl
 
     public void SelectAll()
     {
+        _singleCell = false;
         _selectionAnchor = (0, 0);
         _selectionHead = (_emulator.TotalLines - 1, _emulator.Cols - 1);
+        _selectedSnapshot = GetSelectionText();
         InvalidateAll();
     }
 
-    public string SelectedText => GetSelectionText();
+    public string SelectedText => HasSelection ? _selectedSnapshot ?? GetSelectionText() : string.Empty;
 
-    public void CopySelection() => SetClipboard(SelectedText);
+    /// <summary>Copies the selection; the clipboard write retries in the background until it lands.</summary>
+    public void CopySelection() => _ = ClipboardWriter.SetTextAsync(SelectedText);
 
     /// <summary>Pastes clipboard text into the shell, wrapped in bracketed-paste markers when the app asked for them.</summary>
     public async Task PasteAsync()
@@ -359,42 +370,9 @@ public sealed partial class TerminalView : UserControl
         }
 
         _selectionAnchor = _selectionHead = default;
+        _singleCell = false;
+        _selectedSnapshot = null;
         InvalidateAll();
-    }
-
-    /// <summary>Sets the clipboard, retrying: another process briefly holding it open makes SetContent throw (CLIPBRD_E_CANT_OPEN), which is what made copy hit or miss.</summary>
-    private static bool SetClipboard(string text)
-    {
-        if (text.Length == 0)
-        {
-            return false;
-        }
-
-        for (var attempt = 0; attempt < 5; attempt++)
-        {
-            try
-            {
-                var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
-                package.SetText(text);
-                Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
-                try
-                {
-                    Windows.ApplicationModel.DataTransfer.Clipboard.Flush();
-                }
-                catch (Exception)
-                {
-                    // Flush is best effort; the content is already set.
-                }
-
-                return true;
-            }
-            catch (Exception)
-            {
-                System.Threading.Thread.Sleep(30);
-            }
-        }
-
-        return false;
     }
 
     // ------------------------------------------------------------------ metrics
@@ -1177,6 +1155,7 @@ public sealed partial class TerminalView : UserControl
         }
 
         var position = PointToCell(point.Position);
+        _singleCell = false;
         if (IsShiftDown() && HasSelection)
         {
             _selectionHead = position;
@@ -1254,6 +1233,7 @@ public sealed partial class TerminalView : UserControl
             _ = WriteToShellAsync(EncodeMouseReport(button, cell.Col, ViewportRow(cell.Line), pressed: false));
         }
 
+        var appClick = _reportedButton >= 0;
         _reportedButton = -1;
 
         if (_selecting)
@@ -1262,6 +1242,12 @@ public sealed partial class TerminalView : UserControl
         }
 
         _selecting = false;
+
+        // The selection is final: remember its text now, for Ctrl+C to copy as the reader saw it.
+        if (!appClick)
+        {
+            _selectedSnapshot = HasSelection ? GetSelectionText() : null;
+        }
     }
 
     private bool AppOwnsMouse => _emulator.MouseMode != TerminalEmulator.MouseTracking.None && !IsShiftDown();
@@ -1325,8 +1311,18 @@ public sealed partial class TerminalView : UserControl
             end++;
         }
 
+        if (end == start)
+        {
+            // Not on a word (a space, a bracket): nothing to select.
+            ClearSelection();
+            return;
+        }
+
+        // The head cell is inclusive, so a word ends on its last cell, not the one after it.
         _selectionAnchor = (line, start);
-        _selectionHead = (line, end);
+        _selectionHead = (line, end - 1);
+        _singleCell = end - 1 == start;
+        _selectedSnapshot = GetSelectionText();
         InvalidateAll();
     }
 
@@ -1358,7 +1354,7 @@ public sealed partial class TerminalView : UserControl
             ? (_selectionAnchor, _selectionHead)
             : (_selectionHead, _selectionAnchor);
 
-        if (a == b)
+        if (a == b && !_singleCell)
         {
             return string.Empty;
         }

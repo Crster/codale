@@ -20,6 +20,8 @@
             Draw="OnCanvasDraw"
             PointerPressed="OnPointerPressed"
             PointerMoved="OnPointerMoved"
+            PointerEntered="OnPointerEntered"
+            PointerExited="OnPointerExited"
             PointerReleased="OnPointerReleased"
             PointerWheelChanged="OnPointerWheelChanged"
             SizeChanged="OnCanvasSizeChanged" />

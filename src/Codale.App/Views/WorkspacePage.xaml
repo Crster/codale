@@ -329,8 +329,8 @@
                 </MenuFlyoutItem.Icon>
             </MenuFlyoutItem>
             <MenuFlyoutSeparator />
-            <MenuFlyoutItem Click="OnMenuStage" Text="Stage" />
-            <MenuFlyoutItem Click="OnMenuUnstage" Text="Unstage" />
+            <MenuFlyoutItem x:Name="StageItem" Click="OnMenuStage" Text="Stage" />
+            <MenuFlyoutItem x:Name="UnstageItem" Click="OnMenuUnstage" Text="Unstage" />
             <MenuFlyoutSeparator />
             <MenuFlyoutItem Click="OnMenuDiscard" Text="Discard changes…">
                 <MenuFlyoutItem.Icon>
@@ -517,9 +517,10 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" MinHeight="110" />
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" MinHeight="120" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition x:Name="GitHistoryRow" Height="*" />
                         </Grid.RowDefinitions>
 
                         <!--  Header: branch switcher on the left, sync actions on the right  -->
@@ -830,8 +831,67 @@
                             </Button>
                         </StackPanel>
 
+                        <!--  Staged: only present while something is in the index; collapsible  -->
+                        <StackPanel
+                            Grid.Row="3"
+                            Margin="0,0,0,6"
+                            Visibility="{x:Bind ViewModel.Git.StagedChanges.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                            <ToggleButton
+                                x:Name="GitStagedSection"
+                                IsChecked="True"
+                                Style="{StaticResource SectionHeader}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Text="STAGED" />
+                                    <Border
+                                        Padding="6,0"
+                                        VerticalAlignment="Center"
+                                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                        CornerRadius="8">
+                                        <TextBlock
+                                            FontSize="10"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Text="{x:Bind ViewModel.Git.StagedChanges.Count, Mode=OneWay}" />
+                                    </Border>
+                                </StackPanel>
+                            </ToggleButton>
+
+                            <ListView
+                                MaxHeight="170"
+                                IsItemClickEnabled="True"
+                                ItemClick="OnGitChangeClick"
+                                ItemsSource="{x:Bind ViewModel.Git.StagedChanges}"
+                                SelectionMode="None"
+                                Visibility="{x:Bind GitStagedSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="MinHeight" Value="26" />
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="VerticalContentAlignment" Value="Center" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="git:GitFileStatus">
+                                        <!--  Tag marks the row as staged so the shared menu offers Unstage  -->
+                                        <Grid
+                                            Background="Transparent"
+                                            ContextFlyout="{StaticResource ChangeContextMenu}"
+                                            Tag="staged"
+                                            ToolTipService.ToolTip="{x:Bind Path}">
+                                            <TextBlock
+                                                VerticalAlignment="Center"
+                                                FontSize="12"
+                                                TextTrimming="CharacterEllipsis">
+                                                <Run Foreground="{Binding Index, Converter={StaticResource GitStatusBrush}}" Text="{x:Bind DisplayName}" /><Run Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="{x:Bind PathHintTail}" />
+                                            </TextBlock>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </StackPanel>
+
                         <!--  Changes section header: count + stage all  -->
-                        <Grid Grid.Row="3" Margin="6,0,2,2" ColumnSpacing="6">
+                        <Grid Grid.Row="4" Margin="6,0,2,2" ColumnSpacing="6">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
@@ -854,7 +914,7 @@
                                 <TextBlock
                                     FontSize="10"
                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Text="{x:Bind ViewModel.Git.ChangeCount, Mode=OneWay}" />
+                                    Text="{x:Bind ViewModel.Git.Changes.Count, Mode=OneWay}" />
                             </Border>
                             <Button
                                 Grid.Column="2"
@@ -870,7 +930,8 @@
 
                         <!--  Working tree: click opens the diff in the centre; right-click stages  -->
                         <ListView
-                            Grid.Row="4"
+                            Grid.Row="5"
+                            MinHeight="60"
                             IsItemClickEnabled="True"
                             ItemClick="OnGitChangeClick"
                             ItemsSource="{x:Bind ViewModel.Git.Changes}"
@@ -904,28 +965,30 @@
                             </ListView.ItemTemplate>
                         </ListView>
 
-                        <StackPanel
-                            Grid.Row="5"
-                            Margin="6,10,0,4"
+                        <Border
+                            Grid.Row="6"
+                            Margin="0,10,0,0"
                             BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                             BorderThickness="0,1,0,0"
-                            Padding="0,8,0,0"
                             ToolTipService.ToolTip="Click a commit for its diff">
-                            <TextBlock
-                                CharacterSpacing="60"
-                                FontSize="11"
-                                FontWeight="SemiBold"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Text="HISTORY" />
-                        </StackPanel>
+                            <ToggleButton
+                                x:Name="GitHistorySection"
+                                Click="OnGitHistorySectionClick"
+                                IsChecked="True"
+                                Style="{StaticResource SectionHeader}">
+                                <TextBlock Text="HISTORY" />
+                            </ToggleButton>
+                        </Border>
 
                         <!--  History as a branch graph; click opens the commit's diff  -->
                         <ListView
-                            Grid.Row="6"
+                            Grid.Row="7"
+                            MinHeight="120"
                             IsItemClickEnabled="True"
                             ItemClick="OnGitCommitClick"
                             ItemsSource="{x:Bind ViewModel.Git.Log}"
-                            SelectionMode="None">
+                            SelectionMode="None"
+                            Visibility="{x:Bind GitHistorySection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
                             <ListView.ItemContainerStyle>
                                 <Style TargetType="ListViewItem">
                                     <Setter Property="MinHeight" Value="28" />

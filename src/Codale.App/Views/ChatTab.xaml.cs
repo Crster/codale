@@ -324,7 +324,12 @@ public sealed partial class ChatTab : UserControl
 
     private void OnPlanMarkdownDataContextChanged(FrameworkElement sender, DataContextChangedEventArgs e) => AttachPlanMarkdown((MarkdownView)sender);
 
-    private void AttachPlanMarkdown(MarkdownView markdown) => PlanAnnotator.For(markdown).Plan = PlanArtifactOf(markdown);
+    private void AttachPlanMarkdown(MarkdownView markdown)
+    {
+        var plan = PlanArtifactOf(markdown);
+        PlanAnnotator.For(markdown).Plan = plan;
+        markdown.SetRevision(plan?.Revision);
+    }
 
     private void OnPlanBarLoaded(object sender, RoutedEventArgs e) => AttachPlanBar((PlanAnnotationBar)sender);
 
@@ -334,7 +339,7 @@ public sealed partial class ChatTab : UserControl
 
     /// <summary>The card's annotations go back as a plan-mode revision request, as from the plan tab.</summary>
     private void OnPlanAnnotationsSend(object? sender, string message) =>
-        _ = ViewModel?.SendRoutedAsync(message, [], Codale.Core.Helper.RouteIntent.Plan);
+        _ = ViewModel?.SendPlanRevisionAsync(message);
 
     /// <summary>A step's row: fold or unfold its body. Once done by hand, the step stays as the reader left it.</summary>
     private void OnToolToggleClick(object sender, RoutedEventArgs e)

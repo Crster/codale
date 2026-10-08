@@ -2469,6 +2469,24 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    /// <summary>The plan a refused ExitPlanMode asked to have revised, and what was asked, until the next plan arrives.</summary>
+    private (SessionArtifact Plan, IReadOnlyList<PlanAnnotation> Notes)? _pendingRevision;
+
+    private void NoteRevisionRequest(ToolCallItem call, ApprovalDecision decision)
+    {
+        if (!call.IsPlan || decision.Behavior != ApprovalBehavior.Deny ||
+            Artifacts.FirstOrDefault(a => a.ToolUseId == call.ToolUseId) is not { } plan)
+        {
+            return;
+        }
+
+        IReadOnlyList<PlanAnnotation> notes = plan.SentNotes is { Count: > 0 } sent
+            ? sent
+            : decision.Message is { Length: > 0 } message ? [new PlanAnnotation("", message)] : [];
+        plan.SentNotes = null;
+        _pendingRevision = (plan, notes);
+    }
+
     /// <summary>
     /// An ExitPlanMode plan joins the session's plans the moment it is proposed. Plan mode
     /// writes the plan to a file under .claude/plans first, then proposes that same text:
@@ -2490,7 +2508,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             Markdown = item.PlanText ?? "",
             UpdatedAt = item.Timestamp,
             Status = SessionArtifactStatus.Proposed,
+            Revision = _pendingRevision is { } asked ? new PlanRevision(asked.Plan.Markdown, asked.Notes) : null,
         };
+        _pendingRevision = null;
 
         if (source is not null)
         {
@@ -2925,6 +2945,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _approvals.Remove(approval.RequestId);
         OnApprovalsChanged();
         pending.Approval = null;
+        NoteRevisionRequest(pending, decision);
         pending.Status = decision.Behavior == ApprovalBehavior.Allow
             ? ToolCallStatus.Running
             : ToolCallStatus.Denied;
@@ -2974,6 +2995,28 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             answered.TrySetResult(decision);
         }
+    }
+
+    /// <summary>
+    /// Annotations sent back on a plan. While the plan still awaits approval the turn is
+    /// blocked on it, so the annotations answer that approval as a revision (the old plan
+    /// is replaced and the turn carries on). Otherwise they go out as a new plan turn.
+    /// </summary>
+    public Task SendPlanRevisionAsync(string message)
+    {
+        var pending = _toolCalls.Values
+            .Select(c => c.Approval)
+            .FirstOrDefault(a => a is { IsPlan: true } && _approvals.ContainsKey(a.RequestId));
+
+        if (pending is null)
+        {
+            return SendRoutedAsync(message, [], RouteIntent.Plan);
+        }
+
+        RespondToApproval(
+            pending.RequestId,
+            ApprovalDecision.Deny($"The user reviewed the plan and asked for revisions. {message}\n\nRevise the plan and present it again."));
+        return Task.CompletedTask;
     }
 
     /// <summary>

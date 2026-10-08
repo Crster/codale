@@ -1,4 +1,5 @@
 using Codale.App.Services;
+using Codale.App.ViewModels;
 using Codale.Core.Markdown;
 
 using Microsoft.UI.Dispatching;
@@ -174,16 +175,25 @@ public sealed class MarkdownView : StackPanel
 
         if (!string.IsNullOrEmpty(Markdown))
         {
-            RenderBlocks(Children, MarkdownParser.Parse(Markdown), BaseFontSize, topBlock: true);
+            var changes = _revision is { } revision ? PlanDiff.Compute(revision.PreviousMarkdown, Markdown) : null;
+            RenderBlocks(Children, MarkdownParser.Parse(Markdown), BaseFontSize, topBlock: true, changes);
         }
 
         _images = _imagesInUse;
     }
 
-    private void RenderBlocks(UIElementCollection into, IReadOnlyList<MarkdownBlock> blocks, double size, bool topBlock)
+    private void RenderBlocks(
+        UIElementCollection into,
+        IReadOnlyList<MarkdownBlock> blocks,
+        double size,
+        bool topBlock,
+        IReadOnlyDictionary<int, PlanBlockChange>? changes = null)
     {
-        foreach (var block in blocks)
+        for (var index = 0; index < blocks.Count; index++)
         {
+            var block = blocks[index];
+            var first = into.Count;
+
             switch (block)
             {
                 case MarkdownBlock.Heading heading:
@@ -220,8 +230,139 @@ public sealed class MarkdownView : StackPanel
                     break;
             }
 
+            if (changes is not null && changes.TryGetValue(index, out var change) && into.Count > first)
+            {
+                var rendered = new List<UIElement>();
+                for (var k = first; k < into.Count; k++)
+                {
+                    rendered.Add(into[k]);
+                }
+
+                while (into.Count > first)
+                {
+                    into.RemoveAt(into.Count - 1);
+                }
+
+                into.Add(ChangeMarker(rendered, change));
+            }
+
             topBlock = false;
         }
+    }
+
+    private PlanRevision? _revision;
+
+    /// <summary>
+    /// Marks what this plan changed against the plan it replaced: a flag in the margin of
+    /// each changed block that shows the old wording and what the reader asked on hover.
+    /// Null turns the markers off.
+    /// </summary>
+    internal void SetRevision(PlanRevision? revision)
+    {
+        if (ReferenceEquals(_revision, revision))
+        {
+            return;
+        }
+
+        _revision = revision;
+        _debounce.Stop();
+        if (IsLoaded)
+        {
+            Rebuild();
+        }
+        else
+        {
+            _markdownStale = true;
+        }
+    }
+
+    private Grid ChangeMarker(IReadOnlyList<UIElement> rendered, PlanBlockChange change)
+    {
+        var color = change.Kind switch
+        {
+            PlanChangeKind.Added => ThemeBrush("MdChangeAddedBrush", 0x6E, 0xDD, 0xC8),
+            PlanChangeKind.Edited => ThemeBrush("MdChangeEditedBrush", 0xF2, 0xC0, 0x30),
+            _ => ThemeBrush("MdChangeDroppedBrush", 0xE0, 0x7A, 0x7A),
+        };
+
+        var body = new StackPanel();
+        foreach (var element in rendered)
+        {
+            body.Children.Add(element);
+        }
+
+        var marker = new Border
+        {
+            Width = 12,
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Child = new Rectangle
+            {
+                Width = 3,
+                RadiusX = 1.5,
+                RadiusY = 1.5,
+                Fill = color,
+                HorizontalAlignment = HorizontalAlignment.Left,
+            },
+        };
+        ToolTipService.SetToolTip(marker, ChangeTip(change));
+
+        var grid = new Grid { Margin = new Thickness(-12, 0, 0, 0) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(body, 1);
+        grid.Children.Add(marker);
+        grid.Children.Add(body);
+        return grid;
+    }
+
+    private ToolTip ChangeTip(PlanBlockChange change)
+    {
+        var tertiary = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"];
+        var panel = new StackPanel { Spacing = 6, MaxWidth = 440 };
+
+        void Add(string label, string text)
+        {
+            panel.Children.Add(new TextBlock { Text = label, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = tertiary });
+            panel.Children.Add(new TextBlock { Text = text, FontSize = 12.5, TextWrapping = TextWrapping.Wrap });
+        }
+
+        var asked = new List<PlanAnnotation>();
+        foreach (var note in _revision?.Notes ?? [])
+        {
+            if (note.Quote.Length > 0 &&
+                ((change.Was?.Contains(note.Quote, StringComparison.Ordinal) ?? false) ||
+                 change.Removed.Any(r => r.Contains(note.Quote, StringComparison.Ordinal))))
+            {
+                asked.Add(note);
+            }
+        }
+
+        switch (change.Kind)
+        {
+            case PlanChangeKind.Added:
+                Add("NEW IN THIS VERSION", "This block was not in the previous plan.");
+                break;
+
+            case PlanChangeKind.Edited:
+                Add("PREVIOUSLY", change.Was ?? "");
+                break;
+
+            default:
+                Add("REMOVED AFTER THIS", string.Join("\n\n", change.Removed));
+                break;
+        }
+
+        if (change.Kind != PlanChangeKind.DroppedAfter && change.Removed.Count > 0)
+        {
+            Add("ALSO REMOVED HERE", string.Join("\n\n", change.Removed));
+        }
+
+        foreach (var note in asked)
+        {
+            Add("YOU ASKED", note.Note);
+        }
+
+        return new ToolTip { Content = panel };
     }
 
     private TextBlock Heading(MarkdownBlock.Heading heading, double size, bool topBlock)

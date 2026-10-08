@@ -14,6 +14,18 @@ public interface ITerminalSource
 
     /// <summary>Output since an offset (or the last <paramref name="tailChars"/> characters); null when no such terminal is open.</summary>
     TaskSnapshot? Read(string id, long? since, int? tailChars);
+
+    /// <summary>
+    /// Runs a command the agent asked for in a new terminal tab and returns what it printed in
+    /// the first <paramref name="waitSeconds"/>; null when no tab can be opened (no window).
+    /// </summary>
+    Task<TaskSnapshot?> StartAsync(string command, string? name, int waitSeconds, CancellationToken ct);
+
+    /// <summary>Interrupts the command of a tab the agent started (the tab stays, with its output); null when no such tab.</summary>
+    Task<TaskSnapshot?> StopAsync(string id, CancellationToken ct);
+
+    /// <summary>The tabs the agent started, as list_tasks shows them.</summary>
+    IReadOnlyList<TaskSnapshot> ListStarted();
 }
 
 /// <summary>

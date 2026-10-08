@@ -70,8 +70,18 @@ public sealed class LocalTaskService(HostedTaskManager manager, ITerminalSource?
         Task.FromResult(terminals?.Read(id, since, tailChars ?? 8000)
             ?? throw new TaskServiceException($"No terminal '{id}'. Use list_terminals to see the open ones."));
 
+    /// <summary>Terminal tab ids; everything else is a headless task of the manager.</summary>
+    private static bool IsTerminalId(string id) => id.StartsWith("term-", StringComparison.Ordinal);
+
     public async Task<TaskSnapshot> StartAsync(string command, string? name, int waitSeconds, CancellationToken ct)
     {
+        // The agent's commands run in a terminal tab the user can watch and type into;
+        // the headless manager is only the fallback when there is no window to hold a tab.
+        if (terminals is not null && await terminals.StartAsync(command, name, waitSeconds, ct).ConfigureAwait(false) is { } started)
+        {
+            return started;
+        }
+
         var task = manager.Start(command, name);
 
         // Early output (a port number, a compile error) is what the agent needs next.
@@ -85,16 +95,25 @@ public sealed class LocalTaskService(HostedTaskManager manager, ITerminalSource?
     }
 
     public Task<TaskSnapshot> ReadAsync(string id, long? since, int? tailChars, CancellationToken ct) =>
-        Task.FromResult(Snapshot(Find(id), since, tailChars ?? 8000));
+        IsTerminalId(id)
+            ? ReadTerminalAsync(id, since, tailChars, ct)
+            : Task.FromResult(Snapshot(Find(id), since, tailChars ?? 8000));
 
     public Task<IReadOnlyList<TaskSnapshot>> ListAsync(CancellationToken ct) =>
-        Task.FromResult<IReadOnlyList<TaskSnapshot>>([.. manager.List().Select(t => Snapshot(t, null, 0))]);
+        Task.FromResult<IReadOnlyList<TaskSnapshot>>(
+            [.. manager.List().Select(t => Snapshot(t, null, 0)), .. terminals?.ListStarted() ?? []]);
 
-    public Task<TaskSnapshot> StopAsync(string id, CancellationToken ct)
+    public async Task<TaskSnapshot> StopAsync(string id, CancellationToken ct)
     {
+        if (IsTerminalId(id))
+        {
+            return (terminals is null ? null : await terminals.StopAsync(id, ct).ConfigureAwait(false))
+                ?? throw new TaskServiceException($"No task '{id}'. Use list_tasks to see the running ones.");
+        }
+
         var task = Find(id);
         task.Stop();
-        return Task.FromResult(Snapshot(task, null, 2000));
+        return Snapshot(task, null, 2000);
     }
 
     private HostedTask Find(string id) =>
