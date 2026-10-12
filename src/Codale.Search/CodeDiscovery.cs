@@ -113,7 +113,7 @@ internal static class CodeDiscovery
             new ToolParameter
             {
                 Name = "keywords",
-                Description = "comma separated terms the implementing code literally contains",
+                Description = "comma separated terms the implementing code literally contains; treat short queries like 'run build' as a complete thought, not separate entities",
                 Required = true,
             },
             new ToolParameter
@@ -253,6 +253,13 @@ internal static class CodeDiscovery
         grep, comma separated. Each is one identifier (MessageRouter, onKeyDown,
         max_retries) or a short exact string the code contains - never a description of
         the code ("session title generation" matches nothing; SessionTitles does).
+        When the query is a short keyword, command, or phrase (e.g. "run build"), treat
+        it as a single complete thought, not as separate entities: do not split it into
+        loose individual words like "run" and "build". Instead, search for the whole
+        keyword or complete thought: the exact phrase string ("run build"), compound
+        identifiers that represent the whole concept together (RunBuild, BuildRunner,
+        run_build, RunBuildCommand), or the cohesive command/action in the project's
+        vocabulary.
         Use this project's own vocabulary - class and file names you can see in the
         list, and the methods, properties, events, settings keys and API calls such code
         would contain - in the project's casing. For UI questions add the user-visible
@@ -280,7 +287,9 @@ internal static class CodeDiscovery
         the code that handles it. Usually 1 to 3, never more than 4. Empty if none are.
 
         keywords: only when none are relevant, 3 to 8 different terms to grep next, using
-        how this codebase names things as the candidates show it.
+        how this codebase names things as the candidates show it. Keep short queries or
+        commands (like "run build") together as a unified complete thought or compound
+        identifier, not separate loose words.
 
         Rules:
         - A file that only mentions, imports, tests or calls it in passing is not relevant.
@@ -351,6 +360,10 @@ internal static class CodeDiscovery
 
         builder.AppendLine();
         builder.Append("Question: ").Append(query);
+        if (IsShortCompleteThought(query))
+        {
+            builder.Append(" (short keyword/command: treat as a single complete thought, not separate entities)");
+        }
         return builder.ToString();
     }
 
@@ -415,4 +428,33 @@ internal static class CodeDiscovery
         "thing", "things", "like", "get", "set", "there", "here", "happen", "happens", "logic",
         "feature", "function", "method", "part", "done", "does", "doing", "want", "need",
     };
+
+    private static readonly HashSet<string> QuestionStopWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "where", "what", "which", "how", "why", "who", "when",
+        "does", "do", "did", "is", "are", "was", "were",
+        "can", "could", "should", "would", "may", "might",
+        "tell", "show", "find", "explain",
+    };
+
+    /// <summary>
+    /// True when the query is a short keyword, command or action phrase (e.g. "run build", "save file")
+    /// representing a single complete thought, rather than a natural language question or single word.
+    /// </summary>
+    internal static bool IsShortCompleteThought(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query) || query.Contains('?'))
+        {
+            return false;
+        }
+
+        var unquoted = WithoutQuoted(query).Trim();
+        var words = unquoted.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length is < 2 or > 4)
+        {
+            return false;
+        }
+
+        return !words.Any(w => QuestionStopWords.Contains(w.Trim(',', '.', '!', ':', ';')));
+    }
 }

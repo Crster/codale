@@ -116,7 +116,9 @@ public sealed class SourceExplorer
             .ToList();
         if (keywords.Count == 0)
         {
-            keywords = questionTerms.Select(t => t.Text).ToList();
+            keywords = CodeDiscovery.IsShortCompleteThought(query)
+                ? [query.Trim()]
+                : questionTerms.Select(t => t.Text).ToList();
         }
 
         var tried = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -138,12 +140,17 @@ public sealed class SourceExplorer
 
             // The model's words lead; the question's own words only break ties - except
             // the text it quotes, which the user asked for as written.
+            // When the question is a short complete thought (like "run build"), do not split it into loose words.
+            var tieBreakers = CodeDiscovery.IsShortCompleteThought(query)
+                ? Enumerable.Empty<ExploreTerm>()
+                : questionTerms
+                    .Where(q => !q.Exact && !fresh.Contains(q.Text, StringComparer.OrdinalIgnoreCase))
+                    .Select(q => q with { Weight = q.Weight * 0.3 });
+
             var terms = Resolve(snapshot, [
                 .. questionTerms.Where(q => q.Exact),
                 .. fresh.Select(k => new ExploreTerm(k, 1.0)),
-                .. questionTerms
-                    .Where(q => !q.Exact && !fresh.Contains(q.Text, StringComparer.OrdinalIgnoreCase))
-                    .Select(q => q with { Weight = q.Weight * 0.3 }),
+                .. tieBreakers,
             ]);
 
             var found = Rank(snapshot, terms, paths, setup)

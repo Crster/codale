@@ -94,4 +94,37 @@ public sealed class CodeDiscoveryTests
     [InlineData(@"src\Contest.cs", false)]
     public void Test_and_doc_paths_are_recognised(string path, bool expected) =>
         Assert.Equal(expected, CodeDiscovery.IsTestOrDoc(path));
+
+    [Fact]
+    public void Prompt_instructs_model_to_treat_short_keyword_as_complete_thought()
+    {
+        Assert.Contains("run build", CodeDiscovery.KeywordSystemPrompt);
+        Assert.Contains("complete thought", CodeDiscovery.KeywordSystemPrompt);
+        Assert.Contains("separate entities", CodeDiscovery.KeywordSystemPrompt);
+        Assert.Contains("run build", CodeDiscovery.JudgeSystemPrompt);
+        Assert.Contains("run build", CodeDiscovery.KeywordsTool.Parameters[0].Description);
+    }
+
+    [Theory]
+    [InlineData("run build", true)]
+    [InlineData("npm run build", true)]
+    [InlineData("save file", true)]
+    [InlineData("where is the RetryPolicy backoff", false)]
+    [InlineData("how do I run this project", false)]
+    [InlineData("what is this", false)]
+    [InlineData("retry", false)]
+    [InlineData("run build?", false)]
+    public void IsShortCompleteThought_identifies_short_commands_and_keywords(string query, bool expected) =>
+        Assert.Equal(expected, CodeDiscovery.IsShortCompleteThought(query));
+
+    [Fact]
+    public void BuildKeywordPrompt_adds_short_complete_thought_hint_for_short_queries()
+    {
+        var prompt = CodeDiscovery.BuildKeywordPrompt("run build", ["src/Build.cs"]);
+        Assert.Contains("Question: run build (short keyword/command: treat as a single complete thought, not separate entities)", prompt);
+
+        var questionPrompt = CodeDiscovery.BuildKeywordPrompt("where is the RetryPolicy backoff", ["src/RetryPolicy.cs"]);
+        Assert.Contains("Question: where is the RetryPolicy backoff", questionPrompt);
+        Assert.DoesNotContain("short keyword/command", questionPrompt);
+    }
 }

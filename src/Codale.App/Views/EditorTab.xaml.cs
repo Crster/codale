@@ -105,7 +105,16 @@ public sealed partial class EditorTab : UserControl
             };
             RenderHighlights(force: true);
         };
+
+        GotFocus += OnTabGotFocus;
+        PointerPressed += OnTabPointerPressed;
     }
+
+    private void OnTabGotFocus(object sender, Microsoft.UI.Xaml.RoutedEventArgs e) =>
+        _ = CheckAndUpdateIfModifiedAsync();
+
+    private void OnTabPointerPressed(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e) =>
+        _ = CheckAndUpdateIfModifiedAsync();
 
     private void AddAccelerator(
         Windows.System.VirtualKey key,
@@ -412,6 +421,106 @@ public sealed partial class EditorTab : UserControl
             try
             {
                 FileEditor.LoadText(text);
+            }
+            finally
+            {
+                _loadingText = false;
+            }
+
+            ApplyHighlighting(path);
+        }
+    }
+
+    private bool _isCheckingUpdate;
+
+    /// <summary>
+    /// Checks if the open file has been modified on disk by an agent or other program,
+    /// and reloads the display if so.
+    /// </summary>
+    public async Task<bool> CheckAndUpdateIfModifiedAsync()
+    {
+        if (ViewModel is null || !ViewModel.HasFile || ViewModel.FilePath is not { } path)
+        {
+            return false;
+        }
+
+        if (_isCheckingUpdate)
+        {
+            return false;
+        }
+
+        _isCheckingUpdate = true;
+        try
+        {
+            if (ViewModel.DeletedOnDisk())
+            {
+                ViewModel.Message = "File was deleted on disk.";
+                return false;
+            }
+
+            if (!ViewModel.ChangedOnDisk())
+            {
+                return false;
+            }
+
+            // If the user has unsaved changes in Codale, don't silently overwrite them.
+            if (ViewModel.IsDirty)
+            {
+                ViewModel.Message = "This file changed on disk since you opened it. Save again to overwrite it with your version.";
+                return false;
+            }
+
+            await ReloadAsync();
+            return true;
+        }
+        finally
+        {
+            _isCheckingUpdate = false;
+        }
+    }
+
+    /// <summary>
+    /// Reloads the file from disk while preserving the cursor position and scroll offset if possible.
+    /// </summary>
+    public async Task ReloadAsync()
+    {
+        if (ViewModel.FilePath is not { } path)
+        {
+            return;
+        }
+
+        var cursor = FileEditor.CursorPosition;
+        var scroll = FileEditor.VerticalScroll;
+
+        ClearHighlights();
+        ImagePreview.Source = null;
+        HexView.Close();
+
+        var sequence = ++_loadSequence;
+        await ViewModel.LoadAsync(path);
+
+        if (sequence != _loadSequence)
+        {
+            return;
+        }
+
+        if (ViewModel.IsImage)
+        {
+            _ = ShowImageAsync(path);
+        }
+        else if (ViewModel.IsBinaryPlaceholder)
+        {
+            HexView.Open(path);
+        }
+
+        if (ViewModel.LoadedText is { } text)
+        {
+            _loadingText = true;
+            try
+            {
+                FileEditor.LoadText(text);
+                FileEditor.SetCursorPosition(cursor.LineNumber, Math.Max(0, cursor.CharacterPositionInLine - 1), select: false, scrollIntoView: false);
+                FileEditor.SetVerticalScroll(scroll);
             }
             finally
             {

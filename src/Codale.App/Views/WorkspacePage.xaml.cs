@@ -260,6 +260,11 @@ public sealed partial class WorkspacePage : Page
         }
 
         UpdateSessionPanelForActiveTab();
+
+        if (active is not null)
+        {
+            _ = active.CheckAndUpdateIfModifiedAsync();
+        }
     }
 
     private EditorTab? ActiveEditorTab() =>
@@ -567,7 +572,17 @@ public sealed partial class WorkspacePage : Page
 
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
     {
-        if (args.WindowActivationState == WindowActivationState.Deactivated || _attentionChat is not { } chat)
+        if (args.WindowActivationState == WindowActivationState.Deactivated)
+        {
+            return;
+        }
+
+        if (ActiveEditorTab() is { } activeTab)
+        {
+            _ = activeTab.CheckAndUpdateIfModifiedAsync();
+        }
+
+        if (_attentionChat is not { } chat)
         {
             return;
         }
@@ -1347,6 +1362,7 @@ public sealed partial class WorkspacePage : Page
         if (open is not null)
         {
             CentreTabs.SelectedItem = open.Item;
+            _ = open.Tab.CheckAndUpdateIfModifiedAsync();
             return open;
         }
 
@@ -1391,6 +1407,8 @@ public sealed partial class WorkspacePage : Page
         var item = new TabViewItem { IsClosable = true };
         item.Content = tab;
         item.DoubleTapped += OnEditorTabDoubleTapped;
+        item.PointerPressed += (_, _) => _ = tab.CheckAndUpdateIfModifiedAsync();
+        item.GotFocus += (_, _) => _ = tab.CheckAndUpdateIfModifiedAsync();
 
         var entry = new EditorTabEntry(item, tab);
         tab.Edited += (_, _) => PromoteEditorTab(entry);

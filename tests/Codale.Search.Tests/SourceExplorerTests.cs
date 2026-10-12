@@ -710,4 +710,21 @@ public sealed class SourceExplorerTests : IDisposable
         string[] python = ["def a():", "    x = 1", "    return x", "", "def b():", "    pass"];
         Assert.Equal(3, SourceExplorer.BlockEnd(python, 1));
     }
+
+    [Fact]
+    public async Task A_short_keyword_command_is_passed_to_model_as_a_complete_thought()
+    {
+        var model = new ScriptedModel(Keywords("RunBuild, run build"), Pick("1"));
+        Write("src/BuildTask.cs", """
+            public class BuildTask
+            {
+                public void RunBuild() { }
+            }
+            """);
+
+        var result = await Explorer(model).RunAsync("run build");
+
+        Assert.Contains(model.Seen, s => s.Prompt.Contains("Question: run build (short keyword/command: treat as a single complete thought, not separate entities)"));
+        Assert.Contains(result.Files, f => f.RelativePath == P("src/BuildTask.cs"));
+    }
 }

@@ -1166,6 +1166,7 @@ public sealed partial class SearchAgentLoop
 
         builder.AppendLine($"- Make up to {MaxCallsPerStep} calls at once when they do not depend on each other (a grep and the reads of files already found): every reply costs time.");
         builder.AppendLine("- For questions about running, building or setup, look at the key project files first.");
+        builder.AppendLine("- For short keywords or commands (like \"run build\"), treat them as a single complete thought or whole phrase rather than splitting into separate words.");
         builder.AppendLine("- Before answering, read_file the lines that actually handle the question, so they can be shown.");
         builder.AppendLine("- Call answer as soon as you can answer; do not keep searching once you know. Never repeat a call already made.");
         builder.AppendLine();

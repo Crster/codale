@@ -384,6 +384,28 @@ public sealed partial class EditorViewModel : ObservableObject
         }
     }
 
+    /// <summary>True when the file exists on disk and its write time or size differs from what was loaded or saved.</summary>
+    public bool ChangedOnDisk()
+    {
+        if (FilePath is not { } path)
+        {
+            return false;
+        }
+
+        return ChangedOnDisk(path);
+    }
+
+    /// <summary>True when the file was loaded from disk but no longer exists on disk.</summary>
+    public bool DeletedOnDisk()
+    {
+        if (FilePath is not { } path || _diskStamp is null)
+        {
+            return false;
+        }
+
+        return !File.Exists(path);
+    }
+
     private bool ChangedOnDisk(string path)
     {
         if (_diskStamp is not { } stamp)
