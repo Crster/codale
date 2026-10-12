@@ -304,19 +304,26 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
                 // A live terminal for the same command is reused rather than starting a second copy
                 // (e.g. two dev servers fighting over the same port), so the caller surfaces that tab.
                 TerminalViewModel? live;
+                var trimmedCommand = command.Trim();
+                var trimmedName = string.IsNullOrWhiteSpace(name) ? null : name.Trim();
                 lock (_terminals)
                 {
                     live = _terminals.FirstOrDefault(t =>
-                        IsAgentTerminal(t) &&
                         t.IsCommandTerminal &&
                         t.IsRunning &&
                         t.Activity == TerminalActivity.Busy &&
-                        t.CommandText == command &&
-                        (name is null || t.CommandName == name));
+                        (string.Equals(t.CommandText?.Trim(), trimmedCommand, StringComparison.Ordinal) ||
+                         (trimmedName is not null && string.Equals(t.CommandName?.Trim(), trimmedName, StringComparison.OrdinalIgnoreCase))));
                 }
 
                 if (live is not null)
                 {
+                    lock (_terminals)
+                    {
+                        live.IsAgentTerminal = true;
+                        _agentTerminalIds.Add(live.Id);
+                    }
+
                     AgentTerminalStarted?.Invoke(live);
                     opened.SetResult(live);
                     return;
@@ -464,13 +471,19 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// </summary>
     public TerminalViewModel RunProjectCommand(ProjectCommand command)
     {
-        if (_terminals.FirstOrDefault(t =>
-                t.IsCommandTerminal &&
-                t.IsRunning &&
-                t.CommandName == command.Name &&
-                t.CommandText == command.Command) is { } live)
+        var trimmedCommand = command.Command.Trim();
+        var trimmedName = command.Name.Trim();
+        lock (_terminals)
         {
-            return live;
+            if (_terminals.FirstOrDefault(t =>
+                    t.IsCommandTerminal &&
+                    t.IsRunning &&
+                    t.Activity == TerminalActivity.Busy &&
+                    (string.Equals(t.CommandName?.Trim(), trimmedName, StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(t.CommandText?.Trim(), trimmedCommand, StringComparison.Ordinal))) is { } live)
+            {
+                return live;
+            }
         }
 
         var terminal = new TerminalViewModel(ResolveCommandDirectory(command), command.Command, command.Name);

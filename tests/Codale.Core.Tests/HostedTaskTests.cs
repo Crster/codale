@@ -206,4 +206,75 @@ public sealed class HostedTaskTests
         Assert.Equal("Unauthorized.", response["error"]!.GetValue<string>());
         Assert.Empty(manager.List());
     }
+
+    [Fact]
+    public void Start_reuses_already_running_task()
+    {
+        using var manager = new HostedTaskManager(Path.GetTempPath());
+        var cmd = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 120" : "sleep 120";
+        var first = manager.Start(cmd, "sleeper");
+        try
+        {
+            Assert.Equal(HostedTaskState.Running, first.State);
+
+            var second = manager.Start(cmd, "sleeper");
+            Assert.Same(first, second);
+
+            // Reuses even if name is null on subsequent start
+            var third = manager.Start(cmd);
+            Assert.Same(first, third);
+
+            // Reuses if name matches an existing running task's name
+            var fourth = manager.Start(cmd + " ", "sleeper");
+            Assert.Same(first, fourth);
+
+            Assert.Single(manager.List());
+        }
+        finally
+        {
+            first.Stop();
+        }
+    }
+
+    [Fact]
+    public void TaskStarted_is_not_raised_when_reusing_running_task()
+    {
+        using var manager = new HostedTaskManager(Path.GetTempPath());
+        var starts = 0;
+        manager.TaskStarted += _ => starts++;
+
+        var cmd = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 120" : "sleep 120";
+        var first = manager.Start(cmd, "sleeper");
+        try
+        {
+            Assert.Equal(1, starts);
+
+            var second = manager.Start(cmd, "sleeper");
+            Assert.Same(first, second);
+            Assert.Equal(1, starts);
+        }
+        finally
+        {
+            first.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task Start_spawns_new_task_if_previous_has_exited()
+    {
+        using var manager = new HostedTaskManager(Path.GetTempPath());
+        var cmd = Echo("once");
+        var first = manager.Start(cmd);
+        await Eventually(() => first.State, s => s != HostedTaskState.Running);
+
+        var second = manager.Start(cmd);
+        try
+        {
+            Assert.NotSame(first, second);
+        }
+        finally
+        {
+            second.Stop();
+        }
+    }
 }

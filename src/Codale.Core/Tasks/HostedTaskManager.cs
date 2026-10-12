@@ -236,7 +236,25 @@ public sealed class HostedTaskManager : IDisposable
             throw new ArgumentException("A command is required.", nameof(command));
         }
 
-        var task = new HostedTask($"t{Interlocked.Increment(ref _next)}", string.IsNullOrWhiteSpace(name) ? command.Trim() : name.Trim(), command.Trim());
+        var trimmedCommand = command.Trim();
+        var trimmedName = string.IsNullOrWhiteSpace(name) ? trimmedCommand : name.Trim();
+
+        lock (_gate)
+        {
+            // A running task for the same command is reused rather than starting a second copy
+            // (e.g. two dev servers fighting over the same port).
+            var live = _tasks.Values.FirstOrDefault(t =>
+                t.State == HostedTaskState.Running &&
+                (string.Equals(t.Command, trimmedCommand, StringComparison.Ordinal) ||
+                 (name is not null && string.Equals(t.Name, trimmedName, StringComparison.OrdinalIgnoreCase))));
+
+            if (live is not null)
+            {
+                return live;
+            }
+        }
+
+        var task = new HostedTask($"t{Interlocked.Increment(ref _next)}", trimmedName, trimmedCommand);
 
         var info = new ProcessStartInfo
         {

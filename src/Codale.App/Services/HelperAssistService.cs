@@ -49,7 +49,7 @@ public sealed class ExploreRun(string question)
 /// what they read. Works only on a BYOK provider - the Claude CLI fallback would spend the
 /// same tokens it is meant to save - and says so instead of answering.
 /// </summary>
-public sealed class HelperAssistService(IHelperModel helper, string runDirectory, Func<bool> hasApi) : ITaskAssist
+public sealed class HelperAssistService(IHelperModel helper, string runDirectory, Func<bool> hasApi, Func<string?>? getUserPrompt = null) : ITaskAssist
 {
     /// <summary>
     /// The search's share of the client's wait (<see cref="TaskPipeClient.ExploreTimeout"/>):
@@ -91,6 +91,16 @@ public sealed class HelperAssistService(IHelperModel helper, string runDirectory
         if (!hasApi())
         {
             return Unavailable;
+        }
+
+        if (string.IsNullOrWhiteSpace(question))
+        {
+            question = getUserPrompt?.Invoke()?.Trim() ?? "";
+        }
+
+        if (string.IsNullOrWhiteSpace(question))
+        {
+            return "No question or user prompt was provided to explore.";
         }
 
         var run = new ExploreRun(question);

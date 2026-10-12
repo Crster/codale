@@ -288,4 +288,37 @@ public sealed class TokenSaverHooksTests : IDisposable
         var refused = await without.HandleAsync($$"""{"token":"{{without.Token}}","op":"explore","question":"where?"}""");
         Assert.False(refused["ok"]!.GetValue<bool>());
     }
+
+    [Fact]
+    public async Task Explore_tool_accepts_omitted_or_alias_prompt()
+    {
+        var assist = new FakeAssist();
+        var server = new McpServer("t", "1", TaskTools.Create(new NoTasks(), assist: assist));
+
+        // When question is omitted completely
+        var emptyCall = await server.HandleLineAsync(
+            """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"explore","arguments":{}}}""");
+        Assert.False(JsonDocument.Parse(emptyCall!.ToJsonString()).RootElement.GetProperty("result").TryGetProperty("isError", out var err1) && err1.GetBoolean());
+        Assert.Equal("", assist.LastQuestion);
+
+        // When prompt argument is provided instead of question
+        var promptCall = await server.HandleLineAsync(
+            """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"explore","arguments":{"prompt":"how does it work?"}}}""");
+        Assert.False(JsonDocument.Parse(promptCall!.ToJsonString()).RootElement.GetProperty("result").TryGetProperty("isError", out var err2) && err2.GetBoolean());
+        Assert.Equal("how does it work?", assist.LastQuestion);
+    }
+
+    [Fact]
+    public async Task Pipe_server_accepts_explore_with_empty_or_omitted_question()
+    {
+        var assist = new FakeAssist();
+        var with = new TaskPipeServer(new NoTasks(), assist);
+        var reply = await with.HandleAsync($$"""{"token":"{{with.Token}}","op":"explore"}""");
+        Assert.True(reply["ok"]!.GetValue<bool>());
+        Assert.Equal("", assist.LastQuestion);
+
+        var promptReply = await with.HandleAsync($$"""{"token":"{{with.Token}}","op":"explore","prompt":"where is it?"}""");
+        Assert.True(promptReply["ok"]!.GetValue<bool>());
+        Assert.Equal("where is it?", assist.LastQuestion);
+    }
 }

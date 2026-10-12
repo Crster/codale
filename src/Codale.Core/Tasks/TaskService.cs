@@ -290,9 +290,11 @@ public sealed class TaskPipeServer : IDisposable
                         ct).ConfigureAwait(false));
 
                 case "explore":
-                    return Text(await Assist.ExploreAsync(
-                        request["question"]?.GetValue<string>() ?? throw new TaskServiceException("question is required."),
-                        ct).ConfigureAwait(false));
+                    var exploreQuestion = request["question"]?.GetValue<string>()
+                        ?? request["prompt"]?.GetValue<string>()
+                        ?? request["query"]?.GetValue<string>()
+                        ?? "";
+                    return Text(await Assist.ExploreAsync(exploreQuestion, ct).ConfigureAwait(false));
 
                 case "digest":
                     return Text(await Assist.DigestAsync(

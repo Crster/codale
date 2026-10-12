@@ -208,6 +208,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>The workspace's terminal tabs, readable by the agent's terminal tools; null for a chat without a workspace.</summary>
     public ITerminalSource? Terminals { get; init; }
 
+    private string? _lastUserPrompt;
+
+    /// <summary>The most recent user prompt in this chat.</summary>
+    public string? LastUserPrompt =>
+        _lastUserPrompt ?? Items.OfType<UserMessageItem>().LastOrDefault(m => !string.IsNullOrWhiteSpace(m.Text))?.Text;
+
     /// <summary>The pipe and secret the codale-tasks MCP exe uses to reach this chat's manager, created on first use.</summary>
     private (string Pipe, string Token)? EnsureTaskHost(string workingDirectory)
     {
@@ -224,7 +230,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             HelperAssistService? assist = null;
             if (Helper is { } helper)
             {
-                assist = new HelperAssistService(helper, workingDirectory, () => AppSettings.HasHelperApi);
+                assist = new HelperAssistService(helper, workingDirectory, () => AppSettings.HasHelperApi, () => LastUserPrompt);
                 assist.Saved += (before, after) => _dispatcher.TryEnqueue(() => _status.AddSaved(before - after));
                 assist.ExploreStarted += run => _dispatcher.TryEnqueue(() => OnExploreStarted(run));
             }
@@ -260,7 +266,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // stream the steps into that one instead of listing the run a second time.
         var existing = RunningTasks.LastOrDefault(t => t.Kind == RunningTaskKind.Subagent
             && t.IsRunning
-            && t.Prompt == question
+            && (t.Prompt == question || string.IsNullOrWhiteSpace(t.Prompt) || t.Prompt == (LastUserPrompt ?? "").Trim())
             && !_exploreLinked.Contains(t));
         if (existing is not null)
         {
@@ -305,6 +311,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private void OnHostedTaskStarted(HostedTask hosted)
     {
+        if (RunningTasks.FirstOrDefault(t => t.Hosted == hosted) is not null)
+        {
+            return;
+        }
+
         var item = new RunningTaskItem
         {
             ToolUseId = $"hosted:{hosted.Id}",
@@ -453,15 +464,36 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 && started.Input.TryGetProperty(titleKey, out var d)
                 && d.ValueKind == JsonValueKind.String
                 ? d.GetString()! : "Subagent";
-            if (isHelper)
-            {
-                title = "Explore: " + (title.Length > 80 ? title[..80] + "…" : title);
-            }
 
             var prompt = started.Input.ValueKind == JsonValueKind.Object
                 && started.Input.TryGetProperty(promptKey, out var p)
                 && p.ValueKind == JsonValueKind.String
                 ? p.GetString()! : "";
+
+            if (isHelper)
+            {
+                if (string.IsNullOrWhiteSpace(prompt) && started.Input.ValueKind == JsonValueKind.Object)
+                {
+                    if (started.Input.TryGetProperty("prompt", out var altPrompt) && altPrompt.ValueKind == JsonValueKind.String)
+                    {
+                        prompt = altPrompt.GetString()!;
+                    }
+                    else if (started.Input.TryGetProperty("query", out var altQuery) && altQuery.ValueKind == JsonValueKind.String)
+                    {
+                        prompt = altQuery.GetString()!;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(prompt))
+                {
+                    prompt = LastUserPrompt ?? "";
+                }
+
+                title = prompt.Length > 0
+                    ? "Explore: " + (prompt.Length > 80 ? prompt[..80] + "…" : prompt)
+                    : "Explore";
+            }
+
             AddTask(new RunningTaskItem
             {
                 ToolUseId = started.ToolUseId,
@@ -686,6 +718,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             var task = RunningTasks.FirstOrDefault(t => t.RuntimeId == info.Id)
                 ?? (info.ToolCallId is { } call && _tasksByToolUse.TryGetValue(call, out var byCall) ? byCall : null);
+
+            if (task is null)
+            {
+                var kind = info.Kind == AgentTaskKind.Shell ? RunningTaskKind.Shell : RunningTaskKind.Subagent;
+                var trimmedTitle = info.Title.Trim();
+                task = RunningTasks.FirstOrDefault(t => t.IsRunning && t.Kind == kind && t.Title == trimmedTitle && t.RuntimeId is null);
+            }
 
             if (task is null)
             {
@@ -3315,6 +3354,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         Attachments.Clear();
         ComposerNotice = null;
         IsBusy = true;
+        _lastUserPrompt = text;
         Add(new UserMessageItem { Text = text, Attachments = attachments, SentAsPlan = planOnly });
 
         // The first prompt names the tab - its gist, not a copy - until something better
@@ -3357,6 +3397,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         NextPromptSuggestion = null;
         Attachments.Clear();
         ComposerNotice = null;
+        _lastUserPrompt = text;
 
         var started = _turnStarted;
         EndTurn(TurnOutcome.Completed, end: null);

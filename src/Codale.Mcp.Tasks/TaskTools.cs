@@ -45,8 +45,12 @@ public static class TaskTools
             "Do not use it when you already know the file or symbol (Grep/Read that directly), for files outside the project, or for general programming questions. " +
             "Reply: a direct answer, then 'Files to read' with one line per file as path:start-end, what that range declares (types, methods, properties) " +
             "and the words to grep for inside it. Read only the ranges it names. Takes 10-60 seconds; wait for it rather than searching in parallel.",
-            McpTool.Schema([("question", "string", "One specific, self-contained question about this project's code, e.g. \"How does the editor save a file and which service writes it?\" Include the names you already know.")], "question"),
-            async (a, ct) => await McpTool.Text(await Call(() => assist.ExploreAsync(a.RequiredString("question"), ct)))),
+            McpTool.Schema([("question", "string", "One specific, self-contained question about this project's code, e.g. \"How does the editor save a file and which service writes it?\" Include the names you already know. If omitted, the user's prompt is used.")]),
+            async (a, ct) =>
+            {
+                var question = a.String("question") ?? a.String("prompt") ?? a.String("query") ?? "";
+                return await McpTool.Text(await Call(() => assist.ExploreAsync(question, ct)));
+            }),
     ];
 
     /// <summary>
