@@ -66,8 +66,8 @@ public sealed class ClaudeTranscriptReader
     /// </summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string Path, long Length, DateTime Written), TranscriptSummary?> SummaryCache = new();
 
-    /// <summary>Newest first. Sessions with no user turns are dropped as noise.</summary>
-    public IReadOnlyList<TranscriptSummary> ListSessions()
+    /// <summary>Newest first. Sessions with no user turns are dropped as noise unless <paramref name="includeEmpty"/> is true.</summary>
+    public IReadOnlyList<TranscriptSummary> ListSessions(bool includeEmpty = false)
     {
         if (!Directory.Exists(_historyDirectory))
         {
@@ -78,7 +78,7 @@ public sealed class ClaudeTranscriptReader
 
         foreach (var file in Directory.EnumerateFiles(_historyDirectory, "*.jsonl"))
         {
-            if (Summarize(file) is { UserTurns: > 0 } summary)
+            if (Summarize(file) is { } summary && (includeEmpty || summary.UserTurns > 0))
             {
                 summaries.Add(summary);
             }

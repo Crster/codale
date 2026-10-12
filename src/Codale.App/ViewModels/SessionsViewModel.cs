@@ -3,6 +3,7 @@ using System.Text;
 
 using Codale.Agents.Claude;
 using Codale.Core.Agents;
+using Codale.Git;
 using Codale.Storage;
 
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -242,7 +243,12 @@ public sealed partial class SessionsViewModel : ObservableObject
     private (List<TranscriptSummary> Sessions, Dictionary<string, string> Worktrees) ReadSessions()
     {
         var worktrees = new Dictionary<string, string>(StringComparer.Ordinal);
-        var sessions = _reader.ListSessions().OrderByDescending(s => s.UpdatedAt).ToList();
+        var sessionMap = new Dictionary<string, TranscriptSummary>(StringComparer.Ordinal);
+
+        foreach (var s in _reader.ListSessions())
+        {
+            sessionMap[s.SessionId] = s;
+        }
 
         // The shared connection belongs to the UI thread; this read gets its own (WAL lets
         // readers run beside its writes).
@@ -256,21 +262,112 @@ public sealed partial class SessionsViewModel : ObservableObject
             CrashLog.Warn("sessions", $"stored titles unavailable: {ex.Message}");
         }
 
+        var candidateWorktrees = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var codaleWorktreesDir = Path.Combine(_projectPath, GitWorktrees.CodaleDirectory, "worktrees");
+        if (Directory.Exists(codaleWorktreesDir))
+        {
+            try
+            {
+                foreach (var dir in Directory.EnumerateDirectories(codaleWorktreesDir))
+                {
+                    candidateWorktrees.Add(dir);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+
         using (reader)
         {
-            if (reader is null)
+            IReadOnlyList<SessionRecord> stored = [];
+            if (reader is not null)
             {
-                return (sessions, worktrees);
+                stored = reader.GetSessions(_projectPath, limit: int.MaxValue);
+
+                foreach (var record in stored)
+                {
+                    if (record.WorktreePath is { Length: > 0 } worktree && Directory.Exists(worktree))
+                    {
+                        worktrees.TryAdd(record.SessionId, worktree);
+                        candidateWorktrees.Add(worktree);
+                    }
+                }
             }
 
-            var stored = reader.GetSessions(_projectPath, limit: int.MaxValue);
+            // Read transcripts from all existing worktrees
+            foreach (var wt in candidateWorktrees)
+            {
+                if (!Directory.Exists(wt))
+                {
+                    continue;
+                }
 
+                var wtReader = new ClaudeTranscriptReader(wt);
+                foreach (var s in wtReader.ListSessions(includeEmpty: true))
+                {
+                    worktrees.TryAdd(s.SessionId, wt);
+                    if (!sessionMap.ContainsKey(s.SessionId))
+                    {
+                        sessionMap[s.SessionId] = s;
+                    }
+                }
+            }
+
+            // Also ensure any stored isolated session records pointing to an existing worktree are included
             foreach (var record in stored)
             {
-                if (record.WorktreePath is { Length: > 0 } worktree && Directory.Exists(worktree))
+                if (record.WorktreePath is { Length: > 0 } wt && Directory.Exists(wt))
                 {
-                    worktrees.TryAdd(record.SessionId, worktree);
+                    worktrees.TryAdd(record.SessionId, wt);
+                    if (!sessionMap.ContainsKey(record.SessionId))
+                    {
+                        var wtReader = new ClaudeTranscriptReader(wt);
+                        sessionMap[record.SessionId] = new TranscriptSummary
+                        {
+                            SessionId = record.SessionId,
+                            FilePath = Path.Combine(wtReader.HistoryDirectory, record.SessionId + ".jsonl"),
+                            StartedAt = record.StartedAt,
+                            UpdatedAt = record.UpdatedAt,
+                            UserTurns = 0,
+                            CustomTitle = record.Title ?? "(New session)",
+                        };
+                    }
                 }
+            }
+
+            // If there's an existing worktree directory on disk that has no transcript or stored record, include it too
+            foreach (var wt in candidateWorktrees)
+            {
+                if (!Directory.Exists(wt))
+                {
+                    continue;
+                }
+
+                if (!worktrees.Values.Any(v => SamePath(v, wt)))
+                {
+                    var id = Path.GetFileName(wt);
+                    var wtReader = new ClaudeTranscriptReader(wt);
+                    var summary = new TranscriptSummary
+                    {
+                        SessionId = id,
+                        FilePath = Path.Combine(wtReader.HistoryDirectory, id + ".jsonl"),
+                        StartedAt = Directory.GetCreationTimeUtc(wt),
+                        UpdatedAt = Directory.GetLastWriteTimeUtc(wt),
+                        UserTurns = 0,
+                        CustomTitle = "(Isolated session)",
+                    };
+                    worktrees.TryAdd(id, wt);
+                    sessionMap.TryAdd(id, summary);
+                }
+            }
+
+            var allSessions = sessionMap.Values.OrderByDescending(s => s.UpdatedAt).ToList();
+
+            if (reader is null)
+            {
+                return (allSessions, worktrees);
             }
 
             // Titles the helper model generated live in Codale's own database; show them
@@ -281,7 +378,7 @@ public sealed partial class SessionsViewModel : ObservableObject
                 .ToDictionary(g => g.Key, g => g.First().Title!, StringComparer.Ordinal);
 
             // A title the user typed beats every other source.
-            var retitled = sessions.Select(session =>
+            var retitled = allSessions.Select(session =>
             {
                 if (reader.GetUiState(_projectPath, RetitleKey(session.SessionId)) is { Length: > 0 } chosen)
                 {
@@ -296,6 +393,12 @@ public sealed partial class SessionsViewModel : ObservableObject
             return (retitled, worktrees);
         }
     }
+
+    private static bool SamePath(string a, string b) =>
+        string.Equals(
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(a)),
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(b)),
+            StringComparison.OrdinalIgnoreCase);
 
     private static string RetitleKey(string sessionId) => $"session.title.{sessionId}";
 
@@ -392,6 +495,19 @@ public sealed partial class SessionsViewModel : ObservableObject
         if (File.Exists(item.Summary.FilePath))
         {
             File.Delete(item.Summary.FilePath);
+        }
+
+        if (_worktrees.TryGetValue(item.SessionId, out var worktree) && Directory.Exists(worktree))
+        {
+            try
+            {
+                var gitWorktrees = new GitWorktrees(_projectPath);
+                await gitWorktrees.RemoveAsync(worktree, force: true);
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Warn("sessions", $"removing worktree {worktree} on delete failed: {ex.Message}");
+            }
         }
 
         _store.DeleteSession(item.SessionId);

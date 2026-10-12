@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 
 using Codale.Agents;
@@ -301,8 +301,32 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         {
             try
             {
+                // A live terminal for the same command is reused rather than starting a second copy
+                // (e.g. two dev servers fighting over the same port), so the caller surfaces that tab.
+                TerminalViewModel? live;
+                lock (_terminals)
+                {
+                    live = _terminals.FirstOrDefault(t =>
+                        IsAgentTerminal(t) &&
+                        t.IsCommandTerminal &&
+                        t.IsRunning &&
+                        t.Activity == TerminalActivity.Busy &&
+                        t.CommandText == command &&
+                        (name is null || t.CommandName == name));
+                }
+
+                if (live is not null)
+                {
+                    AgentTerminalStarted?.Invoke(live);
+                    opened.SetResult(live);
+                    return;
+                }
+
                 // Built on the UI thread: the terminal posts its state changes back to where it was made.
-                var terminal = new TerminalViewModel(ProjectPath, command, name);
+                var terminal = new TerminalViewModel(ProjectPath, command, name)
+                {
+                    IsAgentTerminal = true,
+                };
                 terminal.PropertyChanged += OnCommandTerminalPropertyChanged;
                 lock (_terminals)
                 {
@@ -322,11 +346,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         return opened.Task;
     }
 
-    private bool IsAgentTerminal(TerminalViewModel terminal)
+    public bool IsAgentTerminal(TerminalViewModel terminal)
     {
         lock (_terminals)
         {
-            return _agentTerminalIds.Contains(terminal.Id);
+            return terminal.IsAgentTerminal || _agentTerminalIds.Contains(terminal.Id);
         }
     }
 
@@ -416,6 +440,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         lock (_terminals)
         {
             _terminals.Remove(terminal);
+            _agentTerminalIds.Remove(terminal.Id);
         }
 
         UpdateRunningCommandCount();
@@ -719,6 +744,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             await chat.ConnectAsync();
             await Diff.RefreshAsync();
             await Git.RefreshAsync();
+            await Sessions.RefreshAsync();
         }
         finally
         {
@@ -1495,6 +1521,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
         ChatActivationRequested?.Invoke(this, chat);
         await chat.ConnectAsync();
+        await Diff.RefreshAsync();
         return chat;
     }
 

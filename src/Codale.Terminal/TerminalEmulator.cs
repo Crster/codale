@@ -113,6 +113,15 @@ public sealed class TerminalEmulator
     /// <summary>Lines addressable through <see cref="GetLine"/>: the visible scrollback (none on the alt screen) plus the screen.</summary>
     public int TotalLines => ScrollbackCount + _buffer.Rows;
 
+    /// <summary>
+    /// The absolute line index of the last character or cursor in the buffer
+    /// (0 = oldest scrollback line).
+    /// </summary>
+    public int LastContentLine => InAlternate
+        ? _buffer.GetLastContentRow()
+        : ScrollbackCount + _buffer.GetLastContentRow();
+
+
     public int ScrollbackLimit
     {
         get => _buffer.ScrollbackLimit;

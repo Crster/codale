@@ -10,7 +10,7 @@ namespace Codale.Agents.Tests;
 public sealed class ModelCatalogueTests
 {
     [Theory]
-    [InlineData("claude-opus-5-5", "Opus 5.5")]
+    [InlineData("claude-opus-5-5", "Opus")]
     [InlineData("claude-haiku-5-5", "Haiku")]
     [InlineData("claude-sonnet-5", "Sonnet 5")]
     [InlineData("claude-opus-5-5[1m]", "Opus 5.5 · 1M")]

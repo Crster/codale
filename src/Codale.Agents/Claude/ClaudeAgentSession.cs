@@ -40,7 +40,11 @@ public sealed class ClaudeAgentSession : IAgentSession
     private int _controlRequestCounter;
     private readonly List<string> _stderr = [];
 
-    public ClaudeAgentSession(ClaudeSessionOptions options) => _options = options;
+    public ClaudeAgentSession(ClaudeSessionOptions options)
+    {
+        _options = options;
+        SessionId = options.ResumeSessionId ?? options.SessionId?.ToString();
+    }
 
     public string? SessionId { get; private set; }
 

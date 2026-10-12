@@ -114,6 +114,36 @@ public sealed class TerminalBuffer
     /// <summary>The live screen row, 0 = top of the screen.</summary>
     public TerminalCell[] GetScreenRow(int index) => _grid[index];
 
+    /// <summary>
+    /// The 0-based screen row of the last cell containing characters or non-default styling,
+    /// or the cursor row, whichever is further down.
+    /// </summary>
+    public int GetLastContentRow()
+    {
+        for (var row = _rows - 1; row >= 0; row--)
+        {
+            if (row == _cursorRow)
+            {
+                return row;
+            }
+
+            var line = _grid[row];
+            for (var col = 0; col < line.Length; col++)
+            {
+                ref readonly var cell = ref line[col];
+                if (cell.Code is not ' ' and not '\0' ||
+                    cell.Style.Bg != TerminalColor.Default ||
+                    (cell.Style.Flags & (CellFlags.Underline | CellFlags.Reverse)) != 0)
+                {
+                    return Math.Max(row, _cursorRow);
+                }
+            }
+        }
+
+        return Math.Clamp(_cursorRow, 0, _rows - 1);
+    }
+
+
     // ------------------------------------------------------------------ cursor and style
 
     public void MoveCursorTo(int row, int col)

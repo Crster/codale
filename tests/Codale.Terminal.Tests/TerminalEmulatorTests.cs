@@ -22,6 +22,51 @@ public class TerminalEmulatorTests
     private static TerminalCell Cell(TerminalEmulator emulator, int row, int col) => emulator.GetScreenRow(row)[col];
 
     [Fact]
+    public void LastContentLine_tracks_characters_and_cursor()
+    {
+        var emulator = NewEmulator(cols: 20, rows: 5);
+        Assert.Equal(0, emulator.LastContentLine);
+
+        emulator.Feed("line0\r\nline1");
+        Assert.Equal(1, emulator.LastContentLine);
+
+        // Move cursor back to row 0: last content line is still row 1 because text exists there.
+        emulator.Feed("\x1b[1;1H");
+        Assert.Equal(0, emulator.CursorRow);
+        Assert.Equal(1, emulator.LastContentLine);
+
+        // Move cursor to row 3 (past the text): last content line follows cursor to row 3.
+        emulator.Feed("\x1b[4;1H");
+        Assert.Equal(3, emulator.CursorRow);
+        Assert.Equal(3, emulator.LastContentLine);
+    }
+
+    [Fact]
+    public void LastContentLine_includes_scrollback_count()
+    {
+        var emulator = NewEmulator(cols: 10, rows: 3);
+        emulator.Feed("1\r\n2\r\n3\r\n4"); // 4 lines in total -> 1 line scrolled into scrollback
+        Assert.Equal(1, emulator.ScrollbackCount);
+        // On screen: rows 0..1 have text, cursor at row 2 has "4"
+        Assert.Equal(1 + 2, emulator.LastContentLine); // ScrollbackCount (1) + screen row (2) = 3
+    }
+
+    [Fact]
+    public void LastContentLine_ignores_erased_trailing_rows()
+    {
+        var emulator = NewEmulator(cols: 20, rows: 5);
+        // Simulate an app like agy: prints banner on row 0, prompt on row 1, shortcuts on row 2,
+        // then newlines down to row 4 erasing with \x1b[K, and moves cursor back to row 1.
+        emulator.Feed("Banner\r\n> Prompt\r\nShortcuts\r\n\x1b[K\r\n\x1b[K\x1b[2;3H");
+        Assert.Equal(1, emulator.CursorRow);
+        Assert.Equal(2, emulator.CursorCol);
+        // Rows 3 and 4 were erased with spaces and default style: last content row is 2 ("Shortcuts").
+        Assert.Equal(2, emulator.LastContentLine);
+    }
+
+
+
+    [Fact]
     public void Plain_text_lands_at_the_cursor()
     {
         var emulator = NewEmulator();

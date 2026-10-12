@@ -89,6 +89,9 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
 
     public bool IsCommandTerminal => CommandText is not null;
 
+    /// <summary>True when this terminal tab was started by an agent task rather than the user.</summary>
+    public bool IsAgentTerminal { get; set; }
+
     [ObservableProperty]
     public partial bool IsOpen { get; set; }
 

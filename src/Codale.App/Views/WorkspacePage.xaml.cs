@@ -98,7 +98,7 @@ public sealed partial class WorkspacePage : Page
 
         ViewModel = workspace;
         ViewModel.PropertyChanged += OnWorkspacePropertyChanged;
-        ViewModel.AgentTerminalStarted += AddTerminalTab;
+        ViewModel.AgentTerminalStarted += OnAgentTerminalStarted;
         ViewModel.ChatActivationRequested += OnChatActivationRequested;
         ViewModel.Sessions.Sessions.CollectionChanged += OnHistoryInputsChanged;
         ViewModel.Sessions.OpenSessions.CollectionChanged += OnHistoryInputsChanged;
@@ -163,7 +163,7 @@ public sealed partial class WorkspacePage : Page
         if (ViewModel is not null)
         {
             ViewModel.PropertyChanged -= OnWorkspacePropertyChanged;
-            ViewModel.AgentTerminalStarted -= AddTerminalTab;
+            ViewModel.AgentTerminalStarted -= OnAgentTerminalStarted;
             ViewModel.ChatActivationRequested -= OnChatActivationRequested;
             ViewModel.Sessions.Sessions.CollectionChanged -= OnHistoryInputsChanged;
             ViewModel.Sessions.OpenSessions.CollectionChanged -= OnHistoryInputsChanged;
@@ -751,10 +751,10 @@ public sealed partial class WorkspacePage : Page
     private void OpenTerminalTab() => AddTerminalTab(ViewModel.CreateTerminal());
 
     /// <summary>
-    /// Shows a terminal - shell or command - as a new centre tab. Every invocation is
+    /// Shows a terminal - shell or command - as a centre tab. Every invocation is
     /// a new session: terminals stack as tabs like in VS Code.
     /// </summary>
-    private void AddTerminalTab(TerminalViewModel terminal)
+    private void AddTerminalTab(TerminalViewModel terminal, int insertIndex = -1)
     {
         CrashLog.Trace("terminal: AddTerminalTab begin");
         try
@@ -766,7 +766,15 @@ public sealed partial class WorkspacePage : Page
 
             var entry = new TerminalTabEntry(item, tab, terminal);
             _terminalTabs.Add(entry);
-            CentreTabs.TabItems.Add(item);
+            if (insertIndex >= 0 && insertIndex <= CentreTabs.TabItems.Count)
+            {
+                CentreTabs.TabItems.Insert(insertIndex, item);
+            }
+            else
+            {
+                CentreTabs.TabItems.Add(item);
+            }
+
             UpdateEmptyState();
             CentreTabs.SelectedItem = item;
 
@@ -784,6 +792,53 @@ public sealed partial class WorkspacePage : Page
             CrashLog.Write("Terminal", "AddTerminalTab failed", ex);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Closes a terminal tab: unhooks events, tears down the display host, terminates the shell,
+    /// and removes it from the tab strip.
+    /// </summary>
+    private void CloseTerminalTab(TerminalTabEntry entry)
+    {
+        _terminalTabs.Remove(entry);
+        if (CentreTabs.TabItems.Contains(entry.Item))
+        {
+            CentreTabs.TabItems.Remove(entry.Item);
+        }
+
+        UpdateEmptyState();
+        UpdateSessionPanelForActiveTab();
+        entry.Tab.LinkActivated -= OnTerminalLinkActivated;
+        entry.Tab.CloseHost();
+        ViewModel.RemoveTerminal(entry.Terminal);
+    }
+
+    /// <summary>
+    /// Handles a terminal started on behalf of the agent. If the terminal is already displayed
+    /// in a tab (e.g. an existing live dev server reused), it is brought to the front.
+    /// Otherwise, any previous agent terminal tabs are closed and the new terminal is placed
+    /// into the tab strip (reusing the existing tab position if one was closed).
+    /// </summary>
+    private void OnAgentTerminalStarted(TerminalViewModel terminal)
+    {
+        if (_terminalTabs.FirstOrDefault(t => ReferenceEquals(t.Terminal, terminal)) is { } existing)
+        {
+            CentreTabs.SelectedItem = existing.Item;
+            return;
+        }
+
+        var oldAgentTabs = _terminalTabs.Where(t => t.Terminal.IsAgentTerminal || ViewModel.IsAgentTerminal(t.Terminal)).ToList();
+        var targetIndex = -1;
+        if (oldAgentTabs.Count > 0)
+        {
+            targetIndex = CentreTabs.TabItems.IndexOf(oldAgentTabs[0].Item);
+            foreach (var oldTab in oldAgentTabs)
+            {
+                CloseTerminalTab(oldTab);
+            }
+        }
+
+        AddTerminalTab(terminal, targetIndex);
     }
 
     /// <summary>
@@ -1503,12 +1558,7 @@ public sealed partial class WorkspacePage : Page
         }
         else if (_terminalTabs.FirstOrDefault(t => ReferenceEquals(t.Item, args.Item)) is { } terminalEntry)
         {
-            _terminalTabs.Remove(terminalEntry);
-
-            // Closing the tab ends that shell - a command's as well; the other
-            // terminals keep running.
-            terminalEntry.Tab.CloseHost();
-            ViewModel.RemoveTerminal(terminalEntry.Terminal);
+            CloseTerminalTab(terminalEntry);
         }
         else if (ReferenceEquals(args.Item, _searchTabItem))
         {

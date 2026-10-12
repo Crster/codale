@@ -161,6 +161,38 @@ public sealed class ClaudeTranscriptReaderTests : IDisposable
     }
 
     [Fact]
+    public void Sessions_can_include_empty_when_requested()
+    {
+        WriteTranscript("active",
+            """{"type":"user","message":{"role":"user","content":"work"},"timestamp":"2026-09-16T10:00:00Z"}""");
+        WriteTranscript("empty", """{"type":"mode","mode":"normal"}""");
+
+        var sessions = Reader().ListSessions(includeEmpty: true);
+
+        Assert.Equal(2, sessions.Count);
+        Assert.Contains(sessions, s => s.SessionId == "empty");
+    }
+
+    [Fact]
+    public void SessionId_is_available_immediately_from_options()
+    {
+        var guid = Guid.NewGuid();
+        var session = new ClaudeAgentSession(new ClaudeSessionOptions
+        {
+            WorkingDirectory = ".",
+            SessionId = guid,
+        });
+        Assert.Equal(guid.ToString(), session.SessionId);
+
+        var resumeSession = new ClaudeAgentSession(new ClaudeSessionOptions
+        {
+            WorkingDirectory = ".",
+            ResumeSessionId = "resume-123",
+        });
+        Assert.Equal("resume-123", resumeSession.SessionId);
+    }
+
+    [Fact]
     public void A_project_with_no_history_lists_nothing_rather_than_throwing()
     {
         Assert.Empty(new ClaudeTranscriptReader(@"X:\Never\Opened", _claudeHome).ListSessions());

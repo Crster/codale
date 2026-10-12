@@ -308,7 +308,7 @@ public sealed partial class TerminalView : UserControl
     {
         _singleCell = false;
         _selectionAnchor = (0, 0);
-        _selectionHead = (_emulator.TotalLines - 1, _emulator.Cols - 1);
+        _selectionHead = (Math.Max(0, _emulator.LastContentLine), _emulator.Cols - 1);
         _selectedSnapshot = GetSelectionText();
         InvalidateAll();
     }
@@ -924,8 +924,30 @@ public sealed partial class TerminalView : UserControl
 
     // ------------------------------------------------------------------ scroll
 
-    /// <summary>The highest top line: the one that puts the live screen's last row at the bottom.</summary>
-    private int MaxTopLine => Math.Max(0, _emulator.TotalLines - _emulator.Rows);
+    /// <summary>
+    /// The highest top line: aligns the viewport so the last character or cursor
+    /// is at the very bottom of the view if buffer content exceeds the visible area,
+    /// or at line 0 if content fits within the visible rows.
+    /// </summary>
+    private int MaxTopLine
+    {
+        get
+        {
+            if (_emulator.InAlternate)
+            {
+                return 0;
+            }
+
+            var lastLine = _emulator.LastContentLine;
+            if (lastLine + 1 > _emulator.Rows)
+            {
+                return lastLine - _emulator.Rows + 1;
+            }
+
+            return 0;
+        }
+    }
+
 
     /// <summary>The absolute line at the top of the viewport - shared by drawing and hit-testing.</summary>
     private int TopLine => _pinned ? MaxTopLine : Math.Clamp(_topLine, 0, MaxTopLine);
