@@ -1654,7 +1654,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             if (_mcpSettings is not null)
             {
-                _mcpSettings.SyncWorkspaceMcpConfig(workingDirectory, mcpServers);
+                // Terminal CLIs read these files: they get the servers wired for them (panel push on), not this session's.
+                _mcpSettings.SyncWorkspaceMcpConfig(workingDirectory, ServersForTerminalCli());
             }
 
             var activeCli = Codale.Agents.CliLocator.ActiveCli;

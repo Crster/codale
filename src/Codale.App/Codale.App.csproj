@@ -130,6 +130,11 @@
     <ProjectReference Include="..\Codale.Storage\Codale.Storage.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The text Codale's MCP servers send as their instructions; the Antigravity rules file repeats it. -->
+    <Compile Include="..\Codale.Mcp.Common\McpInstructions.cs" Link="Services\McpInstructions.cs" />
+  </ItemGroup>
+
   <!--
     Defining the "HasPackageAndPublishMenuAddedByProject" property here allows the Solution
     Explorer "Package and Publish" context menu entry to be enabled for this project even if

@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Text;
 
+using Codale.Agents.Antigravity;
 using Codale.Agents.Claude;
 using Codale.Core.Agents;
 using Codale.Git;
@@ -34,6 +35,72 @@ public sealed partial class SessionsViewModel : ObservableObject
         _store = store;
         _databasePath = databasePath;
         _reader = new ClaudeTranscriptReader(projectPath);
+        _agy = new AgyHistoryReader(projectPath);
+        _uiContext = SynchronizationContext.Current;
+    }
+
+    private readonly AgyHistoryReader _agy;
+    private readonly SynchronizationContext? _uiContext;
+    private FileSystemWatcher? _agyWatcher;
+
+    /// <summary>
+    /// The agent CLI running in a terminal whose conversations the list shows instead of Claude's
+    /// ("agy"), or null for Claude's. Only Antigravity's prompt log is readable.
+    /// </summary>
+    public string? TerminalCliId
+    {
+        get => _terminalCliId;
+        set
+        {
+            var id = value == "agy" ? value : null;
+            if (id == _terminalCliId)
+            {
+                return;
+            }
+
+            _terminalCliId = id;
+            WatchAgyHistory(id is not null);
+            _ = RefreshAsync();
+        }
+    }
+
+    private string? _terminalCliId;
+
+    private bool ShowsAgy => _terminalCliId == "agy";
+
+    /// <summary>True for a row of a terminal CLI's conversation, which the panel can show but not continue.</summary>
+    public bool IsTerminalCliSession(TranscriptSummary summary) =>
+        string.Equals(summary.FilePath, _agy.HistoryFile, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Re-lists while Antigravity writes its prompt log, so a new prompt shows up at once.</summary>
+    private void WatchAgyHistory(bool on)
+    {
+        _agyWatcher?.Dispose();
+        _agyWatcher = null;
+        if (!on || Path.GetDirectoryName(_agy.HistoryFile) is not { } folder || !Directory.Exists(folder))
+        {
+            return;
+        }
+
+        try
+        {
+            _agyWatcher = new FileSystemWatcher(folder, Path.GetFileName(_agy.HistoryFile))
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size,
+                EnableRaisingEvents = true,
+            };
+            _agyWatcher.Changed += (_, _) =>
+            {
+                if (_uiContext is { } ui)
+                {
+                    ui.Post(_ => _ = RefreshAsync(), null);
+                }
+            };
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
+        {
+            CrashLog.Trace($"Antigravity history watch failed: {ex.Message}");
+        }
     }
 
     public ObservableCollection<SessionListItem> Sessions { get; } = [];
@@ -243,6 +310,11 @@ public sealed partial class SessionsViewModel : ObservableObject
     private (List<TranscriptSummary> Sessions, Dictionary<string, string> Worktrees) ReadSessions()
     {
         var worktrees = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (ShowsAgy)
+        {
+            return ([.. _agy.ListSessions()], worktrees);
+        }
+
         var sessionMap = new Dictionary<string, TranscriptSummary>(StringComparer.Ordinal);
 
         foreach (var s in _reader.ListSessions())
@@ -492,7 +564,8 @@ public sealed partial class SessionsViewModel : ObservableObject
             throw new InvalidOperationException("Close the session's tab before deleting it.");
         }
 
-        if (File.Exists(item.Summary.FilePath))
+        // Antigravity's prompt log is shared by all its conversations: never deleted from here.
+        if (!IsTerminalCliSession(item.Summary) && File.Exists(item.Summary.FilePath))
         {
             File.Delete(item.Summary.FilePath);
         }
@@ -638,5 +711,7 @@ public sealed partial class SessionsViewModel : ObservableObject
 
     /// <summary>Replays a stored transcript into chat items for read-only viewing.</summary>
     public Task<IReadOnlyList<AgentEvent>> LoadTranscriptAsync(TranscriptSummary summary) =>
-        Task.Run<IReadOnlyList<AgentEvent>>(() => _reader.Replay(summary.FilePath).ToList());
+        Task.Run<IReadOnlyList<AgentEvent>>(() => IsTerminalCliSession(summary)
+            ? _agy.Replay(summary.SessionId).ToList()
+            : _reader.Replay(summary.FilePath).ToList());
 }

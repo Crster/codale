@@ -1873,6 +1873,10 @@ public sealed partial class WorkspacePage : Page
             WatchTodos(ViewModel.Chat);
             WatchConversation(ViewModel.Chat);
         }
+        else if (e.PropertyName == nameof(WorkspaceViewModel.TerminalCliName))
+        {
+            QueueHistoryLayout();
+        }
     }
 
     /// <summary>The chat whose conversation decides how much room History gets.</summary>
@@ -1948,6 +1952,9 @@ public sealed partial class WorkspacePage : Page
 
         var sessions = ViewModel.Sessions;
         var conversation = ViewModel.Chat.HasConversation;
+
+        // A CLI in a terminal reports its tasks, changes and artifacts into the live sections, with no conversation here.
+        var live = conversation || ViewModel.TerminalCliName is not null;
         if (conversation != _hadConversation)
         {
             _hadConversation = conversation;
@@ -1964,10 +1971,10 @@ public sealed partial class WorkspacePage : Page
         }
 
         var star = new GridLength(1, GridUnitType.Star);
-        LiveRow.Height = conversation ? star : GridLength.Auto;
+        LiveRow.Height = live ? star : GridLength.Auto;
         // An empty chat folds the live row to nothing; hiding the viewer keeps the
         // panel from showing a dead band between the controls and History.
-        LiveHost.Visibility = conversation ? Visibility.Visible : Visibility.Collapsed;
+        LiveHost.Visibility = live ? Visibility.Visible : Visibility.Collapsed;
         HistoryRow.Height = expanded && !folded ? star : GridLength.Auto;
 
         HistoryShowAllButton.Visibility = conversation ? Visibility.Visible : Visibility.Collapsed;

@@ -63,11 +63,17 @@ if (client is null)
     return 1;
 }
 
+var assist = Environment.GetEnvironmentVariable("CODALE_ASSIST") == "1";
 var server = new McpServer("codale-tasks", "1.0.0", TaskTools.Create(
     client,
     Environment.GetEnvironmentVariable("CODALE_PROJECT_DIR"),
     Environment.GetEnvironmentVariable("CODALE_RUN_DIR"),
-    assist: Environment.GetEnvironmentVariable("CODALE_ASSIST") == "1" ? client : null));
+    assist: assist ? client : null))
+{
+    Instructions = !McpInstructions.Enabled ? null
+        : assist ? McpInstructions.Tasks + " " + McpInstructions.Explore
+        : McpInstructions.Tasks,
+};
 await server.RunStdioAsync();
 return 0;
 

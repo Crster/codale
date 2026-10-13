@@ -29,6 +29,18 @@ public sealed class McpServerTests
     }
 
     [Fact]
+    public async Task Initialize_sends_instructions_only_when_set()
+    {
+        var plain = await Call(Server(), """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}""");
+        var guided = await Call(
+            new McpServer("test", "1.0", []) { Instructions = "Use echo." },
+            """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}""");
+
+        Assert.Null(plain["result"]!["instructions"]);
+        Assert.Equal("Use echo.", (string)guided["result"]!["instructions"]!);
+    }
+
+    [Fact]
     public async Task Notifications_get_no_reply()
     {
         Assert.Null(await Server().HandleLineAsync("""{"jsonrpc":"2.0","method":"notifications/initialized"}"""));

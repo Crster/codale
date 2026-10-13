@@ -153,8 +153,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     }
 
     /// <summary>A shell prompt line was submitted: a known non-Claude CLI launched there is the one the panel now mirrors; any other line means the CLI has exited.</summary>
-    public void AttachTerminalCli(Codale.Agents.CliDescriptor? cli) =>
-        TerminalCliName = cli is { Id: not "claude" } ? cli.DisplayName : null;
+    public void AttachTerminalCli(Codale.Agents.CliDescriptor? cli)
+    {
+        var other = cli is { Id: not "claude" } ? cli : null;
+        TerminalCliName = other?.DisplayName;
+        Sessions.TerminalCliId = other?.Id;
+    }
 
     private readonly CustomUsageTally _customUsage = new();
 
@@ -1368,6 +1372,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     {
         _terminalCliBaseline = null;
         TerminalCliName = null;
+        Sessions.TerminalCliId = null;
     }
 
     private void ListTerminalCliChanges()
@@ -1569,6 +1574,19 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
         var events = await Sessions.LoadTranscriptAsync(summary);
         var title = summary.Title.Length > 28 ? summary.Title[..28].TrimEnd() + "…" : summary.Title;
+
+        if (Sessions.IsTerminalCliSession(summary))
+        {
+            // The panel cannot drive the terminal's CLI: show the conversation without connecting,
+            // since handing its id to Claude would start an unrelated session.
+            var viewer = FreshChat();
+            await viewer.DisposeSessionAsync();
+            viewer.Status.ClearSessionChanges();
+            viewer.LoadHistory(events);
+            viewer.Title = title;
+            ChatActivationRequested?.Invoke(this, viewer);
+            return viewer;
+        }
 
         return await ResumeInChatAsync(summary.SessionId, events, Sessions.WorktreeOf(summary.SessionId), title);
     }

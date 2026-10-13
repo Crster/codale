@@ -1,4 +1,5 @@
 using Codale.Core.Agents;
+using Codale.Mcp;
 using Codale.Storage;
 
 namespace Codale.App.Services;
@@ -36,7 +37,7 @@ public sealed class McpServerSettings
     /// </summary>
     public Func<IReadOnlyList<McpServerSpec>>? TerminalServersProvider { get; set; }
 
-    private IReadOnlyList<McpServerSpec> TerminalServers() => TerminalServersProvider?.Invoke() ?? Servers();
+    private IReadOnlyList<McpServerSpec> TerminalServers() => ForTerminal(TerminalServersProvider?.Invoke() ?? Servers());
 
     /// <summary>On unless the user turned it off.</summary>
     public bool BrowserEnabled
@@ -183,91 +184,211 @@ public sealed class McpServerSettings
     }
 
     /// <summary>
-    /// Synchronizes MCP server configuration into the workspace's <c>.agents/mcp_config.json</c>
-    /// so that custom CLIs such as Google Antigravity (<c>agy</c>) discover and attach
-    /// Codale's tools (browser, computer, tasks) automatically.
+    /// Readies the project for an agent CLI started in a terminal. Antigravity has no launch flag or
+    /// environment variable for MCP servers, so it gets them (and a rules file) in its project folder,
+    /// <c>.agents/</c>; every other CLI gets them on its command line instead (see <see cref="RewriteCliLaunch"/>).
+    /// Also takes back the per-CLI project files earlier builds wrote.
     /// </summary>
     public void SyncWorkspaceMcpConfig(string? targetDirectory = null, IReadOnlyList<McpServerSpec>? servers = null)
     {
+        var root = targetDirectory ?? _projectPath;
+        servers = ForTerminal(servers ?? TerminalServers());
+
         try
         {
-            servers ??= TerminalServers();
-            var json = McpServerSpec.ToClaudeConfig(servers);
-            var dir = targetDirectory ?? _projectPath;
-            var agentsDir = Path.Combine(dir, ".agents");
-            var configPath = Path.Combine(agentsDir, "mcp_config.json");
-
-            if (json is null)
+            var configPath = Path.Combine(root, ".agents", "mcp_config.json");
+            if (McpServerSpec.ToClaudeConfig(servers) is { } json)
             {
-                if (File.Exists(configPath))
-                {
-                    File.Delete(configPath);
-                }
-            }
-            else
-            {
-                Directory.CreateDirectory(agentsDir);
+                Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
                 File.WriteAllText(configPath, json);
             }
+            else if (File.Exists(configPath))
+            {
+                File.Delete(configPath);
+            }
+
+            WriteAgyRules(Path.Combine(root, ".agents", "rules", "codale.md"), servers);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             CrashLog.Trace($"Failed to sync workspace MCP config: {ex.Message}");
         }
 
-        // CLIs with no launch flag for MCP servers read these project files instead (Claude gets
-        // its servers as --mcp-config, see RewriteCliLaunch). They are shared with the user's own
-        // entries, so only the codale-* servers are touched.
-        var root = targetDirectory ?? _projectPath;
-        servers ??= TerminalServers();
-        MergeServers(Path.Combine(root, ".gemini", "settings.json"), servers, McpFileFormat.Gemini);
-        MergeServers(Path.Combine(root, ".qwen", "settings.json"), servers, McpFileFormat.Gemini);
-        MergeServers(Path.Combine(root, "opencode.json"), servers, McpFileFormat.OpenCode);
-
-        // Earlier builds wrote Claude's servers here; remove ours so they are not registered twice.
+        // Written by earlier builds; only Codale's own entries and sections are removed.
+        MergeServers(Path.Combine(root, ".gemini", "settings.json"), [], McpFileFormat.Gemini);
+        MergeServers(Path.Combine(root, ".qwen", "settings.json"), [], McpFileFormat.Gemini);
+        MergeServers(Path.Combine(root, "opencode.json"), [], McpFileFormat.OpenCode);
         MergeServers(Path.Combine(root, ".mcp.json"), [], McpFileFormat.Standard);
+        RemoveContextSection(Path.Combine(root, "GEMINI.md"));
+        RemoveContextSection(Path.Combine(root, "QWEN.md"));
+        DeleteIfEmpty(Path.Combine(root, ".gemini"));
+        DeleteIfEmpty(Path.Combine(root, ".qwen"));
     }
 
-    private static readonly HashSet<string> ClaudeNonSessionArgs = new(StringComparer.OrdinalIgnoreCase)
+    /// <summary>
+    /// The servers as handed to a CLI in a terminal: each sends its usage instructions at connect
+    /// (<see cref="McpInstructions"/>), which the panel's own session gets through its system prompt instead.
+    /// </summary>
+    private static IReadOnlyList<McpServerSpec> ForTerminal(IReadOnlyList<McpServerSpec> servers) =>
+        [.. servers.Select(s => s with
+        {
+            Env = new Dictionary<string, string>(s.Env ?? new Dictionary<string, string>())
+            {
+                [McpInstructions.EnvironmentVariable] = "1",
+            },
+        })];
+
+    /// <summary>
+    /// The same instructions as a workspace rule, for Antigravity: whether it reads a server's
+    /// instructions is not documented, and its rules folder is read at startup.
+    /// </summary>
+    private static void WriteAgyRules(string path, IReadOnlyList<McpServerSpec> servers)
     {
-        "mcp", "config", "update", "upgrade", "doctor", "install", "migrate-installer", "setup-token", "plugin", "agents",
-        "-v", "--version", "-h", "--help", "--mcp-config",
+        var parts = new List<string>();
+        if (servers.FirstOrDefault(s => s.Name == TasksName) is { } tasks)
+        {
+            parts.Add($"codale-tasks: {McpInstructions.Tasks}");
+            if (tasks.Env?.GetValueOrDefault("CODALE_ASSIST") == "1")
+            {
+                parts.Add($"codale-tasks: {McpInstructions.Explore}");
+            }
+        }
+
+        if (servers.Any(s => s.Name == BrowserName))
+        {
+            parts.Add($"{BrowserName}: {McpInstructions.Browser}");
+        }
+
+        if (servers.Any(s => s.Name == ComputerName))
+        {
+            parts.Add($"{ComputerName}: {McpInstructions.Computer}");
+        }
+
+        if (parts.Count == 0)
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+
+            return;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "---\ntrigger: always_on\n---\n\n# Codale\n\n" + string.Join("\n\n", parts) + "\n");
+    }
+
+    private const string ContextStart = "<!-- codale:start";
+    private const string ContextEnd = "<!-- codale:end -->";
+
+    /// <summary>Takes Codale's marked section out of a CLI's context file, deleting the file when nothing else is left.</summary>
+    private static void RemoveContextSection(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return;
+            }
+
+            var text = File.ReadAllText(path);
+            var start = text.IndexOf(ContextStart, StringComparison.Ordinal);
+            var end = start < 0 ? -1 : text.IndexOf(ContextEnd, start, StringComparison.Ordinal);
+            if (end < 0)
+            {
+                return;
+            }
+
+            var rest = (text[..start].TrimEnd() + "\n\n" + text[(end + ContextEnd.Length)..].TrimStart()).Trim();
+            if (rest.Length == 0)
+            {
+                File.Delete(path);
+            }
+            else
+            {
+                File.WriteAllText(path, rest + "\n");
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            CrashLog.Trace($"Failed to clean {path}: {ex.Message}");
+        }
+    }
+
+    private static void DeleteIfEmpty(string directory)
+    {
+        try
+        {
+            if (Directory.Exists(directory) && !Directory.EnumerateFileSystemEntries(directory).Any())
+            {
+                Directory.Delete(directory);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    /// <summary>Arguments that run a CLI's housekeeping (setup, updates, its own MCP management) rather than a session.</summary>
+    private static readonly HashSet<string> NonSessionArgs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "mcp", "config", "update", "upgrade", "doctor", "install", "migrate-installer", "setup-token", "plugin", "plugins",
+        "agents", "models", "changelog", "help", "login", "logout", "auth", "extensions",
+        "-v", "--version", "-h", "--help", "--mcp-config", "--additional-mcp-config",
     };
 
     /// <summary>
-    /// For a line typed at a shell prompt that launches Claude Code, the command to run instead:
-    /// the same line with Codale's servers attached through <c>--mcp-config</c>, so no restart or
-    /// project file is needed. Null for anything else (other commands, subcommands, pipes).
+    /// For a line typed at a shell prompt that starts an agent CLI session, the command to run instead:
+    /// the same launch with Codale's servers attached the way that CLI takes them at startup, so nothing
+    /// is written into the project. Null to run the line as typed (other commands, housekeeping
+    /// subcommands, pipes, and Antigravity, which reads <c>.agents/mcp_config.json</c>).
     /// </summary>
+    /// <remarks>
+    /// Claude: <c>--mcp-config</c>. Copilot: <c>--additional-mcp-config</c>. Codex: <c>-c mcp_servers.*</c> overrides.
+    /// Gemini CLI and Qwen Code: a system settings file named by <c>GEMINI_CLI_SYSTEM_SETTINGS_PATH</c> /
+    /// <c>QWEN_CODE_SYSTEM_SETTINGS_PATH</c>, built on the machine's own system settings so none are lost.
+    /// OpenCode: a config file named by <c>OPENCODE_CONFIG</c>, merged with the user's and project's.
+    /// </remarks>
     public string? RewriteCliLaunch(string promptLine)
     {
         try
         {
-            if (Codale.Agents.CliLocator.DetectLaunch(promptLine) is not ({ Id: "claude" }, var rest))
+            if (Codale.Agents.CliLocator.DetectLaunch(promptLine) is not ({ } cli, var rest))
             {
                 return null;
             }
 
-            if (rest.IndexOfAny(['|', ';', '&', '<', '>']) >= 0 ||
-                rest.Split(' ', StringSplitOptions.RemoveEmptyEntries).Any(ClaudeNonSessionArgs.Contains))
+            if (rest.IndexOfAny(['|', ';', '&', '<', '>', '`', '$']) >= 0 ||
+                rest.Split(' ', StringSplitOptions.RemoveEmptyEntries).Any(NonSessionArgs.Contains))
             {
                 return null;
             }
 
             var servers = TerminalServers();
-            if (servers.Count == 0 || McpServerSpec.ToClaudeConfig(servers) is not { } json)
+            if (servers.Count == 0)
             {
                 return null;
             }
 
-            var directory = Path.Combine(StagingRoot(), "cli");
-            Directory.CreateDirectory(directory);
-            var hash = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(_projectPath)))[..12];
-            var path = Path.Combine(directory, $"claude-{hash}.json");
-            File.WriteAllText(path, json);
+            var powershell = promptLine.StartsWith("PS ", StringComparison.Ordinal);
+            var tail = rest.TrimEnd();
+            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
 
-            // Last, because --mcp-config takes any number of values and would swallow a trailing prompt.
-            return $"claude{rest.TrimEnd()} --mcp-config \"{path}\"";
+            return cli.Id switch
+            {
+                // Last, because --mcp-config takes any number of values and would swallow a trailing prompt.
+                "claude" => $"claude{tail} --mcp-config \"{Stage("claude", McpServerSpec.ToClaudeConfig(servers)!)}\"",
+                "copilot" => $"copilot --additional-mcp-config {Quote(powershell, "@" + Stage("copilot", CopilotConfig(servers)))}{tail}",
+                "codex" => $"codex {CodexOverrides(powershell, servers)}{tail}",
+                "gemini" => WithEnv(powershell, "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
+                    StageSettings("gemini", servers, Path.Combine(programData, "gemini-cli", "settings.json"), "GEMINI_CLI_SYSTEM_SETTINGS_PATH"),
+                    "gemini" + tail),
+                "qwen" => WithEnv(powershell, "QWEN_CODE_SYSTEM_SETTINGS_PATH",
+                    StageSettings("qwen", servers, Path.Combine(programData, "qwen-code", "settings.json"), "QWEN_CODE_SYSTEM_SETTINGS_PATH"),
+                    "qwen" + tail),
+                "opencode" => WithEnv(powershell, "OPENCODE_CONFIG", StageOpenCode(servers), "opencode" + tail),
+                _ => null,
+            };
         }
         catch (Exception ex)
         {
@@ -275,6 +396,104 @@ public sealed class McpServerSettings
             return null;
         }
     }
+
+    /// <summary>Writes a per-project launch config into Codale's staging folder, outside the project.</summary>
+    private string Stage(string cli, string content)
+    {
+        var path = StagedPath(cli);
+        File.WriteAllText(path, content);
+        return path;
+    }
+
+    private string StagedPath(string cli)
+    {
+        var directory = Path.Combine(StagingRoot(), "cli");
+        Directory.CreateDirectory(directory);
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(_projectPath)))[..12];
+        return Path.Combine(directory, $"{cli}-{hash}.json");
+    }
+
+    /// <summary>
+    /// A system settings file for Gemini CLI or Qwen Code: the machine's own (where the variable already
+    /// points, else the default location) with Codale's servers merged in, since this one replaces it.
+    /// </summary>
+    private string StageSettings(string cli, IReadOnlyList<McpServerSpec> servers, string defaultSystemPath, string variable)
+    {
+        var path = StagedPath(cli);
+        var system = Environment.GetEnvironmentVariable(variable) is { Length: > 0 } set ? set : defaultSystemPath;
+        if (File.Exists(system) && !string.Equals(Path.GetFullPath(system), path, StringComparison.OrdinalIgnoreCase))
+        {
+            File.Copy(system, path, overwrite: true);
+        }
+        else if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
+
+        MergeServers(path, servers, McpFileFormat.Gemini);
+        return path;
+    }
+
+    private string StageOpenCode(IReadOnlyList<McpServerSpec> servers)
+    {
+        var path = StagedPath("opencode");
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
+
+        MergeServers(path, servers, McpFileFormat.OpenCode);
+        return path;
+    }
+
+    /// <summary>Copilot CLI's MCP document: <c>mcpServers</c> entries of <c>type: local</c> with every tool allowed.</summary>
+    private static string CopilotConfig(IReadOnlyList<McpServerSpec> servers)
+    {
+        var doc = System.Text.Json.Nodes.JsonNode.Parse(McpServerSpec.ToClaudeConfig(servers)!)!.AsObject();
+        foreach (var (_, entry) in doc["mcpServers"]!.AsObject())
+        {
+            entry!["type"] = "local";
+            entry["tools"] = new System.Text.Json.Nodes.JsonArray("*");
+        }
+
+        return doc.ToJsonString();
+    }
+
+    /// <summary>
+    /// Codex's per-launch config overrides, one <c>-c key=value</c> per field. Values are TOML literal
+    /// strings ('...'), so Windows paths need no escaping.
+    /// </summary>
+    private static string CodexOverrides(bool powershell, IReadOnlyList<McpServerSpec> servers)
+    {
+        static string Literal(string value) => $"'{value}'";
+
+        var parts = new List<string>();
+        foreach (var server in servers)
+        {
+            var key = $"mcp_servers.{server.Name}";
+            parts.Add($"-c {Quote(powershell, $"{key}.command={Literal(server.Command)}")}");
+            parts.Add($"-c {Quote(powershell, $"{key}.args=[{string.Join(",", server.Args.Select(Literal))}]")}");
+            if (server.Env is { Count: > 0 } env)
+            {
+                parts.Add($"-c {Quote(powershell, $"{key}.env={{{string.Join(",", env.Select(e => $"{e.Key}={Literal(e.Value)}"))}}}")}");
+            }
+        }
+
+        return string.Join(' ', parts);
+    }
+
+    /// <summary>One argument, quoted for the shell the line was typed into.</summary>
+    private static string Quote(bool powershell, string value) => powershell
+        ? $"'{value.Replace("'", "''")}'"
+        : $"\"{value}\"";
+
+    /// <summary>
+    /// Runs <paramref name="command"/> with one environment variable set for it alone. PowerShell sets
+    /// variables for the whole shell, so it is taken back when the CLI exits (finally runs on Ctrl+C too).
+    /// </summary>
+    private static string WithEnv(bool powershell, string name, string value, string command) => powershell
+        ? $"& {{ $env:{name}={Quote(true, value)}; try {{ {command} }} finally {{ Remove-Item Env:{name} -ErrorAction SilentlyContinue }} }}"
+        : $"set \"{name}={value}\" && {command} & set \"{name}=\"";
 
     private enum McpFileFormat
     {

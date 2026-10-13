@@ -23,6 +23,26 @@ public sealed class McpServer(string name, string version, IReadOnlyList<McpTool
     /// </summary>
     public int MaxConcurrentCalls { get; init; } = int.MaxValue;
 
+    /// <summary>How to use this server, sent in the initialize reply for clients that add it to the model's prompt; null sends none.</summary>
+    public string? Instructions { get; init; }
+
+    private JsonObject Initialize()
+    {
+        var result = new JsonObject
+        {
+            ["protocolVersion"] = ProtocolVersion,
+            ["capabilities"] = new JsonObject { ["tools"] = new JsonObject() },
+            ["serverInfo"] = new JsonObject { ["name"] = name, ["version"] = version },
+        };
+
+        if (Instructions is { Length: > 0 } instructions)
+        {
+            result["instructions"] = instructions;
+        }
+
+        return result;
+    }
+
     /// <summary>
     /// Reads requests until the input closes. tools/call runs concurrently so a slow tool
     /// (a 15-minute browser handoff) cannot starve ping or other calls; everything else is
@@ -188,12 +208,7 @@ public sealed class McpServer(string name, string version, IReadOnlyList<McpTool
 
             return method switch
             {
-                "initialize" => Result(id, new JsonObject
-                {
-                    ["protocolVersion"] = ProtocolVersion,
-                    ["capabilities"] = new JsonObject { ["tools"] = new JsonObject() },
-                    ["serverInfo"] = new JsonObject { ["name"] = name, ["version"] = version },
-                }),
+                "initialize" => Result(id, Initialize()),
                 "ping" => Result(id, new JsonObject()),
                 "tools/list" => Result(id, new JsonObject
                 {
