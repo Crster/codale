@@ -875,6 +875,13 @@ public sealed partial class WorkspacePage : Page
     {
         // Called for every line submitted at a shell prompt, so a line that is not a CLI launch means
         // any CLI the panel was mirroring has exited.
+        // A CLI without an alternate screen (agy) still reaches here for every message typed in its own
+        // input box; only a real shell prompt line can mean the CLI has exited.
+        if (!CliLocator.IsShellPromptLine(promptLine))
+        {
+            return null;
+        }
+
         var launch = CliLocator.DetectLaunch(promptLine);
         ViewModel?.AttachTerminalCli(launch?.Cli);
         if (launch is null)
