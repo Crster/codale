@@ -10,18 +10,27 @@ namespace Codale.Agents;
 /// </summary>
 public static partial class CliVersionCheck
 {
-    /// <summary>The command that updates an installed CLI, whichever way it was installed.</summary>
-    public static string UpdateCommand => CliLocator.ActiveCli.Executable + " update";
+    /// <summary>The command that updates an installed CLI; null when there is no known way to.</summary>
+    public static string? UpdateCommand(CliDescriptor cli) =>
+        cli.Id == "claude" ? cli.Executable + " update"
+        : NpmPackage(cli) is { } package ? $"npm i -g {package}@latest"
+        : null;
 
-    private const string LatestUrl = "https://registry.npmjs.org/@anthropic-ai/claude-code/latest";
+    /// <summary>The npm package a CLI is published as; null when it is not an npm install.</summary>
+    public static string? NpmPackage(CliDescriptor cli) =>
+        cli.Id == "claude" ? "@anthropic-ai/claude-code"
+        : cli.InstallCommand is { } install && NpmInstallPattern().Match(install) is { Success: true } match ? match.Groups[1].Value
+        : null;
+
+    [GeneratedRegex(@"^npm\s+(?:i|install)\s+-g\s+(\S+)$")]
+    private static partial Regex NpmInstallPattern();
 
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
 
     /// <summary>Runs <c>&lt;cli&gt; --version</c>; null when the CLI is missing or says nothing parseable.</summary>
-    public static async Task<Version?> InstalledAsync(CancellationToken cancellation = default)
+    public static async Task<Version?> InstalledAsync(CliDescriptor cli, CancellationToken cancellation = default)
     {
-        var executable = CliLocator.ActiveCli.Executable;
-        if (CliLocator.Find(executable) is not { } path)
+        if (CliLocator.Find(cli.Executable) is not { } path)
         {
             return null;
         }
@@ -56,11 +65,16 @@ public static partial class CliVersionCheck
     }
 
     /// <summary>The newest published release; null when the registry cannot be reached.</summary>
-    public static async Task<Version?> LatestAsync(CancellationToken cancellation = default)
+    public static async Task<Version?> LatestAsync(CliDescriptor cli, CancellationToken cancellation = default)
     {
+        if (NpmPackage(cli) is not { } package)
+        {
+            return null;
+        }
+
         try
         {
-            await using var stream = await Http.GetStreamAsync(LatestUrl, cancellation);
+            await using var stream = await Http.GetStreamAsync($"https://registry.npmjs.org/{package}/latest", cancellation);
             using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellation);
             return document.RootElement.TryGetProperty("version", out var version) ? Parse(version.GetString()) : null;
         }

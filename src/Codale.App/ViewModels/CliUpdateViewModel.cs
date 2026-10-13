@@ -5,8 +5,8 @@ using CommunityToolkit.Mvvm.ComponentModel;
 namespace Codale.App.ViewModels;
 
 /// <summary>
-/// The installed Claude CLI's version and whether a newer one is published. One per
-/// app: every window shows the same CLI. The latest release is looked up at most once
+/// An agent CLI's version and whether a newer one is published. One per
+/// page, following whichever CLI its panel shows. The latest release is looked up at most once
 /// an hour; the installed version is re-read on every refresh, so it follows an update
 /// as soon as it lands.
 /// </summary>
@@ -14,10 +14,11 @@ public sealed partial class CliUpdateViewModel : ObservableObject
 {
     private static readonly TimeSpan LatestTtl = TimeSpan.FromHours(1);
 
-    private Version? _latest;
-    private DateTimeOffset _latestChecked;
+    private static readonly Dictionary<string, (Version Version, DateTimeOffset Checked)> LatestByCli = new();
 
-    public static CliUpdateViewModel Instance { get; } = new();
+    private CliDescriptor _cli = CliLocator.ActiveCli;
+
+    public CliDescriptor Cli => _cli;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(VersionText), nameof(IsVersionKnown), nameof(UpdateAvailable), nameof(UpdateTip))]
@@ -34,25 +35,48 @@ public sealed partial class CliUpdateViewModel : ObservableObject
     public bool UpdateAvailable => Installed is { } installed && Latest is { } latest && latest > installed;
 
     public string UpdateTip => UpdateAvailable
-        ? $"{CliLocator.ActiveCli.DisplayName} CLI {Latest} is available (you have {Installed}). Click to update."
+        ? $"{_cli.DisplayName} CLI {Latest} is available (you have {Installed}). Click to update."
         : "";
 
-    public async Task RefreshAsync(bool forceLatest = false)
+    public async Task RefreshAsync(CliDescriptor cli, bool forceLatest = false)
     {
-        Installed = await CliVersionCheck.InstalledAsync();
+        _cli = cli;
+        Installed = null;
+        Latest = null;
 
-        if (Installed is null || (!forceLatest && _latest is not null && DateTimeOffset.Now - _latestChecked < LatestTtl))
+        var installed = await CliVersionCheck.InstalledAsync(cli);
+        if (_cli != cli)
         {
-            Latest = _latest;
             return;
         }
 
-        if (await CliVersionCheck.LatestAsync() is { } latest)
+        Installed = installed;
+        if (installed is null || CliVersionCheck.UpdateCommand(cli) is null)
         {
-            _latest = latest;
-            _latestChecked = DateTimeOffset.Now;
+            return;
         }
 
-        Latest = _latest;
+        (Version Version, DateTimeOffset Checked) cached;
+        lock (LatestByCli)
+        {
+            LatestByCli.TryGetValue(cli.Id, out cached);
+        }
+
+        if (forceLatest || cached.Version is null || DateTimeOffset.Now - cached.Checked >= LatestTtl)
+        {
+            if (await CliVersionCheck.LatestAsync(cli) is { } latest)
+            {
+                cached = (latest, DateTimeOffset.Now);
+                lock (LatestByCli)
+                {
+                    LatestByCli[cli.Id] = cached;
+                }
+            }
+        }
+
+        if (_cli == cli)
+        {
+            Latest = cached.Version;
+        }
     }
 }

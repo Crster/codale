@@ -1456,7 +1456,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    public string ProviderName => Codale.Agents.CliLocator.ActiveCli.DisplayName;
+    public string ProviderName => (TerminalCli ?? Codale.Agents.CliLocator.ActiveCli).DisplayName;
 
     /// <summary>Provider-assigned id of the live session, once it has started.</summary>
     public string? SessionId => _session?.SessionId;

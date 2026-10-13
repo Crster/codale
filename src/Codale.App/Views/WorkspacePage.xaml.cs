@@ -68,7 +68,9 @@ public sealed partial class WorkspacePage : Page
 
     public WorkspaceViewModel ViewModel { get; private set; } = null!;
 
-    public CliUpdateViewModel CliUpdate { get; } = CliUpdateViewModel.Instance;
+    public CliUpdateViewModel CliUpdate { get; } = new();
+
+    private CliDescriptor PanelCli => ViewModel.Panel.TerminalCli ?? CliLocator.ActiveCli;
 
     /// <summary>
     /// Updates the CLI in a terminal tab, so its output is visible and nothing changes
@@ -79,12 +81,18 @@ public sealed partial class WorkspacePage : Page
     {
         try
         {
-            await RunInNewTerminalAsync(CliVersionCheck.UpdateCommand);
+            var cli = CliUpdate.Cli;
+            if (CliVersionCheck.UpdateCommand(cli) is not { } command)
+            {
+                return;
+            }
 
-            for (var i = 0; i < 36 && CliUpdate.UpdateAvailable; i++)
+            await RunInNewTerminalAsync(command);
+
+            for (var i = 0; i < 36 && CliUpdate.UpdateAvailable && CliUpdate.Cli == cli; i++)
             {
                 await Task.Delay(TimeSpan.FromSeconds(5));
-                await CliUpdate.RefreshAsync();
+                await CliUpdate.RefreshAsync(cli);
             }
         }
         catch (Exception ex)
@@ -134,7 +142,7 @@ public sealed partial class WorkspacePage : Page
         // live to the tabs it owns. All windows share one UI thread.
         AppSettings.Changed += OnAppSettingsChanged;
 
-        _ = CliUpdate.RefreshAsync();
+        _ = CliUpdate.RefreshAsync(PanelCli);
 
         // Everything except the CLI: no agent session starts until the user opens a
         // chat tab and asks for one. An exception escaping this async void would kill
@@ -2102,6 +2110,7 @@ public sealed partial class WorkspacePage : Page
             SetPeek(null);
             WatchTodos(ViewModel.Panel);
             WatchConversation(ViewModel.Panel);
+            _ = CliUpdate.RefreshAsync(PanelCli);
         }
     }
 
