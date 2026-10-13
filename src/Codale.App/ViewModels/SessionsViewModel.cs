@@ -3,6 +3,7 @@ using System.Text;
 
 using Codale.Agents.Antigravity;
 using Codale.Agents.Claude;
+using Codale.Agents.History;
 using Codale.Core.Agents;
 using Codale.Git;
 using Codale.Storage;
@@ -35,71 +36,104 @@ public sealed partial class SessionsViewModel : ObservableObject
         _store = store;
         _databasePath = databasePath;
         _reader = new ClaudeTranscriptReader(projectPath);
-        _agy = new AgyHistoryReader(projectPath);
+        _historyRegistry = new CliHistoryRegistry(projectPath);
         _uiContext = SynchronizationContext.Current;
     }
 
-    private readonly AgyHistoryReader _agy;
+    private readonly CliHistoryRegistry _historyRegistry;
+    private ICliHistoryReader? _currentTerminalReader;
     private readonly SynchronizationContext? _uiContext;
-    private FileSystemWatcher? _agyWatcher;
+    private FileSystemWatcher? _terminalHistoryWatcher;
 
     /// <summary>
     /// The agent CLI running in a terminal whose conversations the list shows instead of Claude's
-    /// ("agy"), or null for Claude's. Only Antigravity's prompt log is readable.
+    /// (e.g. "agy", "aider", "goose", "gemini"), or null for Claude's.
     /// </summary>
     public string? TerminalCliId
     {
         get => _terminalCliId;
         set
         {
-            var id = value == "agy" ? value : null;
+            var reader = value is not null ? _historyRegistry.GetReader(value) : null;
+            var id = reader is not null ? value : null;
             if (id == _terminalCliId)
             {
                 return;
             }
 
             _terminalCliId = id;
-            WatchAgyHistory(id is not null);
+            _currentTerminalReader = reader;
+            WatchTerminalHistory(_currentTerminalReader?.HistorySourcePath);
             _ = RefreshAsync();
         }
     }
 
     private string? _terminalCliId;
 
-    private bool ShowsAgy => _terminalCliId == "agy";
+    private bool ShowsTerminalCli => _currentTerminalReader is not null;
 
     /// <summary>True for a row of a terminal CLI's conversation, which the panel can show but not continue.</summary>
-    public bool IsTerminalCliSession(TranscriptSummary summary) =>
-        string.Equals(summary.FilePath, _agy.HistoryFile, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>Re-lists while Antigravity writes its prompt log, so a new prompt shows up at once.</summary>
-    private void WatchAgyHistory(bool on)
+    public bool IsTerminalCliSession(TranscriptSummary summary)
     {
-        _agyWatcher?.Dispose();
-        _agyWatcher = null;
-        if (!on || Path.GetDirectoryName(_agy.HistoryFile) is not { } folder || !Directory.Exists(folder))
+        if (_currentTerminalReader is not null &&
+            (_currentTerminalReader.IsSessionFile(summary.FilePath) ||
+             string.Equals(summary.FilePath, _currentTerminalReader.HistorySourcePath, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return _historyRegistry.AllReaders.Any(r => r.IsSessionFile(summary.FilePath));
+    }
+
+    /// <summary>Re-lists while the active CLI writes its history log, so a new prompt shows up at once.</summary>
+    private void WatchTerminalHistory(string? path)
+    {
+        _terminalHistoryWatcher?.Dispose();
+        _terminalHistoryWatcher = null;
+        if (string.IsNullOrWhiteSpace(path))
         {
             return;
         }
 
         try
         {
-            _agyWatcher = new FileSystemWatcher(folder, Path.GetFileName(_agy.HistoryFile))
+            string folder;
+            string filter;
+
+            if (Directory.Exists(path))
             {
-                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size,
+                folder = path;
+                filter = "*.*";
+            }
+            else if (Path.GetDirectoryName(path) is { } dir && Directory.Exists(dir))
+            {
+                folder = dir;
+                filter = Path.GetFileName(path);
+            }
+            else
+            {
+                return;
+            }
+
+            _terminalHistoryWatcher = new FileSystemWatcher(folder, filter)
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName,
                 EnableRaisingEvents = true,
             };
-            _agyWatcher.Changed += (_, _) =>
-            {
-                if (_uiContext is { } ui)
-                {
-                    ui.Post(_ => _ = RefreshAsync(), null);
-                }
-            };
+            _terminalHistoryWatcher.Changed += OnTerminalHistoryChanged;
+            _terminalHistoryWatcher.Created += OnTerminalHistoryChanged;
         }
         catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
         {
-            CrashLog.Trace($"Antigravity history watch failed: {ex.Message}");
+            CrashLog.Trace($"Terminal history watch failed: {ex.Message}");
+        }
+    }
+
+    private void OnTerminalHistoryChanged(object sender, FileSystemEventArgs e)
+    {
+        if (_uiContext is { } ui)
+        {
+            ui.Post(_ => _ = RefreshAsync(), null);
         }
     }
 
@@ -310,9 +344,9 @@ public sealed partial class SessionsViewModel : ObservableObject
     private (List<TranscriptSummary> Sessions, Dictionary<string, string> Worktrees) ReadSessions()
     {
         var worktrees = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (ShowsAgy)
+        if (ShowsTerminalCli && _currentTerminalReader is not null)
         {
-            return ([.. _agy.ListSessions()], worktrees);
+            return ([.. _currentTerminalReader.ListSessions()], worktrees);
         }
 
         var sessionMap = new Dictionary<string, TranscriptSummary>(StringComparer.Ordinal);
@@ -711,7 +745,19 @@ public sealed partial class SessionsViewModel : ObservableObject
 
     /// <summary>Replays a stored transcript into chat items for read-only viewing.</summary>
     public Task<IReadOnlyList<AgentEvent>> LoadTranscriptAsync(TranscriptSummary summary) =>
-        Task.Run<IReadOnlyList<AgentEvent>>(() => IsTerminalCliSession(summary)
-            ? _agy.Replay(summary.SessionId).ToList()
-            : _reader.Replay(summary.FilePath).ToList());
+        Task.Run<IReadOnlyList<AgentEvent>>(() =>
+        {
+            if (_currentTerminalReader is not null && _currentTerminalReader.IsSessionFile(summary.FilePath))
+            {
+                return _currentTerminalReader.Replay(summary.SessionId).ToList();
+            }
+
+            var matchingReader = _historyRegistry.AllReaders.FirstOrDefault(r => r.IsSessionFile(summary.FilePath));
+            if (matchingReader is not null)
+            {
+                return matchingReader.Replay(summary.SessionId).ToList();
+            }
+
+            return _reader.Replay(summary.FilePath).ToList();
+        });
 }
