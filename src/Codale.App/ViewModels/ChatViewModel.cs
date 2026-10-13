@@ -137,7 +137,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         _status.CustomProviderName =
             AppSettings.HelperApiProvider?.Provider.Name.Trim() is { Length: > 0 } helperName ? helperName
-            : "Claude";
+            : Codale.Agents.CliLocator.ActiveCli.DisplayName;
+        OnPropertyChanged(nameof(ProviderName));
+        OnPropertyChanged(nameof(TabTitle));
     }
 
     /// <summary>True when this chat's turns go to the same BYOK provider background tasks use, so they share its tally.</summary>
@@ -1408,7 +1410,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    public string ProviderName => "Claude";
+    public string ProviderName => Codale.Agents.CliLocator.ActiveCli.DisplayName;
 
     /// <summary>Provider-assigned id of the live session, once it has started.</summary>
     public string? SessionId => _session?.SessionId;
@@ -1606,9 +1608,18 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 CrashLog.Trace($"Connect: endpoint override active for {ProviderName}");
             }
 
+            if (_mcpSettings is not null)
+            {
+                _mcpSettings.SyncWorkspaceMcpConfig(workingDirectory, mcpServers);
+            }
+
+            var activeCli = Codale.Agents.CliLocator.ActiveCli;
+            var cliExecutable = activeCli.ResolvedPath ?? activeCli.Executable;
+
             IAgentSession session = starting = new ClaudeAgentSession(new ClaudeSessionOptions
             {
                 WorkingDirectory = workingDirectory,
+                Executable = cliExecutable,
                 AdditionalDirectories = ExtraFolders?.Folders ?? [],
                 Model = model,
                 Effort = effort,
@@ -1624,7 +1635,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 PromptSuggestions = AppSettings.SuggestNextPrompt,
                 SessionId = ResumeSessionId is null ? Guid.NewGuid() : null,
                 ResumeSessionId = ResumeSessionId,
-                RawLogPath = CrashLog.NewRawLogPath($"claude-{ResumeSessionId?[..8] ?? "new"}"),
+                RawLogPath = CrashLog.NewRawLogPath($"{activeCli.Id}-{ResumeSessionId?[..8] ?? "new"}"),
                 Environment = environment.Count == 0 ? null : environment,
             });
 

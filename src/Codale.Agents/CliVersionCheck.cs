@@ -11,16 +11,17 @@ namespace Codale.Agents;
 public static partial class CliVersionCheck
 {
     /// <summary>The command that updates an installed CLI, whichever way it was installed.</summary>
-    public const string UpdateCommand = CliLocator.Executable + " update";
+    public static string UpdateCommand => CliLocator.ActiveCli.Executable + " update";
 
     private const string LatestUrl = "https://registry.npmjs.org/@anthropic-ai/claude-code/latest";
 
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
 
-    /// <summary>Runs <c>claude --version</c>; null when the CLI is missing or says nothing parseable.</summary>
+    /// <summary>Runs <c>&lt;cli&gt; --version</c>; null when the CLI is missing or says nothing parseable.</summary>
     public static async Task<Version?> InstalledAsync(CancellationToken cancellation = default)
     {
-        if (CliLocator.Find(CliLocator.Executable) is not { } path)
+        var executable = CliLocator.ActiveCli.Executable;
+        if (CliLocator.Find(executable) is not { } path)
         {
             return null;
         }

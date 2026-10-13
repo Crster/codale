@@ -44,6 +44,9 @@ public sealed record McpServerSpec
                          toolName.StartsWith(PrefixOf(s.Name), StringComparison.Ordinal) &&
                          !s.AskTools.Contains(toolName[PrefixOf(s.Name).Length..], StringComparer.Ordinal));
 
+    /// <summary>Standard <c>mcp_config.json</c> document for servers, recognized by Antigravity and other MCP-compliant CLIs.</summary>
+    public static string? ToStandardMcpConfig(IReadOnlyList<McpServerSpec> servers) => ToClaudeConfig(servers);
+
     /// <summary>The <c>--mcp-config</c> document for a set of servers, or null when there are none.</summary>
     public static string? ToClaudeConfig(IReadOnlyList<McpServerSpec> servers)
     {

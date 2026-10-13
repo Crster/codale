@@ -34,7 +34,7 @@ public sealed partial class CliUpdateViewModel : ObservableObject
     public bool UpdateAvailable => Installed is { } installed && Latest is { } latest && latest > installed;
 
     public string UpdateTip => UpdateAvailable
-        ? $"Claude CLI {Latest} is available (you have {Installed}). Click to update."
+        ? $"{CliLocator.ActiveCli.DisplayName} CLI {Latest} is available (you have {Installed}). Click to update."
         : "";
 
     public async Task RefreshAsync(bool forceLatest = false)

@@ -109,6 +109,7 @@ public sealed partial class McpToolsViewModel : ObservableObject
         if (!_loading)
         {
             _settings.BrowserEnabled = value;
+            _settings.SyncWorkspaceMcpConfig();
         }
     }
 
@@ -117,6 +118,7 @@ public sealed partial class McpToolsViewModel : ObservableObject
         if (!_loading)
         {
             _settings.ComputerEnabled = value;
+            _settings.SyncWorkspaceMcpConfig();
         }
     }
 }

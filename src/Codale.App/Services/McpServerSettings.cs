@@ -173,6 +173,39 @@ public sealed class McpServerSettings
     }
 
     /// <summary>
+    /// Synchronizes MCP server configuration into the workspace's <c>.agents/mcp_config.json</c>
+    /// so that custom CLIs such as Google Antigravity (<c>agy</c>) discover and attach
+    /// Codale's tools (browser, computer, tasks) automatically.
+    /// </summary>
+    public void SyncWorkspaceMcpConfig(string? targetDirectory = null, IReadOnlyList<McpServerSpec>? servers = null)
+    {
+        try
+        {
+            servers ??= Servers();
+            var json = McpServerSpec.ToClaudeConfig(servers);
+            var dir = targetDirectory ?? _projectPath;
+            var agentsDir = Path.Combine(dir, ".agents");
+            var configPath = Path.Combine(agentsDir, "mcp_config.json");
+
+            if (json is null)
+            {
+                if (File.Exists(configPath))
+                {
+                    File.Delete(configPath);
+                }
+                return;
+            }
+
+            Directory.CreateDirectory(agentsDir);
+            File.WriteAllText(configPath, json);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Trace($"Failed to sync workspace MCP config: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// A standing instruction for the enabled servers, appended to the agent's system prompt; null when none.
     /// Pass the <paramref name="servers"/> already computed for the session to skip a second scan.
     /// </summary>

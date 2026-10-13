@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8" ?>
 <UserControl
     x:Class="Codale.App.Controls.SettingsPanel"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -263,6 +263,14 @@
                     <TextBlock Style="{StaticResource GroupTitle}" Text="New chat defaults" />
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Agent CLI" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Which AI coding CLI drives the agent. Auto detects installed CLIs." />
+                                </StackPanel>
+                                <ComboBox x:Name="AgentCliBox" Grid.Column="1" VerticalAlignment="Center" Width="220" SelectionChanged="OnAgentCliChanged" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
                             <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
                                 <StackPanel VerticalAlignment="Center" Spacing="2">
                                     <TextBlock Text="Default model" />

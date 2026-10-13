@@ -68,8 +68,14 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
 
     private ByokProvider? ActiveProvider => AppSettings.FindByok(_chat?.EndpointName);
 
-    /// <summary>False while the chat in front runs a turn: a switch restarts its CLI and would cut the turn off.</summary>
-    public bool CanSwitch => _chat is not { IsBusy: true };
+    /// <summary>True when a custom CLI (e.g. Antigravity) is driving sessions instead of Claude.</summary>
+    public bool IsCustomCli => Codale.Agents.CliLocator.ActiveCli.Id != "claude";
+
+    /// <summary>The active CLI display name (e.g. "Antigravity", "Claude").</summary>
+    public string CustomCliName => Codale.Agents.CliLocator.ActiveCli.DisplayName;
+
+    /// <summary>False while the chat in front runs a turn or when a custom CLI is driving the session.</summary>
+    public bool CanSwitch => !IsCustomCli && _chat is not { IsBusy: true };
 
     /// <summary>True when a BYOK provider (not Default) is in use.</summary>
     public bool IsActive => ActiveProvider is not null;
@@ -78,15 +84,17 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
     public string ActiveName => ActiveProvider?.Name.Trim() ?? "";
 
     /// <summary>Where Claude goes with the current choice, in words.</summary>
-    public string RouteText => !CanSwitch
-        ? "A turn is running. Switch the provider when it finishes."
-        : ActiveProvider is not { } provider
-            ? "Claude uses your Claude login in this chat."
-            : provider.IsAccount
-                ? $"Claude uses the {provider.Name.Trim()} account in this chat."
-            : provider.LiteModel.Length == 0 && provider.SmartModel.Length == 0
-                ? $"This chat uses {provider.Name.Trim()}. It has no model name yet; add one in settings.json."
-                : $"This chat uses {provider.Name.Trim()}.";
+    public string RouteText => IsCustomCli
+        ? $"This session runs on {CustomCliName}. Custom provider dropdown is disabled for custom CLIs."
+        : !CanSwitch
+            ? "A turn is running. Switch the provider when it finishes."
+            : ActiveProvider is not { } provider
+                ? "Claude uses your Claude login in this chat."
+                : provider.IsAccount
+                    ? $"Claude uses the {provider.Name.Trim()} account in this chat."
+                : provider.LiteModel.Length == 0 && provider.SmartModel.Length == 0
+                    ? $"This chat uses {provider.Name.Trim()}. It has no model name yet; add one in settings.json."
+                    : $"This chat uses {provider.Name.Trim()}.";
 
     /// <summary>Re-reads the provider list and the current choice; the flyout calls this when it opens.</summary>
     public void Reload()
@@ -114,6 +122,9 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
         Selected = Choices.FirstOrDefault(c => string.Equals(c.Name, active, StringComparison.OrdinalIgnoreCase)) ?? Choices[0];
         _loading = false;
 
+        OnPropertyChanged(nameof(IsCustomCli));
+        OnPropertyChanged(nameof(CustomCliName));
+        OnPropertyChanged(nameof(CanSwitch));
         OnPropertyChanged(nameof(IsActive));
         OnPropertyChanged(nameof(ActiveName));
         OnPropertyChanged(nameof(RouteText));

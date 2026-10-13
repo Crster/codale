@@ -60,9 +60,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         _router = new MessageRouter(_helper);
         CliEndpoint.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(CliEndpointViewModel.ActiveName))
+            if (e.PropertyName is nameof(CliEndpointViewModel.ActiveName) or nameof(CliEndpointViewModel.IsCustomCli) or nameof(CliEndpointViewModel.CustomCliName) or nameof(CliEndpointViewModel.CanSwitch))
             {
                 OnPropertyChanged(nameof(EndpointLabel));
+                OnPropertyChanged(nameof(ProviderToolTip));
+                OnPropertyChanged(nameof(IsCustomProviderDropdownEnabled));
             }
         };
 
@@ -128,13 +130,30 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>The provider picker follows the chat in front.</summary>
     partial void OnChatChanged(ChatViewModel value) => CliEndpoint.Attach(value);
 
-    /// <summary>The status bar's CLI endpoint button: the selected custom provider's name, else "Default".</summary>
-    public string EndpointLabel => CliEndpoint.IsActive && CliEndpoint.ActiveName is { Length: > 0 } name ? name : "Default";
+    /// <summary>The session panel provider label: the custom CLI name (e.g. "Antigravity"), or selected custom provider's name, else "Default".</summary>
+    public string EndpointLabel =>
+        CliEndpoint.IsCustomCli
+            ? CliEndpoint.CustomCliName
+            : CliEndpoint.IsActive && CliEndpoint.ActiveName is { Length: > 0 } name ? name : "Default";
+
+    /// <summary>Tooltip for the session panel provider indicator.</summary>
+    public string ProviderToolTip =>
+        CliEndpoint.IsCustomCli
+            ? $"Agent provider: {CliEndpoint.CustomCliName} (custom CLI)"
+            : "Agent provider for this chat";
+
+    /// <summary>Whether the custom provider dropdown button in the session panel is enabled.</summary>
+    public bool IsCustomProviderDropdownEnabled => CliEndpoint.CanSwitch;
 
     private readonly CustomUsageTally _customUsage = new();
 
     private void OnAppSettingsChanged(object? sender, EventArgs e)
     {
+        CliEndpoint.Reload();
+        OnPropertyChanged(nameof(EndpointLabel));
+        OnPropertyChanged(nameof(ProviderToolTip));
+        OnPropertyChanged(nameof(IsCustomProviderDropdownEnabled));
+
         foreach (var chat in Chats)
         {
             chat.RefreshCustomProviderName();

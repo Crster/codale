@@ -116,8 +116,56 @@ public sealed record ClaudeSessionOptions
     /// </summary>
     public string? RawLogPath { get; init; }
 
+    private static bool IsAgy(string executable) =>
+        string.Equals(Path.GetFileNameWithoutExtension(executable), "agy", StringComparison.OrdinalIgnoreCase);
+
     internal IReadOnlyList<string> BuildArguments()
     {
+        if (IsAgy(Executable))
+        {
+            var agyArgs = new List<string>
+            {
+                "--input-format", "stream-json",
+                "--output-format", "stream-json",
+            };
+
+            if (PermissionMode is "auto" or "bypassPermissions")
+            {
+                agyArgs.Add("--dangerously-skip-permissions");
+            }
+            else if (PermissionMode is "plan")
+            {
+                agyArgs.AddRange(["--mode", "plan"]);
+            }
+            else if (PermissionMode is "acceptEdits")
+            {
+                agyArgs.AddRange(["--mode", "accept-edits"]);
+            }
+
+            if (Model is { Length: > 0 } m)
+            {
+                agyArgs.AddRange(["--model", m]);
+            }
+
+            if (Effort is { Length: > 0 } e)
+            {
+                agyArgs.AddRange(["--effort", e]);
+            }
+
+            if (ResumeSessionId is { Length: > 0 } r)
+            {
+                agyArgs.AddRange(["--conversation", r]);
+            }
+
+            foreach (var dir in AdditionalDirectories)
+            {
+                agyArgs.AddRange(["--add-dir", dir]);
+            }
+
+            agyArgs.AddRange(ExtraArguments);
+            return agyArgs;
+        }
+
         var args = new List<string>
         {
             "-p",

@@ -1,4 +1,4 @@
-﻿using Codale.Agents.Claude;
+using Codale.Agents.Claude;
 using Codale.Agents;
 using Codale.Agents.OpenAi;
 using Codale.App.Services;
@@ -103,6 +103,7 @@ public sealed partial class SettingsPanel : UserControl
 
         DefaultChatModeBox.SelectedIndex = Math.Max(0, DefaultChatModeBox.Items.ToList().FindIndex(
             i => (i as ComboBoxItem)?.Tag as string == AppSettings.DefaultChatMode));
+        BuildAgentCliItems();
         BuildDefaultModelItems();
         DefaultEffortBox.SelectedIndex = AppSettings.DefaultEffort switch
         {
@@ -796,6 +797,47 @@ public sealed partial class SettingsPanel : UserControl
         }
 
         DefaultModelBox.SelectedIndex = index;
+    }
+
+    private void BuildAgentCliItems()
+    {
+        AgentCliBox.Items.Clear();
+        var current = AppSettings.AgentCli;
+        var active = Codale.Agents.CliLocator.ActiveCli;
+        AgentCliBox.Items.Add(new ComboBoxItem { Content = $"Auto ({active.DisplayName})", Tag = "auto" });
+
+        var selectedIndex = string.Equals(current, "auto", StringComparison.OrdinalIgnoreCase) ? 0 : -1;
+        foreach (var cli in Codale.Agents.CliLocator.KnownClis)
+        {
+            var isInstalled = cli.IsInstalled;
+            var label = isInstalled ? $"{cli.DisplayName} ({cli.Executable})" : $"{cli.DisplayName} (not found)";
+            var item = new ComboBoxItem { Content = label, Tag = cli.Id, IsEnabled = isInstalled };
+            AgentCliBox.Items.Add(item);
+            if (string.Equals(current, cli.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                selectedIndex = AgentCliBox.Items.Count - 1;
+            }
+        }
+
+        if (selectedIndex < 0)
+        {
+            selectedIndex = 0;
+        }
+
+        AgentCliBox.SelectedIndex = selectedIndex;
+    }
+
+    private void OnAgentCliChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        if (AgentCliBox.SelectedItem is ComboBoxItem item && item.Tag is string id)
+        {
+            AppSettings.AgentCli = id;
+        }
     }
 
     private void OnEditorFontSizeChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)

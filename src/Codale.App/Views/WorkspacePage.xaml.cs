@@ -181,6 +181,11 @@ public sealed partial class WorkspacePage : Page
                 entry.Chat.AttentionNeeded -= OnChatAttentionNeeded;
                 entry.Chat.PropertyChanged -= OnChatPropertyChanged;
             }
+
+            foreach (var entry in _terminalTabs)
+            {
+                entry.Terminal.PropertyChanged -= OnTerminalPropertyChanged;
+            }
         }
     }
 
@@ -404,13 +409,14 @@ public sealed partial class WorkspacePage : Page
 
     private void RefreshCliLabels()
     {
-        var claude = CliLocator.IsInstalled() ? "Claude chat" : "Install Claude CLI…";
-        ClaudeMenuItem.Text = claude;
-        ClaudeEmptyLabel.Text = claude;
+        var cli = CliLocator.ActiveCli;
+        var label = CliLocator.IsInstalled() ? $"{cli.DisplayName} session" : $"Install {cli.DisplayName}…";
+        ClaudeMenuItem.Text = label;
+        ClaudeEmptyLabel.Text = label;
     }
 
     /// <summary>
-    /// Opens the chat when the Claude CLI exists; otherwise offers to install it,
+    /// Opens the chat when the active CLI exists; otherwise offers to install it,
     /// running the installer in a new terminal tab so the user sees its output.
     /// </summary>
     private async Task OpenChatOrOfferInstallAsync()
@@ -421,11 +427,12 @@ public sealed partial class WorkspacePage : Page
             return;
         }
 
+        var cli = CliLocator.ActiveCli;
         var command = CliLocator.InstallCommand;
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
-            Title = "Claude CLI not found",
+            Title = $"{cli.DisplayName} not found",
             Content = new TextBlock
             {
                 TextWrapping = TextWrapping.Wrap,
@@ -661,6 +668,14 @@ public sealed partial class WorkspacePage : Page
         {
             RefreshTabAttention(entry);
         }
+
+        if (e.PropertyName == nameof(ChatViewModel.IsConnected) && sender is ChatViewModel chat && chat.IsConnected)
+        {
+            if (ViewModel?.CliEndpoint.IsCustomCli == true && !_sessionPanelOpen)
+            {
+                SetSessionPanel(true);
+            }
+        }
     }
 
     /// <summary>
@@ -763,6 +778,32 @@ public sealed partial class WorkspacePage : Page
     private ChatTabEntry? ChatTabInFront() =>
         _chatTabs.FirstOrDefault(e => ReferenceEquals(e.Item, CentreTabs.SelectedItem));
 
+    private TerminalTabEntry? TerminalTabInFront() =>
+        _terminalTabs.FirstOrDefault(e => ReferenceEquals(e.Item, CentreTabs.SelectedItem));
+
+    private bool IsCliInSession()
+    {
+        if (ViewModel is null)
+        {
+            return false;
+        }
+
+        // 1. Is there an active agent chat session connected or working?
+        if (ViewModel.Chat.IsConnected || _chatTabs.Any(t => t.Chat.IsConnected))
+        {
+            return true;
+        }
+
+        // 2. Is there an active agent terminal or terminal running a known CLI?
+        if (_terminalTabs.Any(t => t.Terminal.IsAgentTerminal || t.Terminal.IsRunning && CliLocator.KnownClis.Any(k => string.Equals(k.Id, t.Terminal.RunningCommand, StringComparison.OrdinalIgnoreCase))))
+        {
+            return true;
+        }
+
+        // 3. Is the custom CLI configured?
+        return ViewModel.CliEndpoint.IsCustomCli;
+    }
+
     private void OpenTerminalTab() => AddTerminalTab(ViewModel.CreateTerminal());
 
     /// <summary>
@@ -792,6 +833,8 @@ public sealed partial class WorkspacePage : Page
 
             UpdateEmptyState();
             CentreTabs.SelectedItem = item;
+
+            terminal.PropertyChanged += OnTerminalPropertyChanged;
 
             // The shell lives exactly as long as its tab: started when the tab first
             // appears, terminated when the tab is closed.
@@ -823,9 +866,24 @@ public sealed partial class WorkspacePage : Page
 
         UpdateEmptyState();
         UpdateSessionPanelForActiveTab();
+        entry.Terminal.PropertyChanged -= OnTerminalPropertyChanged;
         entry.Tab.LinkActivated -= OnTerminalLinkActivated;
         entry.Tab.CloseHost();
         ViewModel.RemoveTerminal(entry.Terminal);
+    }
+
+    private void OnTerminalPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(TerminalViewModel.RunningCommand) && sender is TerminalViewModel term)
+        {
+            if (term.IsRunning && CliLocator.KnownClis.Any(k => string.Equals(k.Id, term.RunningCommand, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (!_sessionPanelOpen)
+                {
+                    SetSessionPanel(true);
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -2012,10 +2070,10 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>
-    /// The session panel belongs to the agent chat: it is shown only while the chat
-    /// tab is in front of the centre area, and hides when another tab takes over or
-    /// the chat tab closes. The title-bar button can still close it by hand while
-    /// the chat stays in front.
+    /// The session panel belongs to the agent: it is shown while the chat tab is in front,
+    /// or when a custom CLI is in session/running (resizing adjacent terminal/editor content),
+    /// and hides when unrelated tabs take over without a CLI in session.
+    /// The title-bar button can still toggle it by hand.
     /// </summary>
     private void UpdateSessionPanelForActiveTab()
     {
@@ -2025,7 +2083,20 @@ public sealed partial class WorkspacePage : Page
         }
 
         var chatInFront = ChatTabInFront() is not null;
-        SetSessionPanel(chatInFront);
+        if (chatInFront)
+        {
+            SetSessionPanel(true);
+        }
+        else if (IsCliInSession())
+        {
+            // When a custom CLI is in session, keep the session panel open (or closed if toggled off);
+            // CentreContent.Margin automatically resizes the active terminal or editor tab.
+            SetSessionPanel(_sessionPanelOpen);
+        }
+        else
+        {
+            SetSessionPanel(false);
+        }
 
         // The peek belongs to the chat's task list: it goes when the chat does.
         if (!chatInFront)
@@ -2096,9 +2167,9 @@ public sealed partial class WorkspacePage : Page
 
     private async Task ToggleSessionPanelAsync()
     {
-        // With the chat in front the button simply toggles the panel; otherwise it
-        // brings the chat back, since the panel only exists for the agent.
-        if (ChatTabInFront() is not null)
+        // When chat is in front or a custom CLI is in session (or terminal in front),
+        // clicking the button toggles the panel on the right side and resizes adjacent content.
+        if (ChatTabInFront() is not null || IsCliInSession() || TerminalTabInFront() is not null)
         {
             SetSessionPanel(!_sessionPanelOpen);
             return;

@@ -129,7 +129,7 @@
                         BorderBrush="Transparent"
                         Click="OnTitleBarSessionClick"
                         ToolTipService.ToolTip="Agent session panel">
-                        <FontIcon FontSize="14" Glyph="&#xE77B;" />
+                        <FontIcon FontSize="14" Glyph="&#xE99A;" />
                     </Button>
                 </StackPanel>
             </TitleBar.Content>
