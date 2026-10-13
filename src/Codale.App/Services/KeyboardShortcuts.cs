@@ -177,6 +177,7 @@ public readonly record struct KeyChord(VirtualKey Key, bool Ctrl, bool Shift, bo
 public static class KeyboardShortcuts
 {
     public const string OpenTerminal = "openTerminal";
+    public const string FocusShellCommand = "focusShellCommand";
     public const string ToggleLeftPanel = "toggleLeftPanel";
     public const string NewFile = "newFile";
     public const string OpenChat = "openChat";
@@ -193,7 +194,8 @@ public static class KeyboardShortcuts
 
     public static IReadOnlyList<ShortcutAction> Actions { get; } =
     [
-        new(OpenTerminal, "Open terminal", "A new terminal tab.", "Ctrl+`"),
+        new(OpenTerminal, "Open terminal", "A new terminal tab.", "Ctrl+T"),
+        new(FocusShellCommand, "Focus shell command", "The shell command input in the status bar.", "Ctrl+`"),
         new(ToggleLeftPanel, "Hide / show left panel", "The files and git panel.", "Ctrl+B"),
         new(NewFile, "New file", "An untitled editor tab.", "Ctrl+N"),
         new(OpenChat, "Open chat", "Brings up the chat and focuses its prompt.", "Ctrl+I"),

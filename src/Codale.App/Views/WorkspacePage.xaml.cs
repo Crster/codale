@@ -2496,6 +2496,9 @@ public sealed partial class WorkspacePage : Page
             case KeyboardShortcuts.OpenTerminal:
                 OpenTerminalTab();
                 break;
+            case KeyboardShortcuts.FocusShellCommand:
+                FocusStatusBarCommandBox();
+                break;
             case KeyboardShortcuts.ToggleLeftPanel:
                 ToggleLeftPanel();
                 break;
@@ -2589,6 +2592,16 @@ public sealed partial class WorkspacePage : Page
 
         // After the tab switch settles, or the new tab's content takes the focus back.
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => window.FocusSearch());
+    }
+
+    /// <summary>Focuses the status bar shell command input box and selects its text if any.</summary>
+    private void FocusStatusBarCommandBox()
+    {
+        StatusBarCommandBox.Focus(FocusState.Programmatic);
+        if (FindTemplateChild(StatusBarCommandBox, "TextBox") is TextBox inner && !string.IsNullOrEmpty(StatusBarCommandBox.Text))
+        {
+            inner.SelectAll();
+        }
     }
 
     /// <summary>The mode chip's order; the flyout lists them the same way.</summary>

@@ -51,26 +51,33 @@ public static class TodoParser
         var items = new List<TodoItem>();
         foreach (var entry in todos.EnumerateArray())
         {
+            // The schema names "content", but a CLI model sometimes fills the list with its own
+            // field names (Antigravity sends "text"); a step that is still readable is kept.
             if (entry.ValueKind == JsonValueKind.Object &&
-                Text(entry, "content") is { } content &&
-                !string.IsNullOrWhiteSpace(content))
+                ContentFields.Select(f => Text(entry, f)).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t)) is { } content)
             {
                 items.Add(new TodoItem { Content = content.Trim(), Status = ParseStatus(Text(entry, "status")) });
+            }
+            else if (entry.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(entry.GetString()))
+            {
+                items.Add(new TodoItem { Content = entry.GetString()!.Trim() });
             }
         }
 
         return items;
     }
 
+    private static readonly string[] ContentFields = ["content", "text", "title", "task", "step", "description", "name"];
+
     private static string? Text(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
 
-    private static TodoStatus ParseStatus(string? status) => status?.ToLowerInvariant() switch
+    private static TodoStatus ParseStatus(string? status) => status?.ToLowerInvariant().Replace("-", "_").Replace(" ", "_") switch
     {
-        "completed" or "done" => TodoStatus.Completed,
-        "in_progress" or "inprogress" or "active" => TodoStatus.InProgress,
+        "completed" or "complete" or "done" => TodoStatus.Completed,
+        "in_progress" or "inprogress" or "active" or "running" => TodoStatus.InProgress,
         _ => TodoStatus.Pending,
     };
 }
