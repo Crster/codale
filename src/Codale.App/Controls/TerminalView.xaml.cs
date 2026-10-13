@@ -159,6 +159,7 @@ public sealed partial class TerminalView : UserControl
             _caretTimer.Stop();
             InvalidateAll();
         };
+        LosingFocus += OnTerminalLosingFocus;
 
         // A ChangeView issued before the extent grew is clamped to the old extent;
         // once layout catches up, re-issue it so the scrollbar lands where we meant.
@@ -1056,10 +1057,10 @@ public sealed partial class TerminalView : UserControl
     // ------------------------------------------------------------------ pointer
 
     /// <summary>Ctrl+click on a URL or file path in the output; the host decides how to open it.</summary>
-    public event EventHandler<Codale.App.Services.LinkMatch>? LinkActivated;
+    public event EventHandler<LinkMatch>? LinkActivated;
 
     /// <summary>The link under the pointer while Ctrl is held: underlined, and clickable.</summary>
-    private (int Line, int From, int To, Codale.App.Services.LinkMatch Match)? _hoverLink;
+    private (int Line, int From, int To, LinkMatch Match)? _hoverLink;
 
     /// <summary>
     /// What the hover computation was last built from. With Ctrl held, every pointer
@@ -1067,7 +1068,7 @@ public sealed partial class TerminalView : UserControl
     /// though the cell (and the buffer) had not moved.
     /// </summary>
     private (int Line, int Col, long Revision)? _linkCacheKey;
-    private (int Line, int From, int To, Codale.App.Services.LinkMatch Match)? _linkCache;
+    private (int Line, int From, int To, LinkMatch Match)? _linkCache;
 
     private static readonly Windows.UI.Color LinkColor = FromHex("#61AFEF");
 
@@ -1084,7 +1085,7 @@ public sealed partial class TerminalView : UserControl
         return new string(chars);
     }
 
-    private (int Line, int From, int To, Codale.App.Services.LinkMatch Match)? LinkAt(Windows.Foundation.Point point)
+    private (int Line, int From, int To, LinkMatch Match)? LinkAt(Windows.Foundation.Point point)
     {
         // An app tracking the mouse owns clicks; Shift is the usual way to take them back.
         if (_emulator.MouseMode != TerminalEmulator.MouseTracking.None && !IsShiftDown())
@@ -1096,7 +1097,7 @@ public sealed partial class TerminalView : UserControl
     }
 
     /// <summary>The link for the cell under the point, cached against the cell and the buffer revision.</summary>
-    private (int Line, int From, int To, Codale.App.Services.LinkMatch Match)? ComputeLinkAt(Windows.Foundation.Point point)
+    private (int Line, int From, int To, LinkMatch Match)? ComputeLinkAt(Windows.Foundation.Point point)
     {
         var (line, col) = PointToCell(point);
         if (_linkCacheKey == (line, col, _emulator.Revision))
@@ -1104,9 +1105,9 @@ public sealed partial class TerminalView : UserControl
             return _linkCache;
         }
 
-        var link = Codale.App.Services.LinkFinder.At(LineText(line), col) is { } match
+        var link = LinkFinder.At(LineText(line), col) is { } match
             ? (line, match.Index, match.Index + match.Length, match)
-            : default((int, int, int, Codale.App.Services.LinkMatch)?);
+            : default((int, int, int, LinkMatch)?);
 
         _linkCacheKey = (line, col, _emulator.Revision);
         _linkCache = link;
@@ -1115,7 +1116,7 @@ public sealed partial class TerminalView : UserControl
 
     private void UpdateHover(PointerRoutedEventArgs e)
     {
-        var link = IsCtrlDown() ? ComputeLinkAt(e.GetCurrentPoint(Canvas).Position) : default((int, int, int, Codale.App.Services.LinkMatch)?);
+        var link = IsCtrlDown() ? ComputeLinkAt(e.GetCurrentPoint(Canvas).Position) : default((int, int, int, LinkMatch)?);
         if (Equals(link, _hoverLink))
         {
             return;
@@ -1138,7 +1139,7 @@ public sealed partial class TerminalView : UserControl
 
     private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        Focus(FocusState.Pointer);
+        Focus(FocusState.Programmatic);
 
         if (IsCtrlDown() && LinkAt(e.GetCurrentPoint(Canvas).Position) is { } link)
         {
@@ -1269,6 +1270,24 @@ public sealed partial class TerminalView : UserControl
         if (!appClick)
         {
             _selectedSnapshot = HasSelection ? GetSelectionText() : null;
+        }
+
+        e.Handled = true;
+    }
+
+    private void OnTerminalLosingFocus(UIElement sender, LosingFocusEventArgs args)
+    {
+        // WinUI 3 can attempt to shift or drop focus to null (unfocused) or to internal
+        // non-focusable/chrome children (the Win2D canvas or the scrollbar Scroller) during
+        // pointer release. Retain focus on this control unless focus is genuinely moving
+        // to an external element.
+        if (args.NewFocusedElement is null ||
+            ReferenceEquals(args.NewFocusedElement, Canvas) ||
+            ReferenceEquals(args.NewFocusedElement, CaretCanvas) ||
+            ReferenceEquals(args.NewFocusedElement, Scroller) ||
+            ReferenceEquals(args.NewFocusedElement, Extent))
+        {
+            args.TryCancel();
         }
     }
 

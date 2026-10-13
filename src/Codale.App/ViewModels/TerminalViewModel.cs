@@ -78,6 +78,12 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     /// <summary>True for a dedicated CLI tab: the shell exits with the CLI, so the exit is known.</summary>
     public bool IsCliTerminal => CliId is not null;
 
+    /// <summary>
+    /// The headless session this CLI tab stands for: what the CLI reports (tasks, artifacts, changes) lands in
+    /// it, and it is what the session panel shows while the tab is in front. Null for a shell or a command run.
+    /// </summary>
+    public ChatViewModel? AgentSession { get; init; }
+
     /// <summary>True when this terminal tab was started by an agent task rather than the user.</summary>
     public bool IsAgentTerminal { get; set; }
 
@@ -175,9 +181,19 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>Raised when the user sends a line (Enter) into the terminal; emulator replies never contain one.</summary>
+    public event EventHandler? InputSubmitted;
+
     /// <summary>Forwards keystrokes, pastes and emulator replies into the shell.</summary>
-    public Task WriteAsync(string text) =>
-        _session is { } session && IsRunning ? session.WriteAsync(text) : Task.CompletedTask;
+    public Task WriteAsync(string text)
+    {
+        if (text.Contains('\r'))
+        {
+            InputSubmitted?.Invoke(this, EventArgs.Empty);
+        }
+
+        return _session is { } session && IsRunning ? session.WriteAsync(text) : Task.CompletedTask;
+    }
 
     /// <summary>Resizes the pseudoconsole to the view's cell grid.</summary>
     public void Resize(short columns, short rows) => _session?.Resize(columns, rows);

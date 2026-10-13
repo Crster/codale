@@ -296,6 +296,7 @@ public sealed partial class CodeEditor : UserControl
             _caretVisible = false;
             InvalidateAll();
         };
+        LosingFocus += OnEditorLosingFocus;
 
         // Tunnelling: the focus system takes Tab before a bubbling KeyDown fires.
         PreviewKeyDown += OnEditorKeyDown;
@@ -1099,7 +1100,7 @@ public sealed partial class CodeEditor : UserControl
 
     private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        Focus(FocusState.Pointer);
+        Focus(FocusState.Programmatic);
         var point = e.GetCurrentPoint(Canvas);
 
         // A right click opens the context menu: it moves the caret unless it lands in the
@@ -1192,6 +1193,20 @@ public sealed partial class CodeEditor : UserControl
         if (position.X < 0 || position.Y < 0 || position.X > Canvas.ActualWidth || position.Y > Canvas.ActualHeight)
         {
             ProtectedCursor = null;
+        }
+
+        e.Handled = true;
+    }
+
+    private void OnEditorLosingFocus(UIElement sender, LosingFocusEventArgs args)
+    {
+        if (args.NewFocusedElement is null ||
+            ReferenceEquals(args.NewFocusedElement, Canvas) ||
+            ReferenceEquals(args.NewFocusedElement, CaretCanvas) ||
+            ReferenceEquals(args.NewFocusedElement, Scroller) ||
+            ReferenceEquals(args.NewFocusedElement, Extent))
+        {
+            args.TryCancel();
         }
     }
 

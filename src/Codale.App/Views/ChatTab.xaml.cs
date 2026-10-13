@@ -22,12 +22,22 @@ namespace Codale.App.Views;
 /// A workspace file a transcript tool call points at; IsEdit asks for the diff view.
 /// Diff, when present, is the call's own change - shown instead of git's whole-file diff.
 /// </summary>
-public sealed class ToolFileRequestEventArgs(string path, bool isEdit, Codale.Git.FileDiff? diff = null, int line = 0) : EventArgs
+public sealed class ToolFileRequestEventArgs(
+    string path,
+    bool isEdit,
+    Codale.Git.FileDiff? diff = null,
+    int line = 0,
+    int column = 0,
+    int endLine = 0,
+    int endColumn = 0) : EventArgs
 {
     public string Path { get; } = path;
 
     /// <summary>1-based line to reveal and mark, or 0 for the top of the file.</summary>
     public int Line { get; } = line;
+    public int Column { get; } = column;
+    public int EndLine { get; } = endLine;
+    public int EndColumn { get; } = endColumn;
     public bool IsEdit { get; } = isEdit;
     public Codale.Git.FileDiff? Diff { get; } = diff;
 }
@@ -126,13 +136,10 @@ public sealed partial class ChatTab : UserControl
 
         Loaded += (_, _) =>
         {
-            MarkdownView.FileLinkClicked += OnMarkdownFileLink;
             UpdateStopPulse();
         };
         Unloaded += (_, _) =>
         {
-            MarkdownView.FileLinkClicked -= OnMarkdownFileLink;
-
             // A background tab's forever storyboard would still tick every frame.
             StopStopPulse();
         };
@@ -163,31 +170,6 @@ public sealed partial class ChatTab : UserControl
             ViewModel.InterruptCommand.Execute(null);
             e.Handled = true;
         }
-    }
-
-    /// <summary>A path in the assistant's text was clicked; only the tab holding that text answers.</summary>
-    private void OnMarkdownFileLink(MarkdownView source, Codale.App.Services.LinkMatch link)
-    {
-        if (link.Path is null || !IsAncestorOf(source))
-        {
-            return;
-        }
-
-        ToolFileRequested?.Invoke(this, new ToolFileRequestEventArgs(link.Path, isEdit: false, line: link.Line));
-    }
-
-    private bool IsAncestorOf(DependencyObject node)
-    {
-        for (var parent = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node); parent is not null;
-             parent = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(parent))
-        {
-            if (ReferenceEquals(parent, this))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     public ChatViewModel ViewModel

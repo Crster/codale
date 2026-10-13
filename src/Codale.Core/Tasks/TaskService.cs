@@ -416,9 +416,10 @@ public sealed class TaskPipeClient(string pipeName, string token) : ITaskService
 
     /// <summary>
     /// Shows a todos_set / artifact_add call of an agent CLI outside the chat in the session panel
-    /// (<paramref name="kind"/> is "todos" or "artifact"). Never throws: the panel is a courtesy.
+    /// (<paramref name="kind"/> is "todos" or "artifact"). Never throws: the panel is a courtesy;
+    /// the result is null when it was delivered, otherwise why it was not.
     /// </summary>
-    public async Task PublishPanelAsync(string kind, JsonElement input, CancellationToken ct)
+    public async Task<string?> PublishPanelAsync(string kind, JsonElement input, CancellationToken ct)
     {
         try
         {
@@ -428,9 +429,11 @@ public sealed class TaskPipeClient(string pipeName, string token) : ITaskService
                     TimeSpan.FromSeconds(3),
                     exclusive: false)
                 .ConfigureAwait(false);
+            return null;
         }
         catch (Exception e) when (e is TaskServiceException or IOException or OperationCanceledException or JsonException)
         {
+            return e.Message;
         }
     }
 

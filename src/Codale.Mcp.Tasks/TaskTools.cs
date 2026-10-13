@@ -65,6 +65,37 @@ public static class TaskTools
     private static bool PushesToPanel(ITaskService tasks) =>
         tasks is TaskPipeClient && Environment.GetEnvironmentVariable("CODALE_PANEL_PUSH") == "1";
 
+    /// <summary>
+    /// Sends a panel call to the app when this server runs for a terminal CLI; null when it was
+    /// delivered (or is not pushed at all), otherwise why not. Each attempt is logged to
+    /// <c>panel-push.log</c> beside Codale's other data, since a CLI's tool output is easy to miss.
+    /// </summary>
+    private static async Task<string?> PublishAsync(ITaskService tasks, string kind, System.Text.Json.JsonElement input, CancellationToken ct)
+    {
+        if (!PushesToPanel(tasks))
+        {
+            Log($"{kind}: not pushed (pipe client = {tasks is TaskPipeClient}, CODALE_PANEL_PUSH = {Environment.GetEnvironmentVariable("CODALE_PANEL_PUSH")}) input = {input.GetRawText()}");
+            return null;
+        }
+
+        var failure = await ((TaskPipeClient)tasks).PublishPanelAsync(kind, input, ct);
+        Log($"{kind}: {(failure is null ? "delivered" : "FAILED: " + failure)} input = {input.GetRawText()}");
+        return failure;
+    }
+
+    private static void Log(string line)
+    {
+        try
+        {
+            var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale");
+            Directory.CreateDirectory(folder);
+            File.AppendAllText(Path.Combine(folder, "panel-push.log"), $"[{DateTime.Now:HH:mm:ss.fff}] {line}{Environment.NewLine}");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
     private static IReadOnlyList<McpTool> Panel(ITaskService tasks) =>
     [
         new McpTool(
@@ -104,12 +135,10 @@ public static class TaskTools
             {
                 var list = a.RequiredArray("todos");
                 var done = list.Count(t => t.TryGetProperty("status", out var s) && s.GetString() == "completed");
-                if (PushesToPanel(tasks))
-                {
-                    await ((TaskPipeClient)tasks).PublishPanelAsync("todos", a.Raw, ct);
-                }
-
-                return await McpTool.Text($"Task list updated: {done}/{list.Count} done.");
+                var failure = await PublishAsync(tasks, "todos", a.Raw, ct);
+                return await McpTool.Text(failure is null
+                    ? $"Task list updated: {done}/{list.Count} done."
+                    : $"Task list NOT shown in Codale's panel: {failure}");
             }),
 
         new McpTool(
@@ -132,12 +161,10 @@ public static class TaskTools
                     throw new McpToolException("Give either 'path' or 'markdown'.");
                 }
 
-                if (PushesToPanel(tasks))
-                {
-                    await ((TaskPipeClient)tasks).PublishPanelAsync("artifact", a.Raw, ct);
-                }
-
-                return await McpTool.Text("Added to the session panel's artifacts.");
+                var failure = await PublishAsync(tasks, "artifact", a.Raw, ct);
+                return await McpTool.Text(failure is null
+                    ? "Added to the session panel's artifacts."
+                    : $"NOT added to Codale's panel: {failure}");
             }),
     ];
 

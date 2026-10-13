@@ -1286,12 +1286,12 @@
                                 Height="6"
                                 VerticalAlignment="Center"
                                 Fill="SeaGreen"
-                                Visibility="{x:Bind ViewModel.Chat.IsConnected, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                Visibility="{x:Bind ViewModel.Panel.IsConnected, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                             <TextBlock
                                 VerticalAlignment="Center"
                                 FontSize="12"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Text="{x:Bind ViewModel.Chat.ProviderName, Mode=OneWay}" />
+                                Text="{x:Bind ViewModel.Panel.ProviderName, Mode=OneWay}" />
                             <TextBlock
                                 VerticalAlignment="Center"
                                 FontSize="12"
@@ -1385,9 +1385,9 @@
 
                                             <Button
                                                 Click="OnModelChipClick"
-                                                IsEnabled="{x:Bind ViewModel.Chat.CanChangeMode, Mode=OneWay}"
+                                                IsEnabled="{x:Bind ViewModel.Panel.CanChangeMode, Mode=OneWay}"
                                                 Style="{StaticResource SessionControlButton}"
-                                                ToolTipService.ToolTip="{x:Bind ViewModel.Chat.ModelDisplay, Mode=OneWay}">
+                                                ToolTipService.ToolTip="{x:Bind ViewModel.Panel.ModelDisplay, Mode=OneWay}">
                                                 <Grid ColumnSpacing="6" RowSpacing="2">
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="Auto" />
@@ -1411,7 +1411,7 @@
                                                         Grid.Row="1"
                                                         Grid.Column="1"
                                                         Style="{StaticResource SessionControlValue}"
-                                                        Text="{x:Bind ViewModel.Chat.ModelDisplay, Mode=OneWay}" />
+                                                        Text="{x:Bind ViewModel.Panel.ModelDisplay, Mode=OneWay}" />
                                                     <FontIcon
                                                         Grid.Row="1"
                                                         Grid.Column="2"
@@ -1424,7 +1424,7 @@
                                             <Button
                                                 Grid.Column="1"
                                                 Click="OnEffortChipClick"
-                                                IsEnabled="{x:Bind ViewModel.Chat.CanChangeMode, Mode=OneWay}"
+                                                IsEnabled="{x:Bind ViewModel.Panel.CanChangeMode, Mode=OneWay}"
                                                 Style="{StaticResource SessionControlButton}"
                                                 ToolTipService.ToolTip="How hard the model thinks before it answers (locked while the agent works)">
                                                 <Grid ColumnSpacing="6" RowSpacing="2">
@@ -1450,7 +1450,7 @@
                                                         Grid.Row="1"
                                                         Grid.Column="1"
                                                         Style="{StaticResource SessionControlValue}"
-                                                        Text="{x:Bind ViewModel.Chat.EffortDisplay, Mode=OneWay}" />
+                                                        Text="{x:Bind ViewModel.Panel.EffortDisplay, Mode=OneWay}" />
                                                     <FontIcon
                                                         Grid.Row="1"
                                                         Grid.Column="2"
@@ -1463,7 +1463,7 @@
                                             <Button
                                                 Grid.Column="2"
                                                 Click="OnModeChipClick"
-                                                IsEnabled="{x:Bind ViewModel.Chat.CanChangeMode, Mode=OneWay}"
+                                                IsEnabled="{x:Bind ViewModel.Panel.CanChangeMode, Mode=OneWay}"
                                                 Style="{StaticResource SessionControlButton}"
                                                 ToolTipService.ToolTip="How much the agent may do before asking (locked while the agent is working)">
                                                 <Grid ColumnSpacing="6" RowSpacing="2">
@@ -1484,12 +1484,12 @@
                                                         Grid.Row="1"
                                                         FontSize="12"
                                                         Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                                        Glyph="{x:Bind ViewModel.Chat.ModeGlyph, Mode=OneWay}" />
+                                                        Glyph="{x:Bind ViewModel.Panel.ModeGlyph, Mode=OneWay}" />
                                                     <TextBlock
                                                         Grid.Row="1"
                                                         Grid.Column="1"
                                                         Style="{StaticResource SessionControlValue}"
-                                                        Text="{x:Bind ViewModel.Chat.ModeDisplayText, Mode=OneWay}" />
+                                                        Text="{x:Bind ViewModel.Panel.ModeDisplayText, Mode=OneWay}" />
                                                     <FontIcon
                                                         Grid.Row="1"
                                                         Grid.Column="2"
@@ -1501,7 +1501,7 @@
                                         </Grid>
 
                                         <!--  The two ways to start over, side by side: the primary one in accent  -->
-                                        <Grid ColumnSpacing="8" Visibility="{x:Bind ViewModel.IsIsolated, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
+                                        <Grid ColumnSpacing="8" Visibility="{x:Bind ViewModel.ShowNewSessionButtons, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="*" />
@@ -1635,7 +1635,7 @@
                             Padding="12,0">
                             <StackPanel Spacing="10">
                                     <!--  Todos: collapsed until the agent publishes something  -->
-                                    <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Chat.Todos.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                    <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Panel.Todos.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
                                         <ToggleButton
                                             x:Name="TodosSection"
                                             IsChecked="True"
@@ -1647,11 +1647,11 @@
                                                     VerticalAlignment="Center"
                                                     Background="{StaticResource KindTodoTintBrush}"
                                                     CornerRadius="8"
-                                                    Visibility="{x:Bind ViewModel.Chat.TasksTotal, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                                    Visibility="{x:Bind ViewModel.Panel.TasksTotal, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
                                                     <TextBlock FontSize="10" Foreground="{StaticResource KindTodoBrush}">
-                                                        <Run Text="{x:Bind ViewModel.Chat.TasksDone, Mode=OneWay}" />
+                                                        <Run Text="{x:Bind ViewModel.Panel.TasksDone, Mode=OneWay}" />
                                                         <Run Text="/" />
-                                                        <Run Text="{x:Bind ViewModel.Chat.TasksTotal, Mode=OneWay}" />
+                                                        <Run Text="{x:Bind ViewModel.Panel.TasksTotal, Mode=OneWay}" />
                                                     </TextBlock>
                                                 </Border>
                                             </StackPanel>
@@ -1664,13 +1664,13 @@
                                             <!--  Progress at a glance: a thin bar over the list.  -->
                                             <ProgressBar
                                                 Margin="8,0,8,4"
-                                                Maximum="{x:Bind ViewModel.Chat.TasksTotal, Mode=OneWay}"
-                                                Value="{x:Bind ViewModel.Chat.TasksDone, Mode=OneWay}"
-                                                Visibility="{x:Bind ViewModel.Chat.TasksTotal, Mode=OneWay, Converter={StaticResource CountToVisibility}}" />
+                                                Maximum="{x:Bind ViewModel.Panel.TasksTotal, Mode=OneWay}"
+                                                Value="{x:Bind ViewModel.Panel.TasksDone, Mode=OneWay}"
+                                                Visibility="{x:Bind ViewModel.Panel.TasksTotal, Mode=OneWay, Converter={StaticResource CountToVisibility}}" />
 
                                             <ListView
                                                 ItemContainerStyle="{StaticResource PanelItem}"
-                                                ItemsSource="{x:Bind ViewModel.Chat.Todos, Mode=OneWay}"
+                                                ItemsSource="{x:Bind ViewModel.Panel.Todos, Mode=OneWay}"
                                                 SelectionMode="None">
                                                 <ListView.ItemTemplate>
                                                     <DataTemplate x:DataType="agents:TodoItem">
@@ -1700,7 +1700,7 @@
 
                                     <!--  Running tasks: background shells and subagents; hidden until
                                           one starts. Clicking a row splits the centre to peek at it.  -->
-                                    <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Chat.RunningTasks.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                    <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Panel.RunningTasks.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
                                         <ToggleButton
                                             x:Name="RunningTasksSection"
                                             IsChecked="True"
@@ -1715,7 +1715,7 @@
                                                     <TextBlock
                                                         FontSize="10"
                                                         Foreground="{StaticResource StatusRunningBrush}"
-                                                        Text="{x:Bind ViewModel.Chat.RunningTasks.Count, Mode=OneWay}" />
+                                                        Text="{x:Bind ViewModel.Panel.RunningTasks.Count, Mode=OneWay}" />
                                                 </Border>
                                             </StackPanel>
                                         </ToggleButton>
@@ -1726,7 +1726,7 @@
                                             IsItemClickEnabled="True"
                                             ItemClick="OnRunningTaskClick"
                                             ItemContainerStyle="{StaticResource PanelItem}"
-                                            ItemsSource="{x:Bind ViewModel.Chat.RunningTasks, Mode=OneWay}"
+                                            ItemsSource="{x:Bind ViewModel.Panel.RunningTasks, Mode=OneWay}"
                                             SelectionMode="None"
                                             Visibility="{x:Bind RunningTasksSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
                                             <ListView.ItemTemplate>
@@ -1787,7 +1787,7 @@
                                           per file measured from before its first touch. The badge
                                           pulses while a change is fresh, so an edit landing mid-turn
                                           is visible without looking at the transcript.  -->
-                                    <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Status.ChangeCount, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                    <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Panel.Status.ChangeCount, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
                                         <ToggleButton
                                             x:Name="SessionChangesSection"
                                             IsChecked="True"
@@ -1799,12 +1799,12 @@
                                                     VerticalAlignment="Center"
                                                     Background="{StaticResource KindEditTintBrush}"
                                                     CornerRadius="8"
-                                                    Visibility="{x:Bind ViewModel.Status.ChangeCount, Mode=OneWay, Converter={StaticResource CountToVisibility}}"
-                                                    views:Pulse.IsActive="{x:Bind ViewModel.Status.HasFreshChanges, Mode=OneWay}">
+                                                    Visibility="{x:Bind ViewModel.Panel.Status.ChangeCount, Mode=OneWay, Converter={StaticResource CountToVisibility}}"
+                                                    views:Pulse.IsActive="{x:Bind ViewModel.Panel.Status.HasFreshChanges, Mode=OneWay}">
                                                     <TextBlock
                                                         FontSize="10"
                                                         Foreground="{StaticResource KindEditBrush}"
-                                                        Text="{x:Bind ViewModel.Status.ChangeCount, Mode=OneWay}" />
+                                                        Text="{x:Bind ViewModel.Panel.Status.ChangeCount, Mode=OneWay}" />
                                                 </Border>
                                             </StackPanel>
                                         </ToggleButton>
@@ -1817,7 +1817,7 @@
                                                 Margin="8,0,8,2"
                                                 FontSize="12"
                                                 Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                Text="{x:Bind ViewModel.Status.ChangeSummary, Mode=OneWay}"
+                                                Text="{x:Bind ViewModel.Panel.Status.ChangeSummary, Mode=OneWay}"
                                                 TextWrapping="Wrap" />
 
                                             <ListView
@@ -1825,7 +1825,7 @@
                                                 IsItemClickEnabled="True"
                                                 ItemClick="OnSessionChangeClick"
                                                 ItemContainerStyle="{StaticResource PanelItem}"
-                                                ItemsSource="{x:Bind ViewModel.Status.Changes, Mode=OneWay}"
+                                                ItemsSource="{x:Bind ViewModel.Panel.Status.Changes, Mode=OneWay}"
                                                 SelectionMode="None">
                                                 <ListView.ItemTemplate>
                                                     <DataTemplate x:DataType="vm:SessionFileChange">
@@ -1882,7 +1882,7 @@
                                     </StackPanel>
 
                                     <!--  Plans: proposed in chat or written to disk, one click away.  -->
-                                    <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Chat.Artifacts.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                    <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.Panel.Artifacts.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
                                         <ToggleButton
                                             x:Name="PlansSection"
                                             IsChecked="True"
@@ -1894,11 +1894,11 @@
                                                     VerticalAlignment="Center"
                                                     Background="{StaticResource KindPlanTintBrush}"
                                                     CornerRadius="8"
-                                                    Visibility="{x:Bind ViewModel.Chat.Artifacts.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                                    Visibility="{x:Bind ViewModel.Panel.Artifacts.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
                                                     <TextBlock
                                                         FontSize="10"
                                                         Foreground="{StaticResource KindPlanBrush}"
-                                                        Text="{x:Bind ViewModel.Chat.Artifacts.Count, Mode=OneWay}" />
+                                                        Text="{x:Bind ViewModel.Panel.Artifacts.Count, Mode=OneWay}" />
                                                 </Border>
                                             </StackPanel>
                                         </ToggleButton>
@@ -1908,7 +1908,7 @@
                                                 IsItemClickEnabled="True"
                                                 ItemClick="OnArtifactClick"
                                                 ItemContainerStyle="{StaticResource PanelItem}"
-                                                ItemsSource="{x:Bind ViewModel.Chat.Artifacts, Mode=OneWay}"
+                                                ItemsSource="{x:Bind ViewModel.Panel.Artifacts, Mode=OneWay}"
                                                 SelectionMode="None">
                                                 <ListView.ItemTemplate>
                                                     <DataTemplate x:DataType="vm:SessionArtifact">

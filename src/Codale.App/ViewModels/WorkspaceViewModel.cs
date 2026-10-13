@@ -55,7 +55,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         Sessions = new SessionsViewModel(ProjectPath, _store, _databasePath);
         _endpoints = new CliEndpointSettings();
         _mcp = new McpServerSettings(_store, ProjectPath);
-        _mcp.TerminalServersProvider = () => Chat.ServersForTerminalCli();
+        _mcp.TerminalServersProvider = () => Panel is { IsTerminalSession: true } session ? session.ServersForTerminalCli() : _mcp.Servers();
         McpTools = new McpToolsViewModel(_mcp);
         CliEndpoint = new CliEndpointViewModel();
         _router = new MessageRouter(_helper);
@@ -80,6 +80,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         Git.WorkingTreeChanged += OnGitWorkingTreeChanged;
 
         Chat = CreateChat();
+        Panel = Chat;
     }
 
     /// <summary>
@@ -126,38 +127,74 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     [NotifyPropertyChangedFor(nameof(EndpointLabel))]
     public partial ChatViewModel Chat { get; set; }
 
-    /// <summary>The provider picker follows the chat in front.</summary>
-    partial void OnChatChanged(ChatViewModel value) => CliEndpoint.Attach(value);
-
-    /// <summary>The status bar's CLI endpoint button: the selected custom provider's name, else "Default".</summary>
-    public string EndpointLabel =>
-        TerminalCliName is { Length: > 0 } cli
-            ? cli
-            : CliEndpoint.IsActive && CliEndpoint.ActiveName is { Length: > 0 } name ? name : "Default";
-
-    /// <summary>The name of the non-Claude agent CLI running in a terminal ("Antigravity"), or null when none is.</summary>
+    /// <summary>
+    /// The session the panel shows: the chat in front for a Claude chat tab (the full panel), or the
+    /// headless session of the terminal CLI in front (the simple panel). Each agent session has its
+    /// own; the panel is not shared. It keeps the last session while a non-agent tab is in front.
+    /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WorkingDirectory))]
+    [NotifyPropertyChangedFor(nameof(IsIsolated))]
     [NotifyPropertyChangedFor(nameof(EndpointLabel))]
     [NotifyPropertyChangedFor(nameof(ShowSessionPickers))]
-    public partial string? TerminalCliName { get; set; }
+    [NotifyPropertyChangedFor(nameof(ShowNewSessionButtons))]
+    public partial ChatViewModel Panel { get; set; }
 
-    /// <summary>The model, effort and mode tiles: hidden while another CLI runs in a terminal, where they would not apply.</summary>
-    public bool ShowSessionPickers => TerminalCliName is null;
-
-    partial void OnTerminalCliNameChanged(string? value)
+    /// <summary>The provider picker follows the session on the panel; a terminal CLI's has none to switch.</summary>
+    partial void OnPanelChanged(ChatViewModel value)
     {
-        foreach (var chat in Chats)
+        CliEndpoint.Attach(value);
+        Sessions.TerminalCliId = value.TerminalCli?.Id;
+    }
+
+    /// <summary>The chat in front is also the one the panel shows, unless a terminal CLI's session is (the page moves the panel when a tab comes to front).</summary>
+    partial void OnChatChanged(ChatViewModel value)
+    {
+        if (Panel is not { IsTerminalSession: true })
         {
-            chat.IsTerminalCliAttached = value is not null;
+            Panel = value;
         }
     }
 
-    /// <summary>A shell prompt line was submitted: a known non-Claude CLI launched there is the one the panel now mirrors; any other line means the CLI has exited.</summary>
-    public void AttachTerminalCli(Codale.Agents.CliDescriptor? cli)
+    /// <summary>The panel header: the terminal CLI's name ("Antigravity"), else the selected custom provider's name, else "Default".</summary>
+    public string EndpointLabel =>
+        Panel.TerminalCli is { } cli
+            ? cli.DisplayName
+            : CliEndpoint.IsActive && CliEndpoint.ActiveName is { Length: > 0 } name ? name : "Default";
+
+    /// <summary>The model, effort and mode tiles: only a Claude chat has them; a CLI in a terminal gets the simple panel.</summary>
+    public bool ShowSessionPickers => !Panel.IsTerminalSession;
+
+    /// <summary>The start-over buttons begin a Claude conversation, so they belong to a chat's panel.</summary>
+    public bool ShowNewSessionButtons => ShowSessionPickers && !IsIsolated;
+
+    /// <summary>Each terminal CLI's headless session, one per CLI tab; kept apart from <see cref="Chats"/> (those are tabs).</summary>
+    public ObservableCollection<ChatViewModel> TerminalSessions { get; } = [];
+
+    /// <summary>
+    /// A session for an agent CLI launched in a terminal: it owns the task host the CLI reports its
+    /// todos, artifacts and tasks to, and the changes attributed to it, so its panel is its own.
+    /// </summary>
+    public ChatViewModel CreateTerminalSession(Codale.Agents.CliDescriptor cli)
     {
-        var other = cli is { Id: not "claude" } ? cli : null;
-        TerminalCliName = other?.DisplayName;
-        Sessions.TerminalCliId = other?.Id;
+        var session = new ChatViewModel(ProjectPath, new StatusViewModel(_customUsage), _endpoints, _mcp) { Router = _router, Helper = _helper, ExtraFolders = ExtraFolders, Terminals = new TerminalSource(this), TerminalCli = cli };
+        TerminalSessions.Add(session);
+        return session;
+    }
+
+    /// <summary>The CLI ended or its tab closed: its session goes, and with it its pipe and task host.</summary>
+    public async Task RemoveTerminalSessionAsync(ChatViewModel session)
+    {
+        _terminalBaselines.Remove(session);
+        _terminalLastOutput.TryRemove(session, out _);
+        foreach (var path in _changeOwners.Where(o => ReferenceEquals(o.Value, session)).Select(o => o.Key).ToList())
+        {
+            _changeOwners.Remove(path);
+        }
+
+        TerminalSessions.Remove(session);
+        _mcp.ClearStaged(SessionKey(session));
+        await session.DisposeAsync();
     }
 
     private readonly CustomUsageTally _customUsage = new();
@@ -195,19 +232,31 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>The built-in browser and desktop-control servers, editable from the status bar flyout.</summary>
     public McpToolsViewModel McpTools { get; }
 
-    /// <summary>Writes Codale's MCP servers into the workspace config so a CLI restarted in a terminal picks them up.</summary>
-    public void InjectMcpForTerminalCli() => _mcp.SyncWorkspaceMcpConfig();
+    /// <summary>
+    /// Writes the session's Codale MCP servers into the workspace config (Antigravity reads it at startup), and
+    /// takes back what earlier builds wrote. A shared file: the CLI launched last wins, so it is written per launch.
+    /// </summary>
+    public void InjectMcpForTerminalCli(ChatViewModel session) =>
+        _mcp.SyncWorkspaceMcpConfig(servers: session.ServersForTerminalCli());
 
-    /// <summary>Adds Codale's MCP servers to an agent CLI launch typed at a terminal prompt; null when the line is not one.</summary>
-    public string? RewriteCliLaunch(string promptLine) => _mcp.RewriteCliLaunch(promptLine);
+    /// <summary>
+    /// Adds this session's Codale MCP servers to an agent CLI launch typed at a terminal prompt (its own pipe,
+    /// so what the CLI reports lands in its own panel); null when the line is not one.
+    /// </summary>
+    public string? RewriteCliLaunch(string promptLine, ChatViewModel session) =>
+        _mcp.RewriteCliLaunch(promptLine, session.ServersForTerminalCli(), SessionKey(session));
+
+    /// <summary>Names one session's staged launch files.</summary>
+    private static string SessionKey(ChatViewModel session) =>
+        System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(session).ToString("x8", System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Opens a dedicated terminal for an agent CLI session: the shell runs only the CLI and exits
-    /// with it, so the tab knows when the session ends.
+    /// with it, so the tab knows when the session ends. The terminal carries the session its panel shows.
     /// </summary>
-    public TerminalViewModel RunCliTerminal(string command, Codale.Agents.CliDescriptor cli, string directory)
+    public TerminalViewModel RunCliTerminal(string command, Codale.Agents.CliDescriptor cli, string directory, ChatViewModel session)
     {
-        var terminal = new TerminalViewModel(directory, command, cli.DisplayName, cli.Id);
+        var terminal = new TerminalViewModel(directory, command, cli.DisplayName, cli.Id) { AgentSession = session };
         terminal.PropertyChanged += OnCommandTerminalPropertyChanged;
         lock (_terminals)
         {
@@ -235,7 +284,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         chat.RequestedEffort = AppSettings.DefaultEffort is { Length: > 0 } effort ? effort : null;
         chat.PermissionMode = AppSettings.DefaultChatMode;
 
-        chat.IsTerminalCliAttached = TerminalCliName is not null;
         chat.TurnFinished += OnTurnFinished;
         chat.FilesChanged += OnChatFilesChanged;
         chat.SessionStateChanged += OnSessionStateChanged;
@@ -298,10 +346,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         {
             PublishOpenSessions();
         }
-        else if (e.PropertyName == nameof(ChatViewModel.WorktreePath) && ReferenceEquals(sender, Chat))
+        else if (e.PropertyName == nameof(ChatViewModel.WorktreePath) && ReferenceEquals(sender, Panel))
         {
             OnPropertyChanged(nameof(WorkingDirectory));
             OnPropertyChanged(nameof(IsIsolated));
+            OnPropertyChanged(nameof(ShowNewSessionButtons));
         }
     }
 
@@ -743,8 +792,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>True when resetting the chat would lose nothing: no conversation, no running turn, an empty transcript.</summary>
     private static bool IsBlank(ChatViewModel chat) => !chat.HasConversation && !chat.IsBusy && chat.Items.Count == 0;
 
-    /// <summary>True while the chat in front works in its own worktree.</summary>
-    public bool IsIsolated => Chat.IsIsolated;
+    /// <summary>True while the session on the panel works in its own worktree.</summary>
+    public bool IsIsolated => Panel.IsIsolated;
 
     /// <summary>
     /// Leaves isolation for the chat in front. Merging first brings the worktree's
@@ -941,8 +990,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         await Chat.RestartWithCurrentConfigAsync();
     }
 
-    /// <summary>Where the live agent is working: the project, or an isolated worktree.</summary>
-    public string WorkingDirectory => Chat.WorktreePath ?? ProjectPath;
+    /// <summary>Where the agent on the panel is working: the project, or an isolated worktree.</summary>
+    public string WorkingDirectory => Panel.WorktreePath ?? ProjectPath;
 
     /// <summary>Leaves history and returns to the live conversation.</summary>
     public void ReturnToLiveSession()
@@ -1365,40 +1414,42 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
     private void OnNestedSnapshotsRefreshed(object? sender, IReadOnlyList<GitSnapshot> snapshots) => Files.ApplyNestedGitStatus(snapshots);
 
-    /// <summary>A stage, commit, checkout... just landed: the diff panel follows git's new state.</summary>
     /// <summary>
-    /// Working-tree diffs (by path) as they stood when an agent CLI was launched in a terminal, or null
-    /// while none is. Codale cannot see that CLI's edits, so what differs from this is its work.
+    /// Working-tree diffs (by path) as they stood when each agent CLI was launched in a terminal. Codale
+    /// cannot see a CLI's edits, so what differs from its baseline is its work.
     /// </summary>
-    private Dictionary<string, (int Added, int Removed)>? _terminalCliBaseline;
+    private readonly Dictionary<ChatViewModel, Dictionary<string, (int Added, int Removed)>> _terminalBaselines = [];
 
-    /// <summary>An agent CLI was launched in a terminal: from now on, working-tree changes are listed as session changes.</summary>
-    public async Task BeginTerminalCliSessionAsync()
+    /// <summary>When each terminal session's CLI last wrote to its terminal: the one most recently active gets the next changes.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<ChatViewModel, DateTime> _terminalLastOutput = [];
+
+    /// <summary>The session a changed file was first listed under, so a second CLI is not credited with the first one's edits.</summary>
+    private readonly Dictionary<string, ChatViewModel> _changeOwners = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>An agent CLI was launched in a terminal: from now on, working-tree changes are listed under its session.</summary>
+    public async Task BeginTerminalCliSessionAsync(ChatViewModel session, TerminalViewModel terminal)
     {
-        if (_terminalCliBaseline is not null)
-        {
-            return;
-        }
+        _terminalLastOutput[session] = DateTime.UtcNow;
+        terminal.OutputReceived += (_, _) => _terminalLastOutput[session] = DateTime.UtcNow;
 
         await Diff.RefreshAsync();
-        _terminalCliBaseline = Diff.Files.ToDictionary(f => f.Path, f => (f.Added, f.Removed), StringComparer.OrdinalIgnoreCase);
-    }
-
-    /// <summary>The last terminal closed: stop attributing working-tree changes to a CLI.</summary>
-    public void EndTerminalCliSession()
-    {
-        _terminalCliBaseline = null;
-        TerminalCliName = null;
-        Sessions.TerminalCliId = null;
+        if (TerminalSessions.Contains(session))
+        {
+            _terminalBaselines[session] = Diff.Files.ToDictionary(f => f.Path, f => (f.Added, f.Removed), StringComparer.OrdinalIgnoreCase);
+        }
     }
 
     private void ListTerminalCliChanges()
     {
-        if (_terminalCliBaseline is not { } baseline)
+        var session = _terminalBaselines.Keys
+            .OrderByDescending(s => _terminalLastOutput.GetValueOrDefault(s))
+            .FirstOrDefault();
+        if (session is null)
         {
             return;
         }
 
+        var baseline = _terminalBaselines[session];
         foreach (var file in Diff.Files)
         {
             if (baseline.TryGetValue(file.Path, out var before) && before == (file.Added, file.Removed))
@@ -1406,9 +1457,15 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
                 continue;
             }
 
+            if (_changeOwners.TryGetValue(file.Path, out var owner) && !ReferenceEquals(owner, session))
+            {
+                continue;
+            }
+
+            _changeOwners[file.Path] = session;
             var kind = file.IsNew ? FileChangeKind.Create : file.IsDeleted ? FileChangeKind.Delete : FileChangeKind.Update;
             var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(ProjectPath, file.Path));
-            Chat.Status.RecordFileChange(new FileChange { Kind = kind, FilePath = path }, file);
+            session.Status.RecordFileChange(new FileChange { Kind = kind, FilePath = path }, file);
         }
     }
 
@@ -1714,7 +1771,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         // Every session is told to go at once (the running flags above are already cleared):
         // awaiting them one by one means the process can exit after the first, leaving the
         // other CLIs running.
-        var shutdown = Task.WhenAll(Chats.ToList().Select(chat => chat.DisposeAsync().AsTask()));
+        var shutdown = Task.WhenAll(Chats.Concat(TerminalSessions).ToList().Select(chat => chat.DisposeAsync().AsTask()));
 
         Sessions.SessionOpened -= OnSessionOpened;
         Sessions.SessionResumed -= OnSessionResumed;

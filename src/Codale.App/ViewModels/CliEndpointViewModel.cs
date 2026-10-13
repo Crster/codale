@@ -60,10 +60,6 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(CanSwitch));
             OnPropertyChanged(nameof(RouteText));
         }
-        else if (e.PropertyName == nameof(ChatViewModel.IsTerminalCliAttached))
-        {
-            OnPropertyChanged(nameof(CanSwitch));
-        }
         else if (e.PropertyName == nameof(ChatViewModel.EndpointName) && !_loading)
         {
             Reload();
@@ -72,8 +68,8 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
 
     private ByokProvider? ActiveProvider => AppSettings.FindByok(_chat?.EndpointName);
 
-    /// <summary>False while the chat in front runs a turn: a switch restarts its CLI and would cut the turn off.</summary>
-    public bool CanSwitch => _chat is not { IsBusy: true } and not { IsTerminalCliAttached: true };
+    /// <summary>False while the chat in front runs a turn (a switch restarts its CLI and would cut the turn off), and for a terminal CLI's session, which has no provider of its own to switch.</summary>
+    public bool CanSwitch => _chat is not { IsBusy: true } and not { IsTerminalSession: true };
 
     /// <summary>True when a BYOK provider (not Default) is in use.</summary>
     public bool IsActive => ActiveProvider is not null;

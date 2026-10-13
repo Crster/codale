@@ -155,14 +155,34 @@ public sealed partial class EditorTab : UserControl
     private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush EdgeBrush =
         new(Windows.UI.Color.FromArgb(0xE0, 0xE5, 0xB2, 0x3C));
 
+    private int _targetColumn;
+    private int _targetEndColumn;
+
     /// <summary>
     /// Marks line spans in the open file and, when <paramref name="reveal"/> is set,
     /// scrolls the first one into the middle of the view.
     /// </summary>
-    public void ShowHighlights(IReadOnlyList<LineSpan> spans, string status, bool reveal, bool busy = false, int current = 0, bool moveCaret = false)
+    public void ShowHighlights(
+        IReadOnlyList<LineSpan> spans,
+        string status,
+        bool reveal,
+        bool busy = false,
+        int current = 0,
+        bool moveCaret = false,
+        int column = 0,
+        int endColumn = 0)
     {
+        if (_previewing)
+        {
+            _previewing = false;
+            MarkdownPreviewHost.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+            FileEditor.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+        }
+
         _highlights = spans;
         _currentHighlight = spans.Count > 0 ? Math.Clamp(current, 0, spans.Count - 1) : -1;
+        _targetColumn = column;
+        _targetEndColumn = endColumn;
 
         _highlightLabel = status;
         HighlightStatus.Text = status;
@@ -254,6 +274,8 @@ public sealed partial class EditorTab : UserControl
             return false;
         }
 
+        _targetColumn = 0;
+        _targetEndColumn = 0;
         Reveal((_currentHighlight + step + _highlights.Count) % _highlights.Count, moveCaret: true);
         return true;
     }
@@ -275,7 +297,13 @@ public sealed partial class EditorTab : UserControl
         FileEditor.ScrollLineToCenter(line);
         if (moveCaret)
         {
-            FileEditor.SetCursorPosition(line, 0, false, false);
+            var col = Math.Max(0, _targetColumn > 0 ? _targetColumn - 1 : 0);
+            FileEditor.SetCursorPosition(line, col, false, false);
+
+            if (_targetEndColumn > _targetColumn && _highlights[index].End == _highlights[index].Start)
+            {
+                FileEditor.SetCursorPosition(line, Math.Max(0, _targetEndColumn - 1), true, false);
+            }
         }
 
         if (_highlights.Count > 1)

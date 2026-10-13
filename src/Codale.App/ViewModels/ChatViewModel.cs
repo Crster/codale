@@ -1028,15 +1028,17 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public partial bool IsBusy { get; set; }
 
     /// <summary>
-    /// Another agent CLI (not Claude) is running in a terminal beside this chat. The panel only mirrors
-    /// what it can of that CLI, so the model, effort, mode and provider choices of this chat's own session are locked.
+    /// The agent CLI running in a terminal tab that this headless session stands for, or null for a real chat.
+    /// It never connects to the Claude CLI and has no tab: it only holds what the CLI reports (tasks, artifacts,
+    /// changes) so the panel can mirror it, with the model, effort, mode and provider choices locked.
     /// </summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CanChangeMode))]
-    public partial bool IsTerminalCliAttached { get; set; }
+    public Codale.Agents.CliDescriptor? TerminalCli { get; init; }
 
-    /// <summary>The model, effort, mode and provider are locked while a turn is running or another CLI runs in a terminal.</summary>
-    public bool CanChangeMode => !IsBusy && !IsTerminalCliAttached;
+    /// <summary>True for a terminal CLI's session, which gets the simple panel.</summary>
+    public bool IsTerminalSession => TerminalCli is not null;
+
+    /// <summary>The model, effort, mode and provider are locked while a turn is running or for a terminal CLI's session.</summary>
+    public bool CanChangeMode => !IsBusy && !IsTerminalSession;
 
     /// <summary>Running a turn without waiting on anyone: the tab's blue dot. Waiting shows amber instead.</summary>
     public bool IsBusyWorking => IsBusy && !IsWaitingForYou;
@@ -1650,12 +1652,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             if (claudeEndpoint is not null)
             {
                 CrashLog.Trace($"Connect: endpoint override active for {ProviderName}");
-            }
-
-            if (_mcpSettings is not null)
-            {
-                // Terminal CLIs read these files: they get the servers wired for them (panel push on), not this session's.
-                _mcpSettings.SyncWorkspaceMcpConfig(workingDirectory, ServersForTerminalCli());
             }
 
             var activeCli = Codale.Agents.CliLocator.ActiveCli;

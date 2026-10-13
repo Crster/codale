@@ -59,7 +59,12 @@ public sealed partial class WorkspacePage : Page
     /// <summary>The one tab a file click may replace; null once its file is edited.</summary>
     private EditorTabEntry? _previewTab;
 
-    public WorkspacePage() => InitializeComponent();
+    public WorkspacePage()
+    {
+        InitializeComponent();
+        Loaded += (_, _) => MarkdownView.FileLinkClicked += OnMarkdownFileLink;
+        Unloaded += (_, _) => MarkdownView.FileLinkClicked -= OnMarkdownFileLink;
+    }
 
     public WorkspaceViewModel ViewModel { get; private set; } = null!;
 
@@ -103,8 +108,8 @@ public sealed partial class WorkspacePage : Page
         ViewModel.ChatActivationRequested += OnChatActivationRequested;
         ViewModel.Sessions.Sessions.CollectionChanged += OnHistoryInputsChanged;
         ViewModel.Sessions.OpenSessions.CollectionChanged += OnHistoryInputsChanged;
-        WatchTodos(ViewModel.Chat);
-        WatchConversation(ViewModel.Chat);
+        WatchTodos(ViewModel.Panel);
+        WatchConversation(ViewModel.Panel);
         Bindings.Update();
 
         SetTerminalCwd(ViewModel.WorkingDirectory);
@@ -256,7 +261,8 @@ public sealed partial class WorkspacePage : Page
         ViewModel.ActiveEditor = active?.ViewModel;
         UpdateLanguageButton();
 
-        // The session panel and status bar follow the chat in front.
+        // The status bar follows the chat in front; the session panel follows the agent session in front
+        // (a chat tab's own, or the terminal CLI's), so it is chosen there.
         if (ChatTabInFront() is { } chatEntry)
         {
             ViewModel.Chat = chatEntry.Chat;
@@ -784,15 +790,13 @@ public sealed partial class WorkspacePage : Page
             return true;
         }
 
-        // 2. Is there an active agent terminal or terminal running a known CLI?
-        if (_terminalTabs.Any(t => t.Terminal.IsAgentTerminal ||
-            (t.Terminal.IsCliTerminal && t.Terminal.Activity == TerminalActivity.Busy)))
-        {
-            return true;
-        }
-
-        return false;
+        // 2. Is an agent CLI running in a terminal (it has a session of its own), or a terminal started for the agent?
+        return ViewModel.TerminalSessions.Count > 0 || _terminalTabs.Any(t => t.Terminal.IsAgentTerminal);
     }
+
+    /// <summary>The terminal CLI session of the tab in front, while that CLI is still running; null for any other tab.</summary>
+    private ChatViewModel? CliSessionInFront() =>
+        TerminalTabInFront()?.Terminal.AgentSession is { } session && ViewModel.TerminalSessions.Contains(session) ? session : null;
 
     private void OpenTerminalTab() => AddTerminalTab(ViewModel.CreateTerminal());
 
@@ -805,9 +809,8 @@ public sealed partial class WorkspacePage : Page
         CrashLog.Trace("terminal: AddTerminalTab begin");
         try
         {
-            // Write Codale's MCP servers into the workspace config now, so any agent CLI the user
-            // launches in this terminal reads them at startup and never needs a restart.
-            ViewModel?.InjectMcpForTerminalCli();
+            // An agent CLI typed at this terminal's prompt is launched in its own tab with its own
+            // session's MCP servers (see TryOpenCliTab), so nothing is written for it here.
             terminal.LaunchRewriter ??= OnTerminalLaunchTyped;
 
             var tab = new TerminalTab { ViewModel = terminal };
@@ -852,14 +855,7 @@ public sealed partial class WorkspacePage : Page
     private void CloseTerminalTab(TerminalTabEntry entry)
     {
         _terminalTabs.Remove(entry);
-        if (_terminalTabs.Count == 0)
-        {
-            ViewModel.EndTerminalCliSession();
-        }
-        else
-        {
-            EndCliSessionIfLast(entry.Terminal);
-        }
+        EndCliSession(entry.Terminal);
 
         if (CentreTabs.TabItems.Contains(entry.Item))
         {
@@ -906,20 +902,20 @@ public sealed partial class WorkspacePage : Page
             return false;
         }
 
+        ChatViewModel? session = null;
         try
         {
-            if (!_sessionPanelOpen)
-            {
-                SetSessionPanel(true);
-            }
+            // Every CLI launch is its own agent session: its own task host for what the CLI reports, its
+            // own changes, its own simple panel. The tab selecting itself is what brings that panel up.
+            session = ViewModel.CreateTerminalSession(cli);
+            ViewModel.InjectMcpForTerminalCli(session);
 
-            ViewModel.InjectMcpForTerminalCli();
-            _ = ViewModel.BeginTerminalCliSessionAsync();
-            ViewModel.AttachTerminalCli(cli);
-
-            var command = ViewModel.RewriteCliLaunch(promptLine) ?? cli.Executable + args;
-            var terminal = ViewModel.RunCliTerminal(command, cli, PromptDirectory(promptLine) ?? ViewModel.ProjectPath);
+            var command = ViewModel.RewriteCliLaunch(promptLine, session) ?? cli.Executable + args;
+            CrashLog.Trace($"cli tab: launching {cli.Id} as '{command}', panel open = {_sessionPanelOpen}");
+            var terminal = ViewModel.RunCliTerminal(command, cli, PromptDirectory(promptLine) ?? ViewModel.ProjectPath, session);
+            _ = ViewModel.BeginTerminalCliSessionAsync(session, terminal);
             terminal.Exited += (_, _) => DispatcherQueue.TryEnqueue(() => OnCliTerminalExited(terminal));
+            WatchCliForAttention(cli, terminal);
             AddTerminalTab(terminal);
 
             // A plain shell that only existed to launch the CLI is not left behind; closed after the
@@ -940,8 +936,83 @@ public sealed partial class WorkspacePage : Page
         catch (Exception ex)
         {
             CrashLog.Write("Terminal", "CLI tab launch failed", ex);
+            if (session is not null)
+            {
+                _ = RemoveCliSessionAsync(session);
+            }
+
             return false;
         }
+    }
+
+    /// <summary>How long a CLI's terminal must stay silent after the user's last message before it counts as waiting.</summary>
+    private static readonly TimeSpan CliIdleAfter = TimeSpan.FromSeconds(6);
+
+    private static readonly System.Text.RegularExpressions.Regex CliConfirmation = new(
+        @"(?i)(\(y/n\)|\[y/n\]|\by/n\b|do you want to|would you like to|allow (this|once|always)|approve|permission|press enter to (confirm|continue)|^\s*[>❯]?\s*1\.\s*yes)",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Multiline);
+
+    /// <summary>
+    /// A CLI in a terminal tab gets the attention a chat gets. Its tool stream cannot be read, so the
+    /// terminal itself is watched: once the user has sent it a message and its output then goes quiet,
+    /// it is either waiting on a confirmation (the tail reads like a prompt) or finished. Nothing is
+    /// said while Codale is the window in front.
+    /// </summary>
+    private void WatchCliForAttention(CliDescriptor cli, TerminalViewModel terminal)
+    {
+        var armed = false;
+        var idle = DispatcherQueue.CreateTimer();
+        idle.Interval = CliIdleAfter;
+        idle.IsRepeating = false;
+        idle.Tick += (_, _) =>
+        {
+            if (!armed)
+            {
+                return;
+            }
+
+            armed = false;
+            var tail = terminal.Transcript.Read(null, 1200).Text;
+            var lines = tail.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            var ask = CliConfirmation.Match(tail);
+            if (ask.Success)
+            {
+                var line = lines.LastOrDefault(l => CliConfirmation.IsMatch(l)) ?? ask.Value;
+                NotifyAttention($"{cli.DisplayName} needs your confirmation", line.Length > 140 ? line[..140] : line);
+            }
+            else
+            {
+                NotifyAttention($"{cli.DisplayName} finished", "Waiting for your next message");
+            }
+        };
+
+        terminal.InputSubmitted += (_, _) =>
+        {
+            armed = true;
+            idle.Stop();
+            idle.Start();
+        };
+        terminal.OutputReceived += (_, _) =>
+        {
+            if (armed)
+            {
+                idle.Stop();
+                idle.Start();
+            }
+        };
+        terminal.Exited += (_, _) => idle.Stop();
+    }
+
+    /// <summary>Flashes the taskbar and raises a Windows notification, unless Codale is already in front.</summary>
+    private void NotifyAttention(string title, string detail)
+    {
+        if (ViewModel is null || App.Current.MainWindowHandle is not { } hwnd || Services.Attention.IsForeground(hwnd))
+        {
+            return;
+        }
+
+        Services.Attention.FlashTaskbar(hwnd);
+        Services.Attention.Notify(title, $"{detail}\n{ViewModel.DisplayName}", ActivationRequest.ToUri(ViewModel.ProjectPath));
     }
 
     /// <summary>The CLI ended: the panel stops mirroring it, and the tab goes with it unless it failed (its output is the error).</summary>
@@ -952,7 +1023,13 @@ public sealed partial class WorkspacePage : Page
             return;
         }
 
-        EndCliSessionIfLast(terminal);
+        CrashLog.Trace($"cli tab: {terminal.CliId} exited with {terminal.ExitCode}");
+        var name = terminal.CommandName ?? terminal.CliId;
+        NotifyAttention(
+            terminal.ExitCode == 0 ? $"{name} session ended" : $"{name} stopped with an error",
+            terminal.ExitCode == 0 ? "The CLI exited" : $"Exit code {terminal.ExitCode}");
+        EndCliSession(terminal);
+        UpdateSessionPanelForActiveTab();
         if (terminal.ExitCode != 0)
         {
             return;
@@ -961,17 +1038,36 @@ public sealed partial class WorkspacePage : Page
         CloseTerminalTab(entry);
     }
 
-    /// <summary>Stops the panel mirroring a CLI once no other CLI tab is still running.</summary>
-    private void EndCliSessionIfLast(TerminalViewModel closing)
+    /// <summary>
+    /// A CLI's tab ended: its session goes with it (its pipe, task host and panel), and only its.
+    /// A panel that was showing it falls back to the chat; the caller refreshes the panel.
+    /// </summary>
+    private void EndCliSession(TerminalViewModel closing)
     {
-        if (!closing.IsCliTerminal ||
-            _terminalTabs.Any(t => !ReferenceEquals(t.Terminal, closing) && t.Terminal.IsCliTerminal && t.Terminal.IsRunning))
+        if (closing.AgentSession is not { } session || !ViewModel.TerminalSessions.Contains(session))
         {
             return;
         }
 
-        ViewModel.EndTerminalCliSession();
-        UpdateSessionPanelForActiveTab();
+        CrashLog.Trace($"cli tab: ending CLI session after {closing.CliId} tab ended");
+        if (ReferenceEquals(ViewModel.Panel, session))
+        {
+            ViewModel.Panel = ViewModel.Chat;
+        }
+
+        _ = RemoveCliSessionAsync(session);
+    }
+
+    private async Task RemoveCliSessionAsync(ChatViewModel session)
+    {
+        try
+        {
+            await ViewModel.RemoveTerminalSessionAsync(session);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Error("workspace", "ending a CLI session failed", ex);
+        }
     }
 
     /// <summary>The directory a default shell prompt line shows, when it exists.</summary>
@@ -1197,7 +1293,7 @@ public sealed partial class WorkspacePage : Page
         else if (e.Line > 0 || !File.Exists(ResolveWorkspacePath(e.Path)))
         {
             // Also for a bare name like test.cs that only a search of the repo can place.
-            await OpenFileAtAsync(e.Path, e.Line);
+            await OpenFileAtAsync(e.Path, e.Line, e.Column, e.EndLine, e.EndColumn);
         }
         else
         {
@@ -1205,8 +1301,33 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
+    /// <summary>A file link in markdown (chat history, plan view, or markdown preview) was clicked.</summary>
+    private async void OnMarkdownFileLink(MarkdownView source, LinkMatch link)
+    {
+        if (link.Path is null || !IsAncestorOf(source))
+        {
+            return;
+        }
+
+        await OpenFileAtAsync(link.Path, link.Line, link.Column, link.EndLine, link.EndColumn, source.BasePath);
+    }
+
+    private bool IsAncestorOf(DependencyObject node)
+    {
+        for (var parent = VisualTreeHelper.GetParent(node); parent is not null;
+             parent = VisualTreeHelper.GetParent(parent))
+        {
+            if (ReferenceEquals(parent, this))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>Ctrl+click on a URL or path in a terminal.</summary>
-    private async void OnTerminalLinkActivated(object? sender, Codale.App.Services.LinkMatch link)
+    private async void OnTerminalLinkActivated(object? sender, LinkMatch link)
     {
         if (link.Url is { } url)
         {
@@ -1214,7 +1335,7 @@ public sealed partial class WorkspacePage : Page
         }
         else if (link.Path is { } path)
         {
-            await OpenFileAtAsync(path, link.Line);
+            await OpenFileAtAsync(path, link.Line, link.Column, link.EndLine, link.EndColumn);
         }
     }
 
@@ -1232,9 +1353,26 @@ public sealed partial class WorkspacePage : Page
     /// it and marks it. The path is as printed - absolute, relative to the project, or a
     /// bare name - so it is resolved before giving up.
     /// </summary>
-    private async Task OpenFileAtAsync(string path, int line)
+    private async Task OpenFileAtAsync(
+        string path,
+        int line,
+        int column = 0,
+        int endLine = 0,
+        int endColumn = 0,
+        string? basePath = null)
     {
-        var resolved = ResolveWorkspacePath(path.Replace('/', '\\'));
+        var normalized = path.Replace('/', '\\');
+        string resolved;
+        if (!string.IsNullOrEmpty(basePath) && !Path.IsPathRooted(normalized))
+        {
+            var combined = Path.GetFullPath(Path.Combine(basePath, normalized));
+            resolved = File.Exists(combined) ? combined : ResolveWorkspacePath(normalized);
+        }
+        else
+        {
+            resolved = ResolveWorkspacePath(normalized);
+        }
+
         if (!File.Exists(resolved))
         {
             var root = ViewModel.Git.RepositoryRoot ?? ViewModel.ProjectPath;
@@ -1249,7 +1387,22 @@ public sealed partial class WorkspacePage : Page
         var entry = await ShowFileTabAsync(resolved);
         if (line > 0)
         {
-            entry.Tab.ShowHighlights([new Codale.Search.LineSpan(line, line)], $"line {line}", reveal: true, moveCaret: true);
+            var end = endLine >= line ? endLine : line;
+            var label = end > line
+                ? $"lines {line}–{end}"
+                : column > 0
+                    ? (endColumn > column ? $"line {line}:{column}–{endColumn}" : $"line {line}:{column}")
+                    : $"line {line}";
+
+            entry.Tab.ShowHighlights(
+                [new Codale.Search.LineSpan(line, end)],
+                label,
+                reveal: true,
+                busy: false,
+                current: 0,
+                moveCaret: true,
+                column: column,
+                endColumn: endColumn);
         }
     }
 
@@ -1942,14 +2095,13 @@ public sealed partial class WorkspacePage : Page
         {
             App.Current.MainWindow?.SetCommandsBadge(ViewModel.RunningCommandCount);
         }
-        else if (e.PropertyName == nameof(WorkspaceViewModel.Chat))
+        else if (e.PropertyName == nameof(WorkspaceViewModel.Panel))
         {
-            WatchTodos(ViewModel.Chat);
-            WatchConversation(ViewModel.Chat);
-        }
-        else if (e.PropertyName == nameof(WorkspaceViewModel.TerminalCliName))
-        {
-            QueueHistoryLayout();
+            // Each session has its own tasks and transcript: the peek, the todo watch and the
+            // History layout all follow the session the panel now shows.
+            SetPeek(null);
+            WatchTodos(ViewModel.Panel);
+            WatchConversation(ViewModel.Panel);
         }
     }
 
@@ -2025,10 +2177,10 @@ public sealed partial class WorkspacePage : Page
         }
 
         var sessions = ViewModel.Sessions;
-        var conversation = ViewModel.Chat.HasConversation;
+        var conversation = ViewModel.Panel.HasConversation;
 
         // A CLI in a terminal reports its tasks, changes and artifacts into the live sections, with no conversation here.
-        var live = conversation || ViewModel.TerminalCliName is not null;
+        var live = conversation || ViewModel.Panel.IsTerminalSession;
         if (conversation != _hadConversation)
         {
             _hadConversation = conversation;
@@ -2166,10 +2318,10 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>
-    /// The session panel belongs to the agent: it is shown while the chat tab is in front,
-    /// or when a custom CLI is in session/running (resizing adjacent terminal/editor content),
-    /// and hides when unrelated tabs take over without a CLI in session.
-    /// The title-bar button can still toggle it by hand.
+    /// The session panel belongs to an agent session, and follows the tab in front: a Claude chat tab shows
+    /// that chat's full panel, a terminal CLI's tab shows that CLI's own simple panel. With any other tab in
+    /// front the panel keeps the last session's while one is still running (and stays as the user left it),
+    /// and hides when none is. The title-bar button can still toggle it by hand.
     /// </summary>
     private void UpdateSessionPanelForActiveTab()
     {
@@ -2178,14 +2330,26 @@ public sealed partial class WorkspacePage : Page
             return;
         }
 
-        var chatInFront = ChatTabInFront() is not null;
-        if (chatInFront)
+        var chatInFront = ChatTabInFront();
+        var cliInFront = CliSessionInFront();
+        if (chatInFront is not null)
         {
+            ViewModel.Panel = chatInFront.Chat;
+            SetSessionPanel(true);
+        }
+        else if (cliInFront is not null)
+        {
+            ViewModel.Panel = cliInFront;
             SetSessionPanel(true);
         }
         else if (IsCliInSession())
         {
-            // When a custom CLI is in session, keep the session panel open (or closed if toggled off);
+            // The session on the panel may have ended while another tab was in front.
+            if (ViewModel.Panel is { IsTerminalSession: true } shown && !ViewModel.TerminalSessions.Contains(shown))
+            {
+                ViewModel.Panel = ViewModel.Chat;
+            }
+
             // CentreContent.Margin automatically resizes the active terminal or editor tab.
             SetSessionPanel(_sessionPanelOpen);
         }
@@ -2194,8 +2358,8 @@ public sealed partial class WorkspacePage : Page
             SetSessionPanel(false);
         }
 
-        // The peek belongs to the chat's task list: it goes when the chat does.
-        if (!chatInFront)
+        // The peek belongs to a session's task list: it goes when that session's tab does.
+        if (chatInFront is null && cliInFront is null)
         {
             SetPeek(null);
         }
@@ -2247,7 +2411,7 @@ public sealed partial class WorkspacePage : Page
     {
         if (sender is FrameworkElement { Tag: RunningTaskItem task } && ViewModel is not null)
         {
-            await ViewModel.Chat.StopTaskAsync(task);
+            await ViewModel.Panel.StopTaskAsync(task);
         }
     }
 
@@ -2255,7 +2419,7 @@ public sealed partial class WorkspacePage : Page
     {
         if (ViewModel is not null)
         {
-            await ViewModel.Chat.StopTaskAsync(task);
+            await ViewModel.Panel.StopTaskAsync(task);
         }
     }
 

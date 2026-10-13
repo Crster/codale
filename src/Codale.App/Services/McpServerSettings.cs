@@ -32,8 +32,9 @@ public sealed class McpServerSettings
     }
 
     /// <summary>
-    /// The servers for an agent CLI running in a terminal, supplied by the workspace so they include
-    /// the tasks server wired to the panel's chat. Unset, the servers started now are used.
+    /// The servers to write into the shared workspace config (Antigravity's <c>.agents/</c>) when no launch is
+    /// at hand, supplied by the workspace so they include the tasks server of the terminal session on the panel.
+    /// A launch itself passes its own session's servers (see <see cref="RewriteCliLaunch"/>). Unset, the servers started now are used.
     /// </summary>
     public Func<IReadOnlyList<McpServerSpec>>? TerminalServersProvider { get; set; }
 
@@ -361,7 +362,7 @@ public sealed class McpServerSettings
     /// <c>QWEN_CODE_SYSTEM_SETTINGS_PATH</c>, built on the machine's own system settings so none are lost.
     /// OpenCode: a config file named by <c>OPENCODE_CONFIG</c>, merged with the user's and project's.
     /// </remarks>
-    public string? RewriteCliLaunch(string promptLine)
+    public string? RewriteCliLaunch(string promptLine, IReadOnlyList<McpServerSpec> sessionServers, string key)
     {
         try
         {
@@ -371,7 +372,7 @@ public sealed class McpServerSettings
                 return null;
             }
 
-            var servers = TerminalServers();
+            var servers = ForTerminal(sessionServers);
             if (servers.Count == 0)
             {
                 return null;
@@ -384,16 +385,16 @@ public sealed class McpServerSettings
             return cli.Id switch
             {
                 // Last, because --mcp-config takes any number of values and would swallow a trailing prompt.
-                "claude" => $"claude{tail} --mcp-config \"{Stage("claude", McpServerSpec.ToClaudeConfig(servers)!)}\"",
-                "copilot" => $"copilot --additional-mcp-config {Quote(powershell, "@" + Stage("copilot", CopilotConfig(servers)))}{tail}",
+                "claude" => $"claude{tail} --mcp-config \"{Stage("claude", key, McpServerSpec.ToClaudeConfig(servers)!)}\"",
+                "copilot" => $"copilot --additional-mcp-config {Quote(powershell, "@" + Stage("copilot", key, CopilotConfig(servers)))}{tail}",
                 "codex" => $"codex {CodexOverrides(powershell, servers)}{tail}",
                 "gemini" => WithEnv(powershell, "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
-                    StageSettings("gemini", servers, Path.Combine(programData, "gemini-cli", "settings.json"), "GEMINI_CLI_SYSTEM_SETTINGS_PATH"),
+                    StageSettings("gemini", key, servers, Path.Combine(programData, "gemini-cli", "settings.json"), "GEMINI_CLI_SYSTEM_SETTINGS_PATH"),
                     "gemini" + tail),
                 "qwen" => WithEnv(powershell, "QWEN_CODE_SYSTEM_SETTINGS_PATH",
-                    StageSettings("qwen", servers, Path.Combine(programData, "qwen-code", "settings.json"), "QWEN_CODE_SYSTEM_SETTINGS_PATH"),
+                    StageSettings("qwen", key, servers, Path.Combine(programData, "qwen-code", "settings.json"), "QWEN_CODE_SYSTEM_SETTINGS_PATH"),
                     "qwen" + tail),
-                "opencode" => WithEnv(powershell, "OPENCODE_CONFIG", StageOpenCode(servers), "opencode" + tail),
+                "opencode" => WithEnv(powershell, "OPENCODE_CONFIG", StageOpenCode(key, servers), "opencode" + tail),
                 _ => null,
             };
         }
@@ -404,29 +405,52 @@ public sealed class McpServerSettings
         }
     }
 
-    /// <summary>Writes a per-project launch config into Codale's staging folder, outside the project.</summary>
-    private string Stage(string cli, string content)
+    /// <summary>Writes a launch config for one CLI session into Codale's staging folder, outside the project.</summary>
+    private string Stage(string cli, string key, string content)
     {
-        var path = StagedPath(cli);
+        var path = StagedPath(cli, key);
         File.WriteAllText(path, content);
         return path;
     }
 
-    private string StagedPath(string cli)
+    /// <summary>One file per project and session: each CLI carries its own pipe and token, so two launches must not share one.</summary>
+    private string StagedPath(string cli, string key)
     {
         var directory = Path.Combine(StagingRoot(), "cli");
         Directory.CreateDirectory(directory);
-        var hash = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(_projectPath)))[..12];
-        return Path.Combine(directory, $"{cli}-{hash}.json");
+        return Path.Combine(directory, $"{cli}-{ProjectHash()}-{key}.json");
+    }
+
+    private string ProjectHash() =>
+        Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(_projectPath)))[..12];
+
+    /// <summary>Removes what a session's launch staged once the session has ended.</summary>
+    public void ClearStaged(string key)
+    {
+        try
+        {
+            var directory = Path.Combine(StagingRoot(), "cli");
+            if (Directory.Exists(directory))
+            {
+                foreach (var file in Directory.EnumerateFiles(directory, $"*-{ProjectHash()}-{key}.json"))
+                {
+                    File.Delete(file);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            CrashLog.Trace($"Failed to clear staged CLI config: {ex.Message}");
+        }
     }
 
     /// <summary>
     /// A system settings file for Gemini CLI or Qwen Code: the machine's own (where the variable already
     /// points, else the default location) with Codale's servers merged in, since this one replaces it.
     /// </summary>
-    private string StageSettings(string cli, IReadOnlyList<McpServerSpec> servers, string defaultSystemPath, string variable)
+    private string StageSettings(string cli, string key, IReadOnlyList<McpServerSpec> servers, string defaultSystemPath, string variable)
     {
-        var path = StagedPath(cli);
+        var path = StagedPath(cli, key);
         var system = Environment.GetEnvironmentVariable(variable) is { Length: > 0 } set ? set : defaultSystemPath;
         if (File.Exists(system) && !string.Equals(Path.GetFullPath(system), path, StringComparison.OrdinalIgnoreCase))
         {
@@ -441,9 +465,9 @@ public sealed class McpServerSettings
         return path;
     }
 
-    private string StageOpenCode(IReadOnlyList<McpServerSpec> servers)
+    private string StageOpenCode(string key, IReadOnlyList<McpServerSpec> servers)
     {
-        var path = StagedPath("opencode");
+        var path = StagedPath("opencode", key);
         if (File.Exists(path))
         {
             File.Delete(path);

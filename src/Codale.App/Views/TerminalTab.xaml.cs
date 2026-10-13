@@ -26,17 +26,30 @@ public sealed partial class TerminalTab : UserControl
         InitializeComponent();
         Loaded += OnLoaded;
 
-        // The emulator replies to shell queries (DSR, DA) on the view; they go back
-        // through the PTY input like keystrokes.
         Terminal.Response += (_, text) => _ = _viewModel?.WriteAsync(text);
         Terminal.SubmitRewriter = line => _viewModel?.RewriteSubmitted(line);
         Terminal.Resized += (_, size) => _viewModel?.Resize((short)size.Cols, (short)size.Rows);
         Terminal.LinkActivated += (_, link) => LinkActivated?.Invoke(this, link);
+
+        PointerPressed += (_, _) =>
+        {
+            if (Terminal.FocusState == FocusState.Unfocused)
+            {
+                Terminal.Focus(FocusState.Programmatic);
+            }
+        };
+        GotFocus += (_, _) =>
+        {
+            if (Terminal.FocusState == FocusState.Unfocused)
+            {
+                Terminal.Focus(FocusState.Programmatic);
+            }
+        };
         CrashLog.Trace("terminal: tab ctor end");
     }
 
     /// <summary>A URL or file path in the output was Ctrl+clicked.</summary>
-    public event EventHandler<Codale.App.Services.LinkMatch>? LinkActivated;
+    public event EventHandler<LinkMatch>? LinkActivated;
 
     public TerminalViewModel ViewModel
     {

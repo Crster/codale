@@ -38,6 +38,7 @@
 
         <ScrollViewer
             x:Name="Scroller"
+            IsTabStop="False"
             Background="{x:Null}"
             HorizontalScrollBarVisibility="Disabled"
             HorizontalScrollMode="Enabled"

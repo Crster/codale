@@ -994,21 +994,65 @@ public sealed class MarkdownView : StackPanel
     private static LinkMatch? FileTarget(string url)
     {
         var line = 0;
-        var hash = url.LastIndexOf("#L", StringComparison.Ordinal);
-        if (hash >= 0 && int.TryParse(url[(hash + 2)..].Split('-', 'C')[0], out line))
+        var col = 0;
+        var endLine = 0;
+        var endCol = 0;
+
+        var hash = url.LastIndexOf('#');
+        if (hash >= 0)
         {
+            var fragment = url[(hash + 1)..];
             url = url[..hash];
+            (line, col, endLine, endCol) = LinkFinder.ParseHashLocation(fragment);
         }
 
-        if (url.StartsWith("file:", StringComparison.OrdinalIgnoreCase) && Uri.TryCreate(url, UriKind.Absolute, out var file))
+        if (url.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
         {
-            url = file.LocalPath;
+            if (Uri.TryCreate(url, UriKind.Absolute, out var file))
+            {
+                url = file.LocalPath;
+            }
+            else
+            {
+                url = url[5..].TrimStart('/');
+                if (url.Length >= 2 && url[1] == ':')
+                {
+                    // e.g. "X:/..."
+                }
+                else
+                {
+                    url = "/" + url;
+                }
+            }
         }
 
-        var reference = LinkFinder.AsFileReference(Uri.UnescapeDataString(url));
-        return reference is { Path: not null }
-            ? reference with { Line = reference.Line > 0 ? reference.Line : line }
-            : null;
+        var decoded = Uri.UnescapeDataString(url).Trim();
+        var reference = LinkFinder.AsFileReference(decoded);
+        if (reference is null && (decoded.Contains('/') || decoded.Contains('\\') || (decoded.Length >= 2 && decoded[1] == ':')))
+        {
+            var matches = LinkFinder.Find(decoded);
+            if (matches.Count == 1 && matches[0].Index == 0 && matches[0].Length == decoded.Length)
+            {
+                reference = matches[0];
+            }
+            else
+            {
+                reference = new LinkMatch(0, decoded.Length, decoded, null, decoded);
+            }
+        }
+
+        if (reference is { Path: not null })
+        {
+            return reference with
+            {
+                Line = reference.Line > 0 ? reference.Line : line,
+                Column = reference.Column > 0 ? reference.Column : col,
+                EndLine = reference.EndLine > 0 ? reference.EndLine : endLine,
+                EndColumn = reference.EndColumn > 0 ? reference.EndColumn : endCol,
+            };
+        }
+
+        return null;
     }
 
     /// <summary>Theme brushes by name where the lookup reaches them, fixed colours
