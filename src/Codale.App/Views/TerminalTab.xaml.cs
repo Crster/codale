@@ -29,6 +29,7 @@ public sealed partial class TerminalTab : UserControl
         // The emulator replies to shell queries (DSR, DA) on the view; they go back
         // through the PTY input like keystrokes.
         Terminal.Response += (_, text) => _ = _viewModel?.WriteAsync(text);
+        Terminal.SubmitRewriter = line => _viewModel?.RewriteSubmitted(line);
         Terminal.Resized += (_, size) => _viewModel?.Resize((short)size.Cols, (short)size.Rows);
         Terminal.LinkActivated += (_, link) => LinkActivated?.Invoke(this, link);
         CrashLog.Trace("terminal: tab ctor end");

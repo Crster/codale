@@ -30,6 +30,14 @@ public sealed class McpServerSettings
         _baseDirectory = baseDirectory ?? AppContext.BaseDirectory;
     }
 
+    /// <summary>
+    /// The servers for an agent CLI running in a terminal, supplied by the workspace so they include
+    /// the tasks server wired to the panel's chat. Unset, the servers started now are used.
+    /// </summary>
+    public Func<IReadOnlyList<McpServerSpec>>? TerminalServersProvider { get; set; }
+
+    private IReadOnlyList<McpServerSpec> TerminalServers() => TerminalServersProvider?.Invoke() ?? Servers();
+
     /// <summary>On unless the user turned it off.</summary>
     public bool BrowserEnabled
     {
@@ -60,7 +68,8 @@ public sealed class McpServerSettings
     /// <summary>The tasks server, wired to this chat's pipe; the exe finds the app through its environment.</summary>
     /// <param name="runDirectory">Where the chat's tasks run (its worktree, when it has one); the command list itself is always the project's.</param>
     /// <param name="assist">Offer the explore tool, answered by the background-task model.</param>
-    public McpServerSpec? TasksSpec(string pipeName, string token, string? runDirectory = null, bool assist = false) => !TasksAvailable
+    /// <param name="pushToPanel">For an agent CLI in a terminal, whose tool stream the app cannot read: todos_set and artifact_add are sent over the pipe.</param>
+    public McpServerSpec? TasksSpec(string pipeName, string token, string? runDirectory = null, bool assist = false, bool pushToPanel = false) => !TasksAvailable
         ? null
         : new McpServerSpec
         {
@@ -79,6 +88,7 @@ public sealed class McpServerSettings
                 ["CODALE_PROJECT_DIR"] = _projectPath,
                 ["CODALE_RUN_DIR"] = runDirectory ?? _projectPath,
                 ["CODALE_ASSIST"] = assist ? "1" : "0",
+                ["CODALE_PANEL_PUSH"] = pushToPanel ? "1" : "0",
             },
         };
 
@@ -181,7 +191,7 @@ public sealed class McpServerSettings
     {
         try
         {
-            servers ??= Servers();
+            servers ??= TerminalServers();
             var json = McpServerSpec.ToClaudeConfig(servers);
             var dir = targetDirectory ?? _projectPath;
             var agentsDir = Path.Combine(dir, ".agents");
@@ -193,15 +203,206 @@ public sealed class McpServerSettings
                 {
                     File.Delete(configPath);
                 }
-                return;
             }
-
-            Directory.CreateDirectory(agentsDir);
-            File.WriteAllText(configPath, json);
+            else
+            {
+                Directory.CreateDirectory(agentsDir);
+                File.WriteAllText(configPath, json);
+            }
         }
         catch (Exception ex)
         {
             CrashLog.Trace($"Failed to sync workspace MCP config: {ex.Message}");
+        }
+
+        // CLIs with no launch flag for MCP servers read these project files instead (Claude gets
+        // its servers as --mcp-config, see RewriteCliLaunch). They are shared with the user's own
+        // entries, so only the codale-* servers are touched.
+        var root = targetDirectory ?? _projectPath;
+        servers ??= TerminalServers();
+        MergeServers(Path.Combine(root, ".gemini", "settings.json"), servers, McpFileFormat.Gemini);
+        MergeServers(Path.Combine(root, ".qwen", "settings.json"), servers, McpFileFormat.Gemini);
+        MergeServers(Path.Combine(root, "opencode.json"), servers, McpFileFormat.OpenCode);
+
+        // Earlier builds wrote Claude's servers here; remove ours so they are not registered twice.
+        MergeServers(Path.Combine(root, ".mcp.json"), [], McpFileFormat.Standard);
+    }
+
+    private static readonly HashSet<string> ClaudeNonSessionArgs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "mcp", "config", "update", "upgrade", "doctor", "install", "migrate-installer", "setup-token", "plugin", "agents",
+        "-v", "--version", "-h", "--help", "--mcp-config",
+    };
+
+    /// <summary>
+    /// For a line typed at a shell prompt that launches Claude Code, the command to run instead:
+    /// the same line with Codale's servers attached through <c>--mcp-config</c>, so no restart or
+    /// project file is needed. Null for anything else (other commands, subcommands, pipes).
+    /// </summary>
+    public string? RewriteCliLaunch(string promptLine)
+    {
+        try
+        {
+            if (Codale.Agents.CliLocator.DetectLaunch(promptLine) is not ({ Id: "claude" }, var rest))
+            {
+                return null;
+            }
+
+            if (rest.IndexOfAny(['|', ';', '&', '<', '>']) >= 0 ||
+                rest.Split(' ', StringSplitOptions.RemoveEmptyEntries).Any(ClaudeNonSessionArgs.Contains))
+            {
+                return null;
+            }
+
+            var servers = TerminalServers();
+            if (servers.Count == 0 || McpServerSpec.ToClaudeConfig(servers) is not { } json)
+            {
+                return null;
+            }
+
+            var directory = Path.Combine(StagingRoot(), "cli");
+            Directory.CreateDirectory(directory);
+            var hash = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(_projectPath)))[..12];
+            var path = Path.Combine(directory, $"claude-{hash}.json");
+            File.WriteAllText(path, json);
+
+            // Last, because --mcp-config takes any number of values and would swallow a trailing prompt.
+            return $"claude{rest.TrimEnd()} --mcp-config \"{path}\"";
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Trace($"Failed to rewrite CLI launch: {ex.Message}");
+            return null;
+        }
+    }
+
+    private enum McpFileFormat
+    {
+        /// <summary><c>mcpServers</c> with a <c>type</c> field (Claude's <c>.mcp.json</c>).</summary>
+        Standard,
+
+        /// <summary><c>mcpServers</c> without <c>type</c>, plus <c>trust</c> (Gemini CLI and Qwen Code).</summary>
+        Gemini,
+
+        /// <summary>OpenCode's <c>mcp</c> map: <c>type: local</c>, a <c>command</c> array and an <c>environment</c> map.</summary>
+        OpenCode,
+    }
+
+    /// <summary>
+    /// Writes <paramref name="servers"/> into the MCP map of a CLI's JSON config,
+    /// keeping every other key and every server not owned by Codale. Stale <c>codale-*</c>
+    /// entries are dropped; a file Codale created and left empty is deleted.
+    /// </summary>
+    private static void MergeServers(string path, IReadOnlyList<McpServerSpec> servers, McpFileFormat format)
+    {
+        var mapKey = format == McpFileFormat.OpenCode ? "mcp" : "mcpServers";
+        var gemini = format == McpFileFormat.Gemini;
+        try
+        {
+            var existed = File.Exists(path);
+            if (!existed && servers.Count == 0)
+            {
+                return;
+            }
+
+            System.Text.Json.Nodes.JsonObject doc;
+            if (existed)
+            {
+                try
+                {
+                    doc = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path), documentOptions: new System.Text.Json.JsonDocumentOptions
+                    {
+                        CommentHandling = System.Text.Json.JsonCommentHandling.Skip,
+                        AllowTrailingCommas = true,
+                    }) as System.Text.Json.Nodes.JsonObject ?? new();
+                }
+                catch (System.Text.Json.JsonException)
+                {
+                    // The user's file is malformed; leave it alone rather than overwrite it.
+                    return;
+                }
+            }
+            else
+            {
+                doc = new();
+            }
+
+            var map = doc[mapKey] as System.Text.Json.Nodes.JsonObject ?? new();
+            foreach (var key in map.Select(p => p.Key).Where(k => k.StartsWith("codale-", StringComparison.Ordinal)).ToList())
+            {
+                map.Remove(key);
+            }
+
+            if (servers.Count > 0 && System.Text.Json.Nodes.JsonNode.Parse(McpServerSpec.ToClaudeConfig(servers)!)?["mcpServers"] is System.Text.Json.Nodes.JsonObject ours)
+            {
+                foreach (var (name, entry) in ours.ToList())
+                {
+                    ours.Remove(name);
+                    if (format == McpFileFormat.OpenCode)
+                    {
+                        var spec = servers.First(s => s.Name == name);
+                        var local = new System.Text.Json.Nodes.JsonObject
+                        {
+                            ["type"] = "local",
+                            ["command"] = new System.Text.Json.Nodes.JsonArray(
+                                new[] { spec.Command }.Concat(spec.Args).Select(a => (System.Text.Json.Nodes.JsonNode)a).ToArray()),
+                            ["enabled"] = true,
+                        };
+                        if (spec.Env is { Count: > 0 } env)
+                        {
+                            var vars = new System.Text.Json.Nodes.JsonObject();
+                            foreach (var (key, value) in env)
+                            {
+                                vars[key] = value;
+                            }
+
+                            local["environment"] = vars;
+                        }
+
+                        map[name] = local;
+                        continue;
+                    }
+
+                    if (gemini && entry is System.Text.Json.Nodes.JsonObject e)
+                    {
+                        // Gemini has no "type" field; "trust" skips its per-call confirmation.
+                        e.Remove("type");
+                        var spec = servers.First(s => s.Name == name);
+                        if (spec.AutoApprove && !spec.RequireApproval && spec.AskTools.Count == 0)
+                        {
+                            e["trust"] = true;
+                        }
+                    }
+
+                    map[name] = entry;
+                }
+            }
+
+            if (map.Count == 0)
+            {
+                doc.Remove(mapKey);
+            }
+            else
+            {
+                doc[mapKey] = map;
+            }
+
+            if (doc.Count == 0)
+            {
+                if (existed)
+                {
+                    File.Delete(path);
+                }
+
+                return;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, doc.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Trace($"Failed to merge MCP config into {path}: {ex.Message}");
         }
     }
 

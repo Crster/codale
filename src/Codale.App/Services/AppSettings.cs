@@ -32,11 +32,6 @@ public static class AppSettings
     /// <summary>Raised after any setting was written. Args are always <see cref="EventArgs.Empty"/>.</summary>
     public static event EventHandler? Changed;
 
-    static AppSettings()
-    {
-        Codale.Agents.CliLocator.PreferredCliProvider = () => AgentCli;
-    }
-
     /// <summary>
     /// Records the calling thread as the UI thread so <see cref="Changed"/> is posted back to it
     /// when a setting turns on another one (a file-watcher callback, a background job).
@@ -409,18 +404,6 @@ public static class AppSettings
     {
         get => Get("chat.defaultEffort", () => Read("chat.defaultEffort", "") is var raw && IsEffort(raw) ? raw : "");
         set => Set("chat.defaultEffort", IsEffort(value) ? value : "", FormatText);
-    }
-
-    private const string AgentCliKey = "chat.agentCli";
-
-    /// <summary>
-    /// Which agent CLI drives new sessions: "auto" (detects installed CLIs, prioritizing Antigravity/Claude),
-    /// or a specific CLI id ("agy", "claude", etc.).
-    /// </summary>
-    public static string AgentCli
-    {
-        get => Get(AgentCliKey, () => Read(AgentCliKey, "auto", FormatText));
-        set => Set(AgentCliKey, string.IsNullOrWhiteSpace(value) ? "auto" : value.Trim(), FormatText);
     }
 
     /// <summary>Seconds between the git panel's working-tree checks.</summary>

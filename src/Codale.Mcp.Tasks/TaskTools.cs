@@ -26,7 +26,7 @@ public static class TaskTools
     [
         .. Core(tasks),
         .. string.IsNullOrWhiteSpace(projectRoot) ? [] : CommandTools(tasks, projectRoot, runDirectory ?? projectRoot),
-        .. Panel(),
+        .. Panel(tasks),
         .. assist is null ? [] : AssistTools(assist),
     ];
 
@@ -58,7 +58,14 @@ public static class TaskTools
     /// call itself from the agent's tool stream, so the panel is filled from a fixed
     /// schema of ours instead of the CLI's own task tools, whose shape varies by version.
     /// </summary>
-    private static IReadOnlyList<McpTool> Panel() =>
+    /// <summary>
+    /// Set by the host in the environment of a server handed to an agent CLI running in a terminal.
+    /// Codale cannot read such a CLI's tool stream, so its panel calls are sent over the pipe instead.
+    /// </summary>
+    private static bool PushesToPanel(ITaskService tasks) =>
+        tasks is TaskPipeClient && Environment.GetEnvironmentVariable("CODALE_PANEL_PUSH") == "1";
+
+    private static IReadOnlyList<McpTool> Panel(ITaskService tasks) =>
     [
         new McpTool(
             "todos_set",
@@ -93,11 +100,16 @@ public static class TaskTools
                 },
                 ["required"] = new JsonArray("todos"),
             },
-            (a, _) =>
+            async (a, ct) =>
             {
                 var list = a.RequiredArray("todos");
                 var done = list.Count(t => t.TryGetProperty("status", out var s) && s.GetString() == "completed");
-                return McpTool.Text($"Task list updated: {done}/{list.Count} done.");
+                if (PushesToPanel(tasks))
+                {
+                    await ((TaskPipeClient)tasks).PublishPanelAsync("todos", a.Raw, ct);
+                }
+
+                return await McpTool.Text($"Task list updated: {done}/{list.Count} done.");
             }),
 
         new McpTool(
@@ -113,14 +125,19 @@ public static class TaskTools
                     ("markdown", "string", "Markdown text to save as a document when there is no file. Give this or path."),
                 ],
                 "title"),
-            (a, _) =>
+            async (a, ct) =>
             {
                 if (a.String("path") is null && a.String("markdown") is null)
                 {
                     throw new McpToolException("Give either 'path' or 'markdown'.");
                 }
 
-                return McpTool.Text("Added to the session panel's artifacts.");
+                if (PushesToPanel(tasks))
+                {
+                    await ((TaskPipeClient)tasks).PublishPanelAsync("artifact", a.Raw, ct);
+                }
+
+                return await McpTool.Text("Added to the session panel's artifacts.");
             }),
     ];
 

@@ -1416,6 +1416,28 @@ public sealed partial class TerminalView : UserControl
         return builder.ToString();
     }
 
+    /// <summary>
+    /// Called with the prompt line when Enter is pressed at the main screen; returns the command
+    /// to run instead (the prompt line is replaced by it), or null to submit as typed.
+    /// </summary>
+    public Func<string, string?>? SubmitRewriter { get; set; }
+
+    /// <summary>The text of the screen row holding the cursor, prompt included, trailing blanks trimmed.</summary>
+    private string ReadCursorLine()
+    {
+        var row = _emulator.GetScreenRow(Math.Clamp(_emulator.CursorRow, 0, _emulator.Rows - 1));
+        var builder = new System.Text.StringBuilder(row.Length);
+        foreach (var cell in row)
+        {
+            if (!cell.WideTail)
+            {
+                builder.Append(cell.Code == '\0' ? ' ' : cell.Code);
+            }
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
     // ------------------------------------------------------------------ keyboard
 
     private void OnTerminalKeyDown(object sender, KeyRoutedEventArgs e)
@@ -1444,6 +1466,17 @@ public sealed partial class TerminalView : UserControl
         if (ctrl && e.Key == VirtualKey.V)
         {
             _ = PasteAsync();
+            e.Handled = true;
+            return;
+        }
+
+        // Enter at a shell prompt: the screen shows exactly what the shell is about to run (history
+        // recall, completion and edits included), so the host can swap it for an adjusted command.
+        if (e.Key == VirtualKey.Enter && !ctrl && !alt && !shift && SubmitRewriter is { } rewrite && !_emulator.InAlternate &&
+            rewrite(ReadCursorLine()) is { } rewritten)
+        {
+            // Escape reverts the typed line in PSReadLine and cmd.exe alike.
+            _ = WriteToShellAsync("\x1b" + rewritten + "\r");
             e.Handled = true;
             return;
         }

@@ -238,10 +238,46 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             }
 
             _taskPipe = new TaskPipeServer(new LocalTaskService(_taskManager, Terminals), assist);
+
+            // An agent CLI in a terminal reports its task list and artifacts here (see ServersForTerminalCli).
+            _taskPipe.PanelPublished = (kind, input) => _dispatcher.TryEnqueue(() =>
+            {
+                if (kind == "todos")
+                {
+                    ApplyTodos(input);
+                }
+                else if (kind == "artifact")
+                {
+                    RecordAgentArtifact(input);
+                }
+            });
             _taskPipe.Start();
         }
 
         return (_taskPipe!.PipeName, _taskPipe.Token);
+    }
+
+    /// <summary>
+    /// The servers an agent CLI running in a terminal gets: the browser and computer servers plus
+    /// the tasks server wired to this chat's host, so tasks the CLI starts are listed in the panel.
+    /// </summary>
+    public IReadOnlyList<McpServerSpec> ServersForTerminalCli()
+    {
+        if (_mcpSettings is null)
+        {
+            return [];
+        }
+
+        var servers = _mcpSettings.Servers();
+        var workingDirectory = WorktreePath ?? _projectPath;
+        if (_mcpSettings.TasksAvailable &&
+            EnsureTaskHost(workingDirectory) is { } host &&
+            _mcpSettings.TasksSpec(host.Pipe, host.Token, workingDirectory, Helper is not null && AppSettings.HasHelperApi && AppSettings.TokenSaverExplore, pushToPanel: true) is { } tasks)
+        {
+            servers = [.. servers, tasks];
+        }
+
+        return servers;
     }
 
     private void StopTaskHost()
@@ -991,8 +1027,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     [NotifyPropertyChangedFor(nameof(CanChangeMode))]
     public partial bool IsBusy { get; set; }
 
-    /// <summary>The permission mode is locked while a turn is running.</summary>
-    public bool CanChangeMode => !IsBusy;
+    /// <summary>
+    /// Another agent CLI (not Claude) is running in a terminal beside this chat. The panel only mirrors
+    /// what it can of that CLI, so the model, effort, mode and provider choices of this chat's own session are locked.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanChangeMode))]
+    public partial bool IsTerminalCliAttached { get; set; }
+
+    /// <summary>The model, effort, mode and provider are locked while a turn is running or another CLI runs in a terminal.</summary>
+    public bool CanChangeMode => !IsBusy && !IsTerminalCliAttached;
 
     /// <summary>Running a turn without waiting on anyone: the tab's blue dot. Waiting shows amber instead.</summary>
     public bool IsBusyWorking => IsBusy && !IsWaitingForYou;

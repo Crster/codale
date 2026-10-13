@@ -613,19 +613,6 @@ public sealed partial class TerminalActivityBrushConverter : IValueConverter
         throw new NotSupportedException();
 }
 
-/// <summary>
-/// Tab title: just the running CLI - "claude" - or "Terminal" for an idle shell.
-/// The "(exited)" / "(failed)" suffix comes from the separate exit-suffix converter.
-/// </summary>
-public sealed partial class TerminalTitleConverter : IValueConverter
-{
-    public object Convert(object value, Type targetType, object parameter, string language) =>
-        value is string { Length: > 0 } command ? command : "Terminal";
-
-    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
-        throw new NotSupportedException();
-}
-
 /// <summary>Appended after the title once the shell is gone; empty while it lives.</summary>
 public sealed partial class TerminalExitSuffixConverter : IValueConverter
 {

@@ -55,45 +55,41 @@ public static class CliLocator
         new("goose", "Goose", "goose", null, "Block Goose CLI"),
         new("codex", "Codex", "codex", null, "OpenAI Codex CLI"),
         new("cursor", "Cursor", "cursor", null, "Cursor CLI"),
+        new("opencode", "OpenCode", "opencode", "npm i -g opencode-ai", "OpenCode CLI"),
+        new("qwen", "Qwen", "qwen", "npm i -g @qwen-code/qwen-code", "Qwen Code CLI"),
     };
 
-    /// <summary>Optional provider for the user's preferred CLI id (e.g. from AppSettings).</summary>
-    public static Func<string?>? PreferredCliProvider { get; set; }
+    private static readonly System.Text.RegularExpressions.Regex PromptLaunch = new(
+        @"^(?:PS )?[A-Za-z]:\\[^>]*>\s+(?<cmd>[\w.-]+?)(?:\.exe|\.cmd)?(?<rest>(?:\s.*)?)$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Recognises a known CLI launched on a line typed at a default Windows shell prompt
+    /// ("PS C:\proj&gt; claude --resume" or "C:\proj&gt; agy"), returning the CLI and the
+    /// arguments after its name. Only that prompt shape is matched, so a message typed inside
+    /// a running CLI's own input box is never mistaken for a launch.
+    /// </summary>
+    public static (CliDescriptor Cli, string Args)? DetectLaunch(string promptLine)
+    {
+        var match = PromptLaunch.Match(promptLine);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var cli = KnownClis.FirstOrDefault(k => string.Equals(k.Id, match.Groups["cmd"].Value, StringComparison.OrdinalIgnoreCase));
+        return cli is null ? null : (cli, match.Groups["rest"].Value);
+    }
 
     /// <summary>Detects which known CLIs are installed on this machine.</summary>
     public static IReadOnlyList<CliDescriptor> DetectInstalledClis() =>
         KnownClis.Where(cli => cli.IsInstalled).ToList();
 
     /// <summary>
-    /// The active CLI: checks user preference, else auto-detects installed CLIs
-    /// (prioritizing Antigravity if found, then Claude, then first installed).
+    /// The CLI that drives the session panel: always Claude. The other known CLIs are only
+    /// recognised while they run in a terminal, to give them Codale's MCP servers.
     /// </summary>
-    public static CliDescriptor ActiveCli
-    {
-        get
-        {
-            var preferred = PreferredCliProvider?.Invoke();
-            if (!string.IsNullOrWhiteSpace(preferred) && !string.Equals(preferred, "auto", StringComparison.OrdinalIgnoreCase))
-            {
-                var match = KnownClis.FirstOrDefault(c => string.Equals(c.Id, preferred, StringComparison.OrdinalIgnoreCase) ||
-                                                          string.Equals(c.DisplayName, preferred, StringComparison.OrdinalIgnoreCase));
-                if (match is not null)
-                {
-                    return match;
-                }
-            }
-
-            var installed = DetectInstalledClis();
-            if (installed.Count > 0)
-            {
-                return installed.FirstOrDefault(c => c.Id == "agy")
-                    ?? installed.FirstOrDefault(c => c.Id == "claude")
-                    ?? installed[0];
-            }
-
-            return KnownClis[0];
-        }
-    }
+    public static CliDescriptor ActiveCli => KnownClis[0];
 
     public static bool IsInstalled() => Find(Executable) is not null;
 

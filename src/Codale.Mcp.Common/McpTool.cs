@@ -26,6 +26,9 @@ public sealed class McpArgs(JsonElement? raw)
 {
     private readonly JsonElement? _raw = raw is { ValueKind: JsonValueKind.Object } ? raw : null;
 
+    /// <summary>The whole argument object, or a default (undefined) element when there is none.</summary>
+    public JsonElement Raw => _raw ?? default;
+
     private bool TryGet(string name, out JsonElement value)
     {
         value = default;

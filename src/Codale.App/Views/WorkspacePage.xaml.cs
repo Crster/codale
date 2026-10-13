@@ -181,11 +181,6 @@ public sealed partial class WorkspacePage : Page
                 entry.Chat.AttentionNeeded -= OnChatAttentionNeeded;
                 entry.Chat.PropertyChanged -= OnChatPropertyChanged;
             }
-
-            foreach (var entry in _terminalTabs)
-            {
-                entry.Terminal.PropertyChanged -= OnTerminalPropertyChanged;
-            }
         }
     }
 
@@ -668,14 +663,6 @@ public sealed partial class WorkspacePage : Page
         {
             RefreshTabAttention(entry);
         }
-
-        if (e.PropertyName == nameof(ChatViewModel.IsConnected) && sender is ChatViewModel chat && chat.IsConnected)
-        {
-            if (ViewModel?.CliEndpoint.IsCustomCli == true && !_sessionPanelOpen)
-            {
-                SetSessionPanel(true);
-            }
-        }
     }
 
     /// <summary>
@@ -795,13 +782,12 @@ public sealed partial class WorkspacePage : Page
         }
 
         // 2. Is there an active agent terminal or terminal running a known CLI?
-        if (_terminalTabs.Any(t => t.Terminal.IsAgentTerminal || t.Terminal.IsRunning && CliLocator.KnownClis.Any(k => string.Equals(k.Id, t.Terminal.RunningCommand, StringComparison.OrdinalIgnoreCase))))
+        if (_terminalTabs.Any(t => t.Terminal.IsAgentTerminal))
         {
             return true;
         }
 
-        // 3. Is the custom CLI configured?
-        return ViewModel.CliEndpoint.IsCustomCli;
+        return false;
     }
 
     private void OpenTerminalTab() => AddTerminalTab(ViewModel.CreateTerminal());
@@ -815,6 +801,11 @@ public sealed partial class WorkspacePage : Page
         CrashLog.Trace("terminal: AddTerminalTab begin");
         try
         {
+            // Write Codale's MCP servers into the workspace config now, so any agent CLI the user
+            // launches in this terminal reads them at startup and never needs a restart.
+            ViewModel?.InjectMcpForTerminalCli();
+            terminal.LaunchRewriter ??= OnTerminalLaunchTyped;
+
             var tab = new TerminalTab { ViewModel = terminal };
             tab.LinkActivated += OnTerminalLinkActivated;
             var item = new TabViewItem { IsClosable = true, Header = BuildTerminalHeader(terminal) };
@@ -833,8 +824,6 @@ public sealed partial class WorkspacePage : Page
 
             UpdateEmptyState();
             CentreTabs.SelectedItem = item;
-
-            terminal.PropertyChanged += OnTerminalPropertyChanged;
 
             // The shell lives exactly as long as its tab: started when the tab first
             // appears, terminated when the tab is closed.
@@ -859,6 +848,11 @@ public sealed partial class WorkspacePage : Page
     private void CloseTerminalTab(TerminalTabEntry entry)
     {
         _terminalTabs.Remove(entry);
+        if (_terminalTabs.Count == 0)
+        {
+            ViewModel.EndTerminalCliSession();
+        }
+
         if (CentreTabs.TabItems.Contains(entry.Item))
         {
             CentreTabs.TabItems.Remove(entry.Item);
@@ -866,23 +860,43 @@ public sealed partial class WorkspacePage : Page
 
         UpdateEmptyState();
         UpdateSessionPanelForActiveTab();
-        entry.Terminal.PropertyChanged -= OnTerminalPropertyChanged;
         entry.Tab.LinkActivated -= OnTerminalLinkActivated;
         entry.Tab.CloseHost();
         ViewModel.RemoveTerminal(entry.Terminal);
     }
 
-    private void OnTerminalPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    /// <summary>
+    /// Called when Enter is pressed at a terminal's shell prompt. A known agent CLI typed there
+    /// opens the session panel and gets Codale's MCP servers before it starts: attached as a launch
+    /// argument where the CLI takes one (the returned command), otherwise through the config files
+    /// it reads at startup. Returns null to run the line as typed.
+    /// </summary>
+    private string? OnTerminalLaunchTyped(string promptLine)
     {
-        if (e.PropertyName == nameof(TerminalViewModel.RunningCommand) && sender is TerminalViewModel term)
+        // Called for every line submitted at a shell prompt, so a line that is not a CLI launch means
+        // any CLI the panel was mirroring has exited.
+        var launch = CliLocator.DetectLaunch(promptLine);
+        ViewModel?.AttachTerminalCli(launch?.Cli);
+        if (launch is null)
         {
-            if (term.IsRunning && CliLocator.KnownClis.Any(k => string.Equals(k.Id, term.RunningCommand, StringComparison.OrdinalIgnoreCase)))
-            {
-                if (!_sessionPanelOpen)
-                {
-                    SetSessionPanel(true);
-                }
-            }
+            return null;
+        }
+
+        if (!_sessionPanelOpen)
+        {
+            SetSessionPanel(true);
+        }
+
+        try
+        {
+            ViewModel?.InjectMcpForTerminalCli();
+            _ = ViewModel?.BeginTerminalCliSessionAsync();
+            return ViewModel?.RewriteCliLaunch(promptLine);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("Terminal", "MCP injection failed", ex);
+            return null;
         }
     }
 
@@ -916,10 +930,9 @@ public sealed partial class WorkspacePage : Page
 
     /// <summary>
     /// Tab chrome for a terminal: the terminal glyph, tinted by state (working, idle,
-    /// exited, failed) so it still reads as a terminal tab, plus a title that names
-    /// the CLI running inside. Both bind to the terminal's own view model, so the
-    /// background process-tree poll updates them on their own. A command tab titles
-    /// itself with the command's name and wears the play glyph instead.
+    /// exited, failed) so it still reads as a terminal tab, plus a "Terminal" title. The
+    /// tint binds to the terminal's own view model. A command tab titles itself with the
+    /// command's name and wears the play glyph instead.
     /// </summary>
     private object BuildTerminalHeader(TerminalViewModel terminal)
     {
@@ -954,16 +967,11 @@ public sealed partial class WorkspacePage : Page
         }
         else
         {
-            name.SetBinding(TextBlock.TextProperty, new Binding
-            {
-                Path = new PropertyPath("RunningCommand"),
-                Source = terminal,
-                Converter = (IValueConverter)Resources["TerminalTitle"],
-            });
+            name.Text = "Terminal";
         }
 
         // The "(exited)" marker updates through its own binding; a pathless binding
-        // would read the view model once and never hear the poll's updates.
+        // would read the view model once and never hear the state's updates.
         var suffix = new TextBlock
         {
             FontSize = 12,

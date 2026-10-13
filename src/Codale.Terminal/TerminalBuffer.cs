@@ -171,7 +171,11 @@ public sealed class TerminalBuffer
     }
 
     /// <summary>Moves the cursor without origin-mode clamping (for CUB/CUF which always stay on the line).</summary>
-    public void MoveCursorHorizontal(int col) => _cursorCol = Math.Clamp(col, 0, _cols - 1);
+    public void MoveCursorHorizontal(int col)
+    {
+        _pendingWrap = false;
+        _cursorCol = Math.Clamp(col, 0, _cols - 1);
+    }
 
     public void MoveCursorVertical(int delta) => MoveCursorRow(_cursorRow + delta);
 

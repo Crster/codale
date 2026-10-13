@@ -35,7 +35,6 @@
         <views:TabStateToBrushConverter x:Key="TabStateToBrush" />
         <views:PreviewToFontStyleConverter x:Key="PreviewToItalic" />
         <views:TerminalActivityBrushConverter x:Key="TerminalActivityBrush" />
-        <views:TerminalTitleConverter x:Key="TerminalTitle" />
         <views:TerminalExitSuffixConverter x:Key="TerminalExitSuffix" />
         <views:RelativeTimeConverter x:Key="RelativeTime" />
         <views:NullableBoolToVisibilityConverter x:Key="NullableBoolToVisibility" />
@@ -1185,8 +1184,8 @@
                                 Padding="0" Height="24" VerticalAlignment="Center"
                                 Background="Transparent"
                                 BorderThickness="0"
-                                IsEnabled="{x:Bind ViewModel.IsCustomProviderDropdownEnabled, Mode=OneWay}"
-                                ToolTipService.ToolTip="{x:Bind ViewModel.ProviderToolTip, Mode=OneWay}">
+                                IsEnabled="{x:Bind ViewModel.CliEndpoint.CanSwitch, Mode=OneWay}"
+                                ToolTipService.ToolTip="Agent provider for this chat">
                                 <Button.Resources>
                                     <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="Transparent" />
                                     <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="Transparent" />
@@ -1253,13 +1252,7 @@
                                         Style="{StaticResource BodyStrongTextBlockStyle}">
                                         <Run Text="{x:Bind ViewModel.EndpointLabel, Mode=OneWay}" /><Run Text=" session" />
                                     </TextBlock>
-                                    <FontIcon
-                                        VerticalAlignment="Center"
-                                        Margin="0,1,0,0"
-                                        FontSize="10"
-                                        Glyph="&#xE70D;"
-                                        Opacity="0.6"
-                                        Visibility="{x:Bind ViewModel.IsCustomProviderDropdownEnabled, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                    <FontIcon VerticalAlignment="Center" Margin="0,1,0,0" FontSize="10" Glyph="&#xE70D;" Opacity="0.6" />
                                 </StackPanel>
                             </Button>
                         </StackPanel>
@@ -1380,7 +1373,7 @@
                                     <StackPanel Spacing="10">
                                         <!--  Model, effort and mode: labelled tiles, each opening a
                                               picker whose pick switches the live session  -->
-                                        <Grid ColumnSpacing="6">
+                                        <Grid ColumnSpacing="6" Visibility="{x:Bind ViewModel.ShowSessionPickers, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="1.3*" />
                                                 <ColumnDefinition Width="*" />
@@ -1389,7 +1382,7 @@
 
                                             <Button
                                                 Click="OnModelChipClick"
-                                                IsEnabled="{x:Bind ViewModel.Chat.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
+                                                IsEnabled="{x:Bind ViewModel.Chat.CanChangeMode, Mode=OneWay}"
                                                 Style="{StaticResource SessionControlButton}"
                                                 ToolTipService.ToolTip="{x:Bind ViewModel.Chat.ModelDisplay, Mode=OneWay}">
                                                 <Grid ColumnSpacing="6" RowSpacing="2">
@@ -1428,7 +1421,7 @@
                                             <Button
                                                 Grid.Column="1"
                                                 Click="OnEffortChipClick"
-                                                IsEnabled="{x:Bind ViewModel.Chat.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
+                                                IsEnabled="{x:Bind ViewModel.Chat.CanChangeMode, Mode=OneWay}"
                                                 Style="{StaticResource SessionControlButton}"
                                                 ToolTipService.ToolTip="How hard the model thinks before it answers (locked while the agent works)">
                                                 <Grid ColumnSpacing="6" RowSpacing="2">

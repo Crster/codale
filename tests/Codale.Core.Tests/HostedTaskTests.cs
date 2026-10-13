@@ -195,6 +195,41 @@ public sealed class HostedTaskTests
     }
 
     [Fact]
+    public async Task Pipe_panel_op_hands_the_report_to_the_host()
+    {
+        using var manager = new HostedTaskManager(Path.GetTempPath());
+        using var server = new TaskPipeServer(new LocalTaskService(manager));
+        string? kind = null;
+        string? first = null;
+        server.PanelPublished = (k, input) =>
+        {
+            kind = k;
+            first = input.GetProperty("todos")[0].GetProperty("content").GetString();
+        };
+
+        var response = await server.HandleAsync(
+            $$$"""{"token":"{{{server.Token}}}","op":"panel","kind":"todos","input":{"todos":[{"content":"Do it","status":"pending"}]}}""");
+
+        Assert.True(response["ok"]!.GetValue<bool>());
+        Assert.Equal("todos", kind);
+        Assert.Equal("Do it", first);
+    }
+
+    [Fact]
+    public async Task Pipe_panel_op_refuses_a_wrong_token()
+    {
+        using var manager = new HostedTaskManager(Path.GetTempPath());
+        using var server = new TaskPipeServer(new LocalTaskService(manager));
+        var called = false;
+        server.PanelPublished = (_, _) => called = true;
+
+        var response = await server.HandleAsync("""{"token":"wrong","op":"panel","kind":"todos","input":{}}""");
+
+        Assert.False(response["ok"]!.GetValue<bool>());
+        Assert.False(called);
+    }
+
+    [Fact]
     public async Task Pipe_refuses_a_wrong_token()
     {
         using var manager = new HostedTaskManager(Path.GetTempPath());

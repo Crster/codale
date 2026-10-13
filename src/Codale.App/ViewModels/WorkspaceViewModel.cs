@@ -55,16 +55,15 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         Sessions = new SessionsViewModel(ProjectPath, _store, _databasePath);
         _endpoints = new CliEndpointSettings();
         _mcp = new McpServerSettings(_store, ProjectPath);
+        _mcp.TerminalServersProvider = () => Chat.ServersForTerminalCli();
         McpTools = new McpToolsViewModel(_mcp);
         CliEndpoint = new CliEndpointViewModel();
         _router = new MessageRouter(_helper);
         CliEndpoint.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(CliEndpointViewModel.ActiveName) or nameof(CliEndpointViewModel.IsCustomCli) or nameof(CliEndpointViewModel.CustomCliName) or nameof(CliEndpointViewModel.CanSwitch))
+            if (e.PropertyName == nameof(CliEndpointViewModel.ActiveName))
             {
                 OnPropertyChanged(nameof(EndpointLabel));
-                OnPropertyChanged(nameof(ProviderToolTip));
-                OnPropertyChanged(nameof(IsCustomProviderDropdownEnabled));
             }
         };
 
@@ -130,30 +129,37 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>The provider picker follows the chat in front.</summary>
     partial void OnChatChanged(ChatViewModel value) => CliEndpoint.Attach(value);
 
-    /// <summary>The session panel provider label: the custom CLI name (e.g. "Antigravity"), or selected custom provider's name, else "Default".</summary>
+    /// <summary>The status bar's CLI endpoint button: the selected custom provider's name, else "Default".</summary>
     public string EndpointLabel =>
-        CliEndpoint.IsCustomCli
-            ? CliEndpoint.CustomCliName
+        TerminalCliName is { Length: > 0 } cli
+            ? cli
             : CliEndpoint.IsActive && CliEndpoint.ActiveName is { Length: > 0 } name ? name : "Default";
 
-    /// <summary>Tooltip for the session panel provider indicator.</summary>
-    public string ProviderToolTip =>
-        CliEndpoint.IsCustomCli
-            ? $"Agent provider: {CliEndpoint.CustomCliName} (custom CLI)"
-            : "Agent provider for this chat";
+    /// <summary>The name of the non-Claude agent CLI running in a terminal ("Antigravity"), or null when none is.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(EndpointLabel))]
+    [NotifyPropertyChangedFor(nameof(ShowSessionPickers))]
+    public partial string? TerminalCliName { get; set; }
 
-    /// <summary>Whether the custom provider dropdown button in the session panel is enabled.</summary>
-    public bool IsCustomProviderDropdownEnabled => CliEndpoint.CanSwitch;
+    /// <summary>The model, effort and mode tiles: hidden while another CLI runs in a terminal, where they would not apply.</summary>
+    public bool ShowSessionPickers => TerminalCliName is null;
+
+    partial void OnTerminalCliNameChanged(string? value)
+    {
+        foreach (var chat in Chats)
+        {
+            chat.IsTerminalCliAttached = value is not null;
+        }
+    }
+
+    /// <summary>A shell prompt line was submitted: a known non-Claude CLI launched there is the one the panel now mirrors; any other line means the CLI has exited.</summary>
+    public void AttachTerminalCli(Codale.Agents.CliDescriptor? cli) =>
+        TerminalCliName = cli is { Id: not "claude" } ? cli.DisplayName : null;
 
     private readonly CustomUsageTally _customUsage = new();
 
     private void OnAppSettingsChanged(object? sender, EventArgs e)
     {
-        CliEndpoint.Reload();
-        OnPropertyChanged(nameof(EndpointLabel));
-        OnPropertyChanged(nameof(ProviderToolTip));
-        OnPropertyChanged(nameof(IsCustomProviderDropdownEnabled));
-
         foreach (var chat in Chats)
         {
             chat.RefreshCustomProviderName();
@@ -185,6 +191,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>The built-in browser and desktop-control servers, editable from the status bar flyout.</summary>
     public McpToolsViewModel McpTools { get; }
 
+    /// <summary>Writes Codale's MCP servers into the workspace config so a CLI restarted in a terminal picks them up.</summary>
+    public void InjectMcpForTerminalCli() => _mcp.SyncWorkspaceMcpConfig();
+
+    /// <summary>Adds Codale's MCP servers to an agent CLI launch typed at a terminal prompt; null when the line is not one.</summary>
+    public string? RewriteCliLaunch(string promptLine) => _mcp.RewriteCliLaunch(promptLine);
+
     /// <summary>
     /// A chat needs to be on screen: opened from history, resumed, or started fresh.
     /// The page opens its tab (or selects the one it has) and brings it to the front.
@@ -202,6 +214,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         chat.RequestedEffort = AppSettings.DefaultEffort is { Length: > 0 } effort ? effort : null;
         chat.PermissionMode = AppSettings.DefaultChatMode;
 
+        chat.IsTerminalCliAttached = TerminalCliName is not null;
         chat.TurnFinished += OnTurnFinished;
         chat.FilesChanged += OnChatFilesChanged;
         chat.SessionStateChanged += OnSessionStateChanged;
@@ -1332,11 +1345,57 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     private void OnNestedSnapshotsRefreshed(object? sender, IReadOnlyList<GitSnapshot> snapshots) => Files.ApplyNestedGitStatus(snapshots);
 
     /// <summary>A stage, commit, checkout... just landed: the diff panel follows git's new state.</summary>
+    /// <summary>
+    /// Working-tree diffs (by path) as they stood when an agent CLI was launched in a terminal, or null
+    /// while none is. Codale cannot see that CLI's edits, so what differs from this is its work.
+    /// </summary>
+    private Dictionary<string, (int Added, int Removed)>? _terminalCliBaseline;
+
+    /// <summary>An agent CLI was launched in a terminal: from now on, working-tree changes are listed as session changes.</summary>
+    public async Task BeginTerminalCliSessionAsync()
+    {
+        if (_terminalCliBaseline is not null)
+        {
+            return;
+        }
+
+        await Diff.RefreshAsync();
+        _terminalCliBaseline = Diff.Files.ToDictionary(f => f.Path, f => (f.Added, f.Removed), StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The last terminal closed: stop attributing working-tree changes to a CLI.</summary>
+    public void EndTerminalCliSession()
+    {
+        _terminalCliBaseline = null;
+        TerminalCliName = null;
+    }
+
+    private void ListTerminalCliChanges()
+    {
+        if (_terminalCliBaseline is not { } baseline)
+        {
+            return;
+        }
+
+        foreach (var file in Diff.Files)
+        {
+            if (baseline.TryGetValue(file.Path, out var before) && before == (file.Added, file.Removed))
+            {
+                continue;
+            }
+
+            var kind = file.IsNew ? FileChangeKind.Create : file.IsDeleted ? FileChangeKind.Delete : FileChangeKind.Update;
+            var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(ProjectPath, file.Path));
+            Chat.Status.RecordFileChange(new FileChange { Kind = kind, FilePath = path }, file);
+        }
+    }
+
     private async void OnGitWorkingTreeChanged(object? sender, EventArgs e)
     {
         try
         {
             await Diff.RefreshAsync();
+            ListTerminalCliChanges();
         }
         catch (Exception ex)
         {
@@ -1510,6 +1569,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
         var events = await Sessions.LoadTranscriptAsync(summary);
         var title = summary.Title.Length > 28 ? summary.Title[..28].TrimEnd() + "…" : summary.Title;
+
         return await ResumeInChatAsync(summary.SessionId, events, Sessions.WorktreeOf(summary.SessionId), title);
     }
 

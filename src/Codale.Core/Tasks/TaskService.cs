@@ -152,6 +152,12 @@ public sealed class TaskPipeServer : IDisposable
 
     public string Token { get; }
 
+    /// <summary>
+    /// Called (on a pool thread) when an agent CLI outside the chat reports to the session panel:
+    /// the kind ("todos" or "artifact") and the tool's input. Null drops such reports.
+    /// </summary>
+    public Action<string, JsonElement>? PanelPublished { get; set; }
+
     public void Start() => _ = Task.Run(async () =>
     {
         try
@@ -302,6 +308,15 @@ public sealed class TaskPipeServer : IDisposable
                         request["output"]?.GetValue<string>() ?? throw new TaskServiceException("output is required."),
                         ct).ConfigureAwait(false));
 
+                case "panel":
+                    var kind = request["kind"]?.GetValue<string>() ?? throw new TaskServiceException("kind is required.");
+                    var input = request["input"] ?? throw new TaskServiceException("input is required.");
+                    using (var doc = JsonDocument.Parse(input.ToJsonString()))
+                    {
+                        PanelPublished?.Invoke(kind, doc.RootElement.Clone());
+                    }
+
+                    return new JsonObject { ["ok"] = true };
                 case "saved":
                     Assist.RecordSaved(request["before"]?.GetValue<long>() ?? 0, request["after"]?.GetValue<long>() ?? 0);
                     return new JsonObject { ["ok"] = true };
@@ -389,6 +404,26 @@ public sealed class TaskPipeClient(string pipeName, string token) : ITaskService
         {
             await CallAsync(
                     new JsonObject { ["op"] = "saved", ["before"] = beforeChars, ["after"] = afterChars },
+                    ct,
+                    TimeSpan.FromSeconds(3),
+                    exclusive: false)
+                .ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is TaskServiceException or IOException or OperationCanceledException or JsonException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Shows a todos_set / artifact_add call of an agent CLI outside the chat in the session panel
+    /// (<paramref name="kind"/> is "todos" or "artifact"). Never throws: the panel is a courtesy.
+    /// </summary>
+    public async Task PublishPanelAsync(string kind, JsonElement input, CancellationToken ct)
+    {
+        try
+        {
+            await CallAsync(
+                    new JsonObject { ["op"] = "panel", ["kind"] = kind, ["input"] = JsonNode.Parse(input.GetRawText()) },
                     ct,
                     TimeSpan.FromSeconds(3),
                     exclusive: false)

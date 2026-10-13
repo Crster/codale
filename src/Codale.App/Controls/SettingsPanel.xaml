@@ -265,14 +265,6 @@
                         <StackPanel>
                             <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
                                 <StackPanel VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="Agent CLI" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="Which AI coding CLI drives the agent. Auto detects installed CLIs." />
-                                </StackPanel>
-                                <ComboBox x:Name="AgentCliBox" Grid.Column="1" VerticalAlignment="Center" Width="220" SelectionChanged="OnAgentCliChanged" />
-                            </Grid>
-                            <Rectangle Style="{StaticResource Divider}" />
-                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                <StackPanel VerticalAlignment="Center" Spacing="2">
                                     <TextBlock Text="Default model" />
                                     <TextBlock Style="{StaticResource Hint}" Text="CLI default leaves it to the CLI; keep it there when a custom endpoint is active." />
                                 </StackPanel>

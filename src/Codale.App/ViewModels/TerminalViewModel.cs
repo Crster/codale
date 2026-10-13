@@ -26,26 +26,12 @@ public enum TerminalActivity
 /// <summary>
 /// A shell in a pseudoconsole, rendered by the native TerminalView control. This object
 /// owns the process and its raw byte stream; the view owns the display. Closing the
-/// terminal tab terminates the shell. A background poll of the shell's process tree
-/// keeps <see cref="RunningCommand"/> and <see cref="Activity"/> current, so the tab
-/// can read "claude" with a state-tinted icon.
+/// terminal tab terminates the shell. <see cref="Activity"/> tints the tab icon; a
+/// command tab reads busy from its start until the shell exits.
 /// </summary>
 public sealed partial class TerminalViewModel : ObservableObject, IDisposable
 {
-    /// <summary>Console plumbing that no user command is expected to run.</summary>
-    private static readonly HashSet<string> PlumbingProcesses = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "conhost", "openconsole",
-    };
-
-    /// <summary>Shells: present at the chain's root, not interesting as "the command".</summary>
-    private static readonly HashSet<string> ShellProcesses = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "conhost", "openconsole", "cmd", "powershell", "pwsh",
-    };
-
     private readonly string _workingDirectory;
-    private readonly SynchronizationContext? _uiContext;
     private TerminalSession? _session;
     private bool _disposed;
 
@@ -59,15 +45,11 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
         CommandText = command;
         CommandName = commandName ?? command;
 
-        // A command tab reads busy from the start: the command launches with the shell,
-        // and the first process-tree poll confirms or corrects it.
+        // A command tab reads busy from the start: the command launches with the shell.
         if (command is not null)
         {
             Activity = TerminalActivity.Busy;
         }
-
-        // The consumer feeds a UI-bound renderer, so state changes are posted to the UI thread.
-        _uiContext = SynchronizationContext.Current;
     }
 
     private static int _nextId;
@@ -102,11 +84,14 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     public partial TerminalActivity Activity { get; set; } = TerminalActivity.Idle;
 
     /// <summary>
-    /// The foreground CLI running inside the shell, by process name - "claude", "npm",
-    /// "python" - empty when only the shell itself is running.
+    /// Swaps a command typed at the shell prompt for an adjusted one (an agent CLI launched with
+    /// Codale's MCP servers attached); null result leaves it as typed.
     /// </summary>
-    [ObservableProperty]
-    public partial string RunningCommand { get; set; } = "";
+    public Func<string, string?>? LaunchRewriter { get; set; }
+
+    /// <summary>Applies <see cref="LaunchRewriter"/> to the prompt line typed into a live shell.</summary>
+    public string? RewriteSubmitted(string promptLine) =>
+        IsRunning ? LaunchRewriter?.Invoke(promptLine) : null;
 
     /// <summary>Why the shell could not be started, shown in the terminal when set.</summary>
     public string StartupError { get; private set; } = "";
@@ -173,7 +158,6 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
             _session.Start(_workingDirectory, command);
             IsRunning = true;
             CrashLog.Trace($"terminal: session started, pid = {_session.ProcessId}");
-            _ = Task.Run(MonitorProcessTreeAsync);
         }
         catch (Exception ex)
         {
@@ -181,58 +165,6 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
             StartupError = $"Could not start a shell: {ex.Message}";
             Activity = TerminalActivity.Error;
             CrashLog.Write("Terminal", "session start failed", ex);
-        }
-    }
-
-    /// <summary>
-    /// Polls the shell's process tree until the shell exits. Each pass picks up the
-    /// foreground CLI ("claude") and whether anything is running at all; the events
-    /// are raised on the UI thread because the tab header binds to these properties.
-    /// </summary>
-    private async Task MonitorProcessTreeAsync()
-    {
-        var shellPid = _session?.ProcessId ?? 0;
-
-        while (!_disposed && shellPid != 0 && IsRunning && _session is not null)
-        {
-            await Task.Delay(1500).ConfigureAwait(false);
-
-            var chain = await Task.Run(() => ProcessTree.GetCommandChain(shellPid)).ConfigureAwait(false);
-
-            Post(() =>
-            {
-                if (_disposed || _session is null)
-                {
-                    return;
-                }
-
-                // The chain is root shell first; the first non-shell process is the CLI.
-                var command = "";
-                foreach (var name in chain.Skip(1))
-                {
-                    if (!ShellProcesses.Contains(name))
-                    {
-                        command = name;
-                        break;
-                    }
-                }
-
-                RunningCommand = command;
-                var busy = chain.Skip(1).Any(name => !PlumbingProcesses.Contains(name));
-                Activity = busy ? TerminalActivity.Busy : TerminalActivity.Idle;
-            });
-        }
-    }
-
-    private void Post(Action action)
-    {
-        if (_uiContext is null)
-        {
-            action();
-        }
-        else
-        {
-            _uiContext.Post(_ => action(), null);
         }
     }
 
