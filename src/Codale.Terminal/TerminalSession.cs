@@ -100,8 +100,12 @@ public sealed class TerminalSession : IDisposable
     public static string BuildCommandShell(string command) =>
         WrapCommand(ResolveDefaultShell(), command);
 
-    /// <summary>The wrapping itself, testable against a pinned shell path.</summary>
-    public static string WrapCommand(string shell, string command)
+    /// <summary>
+    /// The wrapping itself, testable against a pinned shell path. With <paramref name="keepShell"/>
+    /// false the shell exits when the command does, so the session ends with it and its exit code
+    /// is the command's.
+    /// </summary>
+    public static string WrapCommand(string shell, string command, bool keepShell = true)
     {
         var name = Path.GetFileName(shell);
 
@@ -110,10 +114,10 @@ public sealed class TerminalSession : IDisposable
         {
             // EncodedCommand sidesteps every quoting hazard a raw -Command string has.
             var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(command));
-            return $"\"{shell}\" -NoExit -EncodedCommand {encoded}";
+            return $"\"{shell}\" {(keepShell ? "-NoExit " : "")}-EncodedCommand {encoded}";
         }
 
-        return $"\"{shell}\" /k \"{command}\"";
+        return $"\"{shell}\" {(keepShell ? "/k" : "/c")} \"{command}\"";
     }
 
     private static string? ResolveOnPath(string executable)

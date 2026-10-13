@@ -202,6 +202,23 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     public string? RewriteCliLaunch(string promptLine) => _mcp.RewriteCliLaunch(promptLine);
 
     /// <summary>
+    /// Opens a dedicated terminal for an agent CLI session: the shell runs only the CLI and exits
+    /// with it, so the tab knows when the session ends.
+    /// </summary>
+    public TerminalViewModel RunCliTerminal(string command, Codale.Agents.CliDescriptor cli, string directory)
+    {
+        var terminal = new TerminalViewModel(directory, command, cli.DisplayName, cli.Id);
+        terminal.PropertyChanged += OnCommandTerminalPropertyChanged;
+        lock (_terminals)
+        {
+            _terminals.Add(terminal);
+        }
+
+        UpdateRunningCommandCount();
+        return terminal;
+    }
+
+    /// <summary>
     /// A chat needs to be on screen: opened from history, resumed, or started fresh.
     /// The page opens its tab (or selects the one it has) and brings it to the front.
     /// </summary>

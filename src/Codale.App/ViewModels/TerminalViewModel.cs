@@ -39,11 +39,12 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     /// A plain shell tab, or one running a project command - the commands menu opens
     /// the second kind with the command wrapped so its shell stays after it ends.
     /// </summary>
-    public TerminalViewModel(string workingDirectory, string? command = null, string? commandName = null)
+    public TerminalViewModel(string workingDirectory, string? command = null, string? commandName = null, string? cliId = null)
     {
         _workingDirectory = workingDirectory;
         CommandText = command;
         CommandName = commandName ?? command;
+        CliId = cliId;
 
         // A command tab reads busy from the start: the command launches with the shell.
         if (command is not null)
@@ -70,6 +71,12 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     public string? CommandName { get; }
 
     public bool IsCommandTerminal => CommandText is not null;
+
+    /// <summary>The agent CLI this tab was opened for; such a tab is dedicated to it and ends with it.</summary>
+    public string? CliId { get; }
+
+    /// <summary>True for a dedicated CLI tab: the shell exits with the CLI, so the exit is known.</summary>
+    public bool IsCliTerminal => CliId is not null;
 
     /// <summary>True when this terminal tab was started by an agent task rather than the user.</summary>
     public bool IsAgentTerminal { get; set; }
@@ -138,7 +145,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
             // outlives it; a plain tab just gets the shell. The shell comes from
             // Settings, falling back to the automatic probe when missing.
             var shell = TerminalSession.ResolveShell(AppSettings.TerminalShell);
-            var command = CommandText is { } line ? TerminalSession.WrapCommand(shell, line) : shell;
+            var command = CommandText is { } line ? TerminalSession.WrapCommand(shell, line, keepShell: !IsCliTerminal) : shell;
             CrashLog.Trace($"terminal: shell = {command}");
 
             // Created on the UI thread, so the session delivers output there.

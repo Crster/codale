@@ -1177,7 +1177,7 @@
                         <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
                             <FontIcon
                                 FontSize="14"
-                                Glyph="&#xE77B;"
+                                Glyph="&#xE99A;"
                                 Opacity="0.7" />
                             <!--  Per-session provider: chosen here, never stored; a new session starts on Default  -->
                             <Button
@@ -1339,10 +1339,12 @@
                                 <!--  Crash recovery: only shown when a session was left running  -->
                                 <InfoBar
                                     Title="Session interrupted"
+                                    Closed="OnInterruptedInfoBarClosed"
                                     IsClosable="True"
                                     IsOpen="{x:Bind ViewModel.Sessions.HasInterrupted, Mode=OneWay}"
                                     Message="Codale closed while an agent was working."
-                                    Severity="Warning">
+                                    Severity="Warning"
+                                    Visibility="{x:Bind ViewModel.Sessions.HasInterrupted, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                                     <InfoBar.ActionButton>
                                         <Button
                                             Command="{x:Bind ViewModel.Sessions.ResumeCommand}"
@@ -1357,7 +1359,8 @@
                                     IsOpen="{x:Bind ViewModel.IsViewingHistory, Mode=OneWay}"
                                     Message="{x:Bind ViewModel.HistoryTitle, Mode=OneWay}"
                                     Severity="Informational"
-                                    Title="Viewing history">
+                                    Title="Viewing history"
+                                    Visibility="{x:Bind ViewModel.IsViewingHistory, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                                     <InfoBar.ActionButton>
                                         <Button Click="OnReturnToLiveClick" Content="Back to live session" />
                                     </InfoBar.ActionButton>
@@ -2142,13 +2145,212 @@
                     </Grid>
                 </Grid>
             </Border>
+
+            <!--  Slide-up terminal command output flyout drawer  -->
+            <Border
+                x:Name="TerminalOutputDrawer"
+                Grid.ColumnSpan="3"
+                VerticalAlignment="Bottom"
+                HorizontalAlignment="Stretch"
+                Margin="8,0,8,4"
+                Height="280"
+                MaxHeight="500"
+                MinHeight="160"
+                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Opacity="0"
+                Visibility="Collapsed">
+                <Border.RenderTransform>
+                    <TranslateTransform x:Name="TerminalDrawerSlide" Y="280" />
+                </Border.RenderTransform>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="36" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!--  Flyout Header  -->
+                    <Border
+                        Grid.Row="0"
+                        Background="{ThemeResource SolidBackgroundFillColorSecondaryBrush}"
+                        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                        BorderThickness="0,0,0,1"
+                        CornerRadius="7,7,0,0"
+                        Padding="12,0,8,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <!--  Left: Terminal glyph, Command badge, CWD badge, Status  -->
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <FontIcon Glyph="&#xE756;" FontSize="12" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                                <Border
+                                    Background="{ThemeResource ControlFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Padding="6,1,6,1">
+                                    <TextBlock
+                                        x:Name="TerminalDrawerCommandText"
+                                        Text="$ ls"
+                                        FontFamily="Cascadia Code, Consolas"
+                                        FontSize="12"
+                                        FontWeight="SemiBold"
+                                        MaxWidth="320"
+                                        TextTrimming="CharacterEllipsis" />
+                                </Border>
+
+                                <StackPanel Orientation="Horizontal" Spacing="4" Opacity="0.75" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xED25;" FontSize="11" VerticalAlignment="Center" />
+                                    <TextBlock
+                                        x:Name="TerminalDrawerCwdText"
+                                        Text="x:/test"
+                                        FontSize="11"
+                                        FontFamily="Cascadia Code, Consolas"
+                                        MaxWidth="220"
+                                        TextTrimming="CharacterEllipsis"
+                                        VerticalAlignment="Center" />
+                                </StackPanel>
+
+                                <Rectangle Width="1" Height="12" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="2,0" />
+
+                                <StackPanel x:Name="TerminalDrawerStatusPanel" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                    <ProgressRing
+                                        x:Name="TerminalDrawerSpinner"
+                                        Width="12"
+                                        Height="12"
+                                        IsActive="False"
+                                        Visibility="Collapsed" />
+                                    <FontIcon
+                                        x:Name="TerminalDrawerStatusIcon"
+                                        Glyph="&#xE73E;"
+                                        FontSize="11"
+                                        Foreground="{ThemeResource SystemFillColorSuccessBrush}" />
+                                    <TextBlock
+                                        x:Name="TerminalDrawerStatusText"
+                                        Text="Ready"
+                                        FontSize="11"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        VerticalAlignment="Center" />
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!--  Right: Drawer actions  -->
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                                <Button
+                                    x:Name="TerminalDrawerCopyButton"
+                                    Click="OnTerminalDrawerCopyClick"
+                                    Padding="6,4"
+                                    Height="28"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    CornerRadius="4"
+                                    ToolTipService.ToolTip="Copy output to clipboard">
+                                    <FontIcon Glyph="&#xE8C8;" FontSize="11" />
+                                </Button>
+                                <Button
+                                    x:Name="TerminalDrawerClearButton"
+                                    Click="OnTerminalDrawerClearClick"
+                                    Padding="6,4"
+                                    Height="28"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    CornerRadius="4"
+                                    ToolTipService.ToolTip="Clear output">
+                                    <FontIcon Glyph="&#xE74D;" FontSize="11" />
+                                </Button>
+                                <Button
+                                    x:Name="TerminalDrawerRerunButton"
+                                    Click="OnTerminalDrawerRerunClick"
+                                    Padding="6,4"
+                                    Height="28"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    CornerRadius="4"
+                                    ToolTipService.ToolTip="Rerun command">
+                                    <FontIcon Glyph="&#xE72C;" FontSize="11" />
+                                </Button>
+                                <Button
+                                    x:Name="TerminalDrawerStopButton"
+                                    Click="OnTerminalDrawerStopClick"
+                                    Padding="6,4"
+                                    Height="28"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    CornerRadius="4"
+                                    Visibility="Collapsed"
+                                    ToolTipService.ToolTip="Stop running command">
+                                    <FontIcon Glyph="&#xE71A;" FontSize="11" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                                </Button>
+                                <Button
+                                    x:Name="TerminalDrawerOpenTabButton"
+                                    Click="OnTerminalDrawerOpenTabClick"
+                                    Padding="6,4"
+                                    Height="28"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    CornerRadius="4"
+                                    ToolTipService.ToolTip="Open in full terminal tab">
+                                    <FontIcon Glyph="&#xE8A7;" FontSize="11" />
+                                </Button>
+                                <Rectangle Width="1" Height="14" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="4,0" />
+                                <Button
+                                    x:Name="TerminalDrawerCloseButton"
+                                    Click="OnTerminalDrawerCloseClick"
+                                    Padding="6,4"
+                                    Height="28"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    CornerRadius="4"
+                                    ToolTipService.ToolTip="Close output (Esc)">
+                                    <FontIcon Glyph="&#xE711;" FontSize="11" />
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!--  Flyout Output Body  -->
+                    <ScrollViewer
+                        x:Name="TerminalDrawerScrollViewer"
+                        Grid.Row="1"
+                        Padding="12,8"
+                        HorizontalScrollBarVisibility="Auto"
+                        VerticalScrollBarVisibility="Auto">
+                        <TextBox
+                            x:Name="TerminalDrawerOutputBox"
+                            IsReadOnly="True"
+                            AcceptsReturn="True"
+                            TextWrapping="NoWrap"
+                            FontFamily="Cascadia Code, Consolas"
+                            FontSize="12"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            CornerRadius="0"
+                            IsSpellCheckEnabled="False"
+                            KeyDown="OnTerminalDrawerOutputBoxKeyDown">
+                            <TextBox.Resources>
+                                <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                                <Thickness x:Key="TextControlBorderThemeThickness">0</Thickness>
+                                <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+                            </TextBox.Resources>
+                        </TextBox>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
         </Grid>
 
         <!--  Status bar  -->
         <StackPanel Grid.Row="1">
         <Border
             Margin="6,2,6,6"
-            Padding="12,4"
+            Padding="8,4,8,4"
+            MinHeight="38"
             Background="{ThemeResource LayerFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
@@ -2276,16 +2478,132 @@
                         Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
                 </StackPanel>
 
-                <!--  Middle: the newest message from a running task, "[Task 2] finding file x.png"  -->
-                <TextBlock
+                <!--  Center: Terminal command input bar  -->
+                <Border
+                    x:Name="StatusBarCommandContainer"
                     Grid.Column="1"
-                    Margin="4,0"
-                    VerticalAlignment="Center"
-                    FontSize="12"
-                    Opacity="0.8"
-                    Text="{x:Bind ViewModel.Chat.TaskStatusLine, Mode=OneWay}"
-                    TextTrimming="CharacterEllipsis"
-                    ToolTipService.ToolTip="{x:Bind ViewModel.Chat.TaskStatusLine, Mode=OneWay}" />
+                    Margin="8,0,8,0"
+                    VerticalAlignment="Stretch"
+                    Background="Transparent"
+                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    BorderThickness="1,0,1,0"
+                    CornerRadius="0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <!--  Current working directory button styled like arrow prompt  -->
+                        <Button
+                            x:Name="StatusBarCwdButton"
+                            Grid.Column="0"
+                            VerticalAlignment="Stretch"
+                            Padding="8,0,8,0"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            CornerRadius="0">
+                            <Button.Flyout>
+                                <MenuFlyout x:Name="CwdMenuFlyout" Placement="Top" Opening="OnCwdMenuFlyoutOpening" />
+                            </Button.Flyout>
+                            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                <FontIcon Glyph="&#xED25;" FontSize="11" Opacity="0.75" VerticalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="StatusBarCwdText"
+                                    FontSize="12"
+                                    FontFamily="Cascadia Code, Consolas"
+                                    FontWeight="SemiBold"
+                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                    VerticalAlignment="Center"
+                                    MaxWidth="220"
+                                    TextTrimming="CharacterEllipsis" />
+                                <TextBlock
+                                    Text=">"
+                                    FontSize="12"
+                                    FontFamily="Cascadia Code, Consolas"
+                                    FontWeight="Bold"
+                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                    VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+
+                        <Rectangle
+                            Grid.Column="0"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Width="1"
+                            Height="14"
+                            Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                        <!--  Flat command textbox  -->
+                        <AutoSuggestBox
+                            x:Name="StatusBarCommandBox"
+                            Grid.Column="1"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            CornerRadius="0"
+                            Padding="8,0,8,0"
+                            VerticalAlignment="Center"
+                            VerticalContentAlignment="Center"
+                            FontFamily="Cascadia Code, Consolas"
+                            FontSize="12"
+                            PlaceholderText="Run shell command (e.g. ls)…"
+                            UpdateTextOnSelect="False"
+                            TextChanged="OnStatusBarCommandBoxTextChanged"
+                            SuggestionChosen="OnStatusBarCommandBoxSuggestionChosen"
+                            QuerySubmitted="OnStatusBarCommandBoxQuerySubmitted"
+                            KeyDown="OnStatusBarCommandBoxKeyDown"
+                            GotFocus="OnStatusBarCommandBoxGotFocus"
+                            LostFocus="OnStatusBarCommandBoxLostFocus">
+                            <AutoSuggestBox.Resources>
+                                <x:Double x:Key="TextControlThemeMinHeight">0</x:Double>
+                                <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                                <Thickness x:Key="TextControlBorderThemeThickness">0</Thickness>
+                                <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+                            </AutoSuggestBox.Resources>
+                        </AutoSuggestBox>
+
+                        <!--  Right quick actions: Enter / Run button and Output Drawer Toggle button  -->
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" Margin="0,0,4,0" VerticalAlignment="Center">
+                            <Button
+                                x:Name="StatusBarRunButton"
+                                Click="OnStatusBarRunButtonClick"
+                                Width="24"
+                                Height="24"
+                                Padding="0"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                CornerRadius="4"
+                                ToolTipService.ToolTip="Run command (Enter)">
+                                <FontIcon Glyph="&#xE751;" FontSize="11" Opacity="0.75" />
+                            </Button>
+                            <Button
+                                x:Name="StatusBarToggleOutputButton"
+                                Click="OnStatusBarToggleOutputClick"
+                                Width="24"
+                                Height="24"
+                                Padding="0"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                CornerRadius="4"
+                                ToolTipService.ToolTip="Toggle command output flyout">
+                                <Grid Width="24" Height="24">
+                                    <FontIcon Glyph="&#xE756;" FontSize="11" Opacity="0.75" />
+                                    <ProgressBar
+                                        x:Name="StatusBarRunProgress"
+                                        IsIndeterminate="True"
+                                        Height="2"
+                                        Margin="3,0,3,2"
+                                        VerticalAlignment="Bottom"
+                                        Visibility="Collapsed" />
+                                </Grid>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                </Border>
 
                 <!--  Right: usage (Claude CLI, then the custom provider), then the provider override  -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">

@@ -337,6 +337,18 @@ public sealed class McpServerSettings
         "-v", "--version", "-h", "--help", "--mcp-config", "--additional-mcp-config",
     };
 
+    /// <summary>True when the prompt line starts an agent CLI session: a known CLI, plain arguments, no housekeeping subcommand.</summary>
+    public static bool IsSessionLaunch(string promptLine)
+    {
+        if (Codale.Agents.CliLocator.DetectLaunch(promptLine) is not (_, var rest))
+        {
+            return false;
+        }
+
+        return rest.IndexOfAny(['|', ';', '&', '<', '>', '`', '$']) < 0 &&
+            !rest.Split(' ', StringSplitOptions.RemoveEmptyEntries).Any(NonSessionArgs.Contains);
+    }
+
     /// <summary>
     /// For a line typed at a shell prompt that starts an agent CLI session, the command to run instead:
     /// the same launch with Codale's servers attached the way that CLI takes them at startup, so nothing
@@ -353,13 +365,8 @@ public sealed class McpServerSettings
     {
         try
         {
-            if (Codale.Agents.CliLocator.DetectLaunch(promptLine) is not ({ } cli, var rest))
-            {
-                return null;
-            }
-
-            if (rest.IndexOfAny(['|', ';', '&', '<', '>', '`', '$']) >= 0 ||
-                rest.Split(' ', StringSplitOptions.RemoveEmptyEntries).Any(NonSessionArgs.Contains))
+            if (!IsSessionLaunch(promptLine) ||
+                Codale.Agents.CliLocator.DetectLaunch(promptLine) is not ({ } cli, var rest))
             {
                 return null;
             }

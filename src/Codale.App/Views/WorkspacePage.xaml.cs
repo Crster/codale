@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 
 using Codale.Agents;
 using Codale.Agents.Claude;
@@ -105,6 +106,8 @@ public sealed partial class WorkspacePage : Page
         WatchTodos(ViewModel.Chat);
         WatchConversation(ViewModel.Chat);
         Bindings.Update();
+
+        SetTerminalCwd(ViewModel.WorkingDirectory);
 
         UpdateEmptyState();
 
@@ -782,7 +785,8 @@ public sealed partial class WorkspacePage : Page
         }
 
         // 2. Is there an active agent terminal or terminal running a known CLI?
-        if (_terminalTabs.Any(t => t.Terminal.IsAgentTerminal))
+        if (_terminalTabs.Any(t => t.Terminal.IsAgentTerminal ||
+            (t.Terminal.IsCliTerminal && t.Terminal.Activity == TerminalActivity.Busy)))
         {
             return true;
         }
@@ -852,6 +856,10 @@ public sealed partial class WorkspacePage : Page
         {
             ViewModel.EndTerminalCliSession();
         }
+        else
+        {
+            EndCliSessionIfLast(entry.Terminal);
+        }
 
         if (CentreTabs.TabItems.Contains(entry.Item))
         {
@@ -873,38 +881,104 @@ public sealed partial class WorkspacePage : Page
     /// </summary>
     private string? OnTerminalLaunchTyped(string promptLine)
     {
-        // Called for every line submitted at a shell prompt, so a line that is not a CLI launch means
-        // any CLI the panel was mirroring has exited.
-        // A CLI without an alternate screen (agy) still reaches here for every message typed in its own
-        // input box; only a real shell prompt line can mean the CLI has exited.
-        if (!CliLocator.IsShellPromptLine(promptLine))
+        // Called for every line submitted at a shell prompt. A CLI launch is taken out of this shell
+        // and run in a dedicated tab (the returned empty line clears what was typed); its exit is
+        // tracked there, so any other line is simply run as typed.
+        if (!TryOpenCliTab(promptLine, TerminalTabInFront()))
         {
             return null;
         }
 
-        var launch = CliLocator.DetectLaunch(promptLine);
-        ViewModel?.AttachTerminalCli(launch?.Cli);
-        if (launch is null)
-        {
-            return null;
-        }
+        return "";
+    }
 
-        if (!_sessionPanelOpen)
+    /// <summary>
+    /// Runs an agent CLI launch in its own terminal tab whose shell exits with the CLI: the session
+    /// panel mirrors it while it lives and the tab closes when it finishes. False when the line is not
+    /// a CLI session launch.
+    /// </summary>
+    private bool TryOpenCliTab(string promptLine, TerminalTabEntry? origin)
+    {
+        if (ViewModel is null ||
+            CliLocator.DetectLaunch(promptLine) is not ({ } cli, var args) ||
+            !McpServerSettings.IsSessionLaunch(promptLine))
         {
-            SetSessionPanel(true);
+            return false;
         }
 
         try
         {
-            ViewModel?.InjectMcpForTerminalCli();
-            _ = ViewModel?.BeginTerminalCliSessionAsync();
-            return ViewModel?.RewriteCliLaunch(promptLine);
+            if (!_sessionPanelOpen)
+            {
+                SetSessionPanel(true);
+            }
+
+            ViewModel.InjectMcpForTerminalCli();
+            _ = ViewModel.BeginTerminalCliSessionAsync();
+            ViewModel.AttachTerminalCli(cli);
+
+            var command = ViewModel.RewriteCliLaunch(promptLine) ?? cli.Executable + args;
+            var terminal = ViewModel.RunCliTerminal(command, cli, PromptDirectory(promptLine) ?? ViewModel.ProjectPath);
+            terminal.Exited += (_, _) => DispatcherQueue.TryEnqueue(() => OnCliTerminalExited(terminal));
+            AddTerminalTab(terminal);
+
+            // A plain shell that only existed to launch the CLI is not left behind; closed after the
+            // key handler that got us here has returned.
+            if (origin is { Terminal.IsCommandTerminal: false })
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (_terminalTabs.Contains(origin))
+                    {
+                        CloseTerminalTab(origin);
+                    }
+                });
+            }
+
+            return true;
         }
         catch (Exception ex)
         {
-            CrashLog.Write("Terminal", "MCP injection failed", ex);
-            return null;
+            CrashLog.Write("Terminal", "CLI tab launch failed", ex);
+            return false;
         }
+    }
+
+    /// <summary>The CLI ended: the panel stops mirroring it, and the tab goes with it unless it failed (its output is the error).</summary>
+    private void OnCliTerminalExited(TerminalViewModel terminal)
+    {
+        if (_terminalTabs.FirstOrDefault(t => ReferenceEquals(t.Terminal, terminal)) is not { } entry)
+        {
+            return;
+        }
+
+        EndCliSessionIfLast(terminal);
+        if (terminal.ExitCode != 0)
+        {
+            return;
+        }
+
+        CloseTerminalTab(entry);
+    }
+
+    /// <summary>Stops the panel mirroring a CLI once no other CLI tab is still running.</summary>
+    private void EndCliSessionIfLast(TerminalViewModel closing)
+    {
+        if (!closing.IsCliTerminal ||
+            _terminalTabs.Any(t => !ReferenceEquals(t.Terminal, closing) && t.Terminal.IsCliTerminal && t.Terminal.IsRunning))
+        {
+            return;
+        }
+
+        ViewModel.EndTerminalCliSession();
+        UpdateSessionPanelForActiveTab();
+    }
+
+    /// <summary>The directory a default shell prompt line shows, when it exists.</summary>
+    private static string? PromptDirectory(string promptLine)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(promptLine, @"^(?:PS )?(?<dir>[A-Za-z]:\\[^>]*)>");
+        return match.Success && Directory.Exists(match.Groups["dir"].Value) ? match.Groups["dir"].Value : null;
     }
 
     /// <summary>
@@ -3210,6 +3284,9 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
+    private void OnInterruptedInfoBarClosed(InfoBar sender, InfoBarClosedEventArgs args) =>
+        sender.Visibility = Visibility.Collapsed;
+
     private void OnReturnToLiveClick(object sender, RoutedEventArgs e) =>
         ViewModel.ReturnToLiveSession();
 
@@ -3603,6 +3680,690 @@ public sealed partial class WorkspacePage : Page
     /// <summary>New session in the project directory - no worktree, no branch, fresh transcript.</summary>
     private void OnNewSessionClick(object sender, RoutedEventArgs e) =>
         _ = ViewModel.StartNewChatSessionAsync();
+
+    #region Status Bar Terminal Input and Slide-up Flyout
+
+    private string _terminalCwd = "";
+    private readonly List<string> _commandHistory = [];
+    private bool _isTerminalDrawerOpen;
+    private Storyboard? _terminalDrawerAnimation;
+    private readonly double _drawerHeight = 280;
+    private CancellationTokenSource? _commandRunCts;
+    private Process? _activeCommandProcess;
+
+    private void SetTerminalCwd(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            _terminalCwd = Path.GetFullPath(path);
+        }
+        catch
+        {
+            _terminalCwd = path;
+        }
+
+        UpdateCwdDisplay();
+    }
+
+    private void UpdateCwdDisplay()
+    {
+        var display = _terminalCwd.Replace('\\', '/');
+        if (StatusBarCwdText is not null)
+        {
+            StatusBarCwdText.Text = display;
+        }
+
+        if (StatusBarCwdButton is not null)
+        {
+            ToolTipService.SetToolTip(StatusBarCwdButton, $"Working directory: {_terminalCwd}\nClick to change working directory");
+        }
+
+        if (TerminalDrawerCwdText is not null)
+        {
+            TerminalDrawerCwdText.Text = display;
+        }
+    }
+
+    private void OnCwdMenuFlyoutOpening(object? sender, object e)
+    {
+        CwdMenuFlyout.Items.Clear();
+
+        var browseItem = new MenuFlyoutItem
+        {
+            Text = "Choose folder…",
+            Icon = new FontIcon { Glyph = "\uED25" },
+        };
+        browseItem.Click += async (_, _) => await PickCustomFolderAsync();
+        CwdMenuFlyout.Items.Add(browseItem);
+
+        CwdMenuFlyout.Items.Add(new MenuFlyoutSeparator());
+
+        if (ViewModel is not null)
+        {
+            var projectRoot = ViewModel.ProjectPath;
+            var projectItem = new MenuFlyoutItem
+            {
+                Text = $"Project: {Path.GetFileName(projectRoot)}",
+                Icon = new FontIcon { Glyph = "\uE80F" },
+            };
+            ToolTipService.SetToolTip(projectItem, projectRoot);
+            projectItem.Click += (_, _) => SetTerminalCwd(projectRoot);
+            CwdMenuFlyout.Items.Add(projectItem);
+
+            if (ViewModel.ActiveEditor?.FilePath is { Length: > 0 } activeFile)
+            {
+                var dir = Path.GetDirectoryName(activeFile);
+                if (!string.IsNullOrEmpty(dir) && !string.Equals(dir, projectRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    var fileDirItem = new MenuFlyoutItem
+                    {
+                        Text = $"Active file: {Path.GetFileName(dir)}",
+                        Icon = new FontIcon { Glyph = "\uE8A5" },
+                    };
+                    ToolTipService.SetToolTip(fileDirItem, dir);
+                    fileDirItem.Click += (_, _) => SetTerminalCwd(dir);
+                    CwdMenuFlyout.Items.Add(fileDirItem);
+                }
+            }
+
+            foreach (var extra in ViewModel.ExtraFolders.Folders)
+            {
+                var extraPath = extra;
+                var extraItem = new MenuFlyoutItem
+                {
+                    Text = $"Folder: {Path.GetFileName(extraPath)}",
+                    Icon = new FontIcon { Glyph = "\uE8B7" },
+                };
+                ToolTipService.SetToolTip(extraItem, extraPath);
+                extraItem.Click += (_, _) => SetTerminalCwd(extraPath);
+                CwdMenuFlyout.Items.Add(extraItem);
+            }
+        }
+    }
+
+    private async Task PickCustomFolderAsync()
+    {
+        try
+        {
+            var picker = new FolderPicker
+            {
+                SuggestedStartLocation = PickerLocationId.ComputerFolder,
+            };
+            picker.FileTypeFilter.Add("*");
+
+            if (App.Current.MainWindowHandle is { } hwnd)
+            {
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+            }
+
+            if (await picker.PickSingleFolderAsync() is { } folder)
+            {
+                SetTerminalCwd(folder.Path);
+            }
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("PickCustomFolder", ex.Message, ex);
+        }
+    }
+
+    private void OnStatusBarCommandBoxGotFocus(object sender, RoutedEventArgs e)
+    {
+        StatusBarCommandBox.ItemsSource = GetCommandSuggestions(StatusBarCommandBox.Text);
+
+        if (Application.Current.Resources.TryGetValue("AccentFillColorDefaultBrush", out var accent) && accent is Brush brush)
+        {
+            StatusBarCommandContainer.BorderBrush = brush;
+        }
+    }
+
+    private void OnStatusBarCommandBoxLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (Application.Current.Resources.TryGetValue("ControlStrokeColorDefaultBrush", out var normal) && normal is Brush brush)
+        {
+            StatusBarCommandContainer.BorderBrush = brush;
+        }
+    }
+
+    private void OnStatusBarCommandBoxKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Escape && !StatusBarCommandBox.IsSuggestionListOpen)
+        {
+            e.Handled = true;
+            if (_isTerminalDrawerOpen)
+            {
+                CloseTerminalDrawer();
+            }
+            else
+            {
+                StatusBarCommandBox.Text = "";
+            }
+        }
+    }
+
+    private void OnStatusBarCommandBoxTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    {
+        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput)
+        {
+            return;
+        }
+
+        sender.ItemsSource = GetCommandSuggestions(sender.Text);
+    }
+
+    private void OnStatusBarCommandBoxSuggestionChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args)
+    {
+        if (args.SelectedItem is string chosen)
+        {
+            sender.Text = chosen;
+        }
+    }
+
+    private async void OnStatusBarCommandBoxQuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
+    {
+        var command = args.ChosenSuggestion as string ?? args.QueryText;
+        await ExecuteStatusBarCommandAsync(command);
+    }
+
+    // Session-only history (in memory, cleared on app close), most recent first.
+    private List<string> GetCommandSuggestions(string text)
+    {
+        var query = text.Trim();
+        var matches = new List<string>();
+        for (var i = _commandHistory.Count - 1; i >= 0 && matches.Count < 8; i--)
+        {
+            var entry = _commandHistory[i];
+            if (query.Length == 0 || (entry.Contains(query, StringComparison.OrdinalIgnoreCase) && entry != query))
+            {
+                matches.Add(entry);
+            }
+        }
+
+        return matches;
+    }
+
+    protected override void OnKeyDown(KeyRoutedEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (e.Key == Windows.System.VirtualKey.Escape && _isTerminalDrawerOpen)
+        {
+            e.Handled = true;
+            CloseTerminalDrawer();
+        }
+    }
+
+    private async void OnStatusBarRunButtonClick(object sender, RoutedEventArgs e) =>
+        await ExecuteStatusBarCommandAsync(StatusBarCommandBox.Text);
+
+    private void OnStatusBarToggleOutputClick(object sender, RoutedEventArgs e)
+    {
+        if (_isTerminalDrawerOpen)
+        {
+            CloseTerminalDrawer();
+        }
+        else
+        {
+            OpenTerminalDrawer();
+        }
+    }
+
+    /// <summary>
+    /// Sends a status bar command to a terminal tab when it is an agent CLI launch or one of the
+    /// project's commands (matched by command line or name). False to run it in the drawer as usual.
+    /// </summary>
+    private async Task<bool> TryRunInTabAsync(string command)
+    {
+        if (ViewModel is null)
+        {
+            return false;
+        }
+
+        var shell = Codale.Terminal.TerminalSession.ResolveShell(AppSettings.TerminalShell);
+        var powershell = Path.GetFileName(shell).Contains("pwsh", StringComparison.OrdinalIgnoreCase) ||
+            Path.GetFileName(shell).Contains("powershell", StringComparison.OrdinalIgnoreCase);
+
+        // The CLI detector reads a default shell prompt line, so give it one for this command.
+        if (TryOpenCliTab($"{(powershell ? "PS " : "")}{_terminalCwd}> {command}", null))
+        {
+            return true;
+        }
+
+        try
+        {
+            var commands = await Task.Run(ViewModel.DiscoverCommands);
+            if (commands.FirstOrDefault(c =>
+                    string.Equals(c.Command.Trim(), command, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(c.Name.Trim(), command, StringComparison.OrdinalIgnoreCase)) is { } match)
+            {
+                OpenCommandTab(match);
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("Terminal", "Project command lookup failed", ex);
+        }
+
+        return false;
+    }
+
+    private async Task ExecuteStatusBarCommandAsync(string rawCommand)
+    {
+        var command = rawCommand.Trim();
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            return;
+        }
+
+        _commandHistory.Remove(command);
+        _commandHistory.Add(command);
+
+        StatusBarCommandBox.Text = "";
+        StatusBarCommandBox.ItemsSource = null;
+
+        // An agent CLI or a project command belongs in a tab of its own, where it stays visible and
+        // its exit is known, rather than in the drawer's one-shot output box.
+        if (await TryRunInTabAsync(command))
+        {
+            return;
+        }
+
+        OpenTerminalDrawer();
+
+        TerminalDrawerCommandText.Text = $"$ {command}";
+        TerminalDrawerCwdText.Text = _terminalCwd.Replace('\\', '/');
+        TerminalDrawerSpinner.Visibility = Visibility.Visible;
+        TerminalDrawerSpinner.IsActive = true;
+        TerminalDrawerStatusIcon.Visibility = Visibility.Collapsed;
+        TerminalDrawerStatusText.Text = "Running…";
+        TerminalDrawerOutputBox.Text = "";
+
+        if (command.Equals("cls", StringComparison.OrdinalIgnoreCase) ||
+            command.Equals("clear", StringComparison.OrdinalIgnoreCase))
+        {
+            TerminalDrawerSpinner.IsActive = false;
+            TerminalDrawerSpinner.Visibility = Visibility.Collapsed;
+            TerminalDrawerStatusIcon.Glyph = "\uE73E";
+            if (Application.Current.Resources.TryGetValue("SystemFillColorSuccessBrush", out var success) && success is Brush b)
+            {
+                TerminalDrawerStatusIcon.Foreground = b;
+            }
+            TerminalDrawerStatusIcon.Visibility = Visibility.Visible;
+            TerminalDrawerStatusText.Text = "Cleared";
+            TerminalDrawerOutputBox.Text = "";
+            return;
+        }
+
+        if (command.StartsWith("cd ", StringComparison.OrdinalIgnoreCase) ||
+            command.StartsWith("chdir ", StringComparison.OrdinalIgnoreCase) ||
+            command.Equals("cd", StringComparison.OrdinalIgnoreCase))
+        {
+            HandleCdCommand(command);
+            return;
+        }
+
+        _commandRunCts?.Cancel();
+        _commandRunCts?.Dispose();
+        _commandRunCts = new CancellationTokenSource();
+        var ct = _commandRunCts.Token;
+
+        var stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            var outputBuilder = new StringBuilder();
+            var shell = Codale.Terminal.TerminalSession.ResolveDefaultShell();
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = shell,
+                WorkingDirectory = _terminalCwd,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8,
+            };
+
+            var shellName = Path.GetFileName(shell).ToLowerInvariant();
+            if (shellName.Contains("powershell") || shellName.Contains("pwsh"))
+            {
+                startInfo.ArgumentList.Add("-NoProfile");
+                startInfo.ArgumentList.Add("-NonInteractive");
+                startInfo.ArgumentList.Add("-ExecutionPolicy");
+                startInfo.ArgumentList.Add("Bypass");
+                startInfo.ArgumentList.Add("-Command");
+                startInfo.ArgumentList.Add("[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; " + command);
+            }
+            else
+            {
+                startInfo.ArgumentList.Add("/c");
+                startInfo.ArgumentList.Add(command);
+            }
+
+            var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+            _activeCommandProcess = process;
+
+            void AppendOutput(string? line)
+            {
+                if (line is null)
+                {
+                    return;
+                }
+
+                var clean = Codale.Core.Agents.BackgroundTaskDetector.StripAnsi(line);
+                outputBuilder.AppendLine(clean);
+                var text = outputBuilder.ToString();
+
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    TerminalDrawerOutputBox.Text = text;
+                    TerminalDrawerScrollViewer.ChangeView(null, TerminalDrawerScrollViewer.ScrollableHeight, null);
+                });
+            }
+
+            process.OutputDataReceived += (_, args) => AppendOutput(args.Data);
+            process.ErrorDataReceived += (_, args) => AppendOutput(args.Data);
+
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            SetCommandRunning(true);
+
+            await process.WaitForExitAsync(ct);
+
+            stopwatch.Stop();
+            var elapsed = stopwatch.ElapsedMilliseconds < 1000
+                ? $"{stopwatch.ElapsedMilliseconds}ms"
+                : $"{stopwatch.Elapsed.TotalSeconds:F2}s";
+
+            var exitCode = process.ExitCode;
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                TerminalDrawerSpinner.IsActive = false;
+                TerminalDrawerSpinner.Visibility = Visibility.Collapsed;
+                TerminalDrawerStatusIcon.Visibility = Visibility.Visible;
+
+                if (exitCode == 0)
+                {
+                    TerminalDrawerStatusIcon.Glyph = "\uE73E";
+                    if (Application.Current.Resources.TryGetValue("SystemFillColorSuccessBrush", out var s) && s is Brush sb)
+                    {
+                        TerminalDrawerStatusIcon.Foreground = sb;
+                    }
+                    TerminalDrawerStatusText.Text = $"Exit 0 · {elapsed}";
+                }
+                else
+                {
+                    TerminalDrawerStatusIcon.Glyph = "\uE783";
+                    if (Application.Current.Resources.TryGetValue("SystemFillColorCriticalBrush", out var c) && c is Brush cb)
+                    {
+                        TerminalDrawerStatusIcon.Foreground = cb;
+                    }
+                    TerminalDrawerStatusText.Text = $"Exit {exitCode} · {elapsed}";
+                }
+
+                if (outputBuilder.Length == 0)
+                {
+                    TerminalDrawerOutputBox.Text = "(Command executed with no output)";
+                }
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            stopwatch.Stop();
+            TerminalDrawerSpinner.IsActive = false;
+            TerminalDrawerSpinner.Visibility = Visibility.Collapsed;
+            TerminalDrawerStatusIcon.Glyph = "\uE711";
+            if (Application.Current.Resources.TryGetValue("SystemFillColorCautionBrush", out var caution) && caution is Brush caub)
+            {
+                TerminalDrawerStatusIcon.Foreground = caub;
+            }
+            TerminalDrawerStatusIcon.Visibility = Visibility.Visible;
+            TerminalDrawerStatusText.Text = "Cancelled";
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            TerminalDrawerSpinner.IsActive = false;
+            TerminalDrawerSpinner.Visibility = Visibility.Collapsed;
+            TerminalDrawerStatusIcon.Glyph = "\uE783";
+            if (Application.Current.Resources.TryGetValue("SystemFillColorCriticalBrush", out var crit) && crit is Brush critb)
+            {
+                TerminalDrawerStatusIcon.Foreground = critb;
+            }
+            TerminalDrawerStatusIcon.Visibility = Visibility.Visible;
+            TerminalDrawerStatusText.Text = "Failed";
+            TerminalDrawerOutputBox.Text = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            _activeCommandProcess?.Dispose();
+            _activeCommandProcess = null;
+            SetCommandRunning(false);
+        }
+    }
+
+    private void HandleCdCommand(string command)
+    {
+        TerminalDrawerSpinner.IsActive = false;
+        TerminalDrawerSpinner.Visibility = Visibility.Collapsed;
+        TerminalDrawerStatusIcon.Visibility = Visibility.Visible;
+
+        var parts = command.Split(' ', 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var target = parts.Length > 1 ? parts[1].Trim('\"', '\'') : "";
+
+        string targetPath;
+        if (string.IsNullOrEmpty(target) || target == "~")
+        {
+            targetPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        }
+        else if (Path.IsPathRooted(target))
+        {
+            targetPath = target;
+        }
+        else
+        {
+            targetPath = Path.GetFullPath(Path.Combine(_terminalCwd, target));
+        }
+
+        if (Directory.Exists(targetPath))
+        {
+            SetTerminalCwd(targetPath);
+            TerminalDrawerStatusIcon.Glyph = "\uE73E";
+            if (Application.Current.Resources.TryGetValue("SystemFillColorSuccessBrush", out var s) && s is Brush sb)
+            {
+                TerminalDrawerStatusIcon.Foreground = sb;
+            }
+            TerminalDrawerStatusText.Text = "Directory changed";
+            TerminalDrawerOutputBox.Text = $"Current working directory is now:\n{targetPath.Replace('\\', '/')}";
+        }
+        else
+        {
+            TerminalDrawerStatusIcon.Glyph = "\uE783";
+            if (Application.Current.Resources.TryGetValue("SystemFillColorCriticalBrush", out var c) && c is Brush cb)
+            {
+                TerminalDrawerStatusIcon.Foreground = cb;
+            }
+            TerminalDrawerStatusText.Text = "Directory not found";
+            TerminalDrawerOutputBox.Text = $"Cannot find path '{target}' because it does not exist.";
+        }
+    }
+
+    private void OpenTerminalDrawer()
+    {
+        if (_isTerminalDrawerOpen)
+        {
+            return;
+        }
+
+        _isTerminalDrawerOpen = true;
+
+        TerminalOutputDrawer.Visibility = Visibility.Visible;
+        TerminalOutputDrawer.Height = _drawerHeight;
+
+        var slide = new DoubleAnimation
+        {
+            From = _drawerHeight,
+            To = 0,
+            Duration = TimeSpan.FromMilliseconds(240),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+        Storyboard.SetTarget(slide, TerminalDrawerSlide);
+        Storyboard.SetTargetProperty(slide, "Y");
+
+        var fade = new DoubleAnimation
+        {
+            From = 0,
+            To = 1,
+            Duration = TimeSpan.FromMilliseconds(200),
+        };
+        Storyboard.SetTarget(fade, TerminalOutputDrawer);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+
+        var storyboard = new Storyboard();
+        storyboard.Children.Add(slide);
+        storyboard.Children.Add(fade);
+
+        _terminalDrawerAnimation?.Stop();
+        _terminalDrawerAnimation = storyboard;
+        storyboard.Begin();
+    }
+
+    private void CloseTerminalDrawer()
+    {
+        if (!_isTerminalDrawerOpen)
+        {
+            return;
+        }
+
+        _isTerminalDrawerOpen = false;
+
+        var slide = new DoubleAnimation
+        {
+            From = 0,
+            To = _drawerHeight,
+            Duration = TimeSpan.FromMilliseconds(180),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn },
+        };
+        Storyboard.SetTarget(slide, TerminalDrawerSlide);
+        Storyboard.SetTargetProperty(slide, "Y");
+
+        var fade = new DoubleAnimation
+        {
+            From = 1,
+            To = 0,
+            Duration = TimeSpan.FromMilliseconds(160),
+        };
+        Storyboard.SetTarget(fade, TerminalOutputDrawer);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+
+        var storyboard = new Storyboard();
+        storyboard.Children.Add(slide);
+        storyboard.Children.Add(fade);
+
+        storyboard.Completed += (_, _) =>
+        {
+            if (!_isTerminalDrawerOpen)
+            {
+                TerminalOutputDrawer.Visibility = Visibility.Collapsed;
+            }
+        };
+
+        _terminalDrawerAnimation?.Stop();
+        _terminalDrawerAnimation = storyboard;
+        storyboard.Begin();
+    }
+
+    private void OnTerminalDrawerCloseClick(object sender, RoutedEventArgs e) => CloseTerminalDrawer();
+
+    private void OnTerminalDrawerCopyClick(object sender, RoutedEventArgs e)
+    {
+        if (!string.IsNullOrEmpty(TerminalDrawerOutputBox.Text))
+        {
+            CopyText(TerminalDrawerOutputBox.Text);
+        }
+    }
+
+    private void OnTerminalDrawerClearClick(object sender, RoutedEventArgs e)
+    {
+        TerminalDrawerOutputBox.Text = "";
+        TerminalDrawerStatusText.Text = "Cleared";
+    }
+
+    private async void OnTerminalDrawerRerunClick(object sender, RoutedEventArgs e)
+    {
+        var cmd = TerminalDrawerCommandText.Text.TrimStart('$', ' ').Trim();
+        if (!string.IsNullOrEmpty(cmd))
+        {
+            await ExecuteStatusBarCommandAsync(cmd);
+        }
+    }
+
+    private void OnTerminalDrawerStopClick(object sender, RoutedEventArgs e)
+    {
+        _commandRunCts?.Cancel();
+        try
+        {
+            _activeCommandProcess?.Kill(entireProcessTree: true);
+        }
+        catch (Exception)
+        {
+            // The process already exited or was disposed.
+        }
+    }
+
+    /// <summary>Shows the toggle-button progress bar and the drawer Stop button once a command has run for a moment.</summary>
+    private async void SetCommandRunning(bool running)
+    {
+        if (!running)
+        {
+            StatusBarRunProgress.Visibility = Visibility.Collapsed;
+            TerminalDrawerStopButton.Visibility = Visibility.Collapsed;
+            TerminalDrawerRerunButton.IsEnabled = true;
+            return;
+        }
+
+        TerminalDrawerStopButton.Visibility = Visibility.Visible;
+        TerminalDrawerRerunButton.IsEnabled = false;
+        var process = _activeCommandProcess;
+        await Task.Delay(600);
+        if (ReferenceEquals(process, _activeCommandProcess) && process is not null)
+        {
+            StatusBarRunProgress.Visibility = Visibility.Visible;
+        }
+    }
+
+    private void OnTerminalDrawerOpenTabClick(object sender, RoutedEventArgs e)
+    {
+        var cmd = TerminalDrawerCommandText.Text.TrimStart('$', ' ').Trim();
+        CloseTerminalDrawer();
+        if (!string.IsNullOrEmpty(cmd))
+        {
+            _ = RunInNewTerminalAsync(cmd);
+        }
+        else
+        {
+            AddTerminalTab(new TerminalViewModel(_terminalCwd));
+        }
+    }
+
+    private void OnTerminalDrawerOutputBoxKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Escape)
+        {
+            e.Handled = true;
+            CloseTerminalDrawer();
+        }
+    }
+
+    #endregion
 
     /// <summary>One open chat tab: its <see cref="TabViewItem"/>, its transcript view and its conversation.</summary>
     private sealed class ChatTabEntry(TabViewItem item, ChatTab tab, ChatViewModel chat)
