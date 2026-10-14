@@ -16,7 +16,7 @@ namespace Codale.App.Views;
 
 /// <summary>
 /// The editor's right-click menu: the everyday edit commands, plus the model-backed
-/// ones (format, ask Claude, check for issues) and the rendered preview.
+/// ones (format, edit here, check for issues) and the rendered preview.
 /// </summary>
 public sealed partial class EditorTab
 {
@@ -27,8 +27,6 @@ public sealed partial class EditorTab
     private MenuFlyoutItem _copyItem = null!;
     private MenuFlyoutItem _pasteItem = null!;
     private MenuFlyoutItem _deleteItem = null!;
-    private MenuFlyoutItem _undoItem = null!;
-    private MenuFlyoutItem _redoItem = null!;
     private MenuFlyoutItem _formatItem = null!;
     private MenuFlyoutItem _askItem = null!;
     private MenuFlyoutItem _checkItem = null!;
@@ -36,7 +34,7 @@ public sealed partial class EditorTab
 
     private MenuFlyoutItem _referencesItem = null!;
 
-    /// <summary>Raised with the selected text when the user asks for its usages across the project.</summary>
+    /// <summary>Raised with the selection, or the word under the cursor, when the user asks for its usages across the project.</summary>
     public event EventHandler<string>? FindReferencesRequested;
 
     private bool _modelBusy;
@@ -45,7 +43,7 @@ public sealed partial class EditorTab
     /// <summary>The one-shot model for format, ask and check; set by the workspace.</summary>
     public IHelperModel? Helper { get; set; }
 
-    /// <summary>The project folder Ask Claude searches for code related to the request; set by the workspace.</summary>
+    /// <summary>The project folder the edit-here job searches for code related to the request; set by the workspace.</summary>
     public string? ProjectRoot { get; set; }
 
     /// <summary>The Ask panel's model job: the log it streams, its clock and its cancel.</summary>
@@ -89,15 +87,13 @@ public sealed partial class EditorTab
 
     private void BuildContextMenu()
     {
-        _undoItem = Item("Undo", FileEditor.Undo, "Ctrl+Z", "");
-        _redoItem = Item("Redo", FileEditor.Redo, "Ctrl+Y", "");
         _cutItem = Item("Cut", FileEditor.CutToClipboard, "Ctrl+X", "");
         _copyItem = Item("Copy", FileEditor.CopyToClipboard, "Ctrl+C", "");
         _pasteItem = Item("Paste", FileEditor.PasteFromClipboard, "Ctrl+V", "");
         _deleteItem = Item("Delete", FileEditor.DeleteSelection, null, "");
         var selectAll = Item("Select All", FileEditor.SelectEverything, "Ctrl+A", "");
         _formatItem = Item("Format Document", () => _ = FormatDocumentAsync(), null, "");
-        _askItem = Item("Ask Claude…", () => _ = AskClaudeAsync(), null, "\uE9CE");
+        _askItem = Item("Edit here…", () => _ = AskClaudeAsync(), null, "\uE9CE");
         _checkItem = Item("Check Issues", () => _ = CheckIssuesAsync(), null, "");
         _referencesItem = Item("Find References", FindReferences, null, "");
         _previewItem = Item("Preview", TogglePreview, null,"");
@@ -105,7 +101,6 @@ public sealed partial class EditorTab
         var menu = new MenuFlyout();
         foreach (var item in new MenuFlyoutItemBase[]
         {
-            _undoItem, _redoItem, new MenuFlyoutSeparator(),
             _cutItem, _copyItem, _pasteItem, _deleteItem, selectAll, new MenuFlyoutSeparator(),
             _referencesItem, new MenuFlyoutSeparator(),
             _formatItem, _askItem, _checkItem, _previewItem,
@@ -148,13 +143,11 @@ public sealed partial class EditorTab
         var editable = ViewModel is { CanEdit: true };
         var hasSelection = FileEditor.HasSelection;
 
-        _undoItem.IsEnabled = editable && FileEditor.CanUndo;
-        _redoItem.IsEnabled = editable && FileEditor.CanRedo;
         _cutItem.IsEnabled = editable && hasSelection;
         _copyItem.IsEnabled = hasSelection;
         _pasteItem.IsEnabled = editable;
         _deleteItem.IsEnabled = editable && hasSelection;
-        _referencesItem.IsEnabled = hasSelection && !string.IsNullOrWhiteSpace(SelectedText());
+        _referencesItem.IsEnabled = ReferenceTarget() is { } target && target.Trim().Length > 0;
 
         var canAsk = editable && Helper is { IsAvailable: true } && !IsModelBusy;
         _formatItem.IsEnabled = canAsk;
@@ -174,12 +167,49 @@ public sealed partial class EditorTab
         return start == end ? string.Empty : FileEditor.GetText()[start..end];
     }
 
+    /// <summary>
+    /// What Find References looks for: the selection, or with nothing selected, the word
+    /// under the caret - either edge of it, so a caret resting after a name still finds
+    /// that name. Null when the caret sits between words with nothing selected.
+    /// </summary>
+    private string? ReferenceTarget()
+    {
+        var (start, end) = FileEditor.SelectionOffsets;
+        if (start != end)
+        {
+            return SelectedText();
+        }
+
+        var text = FileEditor.GetText();
+        bool IsWordChar(int i) =>
+            i >= 0 && i < text.Length && (char.IsLetterOrDigit(text[i]) || text[i] == '_');
+
+        var at = IsWordChar(start) ? start : start - 1;
+        if (!IsWordChar(at))
+        {
+            return null;
+        }
+
+        var first = at;
+        while (IsWordChar(first - 1))
+        {
+            first--;
+        }
+
+        var last = at + 1;
+        while (IsWordChar(last))
+        {
+            last++;
+        }
+
+        return text[first..last];
+    }
+
     private void FindReferences()
     {
-        var text = SelectedText().Trim();
-        if (text.Length > 0)
+        if (ReferenceTarget() is { } target && target.Trim() is { Length: > 0 } word)
         {
-            FindReferencesRequested?.Invoke(this, text);
+            FindReferencesRequested?.Invoke(this, word);
         }
     }
 
@@ -276,7 +306,7 @@ public sealed partial class EditorTab
                 prompt += await gather(ct);
             }
 
-            _session.Log(AskLogKind.Info, "Waiting for Claude's reply…");
+            _session.Log(AskLogKind.Info, "Waiting for the reply…");
             reply = await helper.CompleteAsync(systemPrompt, prompt, 32_000, ct);
             _session.Log(AskLogKind.Info, "Applying the result…");
             result = apply(reply);
@@ -392,7 +422,7 @@ public sealed partial class EditorTab
             });
     }
 
-    /// <summary>Most selected lines the Ask Claude dialog shows back before eliding the rest.</summary>
+    /// <summary>Most selected lines the edit-here composer shows back before eliding the rest.</summary>
     private const int MaxPreviewLines = 6;
 
     private async Task AskClaudeAsync()
@@ -412,7 +442,7 @@ public sealed partial class EditorTab
         var after = text[end..Math.Min(text.Length, end + MaxContextChars / 2)];
 
         await RunModelAsync(
-            hasSelection ? "Claude is rewriting the selection…" : "Claude is writing at the cursor…",
+            hasSelection ? "Editing the selection…" : "Writing at the cursor…",
             "You edit code at a precise spot.\n"
             + "Input: <before> (text before the edit point), <selection> (the selected text, possibly empty), "
             + "<after> (text after it), optionally <related> (code from other files), and <instruction>.\n"
@@ -431,7 +461,7 @@ public sealed partial class EditorTab
             {
                 if (FileEditor.GetText() != text)
                 {
-                    return ("The document changed while Claude worked; ask again.", true);
+                    return ("The document changed while the edit was written; try again.", true);
                 }
 
                 var edit = StripFence(StripTag(reply, "selection"));
@@ -551,8 +581,8 @@ public sealed partial class EditorTab
 
         AskSelectionBox.Visibility = hasSelection ? Visibility.Visible : Visibility.Collapsed;
         AskInput.PlaceholderText = hasSelection
-            ? "What should Claude do with this? e.g. add null checks, convert to async…"
-            : "What should Claude write here? e.g. a method that parses the header…";
+            ? "What should happen to this selection? e.g. add null checks, convert to async…"
+            : "What should go here? e.g. a method that parses the header…";
         AskInput.Text = string.Empty;
         AskInput.IsReadOnly = false;
         RefreshAskSendButton();

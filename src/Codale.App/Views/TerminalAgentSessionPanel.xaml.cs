@@ -3,6 +3,7 @@ using System.ComponentModel;
 
 using Codale.Agents;
 using Codale.Agents.Claude;
+using Codale.Agents.Codex;
 using Codale.Agents.History;
 using Codale.App.ViewModels;
 
@@ -166,6 +167,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
         session.Todos.CollectionChanged += OnLiveChanged;
         session.RunningTasks.CollectionChanged += OnLiveChanged;
         session.Artifacts.CollectionChanged += OnLiveChanged;
+        session.Status.Changes.CollectionChanged += OnLiveChanged;
         session.Status.PropertyChanged += OnStatusChanged;
     }
 
@@ -174,18 +176,30 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
         session.Todos.CollectionChanged -= OnLiveChanged;
         session.RunningTasks.CollectionChanged -= OnLiveChanged;
         session.Artifacts.CollectionChanged -= OnLiveChanged;
+        session.Status.Changes.CollectionChanged -= OnLiveChanged;
         session.Status.PropertyChanged -= OnStatusChanged;
     }
 
     private void OnLiveChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>
-        DispatcherQueue.TryEnqueue(() => Raise(nameof(IsLiveEmpty)));
+        DispatcherQueue.TryEnqueue(RaiseLive);
 
     private void OnStatusChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(StatusViewModel.ChangeCount))
         {
-            DispatcherQueue.TryEnqueue(() => Raise(nameof(IsLiveEmpty)));
+            DispatcherQueue.TryEnqueue(RaiseLive);
         }
+    }
+
+    /// <summary>
+    /// The sections' visibility binds to Session.*.Count, a nested path the binding does not
+    /// re-read when only a collection changes (the Todos list shows only because it is replaced
+    /// whole): raising Session re-evaluates every section, as AgentSessionPanel does.
+    /// </summary>
+    private void RaiseLive()
+    {
+        Raise(nameof(Session));
+        Raise(nameof(IsLiveEmpty));
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
@@ -223,7 +237,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
     /// </summary>
     private async void OnTick()
     {
-        if (_probing || Session is not { TerminalCli.Id: "claude" } session)
+        if (_probing || Session is not { TerminalCli.Id: "claude" or "codex" } session || _reader?.HistorySourcePath is not { Length: > 0 } source)
         {
             return;
         }
@@ -231,21 +245,41 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
         _probing = true;
         try
         {
-            var path = ProjectPath;
             var since = _openedAtUtc;
-            var tokens = await Task.Run(() => ClaudeContextProbe.ReadTokens(path, since));
-            if (tokens is { } used)
+            if (session.TerminalCli.Id == "codex")
             {
-                session.Status.ContextTokens = used;
-                session.Status.ContextWindow = ClaudeContextProbe.WindowFor(used);
-            }
-
-            if (_ticks++ >= UsageEveryTicks)
-            {
-                _ticks = 0;
-                if (await ClaudeUsageClient.FetchAsync() is { } limits)
+                // Codex's rollout carries its own window size and the account's windows.
+                var path = ProjectPath;
+                if (await Task.Run(() => CodexContextProbe.Read(source, path, since)) is { } reading)
                 {
-                    session.Status.Apply(limits);
+                    if (reading.ContextTokens > 0)
+                    {
+                        session.Status.ContextTokens = reading.ContextTokens;
+                        session.Status.ContextWindow = reading.ContextWindow ?? ClaudeContextProbe.WindowFor(reading.ContextTokens);
+                    }
+
+                    if (reading.Limits is { } codexLimits)
+                    {
+                        session.Status.Apply(codexLimits);
+                    }
+                }
+            }
+            else
+            {
+                var tokens = await Task.Run(() => ClaudeContextProbe.ReadTokens(source, since));
+                if (tokens is { } used)
+                {
+                    session.Status.ContextTokens = used;
+                    session.Status.ContextWindow = ClaudeContextProbe.WindowFor(used);
+                }
+
+                if (_ticks++ >= UsageEveryTicks)
+                {
+                    _ticks = 0;
+                    if (await ClaudeUsageClient.FetchAsync() is { } limits)
+                    {
+                        session.Status.Apply(limits);
+                    }
                 }
             }
 
@@ -273,12 +307,12 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
             if (status.HasFiveHour)
             {
-                Vitals.Add(new UsageMeter("5-HOUR", status.FiveHourSummary, status.FiveHourPercent));
+                Vitals.Add(new UsageMeter("USAGE", status.FiveHourSummary, status.FiveHourPercent));
             }
 
             if (status.HasSevenDay)
             {
-                Vitals.Add(new UsageMeter(status.LongWindowLabel.ToUpperInvariant(), status.SevenDaySummary, status.SevenDayPercent));
+                Vitals.Add(new UsageMeter("USAGE", status.SevenDaySummary, status.SevenDayPercent));
             }
         }
 

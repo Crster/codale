@@ -1,7 +1,5 @@
 using System.Text.Json;
 
-using Codale.Core.Projects;
-
 namespace Codale.Agents.Claude;
 
 /// <summary>
@@ -13,12 +11,15 @@ public static class ClaudeContextProbe
 {
     private const int TailBytes = 256 * 1024;
 
-    /// <summary>Tokens in the last prompt of the session transcript touched since <paramref name="since"/>, or null.</summary>
-    public static int? ReadTokens(string projectPath, DateTime since)
+    /// <summary>
+    /// Tokens in the last prompt of the session transcript touched since <paramref name="since"/>, or null.
+    /// <paramref name="directory"/> is the project's transcript folder under the account the CLI runs
+    /// on: a terminal CLI keeps the default one (~/.claude), not Codale's own.
+    /// </summary>
+    public static int? ReadTokens(string directory, DateTime since)
     {
         try
         {
-            var directory = ProjectPaths.ClaudeHistoryDirectory(projectPath);
             if (!Directory.Exists(directory))
             {
                 return null;

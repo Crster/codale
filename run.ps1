@@ -49,7 +49,9 @@ $certFriendlyName = "Codale Development"
 # Codale is deliberately multi-instance (one window per project), so this stops every
 # open window. They all lock the binaries the build is about to overwrite.
 Get-Process -Name "Codale.App" -ErrorAction SilentlyContinue | Stop-Process -Force
-foreach ($n in "Codale.Mcp.Browser", "Codale.Mcp.Computer", "Codale.Mcp.Tasks") { Get-Process -Name $n -ErrorAction SilentlyContinue | Stop-Process -Force }
+foreach ($n in "Codale.Mcp.Browser", "Codale.Mcp.Computer", "Codale.Mcp.Tasks") {
+    Get-Process -Name $n -ErrorAction SilentlyContinue | Stop-Process -Force
+}
 
 # ---------------------------------------------------------------------------
 # Signing certificate

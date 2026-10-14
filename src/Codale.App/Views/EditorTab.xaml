@@ -102,7 +102,7 @@
                 </StackPanel>
             </Border>
 
-            <!--  Ask Claude: a floating composer anchored next to the cursor or selection, with
+            <!--  Edit here: a floating composer anchored next to the cursor or selection, with
                   the agent's progress streaming below it. Format and Check Issues reuse it
                   without the composer, docked at the bottom. Placement is set in code.
                   It is a plain popup shown and hidden with IsOpen, the way the WinUI Gallery
@@ -172,7 +172,7 @@
                                         <TextBlock
                                             FontSize="13"
                                             FontWeight="SemiBold"
-                                            Text="Ask Claude" />
+                                            Text="Edit here" />
                                         <TextBlock
                                             x:Name="AskContextText"
                                             FontSize="12"

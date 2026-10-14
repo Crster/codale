@@ -164,6 +164,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // to model/effort), or the CLI's own default when nothing has been chosen yet.
         (RequestedModel, RequestedEffort) = TierConfig(AppSettings.DefaultTierFor(CliId));
 
+        // The session panel shows its live sections (tasks, changes, subagents) only once
+        // there is a conversation; a chat opened empty from history gains one later.
+        Items.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasConversation));
+
         _turnTimer = _dispatcher.CreateTimer();
         _turnTimer.Interval = TimeSpan.FromMilliseconds(1000);
         _turnTimer.Tick += (_, _) =>
@@ -998,6 +1002,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     [NotifyPropertyChangedFor(nameof(IsBusyWorking))]
     [NotifyPropertyChangedFor(nameof(ShowStop))]
     [NotifyPropertyChangedFor(nameof(CanChangeMode))]
+    [NotifyPropertyChangedFor(nameof(HasConversation))]
     public partial bool IsBusy { get; set; }
 
     /// <summary>
@@ -1484,7 +1489,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// Resume an existing conversation instead of starting a new one. Set before
     /// <see cref="ConnectAsync"/>; this is what crash recovery uses.
     /// </summary>
-    public string? ResumeSessionId { get; set; }
+    public string? ResumeSessionId
+    {
+        get;
+        set
+        {
+            field = value;
+            OnPropertyChanged(nameof(HasConversation));
+        }
+    }
 
     /// <summary>Working directory for the agent: the project, or a session worktree.</summary>
     [ObservableProperty]
@@ -1987,11 +2000,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
                 // Codex reports its own session total (SessionTokensUpdated); Claude's has
                 // to be summed here, subagents' requests included.
-                if (_status.IsOverrideCli && !IsCodexSession && done.Usage is { } spent)
+                if (done.Usage is { } spent)
                 {
-                    _messageTokens.TryGetValue(done.MessageId, out var counted);
-                    _messageTokens[done.MessageId] = spent.TotalTokens;
-                    _status.SessionTokens += spent.TotalTokens - counted;
+                    CountMessageTokens(done.MessageId, spent);
                 }
 
                 if (done.ParentToolUseId is { } owner && _tasksByToolUse.TryGetValue(owner, out var subagent))
@@ -2172,6 +2183,20 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             case UsageUpdated usage:
+                // A Claude stream's message_delta: the request's own usage (the only real
+                // one a Z.ai-style endpoint sends). A subagent's request fills a different
+                // context, but its tokens are still spent.
+                if (usage.MessageId is { } usageMessageId)
+                {
+                    CountMessageTokens(usageMessageId, usage.Usage);
+                    if (usage.ParentToolUseId is not null)
+                    {
+                        break;
+                    }
+
+                    _lastMessageUsage = usage.Usage;
+                }
+
                 // Mid-turn context readings (one after every model
                 // call), so the meter moves while the turn runs, not just when it lands.
                 _status.Apply(usage.Usage);
@@ -2471,7 +2496,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     private void SettleTodos(TurnOutcome outcome)
     {
-        if (outcome != TurnOutcome.Completed || TasksTotal == 0 || TasksDone == TasksTotal)
+        // Only a list this turn set: one carried over from history or an earlier turn is
+        // not this turn's work, and settling it gave a task-less turn a "Tasks n/n done" row.
+        if (_turnTodo is null || outcome != TurnOutcome.Completed || TasksTotal == 0 || TasksDone == TasksTotal)
         {
             return;
         }
@@ -3538,7 +3565,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             Items.Insert(insert++, plan);
         }
 
-        if (turn.Steps.LastOrDefault() is AssistantMessageItem { Text.Length: > 0 } answer &&
+        // The task-list row is bookkeeping, not a step: a closing todos_set after the
+        // answer must not keep the answer folded inside the timeline.
+        if (turn.Steps.LastOrDefault(s => s is not TodoStepItem) is AssistantMessageItem { Text.Length: > 0 } answer &&
             !string.IsNullOrWhiteSpace(answer.Text))
         {
             turn.Steps.Remove(answer);
@@ -4140,6 +4169,27 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             Items.Remove(item);
             Reflow();
+        }
+    }
+
+    /// <summary>
+    /// Adds a Claude request's tokens to the override's session total, once per message:
+    /// the CLI repeats a message, and its stream's message_delta reports it again. The
+    /// larger reading wins, so a later partial one never takes tokens back.
+    /// Codex reports its own session total (SessionTokensUpdated).
+    /// </summary>
+    private void CountMessageTokens(string messageId, UsageSnapshot usage)
+    {
+        if (!_status.IsOverrideCli || IsCodexSession)
+        {
+            return;
+        }
+
+        _messageTokens.TryGetValue(messageId, out var counted);
+        if (usage.TotalTokens > counted)
+        {
+            _messageTokens[messageId] = usage.TotalTokens;
+            _status.SessionTokens += usage.TotalTokens - counted;
         }
     }
 

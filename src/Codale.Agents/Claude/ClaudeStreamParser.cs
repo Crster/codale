@@ -324,17 +324,33 @@ public sealed class ClaudeStreamParser
 
     private static IEnumerable<AgentEvent> ParseStreamEvent(JsonElement root)
     {
-        if (root.Prop("event") is not { } ev || ev.Str("type") != "content_block_delta")
-        {
-            yield break;
-        }
-
-        if (ev.Prop("delta") is not { } delta)
+        if (root.Prop("event") is not { } ev)
         {
             yield break;
         }
 
         var parent = root.Str("parent_tool_use_id");
+
+        // Z.ai-style endpoints put zeros on the assistant message and report the request's
+        // real usage only here, when the message stops.
+        if (ev.Str("type") == "message_delta")
+        {
+            if (ParseUsage(ev.Prop("usage")) is { } usage)
+            {
+                yield return new UsageUpdated(usage)
+                {
+                    MessageId = root.Str("api_message_id"),
+                    ParentToolUseId = parent,
+                };
+            }
+
+            yield break;
+        }
+
+        if (ev.Str("type") != "content_block_delta" || ev.Prop("delta") is not { } delta)
+        {
+            yield break;
+        }
 
         switch (delta.Str("type"))
         {
@@ -433,7 +449,7 @@ public sealed class ClaudeStreamParser
             return null;
         }
 
-        return new UsageSnapshot
+        var snapshot = new UsageSnapshot
         {
             InputTokens = u.Int("input_tokens") ?? 0,
             OutputTokens = u.Int("output_tokens") ?? 0,
@@ -441,6 +457,10 @@ public sealed class ClaudeStreamParser
             CacheCreationInputTokens = u.Int("cache_creation_input_tokens") ?? 0,
             ThinkingTokens = u.Prop("output_tokens_details")?.Int("thinking_tokens") ?? 0,
         };
+
+        // An all-zero block is a placeholder (Z.ai's assistant messages), not a reading:
+        // taking it would empty the context meter.
+        return snapshot.TotalTokens > 0 ? snapshot : null;
     }
 
     /// <summary>

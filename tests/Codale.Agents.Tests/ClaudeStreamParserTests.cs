@@ -292,4 +292,26 @@ public sealed class ClaudeStreamParserTests
 
         Assert.IsType<ConversationReset>(parser.Parse("{" + body + "}").Single());
     }
+
+    [Fact]
+    public void Zai_usage_is_read_from_message_delta_and_zero_placeholders_are_dropped()
+    {
+        // Recorded from a Claude CLI session on Z.ai: the assistant message and message_start
+        // carry zeros; only message_delta has the request's real usage.
+        var parser = new ClaudeStreamParser();
+
+        var start = parser.Parse("""{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"glm-5.3-flash","content":[],"usage":{"input_tokens":0,"output_tokens":0}}},"session_id":"s","parent_tool_use_id":null}""");
+        Assert.Empty(start);
+
+        var assistant = parser.Parse("""{"type":"assistant","message":{"id":"msg_1","type":"message","role":"assistant","model":"glm-5.3-flash","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":0,"output_tokens":0}},"session_id":"s","parent_tool_use_id":null}""");
+        Assert.Null(assistant.OfType<AssistantMessageCompleted>().Single().Usage);
+
+        var delta = parser.Parse("""{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":11271,"output_tokens":332,"cache_read_input_tokens":35072,"server_tool_use":{"web_search_requests":0},"service_tier":"standard"}},"session_id":"s","parent_tool_use_id":null,"api_message_id":"msg_1"}""");
+        var usage = Assert.IsType<UsageUpdated>(delta.Single());
+
+        Assert.Equal("msg_1", usage.MessageId);
+        Assert.Null(usage.ParentToolUseId);
+        Assert.Equal(11271 + 35072, usage.Usage.ContextTokens);
+        Assert.Equal(11271 + 35072 + 332, usage.Usage.TotalTokens);
+    }
 }

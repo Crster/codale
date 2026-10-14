@@ -160,6 +160,12 @@ public sealed record UsageUpdated(UsageSnapshot Usage) : AgentEvent
 {
     /// <summary>The window size the CLI itself is working with, when it reports one alongside the usage.</summary>
     public int? ContextWindow { get; init; }
+
+    /// <summary>The API message the reading belongs to (Claude's stream); null for Codex's per-call readings.</summary>
+    public string? MessageId { get; init; }
+
+    /// <summary>Set when a subagent's request, not the main loop's, made the reading.</summary>
+    public string? ParentToolUseId { get; init; }
 }
 
 public sealed record RateLimitUpdated(RateLimitSnapshot Limits) : AgentEvent;
