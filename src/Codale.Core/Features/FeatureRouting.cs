@@ -57,12 +57,14 @@ public static class FeatureRouting
         "- current: it continues, fixes, extends or gives feedback on the feature marked current, or on the work in " +
         "<last_agent_message>.\n" +
         "- <id>: it is work on one of the other listed features. A feature is a BIG area (Login, Downloads, " +
-        "Dashboard, Settings, Build pipeline). Fixing a bug in it, improving it, restyling it or refactoring it is " +
-        "still that feature - never a new one.\n" +
-        "- new: project work that fits none of the listed features. Give name: a short noun phrase for the big area " +
+        "Dashboard, Settings, Build pipeline, Overview charting). Fixing a bug in it, improving it, restyling it, " +
+        "syncing data for it, or refactoring it is still that feature - never a new one. If an existing feature already " +
+        "covers the same page, screen, component or underlying topic/problem, ALWAYS pick that feature's id.\n" +
+        "- new: project work that fits none of the listed features. Never create a new feature if any listed feature " +
+        "covers the same screen, page, component or problem. Give name: a short noun phrase for the big area " +
         "(1-3 words, e.g. Login or File downloads), never a task (not Fix login bug). When no features are listed " +
         "yet and the request spans several big areas, give up to three names separated by |, the main one first.\n" +
-        "- Unsure between a listed feature and new: the listed feature. Unsure between current and another: current.\n" +
+        "- Unsure between a listed feature and new: ALWAYS choose the listed feature. Unsure between current and another: current.\n" +
         "\n" +
         "intent:\n" +
         "- act (the default): any request to make, change, fix, add, remove, improve or redesign something, however " +

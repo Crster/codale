@@ -69,6 +69,9 @@ public sealed class CodexAgentSession : IAgentSession
 
     public string? SessionId { get; private set; }
 
+    /// <summary>Test seam: the thread notifications are judged against, without a running app-server.</summary>
+    internal void AdoptThread(string threadId) => _threadId = threadId;
+
     public ChannelReader<AgentEvent> Events => _events.Reader;
 
     public async Task StartAsync(CancellationToken ct = default)
@@ -637,9 +640,15 @@ public sealed class CodexAgentSession : IAgentSession
     }
 
     /// <summary>Projects one app-server notification onto the normalised event stream.</summary>
-    private async Task HandleNotificationAsync(string method, JsonElement message)
+    internal async Task HandleNotificationAsync(string method, JsonElement message)
     {
         var parameters = message.Prop("params") ?? message;
+
+        if (ForeignThreadOf(parameters) is { } foreign)
+        {
+            await ReportSubagentThreadAsync(method, foreign, parameters).ConfigureAwait(false);
+            return;
+        }
 
         switch (method)
         {
@@ -706,6 +715,45 @@ public sealed class CodexAgentSession : IAgentSession
                 // Unknown notifications are protocol drift: kept out of the transcript, but
                 // visible in the raw log this session writes when one is requested.
                 return;
+        }
+    }
+
+    /// <summary>Subagent threads codex spawned, by thread id: they are listed, never replayed into the transcript.</summary>
+    private readonly HashSet<string> _subagentThreads = [];
+
+    /// <summary>The id of another thread this notification belongs to (a subagent's), or null when it is the main thread's.</summary>
+    private string? ForeignThreadOf(JsonElement parameters)
+    {
+        var id = parameters.Str("threadId") ?? parameters.Prop("thread")?.Str("id");
+        return _threadId is { Length: > 0 } main && id is { Length: > 0 } && id != main ? id : null;
+    }
+
+    /// <summary>
+    /// A subagent runs on its own thread. Its work stays out of the transcript; the session
+    /// panel only needs to know it exists and when its turn ended, so it surfaces as one
+    /// <c>Agent</c> tool call, the shape the panel already lists subagents by.
+    /// </summary>
+    private async Task ReportSubagentThreadAsync(string method, string threadId, JsonElement parameters)
+    {
+        if (_subagentThreads.Add(threadId))
+        {
+            var thread = parameters.Prop("thread");
+            var title = thread?.Str("agentNickname") ?? thread?.Str("name") ?? thread?.Str("preview");
+            var input = JsonSerializer.SerializeToElement(
+                new { description = string.IsNullOrWhiteSpace(title) ? $"Subagent {_subagentThreads.Count}" : title.Trim() }, WireJson);
+            await _events.Writer.WriteAsync(new ToolCallStarted { ToolUseId = threadId, ToolName = "Agent", Input = input })
+                .ConfigureAwait(false);
+        }
+
+        if (method == "turn/completed")
+        {
+            var turn = parameters.Prop("turn") ?? parameters;
+            var status = turn.Str("status") ?? "completed";
+            await _events.Writer.WriteAsync(new ToolCallCompleted
+            {
+                ToolUseId = threadId,
+                IsError = status is not ("completed" or "interrupted"),
+            }).ConfigureAwait(false);
         }
     }
 

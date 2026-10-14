@@ -546,7 +546,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         var input = new TextBox
         {
             Text = session.Title,
-            PlaceholderText = "Give this feature a short name",
+            PlaceholderText = "Give this history a short name",
             SelectionStart = 0,
             SelectionLength = session.Title.Length,
         };
@@ -575,7 +575,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
-            Title = "Rename feature",
+            Title = "Rename history",
             Content = content,
             PrimaryButtonText = "Save",
             CloseButtonText = "Cancel",
@@ -600,7 +600,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
                 }
                 else
                 {
-                    hint.Text = "This feature has no description to name it from.";
+                    hint.Text = "This history has no description to name it from.";
                 }
             }
             catch (OperationCanceledException)
@@ -627,7 +627,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         }
         catch (Exception ex)
         {
-            await ShowErrorAsync("Could not rename feature", ex.Message);
+            await ShowErrorAsync("Could not rename history", ex.Message);
         }
     }
 
@@ -640,7 +640,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
         if (session.IsOpen)
         {
-            await ShowErrorAsync("Feature is open", "Close its tab before deleting it.");
+            await ShowErrorAsync("History is open", "Close its tab before deleting it.");
             return;
         }
 
@@ -648,7 +648,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         {
             XamlRoot = XamlRoot,
             Title = $"Delete \"{session.Title}\"?",
-            Content = "This removes the feature's summary, history and file index. The work it did in your workspace is kept.",
+            Content = "This removes this history's summary, turns and file index. The work it did in your workspace is kept.",
             PrimaryButtonText = "Delete",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
@@ -662,7 +662,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             }
             catch (Exception ex)
             {
-                await ShowErrorAsync("Could not delete feature", ex.Message);
+                await ShowErrorAsync("Could not delete history", ex.Message);
             }
         }
     }

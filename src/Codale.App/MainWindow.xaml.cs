@@ -157,13 +157,15 @@ public sealed partial class MainWindow : Window
     private void OnTitleBarLeftPanelClick(object sender, RoutedEventArgs e) =>
         LeftPanelToggled?.Invoke(this, EventArgs.Empty);
 
-    private const double SettingsWidth = 560;
+    private const double SettingsWidth = 720;
 
     private bool _settingsOpen;
 
     private Storyboard? _settingsAnimation;
 
     private void OnSettingsClick(object sender, RoutedEventArgs e) => SetSettingsOpen(!_settingsOpen);
+
+    private void OnSettingsBackdropTapped(object sender, TappedRoutedEventArgs e) => SetSettingsOpen(false);
 
     /// <summary>Slides the Settings pane in from (or out to) the right edge.</summary>
     public void SetSettingsOpen(bool open)
@@ -180,13 +182,14 @@ public sealed partial class MainWindow : Window
         {
             SettingsHost.Reload();
             SettingsHost.Visibility = Visibility.Visible;
+            SettingsBackdrop.Visibility = Visibility.Visible;
         }
 
         var slide = new DoubleAnimation
         {
             From = SettingsSlide.X,
             To = open ? 0 : SettingsWidth,
-            Duration = TimeSpan.FromMilliseconds(open ? 240 : 180),
+            Duration = TimeSpan.FromMilliseconds(open ? 260 : 200),
             EasingFunction = new CubicEase
             {
                 EasingMode = open
@@ -197,14 +200,25 @@ public sealed partial class MainWindow : Window
         Storyboard.SetTarget(slide, SettingsSlide);
         Storyboard.SetTargetProperty(slide, "X");
 
+        var fade = new DoubleAnimation
+        {
+            From = SettingsBackdrop.Opacity,
+            To = open ? 1.0 : 0.0,
+            Duration = TimeSpan.FromMilliseconds(open ? 240 : 180),
+        };
+        Storyboard.SetTarget(fade, SettingsBackdrop);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+
         var storyboard = new Storyboard();
         storyboard.Children.Add(slide);
+        storyboard.Children.Add(fade);
         storyboard.Completed += (_, _) =>
         {
             // Hidden once off-screen so it stops taking focus and hit-tests.
             if (!_settingsOpen)
             {
                 SettingsHost.Visibility = Visibility.Collapsed;
+                SettingsBackdrop.Visibility = Visibility.Collapsed;
             }
         };
         _settingsAnimation = storyboard;

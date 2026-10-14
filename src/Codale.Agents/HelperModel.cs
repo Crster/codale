@@ -25,10 +25,14 @@ namespace Codale.Agents;
 /// </remarks>
 public sealed class HelperModel(
     Func<OpenAiEndpoint?>? api = null,
-    Func<string?>? provider = null) : IHelperModel, IDisposable
+    Func<string?>? provider = null,
+    Func<string?>? codexModel = null) : IHelperModel, IDisposable
 {
     /// <summary>The cheapest Claude model: these jobs are short and latency is what the user feels.</summary>
-    internal const string ClaudeModel = "haiku";
+    public const string ClaudeModel = "haiku";
+
+    /// <summary>The fast Codex model: helper jobs are short and latency is what the user feels.</summary>
+    public const string DefaultCodexModel = "gpt-5.6-terra";
 
     /// <summary>A warm CLI nobody has asked for in this long is let go.</summary>
     private static readonly TimeSpan SpareIdleLimit = TimeSpan.FromMinutes(2);
@@ -492,6 +496,17 @@ public sealed class HelperModel(
         startInfo.ArgumentList.Add("--skip-git-repo-check");
         startInfo.ArgumentList.Add("-s");
         startInfo.ArgumentList.Add("read-only");
+
+        var chosenModel = codexModel?.Invoke()?.Trim();
+        if (string.IsNullOrWhiteSpace(chosenModel))
+        {
+            chosenModel = DefaultCodexModel;
+        }
+
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add($"model={chosenModel}");
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("model_reasoning_effort=low");
         startInfo.ArgumentList.Add("-");
 
         Process process;

@@ -91,8 +91,6 @@ public static class AppSettings
 
     private static bool IsShell(string raw) => raw is "auto" or "pwsh" or "powershell" or "cmd";
 
-    private static bool IsEffort(string raw) => raw is "low" or "medium" or "high" or "xhigh" or "max";
-
     /// <summary>
     /// The transcript's base text size; everything in the chat scales from it. 12.5 is
     /// the built-in look, so that value means "no change".

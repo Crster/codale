@@ -308,7 +308,7 @@ public sealed partial class ChatTab : UserControl
         void Load()
         {
             var (history, hasMore) = ViewModel.FeatureHistoryText(count);
-            text.Text = history.Length > 0 ? history : "Nothing recorded for this feature yet.";
+            text.Text = history.Length > 0 ? history : "Nothing recorded for this history yet.";
             more.Visibility = hasMore ? Visibility.Visible : Visibility.Collapsed;
         }
 
@@ -390,8 +390,8 @@ public sealed partial class ChatTab : UserControl
         {
             call.ToggleExpanded();
 
-            // An explore or a subagent is also a task in the session panel: show its peek.
-            if (BackgroundTaskDetector.IsSubagentTool(call.ToolName) || BackgroundTaskDetector.IsHelperTool(call.ToolName))
+            // A subagent is also a task in the session panel: show its peek.
+            if (BackgroundTaskDetector.IsSubagentTool(call.ToolName))
             {
                 TaskPeekRequested?.Invoke(this, call);
             }

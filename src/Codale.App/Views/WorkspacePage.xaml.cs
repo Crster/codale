@@ -3419,8 +3419,13 @@ public sealed partial class WorkspacePage : Page
                 }
 
                 var clean = Codale.Core.Agents.BackgroundTaskDetector.StripAnsi(line);
-                outputBuilder.AppendLine(clean);
-                var text = outputBuilder.ToString();
+                string text;
+                // stdout and stderr callbacks arrive on separate threads; StringBuilder isn't thread-safe.
+                lock (outputBuilder)
+                {
+                    outputBuilder.AppendLine(clean);
+                    text = outputBuilder.ToString();
+                }
 
                 DispatcherQueue.TryEnqueue(() =>
                 {

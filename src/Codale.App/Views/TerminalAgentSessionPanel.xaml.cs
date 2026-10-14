@@ -113,8 +113,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
             if (_session is not null)
             {
                 Attach(_session);
-                _reader = CliResume.CreateReader(_session.TerminalCli?.Id, ProjectPath);
-                WatchHistory();
+                EnsureReader();
             }
 
             Raise(nameof(Session));
@@ -132,8 +131,22 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
         set
         {
             _workspace = value;
+            EnsureReader();
             Raise(nameof(CliName));
         }
+    }
+
+    /// <summary>Opens the history reader once there is a project path; Workspace can arrive after Session.</summary>
+    private void EnsureReader()
+    {
+        if (_session is null || _reader is not null || string.IsNullOrWhiteSpace(ProjectPath))
+        {
+            return;
+        }
+
+        _reader = CliResume.CreateReader(_session.TerminalCli?.Id, ProjectPath);
+        WatchHistory();
+        _ = RefreshHistoryAsync();
     }
 
     public string CliName => Session?.TerminalCli?.DisplayName ?? "Agent";

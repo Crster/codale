@@ -469,44 +469,17 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        var isHelper = BackgroundTaskDetector.IsHelperTool(started.ToolName);
-        if (isHelper || BackgroundTaskDetector.IsSubagentTool(started.ToolName))
+        if (BackgroundTaskDetector.IsSubagentTool(started.ToolName))
         {
-            var titleKey = isHelper ? "question" : "description";
-            var promptKey = isHelper ? "question" : "prompt";
             var title = started.Input.ValueKind == JsonValueKind.Object
-                && started.Input.TryGetProperty(titleKey, out var d)
+                && started.Input.TryGetProperty("description", out var d)
                 && d.ValueKind == JsonValueKind.String
                 ? d.GetString()! : "Subagent";
 
             var prompt = started.Input.ValueKind == JsonValueKind.Object
-                && started.Input.TryGetProperty(promptKey, out var p)
+                && started.Input.TryGetProperty("prompt", out var p)
                 && p.ValueKind == JsonValueKind.String
                 ? p.GetString()! : "";
-
-            if (isHelper)
-            {
-                if (string.IsNullOrWhiteSpace(prompt) && started.Input.ValueKind == JsonValueKind.Object)
-                {
-                    if (started.Input.TryGetProperty("prompt", out var altPrompt) && altPrompt.ValueKind == JsonValueKind.String)
-                    {
-                        prompt = altPrompt.GetString()!;
-                    }
-                    else if (started.Input.TryGetProperty("query", out var altQuery) && altQuery.ValueKind == JsonValueKind.String)
-                    {
-                        prompt = altQuery.GetString()!;
-                    }
-                }
-
-                if (string.IsNullOrWhiteSpace(prompt))
-                {
-                    prompt = LastUserPrompt ?? "";
-                }
-
-                title = prompt.Length > 0
-                    ? "Explore: " + (prompt.Length > 80 ? prompt[..80] + "…" : prompt)
-                    : "Explore";
-            }
 
             AddTask(new RunningTaskItem
             {
@@ -912,20 +885,20 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     public bool HasAttachments => Attachments.Count > 0;
 
-    /// <summary>Slash commands the connected CLI reported; built-ins until it does.</summary>
-    public IReadOnlyList<string> SlashCommands { get; private set; } = FallbackCommands;
-
-    /// <summary>Built-ins offered before (or without) the CLI's own list.</summary>
-    private static readonly IReadOnlyList<string> FallbackCommands =
-        ["clear", "compact", "context", "cost", "init", "review", "security-review"];
-
-    /// <summary>The CLI's names arrive with or without the slash, sometimes twice; keep one bare, sorted copy.</summary>
-    private static IReadOnlyList<string> NormalizeCommands(IEnumerable<string> commands) =>
-        commands.Select(c => c.Trim().TrimStart('/'))
-            .Where(c => c.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Order(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+    /// <summary>Slash commands both the Claude and Codex CLIs understand, with what each does.</summary>
+    public static IReadOnlyList<(string Name, string Description)> SlashCommands { get; } =
+    [
+        ("clear", "Start a fresh conversation and clear the context"),
+        ("compact", "Summarize the conversation to free up context"),
+        ("diff", "Show the changes made in the working tree"),
+        ("init", "Create an AGENTS.md / CLAUDE.md guide for this project"),
+        ("mcp", "List the connected MCP servers and their tools"),
+        ("model", "Choose the model for this session"),
+        ("permissions", "View or change what the agent may do without asking"),
+        ("resume", "Pick up a previous conversation"),
+        ("review", "Review the current changes for problems"),
+        ("status", "Show session, model and usage details"),
+    ];
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(TaskSummary))]
@@ -1270,7 +1243,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         string[] proHints = ["pro", "max", "opus", "ultra", "big"];
         var hints = tier == "flash" ? fastHints : proHints;
 
-        string Name(AgentModelInfo model) => $"{model.Id} {model.DisplayName}";
+        static string Name(AgentModelInfo model) => $"{model.Id} {model.DisplayName}";
         var hinted = AvailableModels.FirstOrDefault(model => hints.Any(hint => Name(model).Contains(hint, StringComparison.OrdinalIgnoreCase)));
         if (hinted is not null)
         {
@@ -1675,13 +1648,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             await session.StartAsync();
 
-            // The initialize handshake already lists the commands. The init event only
-            // comes with the first turn, so waiting for it left "/" empty until then.
-            if (session is ClaudeAgentSession { SlashCommands.Count: > 0 } claude)
-            {
-                SlashCommands = NormalizeCommands(claude.SlashCommands);
-            }
-
             IsConnected = true;
 
             SessionStateChanged?.Invoke(this, EventArgs.Empty);
@@ -1926,12 +1892,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     {
                         PermissionMode = init.PermissionMode;
                     }
-                }
-
-                // Keep the handshake's list if this one comes back empty.
-                if (init.SlashCommands.Count > 0)
-                {
-                    SlashCommands = NormalizeCommands(init.SlashCommands);
                 }
 
                 NotifyModelDisplays();
@@ -2253,10 +2213,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 ComposerNotice = new NoticeItem { Text = info.Text, Severity = info.IsWarning ? NoticeSeverity.Warning : NoticeSeverity.Info };
                 break;
 
-            case CommandsChanged commands:
-                SlashCommands = NormalizeCommands(commands.Commands);
-                break;
-
+            case CommandsChanged:
             case HookFailed or CliStatusChanged or CliInformation:
                 break;
 
@@ -3836,13 +3793,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             // "/" alone lists everything; from the second character on it filters.
             var typed = draft[1..];
 
-            foreach (var command in SlashCommands.Where(c => c.StartsWith(typed, StringComparison.OrdinalIgnoreCase)).Take(12))
+            foreach (var (name, description) in SlashCommands.Where(c => c.Name.StartsWith(typed, StringComparison.OrdinalIgnoreCase)))
             {
                 Suggestions.Add(new SuggestionItem
                 {
-                    Title = "/" + command,
-                    Detail = "command",
-                    Insert = "/" + command,
+                    Title = "/" + name,
+                    Detail = description,
+                    Insert = "/" + name,
                     IsCommand = true,
                 });
             }

@@ -12,11 +12,6 @@ public static partial class BackgroundTaskDetector
 {
     public static bool IsSubagentTool(string toolName) => toolName is "Task" or "Agent";
 
-    /// <summary>Codale's helper-model tools (codale-tasks explore) work like a subagent.</summary>
-    public static bool IsHelperTool(string toolName) =>
-        toolName.Contains("codale", StringComparison.OrdinalIgnoreCase)
-        && toolName.EndsWith("__explore", StringComparison.Ordinal);
-
     public static bool IsShellTool(string toolName) => toolName is "Bash" or "PowerShell" or "Shell";
 
     /// <summary>True when a shell call asked to run in the background.</summary>

@@ -131,15 +131,24 @@
         -->
         <Frame x:Name="RootFrame" Grid.Row="1" />
 
+        <!--  Settings drawer backdrop: dims the editor behind and dismisses on tap  -->
+        <Grid
+            x:Name="SettingsBackdrop"
+            Grid.Row="1"
+            Background="#66000000"
+            Opacity="0"
+            Tapped="OnSettingsBackdropTapped"
+            Visibility="Collapsed" />
+
         <!--  Settings slides in over the right edge; Collapsed (and off-screen) until opened.  -->
         <controls:SettingsPanel
             x:Name="SettingsHost"
             Grid.Row="1"
-            Width="560"
+            Width="720"
             HorizontalAlignment="Right"
             Visibility="Collapsed">
             <controls:SettingsPanel.RenderTransform>
-                <TranslateTransform x:Name="SettingsSlide" X="560" />
+                <TranslateTransform x:Name="SettingsSlide" X="720" />
             </controls:SettingsPanel.RenderTransform>
         </controls:SettingsPanel>
     </Grid>

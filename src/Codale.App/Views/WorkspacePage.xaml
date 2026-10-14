@@ -1436,8 +1436,14 @@
                         <Button
                             x:Name="LanguageButton"
                             Padding="8,2"
+                            Background="Transparent"
+                            BorderThickness="0"
                             IsEnabled="False"
                             ToolTipService.ToolTip="Language mode: change how this file is coloured">
+                            <Button.Resources>
+                                <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
+                                <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
+                            </Button.Resources>
                             <Button.Flyout>
                                 <Flyout
                                     x:Name="LanguageFlyout"
@@ -1460,16 +1466,15 @@
                     </StackPanel>
                 </StackPanel>
 
-                <!--  Center: Terminal command input bar  -->
+                <!--  Center: Terminal command input bar (flat, neutral styling)  -->
                 <Border
                     x:Name="StatusBarCommandContainer"
                     Grid.Column="1"
                     Margin="12,0,12,0"
                     VerticalAlignment="Stretch"
-                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                    BorderThickness="1"
-                    CornerRadius="6">
+                    Background="Transparent"
+                    BorderThickness="0"
+                    CornerRadius="4">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
@@ -1490,13 +1495,12 @@
                                 <MenuFlyout x:Name="CwdMenuFlyout" Placement="Top" Opening="OnCwdMenuFlyoutOpening" />
                             </Button.Flyout>
                             <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                                <FontIcon Glyph="&#xED25;" FontSize="11" Opacity="0.75" VerticalAlignment="Center" />
+                                <FontIcon Glyph="&#xED25;" FontSize="11" Opacity="0.6" VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="StatusBarCwdText"
                                     FontSize="12"
                                     FontFamily="Cascadia Code, Consolas"
-                                    FontWeight="SemiBold"
-                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                    FontWeight="Normal"
                                     VerticalAlignment="Center"
                                     MaxWidth="220"
                                     TextTrimming="CharacterEllipsis" />
@@ -1504,8 +1508,8 @@
                                     Text=">"
                                     FontSize="12"
                                     FontFamily="Cascadia Code, Consolas"
-                                    FontWeight="Bold"
-                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                    FontWeight="SemiBold"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                     VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
@@ -1538,6 +1542,10 @@
                             KeyDown="OnStatusBarCommandBoxKeyDown"
                             GotFocus="OnStatusBarCommandBoxGotFocus">
                             <AutoSuggestBox.Resources>
+                                <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="{ThemeResource TextFillColorDisabled}" Opacity="0.7" />
+                                <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver" Color="{ThemeResource TextFillColorDisabled}" Opacity="0.7" />
+                                <SolidColorBrush x:Key="TextControlPlaceholderForegroundFocused" Color="{ThemeResource TextFillColorDisabled}" Opacity="0.7" />
+                                <SolidColorBrush x:Key="TextControlPlaceholderForegroundDisabled" Color="{ThemeResource TextFillColorDisabled}" Opacity="0.7" />
                                 <x:Double x:Key="TextControlThemeMinHeight">0</x:Double>
                                 <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
                                 <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />

@@ -74,14 +74,22 @@ public sealed partial class ChatViewModel
                 return await SwitchFeatureAsync(created[0], created: true);
 
             default:
-                // No model verdict (none installed, a slow or unparsable reply) and no feature yet: a
-                // real request is project work until shown otherwise, so it starts a feature instead
-                // of vanishing from history.
-                if (FeatureId is null && IsRequest(text) && features.Create(
-                        FeatureRouting.CleanNames(null, text, seed: false)[0], FeatureRouting.DescribeFrom(text)) is { } started)
+                // No model verdict (none installed, a slow or unparsable reply) and no feature yet: check
+                // whether an existing feature in this project matches the request before creating a new one.
+                if (FeatureId is null && IsRequest(text))
                 {
-                    SetFeature(started, seed: false);
-                    Title = started.Name;
+                    var matches = features.Search(text, 1);
+                    if (matches.Count > 0)
+                    {
+                        return await SwitchFeatureAsync(matches[0], created: false);
+                    }
+
+                    if (features.Create(
+                            FeatureRouting.CleanNames(null, text, seed: false)[0], FeatureRouting.DescribeFrom(text)) is { } started)
+                    {
+                        SetFeature(started, seed: false);
+                        Title = started.Name;
+                    }
                 }
 
                 _recording = FeatureId is not null;
@@ -136,7 +144,7 @@ public sealed partial class ChatViewModel
         {
             Add(new NoticeItem
             {
-                Text = created ? $"New feature: {feature.Name}" : $"Continuing feature: {feature.Name}",
+                Text = created ? $"New history: {feature.Name}" : $"Continuing history: {feature.Name}",
                 ActionText = previous is null ? null : $"Back to {previous.Name}",
                 Action = previous is null ? null : () => AttachFeatureAsync(previous),
             });

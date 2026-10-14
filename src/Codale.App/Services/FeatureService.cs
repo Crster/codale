@@ -55,6 +55,8 @@ public sealed class FeatureService : IDisposable
 
     public int FileCount(string id) => _store.FileCount(id);
 
+    public IReadOnlyList<FeatureInfo> Search(string text, int limit) => _store.Search(text, limit);
+
     /// <summary>The features the router is shown for a message: all of them while there are few, else the best matches plus the current one.</summary>
     public IReadOnlyList<FeatureInfo> CandidatesFor(string message, string? currentId)
     {

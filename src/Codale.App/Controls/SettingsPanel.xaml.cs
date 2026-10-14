@@ -49,6 +49,20 @@ public sealed partial class SettingsPanel : UserControl
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => CloseRequested?.Invoke(this, EventArgs.Empty);
 
+    private void OnCategoryTabChanged(object sender, RoutedEventArgs e)
+    {
+        if (SectionGeneral is null || SectionAi is null || SectionEditor is null || SectionTerminal is null || SectionGitShortcuts is null)
+        {
+            return;
+        }
+
+        SectionGeneral.Visibility = TabNavGeneral.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        SectionAi.Visibility = TabNavAi.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        SectionEditor.Visibility = TabNavEditor.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        SectionTerminal.Visibility = TabNavTerminal.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        SectionGitShortcuts.Visibility = TabNavGitShortcuts.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     private void OnAppSettingsChanged(object? sender, EventArgs e)
     {
         ReloadProvidersIfEditedElsewhere();
@@ -930,7 +944,8 @@ public sealed partial class SettingsPanel : UserControl
         // Settings has no file in front, so the dialog asks for the language and an optional sample.
         using var helper = new HelperModel(
             () => AppSettings.HelperApiEndpoint is { } api ? new OpenAiEndpoint(api.BaseUrl, api.ApiKey, api.Model) : null,
-            () => AppSettings.HelperProvider);
+            () => AppSettings.HelperProvider,
+            () => AppSettings.TierModelFor("codex", "flash") ?? HelperModel.DefaultCodexModel);
         await SyntaxDialogs.ShowGenerateAsync(XamlRoot, helper, "", "", "");
     }
 

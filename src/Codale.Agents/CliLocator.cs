@@ -196,7 +196,13 @@ public static class CliLocator
             }
 
             var codexNative = Path.Combine(dir, "node_modules", "@openai", "codex", "bin", "codex.exe");
-            return File.Exists(codexNative) ? codexNative : null;
+            if (File.Exists(codexNative))
+            {
+                return codexNative;
+            }
+
+            var codexVendor = Path.Combine(dir, "node_modules", "@openai", "codex", "node_modules", "@openai", "codex-win32-x64", "vendor", "x86_64-pc-windows-msvc", "bin", "codex.exe");
+            return File.Exists(codexVendor) ? codexVendor : null;
         }
         catch (ArgumentException)
         {

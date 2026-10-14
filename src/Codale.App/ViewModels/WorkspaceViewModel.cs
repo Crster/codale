@@ -25,7 +25,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     private readonly string _databasePath;
     private readonly CliEndpointSettings _endpoints;
     private readonly McpServerSettings _mcp;
-    private readonly DateTimeOffset _startedAt = DateTimeOffset.Now;
 
     /// <summary>Sessions this window has already tried to title, so each is attempted once.</summary>
 
@@ -35,7 +34,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// </summary>
     private readonly HelperModel _helper = new(
         () => AppSettings.HelperApiEndpoint is { } api ? new OpenAiEndpoint(api.BaseUrl, api.ApiKey, api.Model) : null,
-        () => AppSettings.HelperProvider);
+        () => AppSettings.HelperProvider,
+        () => AppSettings.TierModelFor("codex", "flash") ?? HelperModel.DefaultCodexModel);
 
     /// <summary>Raised when a background task fails due to missing CLI authentication.</summary>
     public event EventHandler<string?>? HelperLoginRequired;

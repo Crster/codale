@@ -47,6 +47,9 @@ public sealed class FeatureRoutingTests
         var decision = FeatureRouting.Interpret(Call("dash1"), "it still fails", Both, "login1");
 
         Assert.Equal(FeatureAction.Stay, decision.Action);
+
+        var chartFollowUp = FeatureRouting.Interpret(Call("dash1"), "the chart still not showing daily data.", Both, "login1");
+        Assert.Equal(FeatureAction.Stay, chartFollowUp.Action);
     }
 
     [Fact]
