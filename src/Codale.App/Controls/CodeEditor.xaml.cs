@@ -301,6 +301,7 @@ public sealed partial class CodeEditor : UserControl
         // Tunnelling: the focus system takes Tab before a bubbling KeyDown fires.
         PreviewKeyDown += OnEditorKeyDown;
         CharacterReceived += OnEditorCharacterReceived;
+        InitCompletion();
 
         // FontSize changes (zoom, or XAML styling) re-measure everything.
         RegisterPropertyChangedCallback(FontSizeProperty, (_, _) => OnFontMetricsChanged());
@@ -518,7 +519,11 @@ public sealed partial class CodeEditor : UserControl
     /// <summary>Raised whenever the scroll offsets changed, so overlays can move with the text.</summary>
     public event EventHandler? ScrollChanged;
 
-    private void RaiseTextChanged() => TextChanged?.Invoke(this);
+    private void RaiseTextChanged()
+    {
+        _docWordsDirty = true;
+        TextChanged?.Invoke(this);
+    }
 
     private void RaiseSelectionChanged() =>
         SelectionChanged?.Invoke(this, new EditorSelectionEventArgs
@@ -1014,6 +1019,8 @@ public sealed partial class CodeEditor : UserControl
             }
         }
 
+        DrawDiffPeek(session, viewportHeight);
+        DrawDiffMarkers(session, viewportHeight);
         UpdateExtent();
     }
 
@@ -1160,6 +1167,7 @@ public sealed partial class CodeEditor : UserControl
 
     private void OnPointerExited(object sender, PointerRoutedEventArgs e)
     {
+        HideDiffPreview();
         if (!IsPointerCaptured(e))
         {
             ProtectedCursor = null;
@@ -1170,6 +1178,7 @@ public sealed partial class CodeEditor : UserControl
     {
         if (!IsPointerCaptured(e))
         {
+            UpdateDiffHover(e);
             return;
         }
 
@@ -1391,6 +1400,12 @@ public sealed partial class CodeEditor : UserControl
 
     private void OnEditorKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (HandleCompletionKey(e))
+        {
+            e.Handled = true;
+            return;
+        }
+
         var ctrl = IsCtrlDown();
         var shift = IsShiftDown();
 
@@ -1436,6 +1451,7 @@ public sealed partial class CodeEditor : UserControl
 
         args.Handled = true;
         InsertText(ch.ToString());
+        OnCharacterTyped(ch);
     }
 
     private int VisibleLineCount() => Math.Max(1, (int)(Canvas.ActualHeight / _lineHeight) - 1);

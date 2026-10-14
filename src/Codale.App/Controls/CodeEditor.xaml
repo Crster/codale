@@ -47,5 +47,32 @@
             ViewChanged="OnViewChanged">
             <Canvas x:Name="Extent" IsHitTestVisible="False" />
         </ScrollViewer>
+
+        <!-- Suggestions while typing; never takes focus, the editor keeps the keyboard. -->
+        <Popup x:Name="CompletionPopup" IsLightDismissEnabled="False">
+            <Border
+                MinWidth="240"
+                MaxWidth="420"
+                Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="6">
+                <ListView
+                    x:Name="CompletionList"
+                    MaxHeight="220"
+                    IsItemClickEnabled="True"
+                    IsTabStop="False"
+                    SelectionMode="Single"
+                    ItemClick="OnCompletionItemClick">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="MinHeight" Value="24" />
+                            <Setter Property="Padding" Value="8,0,8,0" />
+                            <Setter Property="IsTabStop" Value="False" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                </ListView>
+            </Border>
+        </Popup>
     </Grid>
 </UserControl>

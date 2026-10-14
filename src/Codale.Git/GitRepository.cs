@@ -784,6 +784,31 @@ public sealed class GitRepository
         _ => GitChangeKind.Unmodified,
     };
 
+    /// <summary>
+    /// The text of <paramref name="filePath"/> as committed at HEAD, for diffing against the
+    /// editor buffer. An empty string means the file is new (not in HEAD yet); null means there is
+    /// nothing to compare against - not a repository, or the file is git-ignored.
+    /// </summary>
+    public async Task<string?> GetHeadTextAsync(string filePath, CancellationToken ct = default)
+    {
+        var name = System.IO.Path.GetFileName(filePath);
+        var inside = await RunReadAsync(["rev-parse", "--is-inside-work-tree"], ct).ConfigureAwait(false);
+        if (!inside.Success)
+        {
+            return null;
+        }
+
+        // Exit 0 means ignored. Paths are relative to the working directory (the file's folder).
+        var ignored = await RunReadAsync(["check-ignore", "-q", "--", name], ct).ConfigureAwait(false);
+        if (ignored.Success)
+        {
+            return null;
+        }
+
+        var shown = await RunReadAsync(["show", $"HEAD:./{name}"], ct).ConfigureAwait(false);
+        return shown.Success ? shown.StandardOutput : string.Empty;
+    }
+
     private Task<GitResult> RunReadAsync(string[] arguments, CancellationToken ct) =>
         GitProcess.RunAsync(_workingDirectory, arguments, readOnly: true, GitProcess.ReadTimeout, ct);
 }

@@ -3683,6 +3683,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Ends a plan turn: hands the session back its previous permission mode.</summary>
     private void RestoreAfterPlanTurn()
     {
+        // A subagent still running means the CLI carries on once it reports, in the same
+        // plan: leaving plan mode now makes its ExitPlanMode fail ("not in plan mode") and
+        // skips the approval. The turn that finishes the plan restores instead.
+        if (_planSession is not null && HasActiveSubagents)
+        {
+            return;
+        }
+
         RestorePlanEffort();
 
         if (_planSession is null)

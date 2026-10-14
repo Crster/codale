@@ -393,7 +393,80 @@ public sealed partial class EditorTab : UserControl
     {
         ViewModel = viewModel;
         Bindings.Update();
+        ViewModel.Saved += (_, _) => _ = RefreshDiffMarkersAsync(refetchHead: true);
         return this;
+    }
+
+    // ------------------------------------------------------------------ diff gutter
+
+    private DispatcherQueueTimer? _diffTimer;
+    private string? _headText;
+    private int _diffSequence;
+
+    /// <summary>
+    /// Recomputes the change bars in the editor gutter against the file's text at HEAD. The
+    /// baseline is only re-read from git when the file was loaded or saved; plain typing just
+    /// re-diffs the buffer against the cached one.
+    /// </summary>
+    private async Task RefreshDiffMarkersAsync(bool refetchHead)
+    {
+        if (ViewModel?.FilePath is not { } path || ViewModel.LoadedText is null)
+        {
+            FileEditor.SetDiffMarkers([]);
+            return;
+        }
+
+        var sequence = ++_diffSequence;
+        try
+        {
+            if (refetchHead)
+            {
+                var directory = System.IO.Path.GetDirectoryName(path);
+                _headText = directory is null || !System.IO.Directory.Exists(directory)
+                    ? null
+                    : await new Codale.Git.GitRepository(directory).GetHeadTextAsync(path);
+            }
+
+            if (sequence != _diffSequence)
+            {
+                return;
+            }
+
+            if (_headText is not { } head)
+            {
+                FileEditor.SetDiffMarkers([]);
+                return;
+            }
+
+            var current = FileEditor.GetText();
+            var markers = await Task.Run(() => DiffMarkers.Build(head, current));
+            if (sequence == _diffSequence)
+            {
+                FileEditor.SetDiffMarkers(markers);
+            }
+        }
+        catch
+        {
+            // A missing git or a locked repository just means no bars.
+            if (sequence == _diffSequence)
+            {
+                FileEditor.SetDiffMarkers([]);
+            }
+        }
+    }
+
+    private void ScheduleDiffRefresh()
+    {
+        if (_diffTimer is null)
+        {
+            _diffTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
+            _diffTimer.Interval = TimeSpan.FromMilliseconds(400);
+            _diffTimer.IsRepeating = false;
+            _diffTimer.Tick += (_, _) => _ = RefreshDiffMarkersAsync(refetchHead: false);
+        }
+
+        _diffTimer.Stop();
+        _diffTimer.Start();
     }
 
     /// <summary>Loads a file into this tab and applies per-language highlighting.</summary>
@@ -434,6 +507,7 @@ public sealed partial class EditorTab : UserControl
             }
 
             ApplyHighlighting(path);
+            _ = RefreshDiffMarkersAsync(refetchHead: true);
         }
     }
 
@@ -534,6 +608,7 @@ public sealed partial class EditorTab : UserControl
             }
 
             ApplyHighlighting(path);
+            _ = RefreshDiffMarkersAsync(refetchHead: true);
         }
     }
 
@@ -642,6 +717,11 @@ public sealed partial class EditorTab : UserControl
         {
             ViewModel.MarkDirty();
             Edited?.Invoke(this, EventArgs.Empty);
+        }
+
+        if (!_loadingText)
+        {
+            ScheduleDiffRefresh();
         }
 
         // Restarting on every keystroke leaves only the last one counted.

@@ -144,6 +144,42 @@ public sealed partial class ArtifactTab : UserControl
             ShowRevisionNote(artifact.Revision, artifact.Markdown);
             _markdown.BasePath = artifact.SourcePath is { } source ? System.IO.Path.GetDirectoryName(source) : null;
             _markdown.Markdown = artifact.IsImage ? "_The image file is no longer available._" : ReadMarkdown(artifact);
+
+            if (artifact.Revision is null && artifact.IsFile && !artifact.IsImage)
+            {
+                _ = ShowGitChangesAsync(artifact);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A plan file with no agent revision still marks what differs from its committed version, so
+    /// the margin bars (and their hover preview of the old wording) work for any plan under git.
+    /// </summary>
+    private async Task ShowGitChangesAsync(SessionArtifact artifact)
+    {
+        if (artifact.SourcePath is not { } path || System.IO.Path.GetDirectoryName(path) is not { } directory || !System.IO.Directory.Exists(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            var head = await new Codale.Git.GitRepository(directory).GetHeadTextAsync(path);
+            if (head is null || !ReferenceEquals(Artifact, artifact) || artifact.Revision is not null)
+            {
+                return;
+            }
+
+            var current = ReadMarkdown(artifact);
+            if (head.Length > 0 && !string.Equals(head.Replace("\r\n", "\n"), current.Replace("\r\n", "\n"), StringComparison.Ordinal))
+            {
+                _markdown.SetRevision(new PlanRevision(head, []));
+            }
+        }
+        catch
+        {
+            // No git, or a locked repository: the plan just shows without bars.
         }
     }
 

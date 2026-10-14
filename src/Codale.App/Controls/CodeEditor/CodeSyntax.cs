@@ -250,6 +250,14 @@ public static class CodeTokenizer
     private static LanguageDef GetDef(CodeSyntax syntax) =>
         Defs.TryGetValue(syntax, out var def) ? def : new LanguageDef { StringChars = ['"'] };
 
+    /// <summary>The language's keywords and constants, for the completion list.</summary>
+    public static IEnumerable<string> KeywordsOf(CodeSyntax syntax) =>
+        Defs.TryGetValue(syntax, out var def) ? def.Keywords.Concat(def.Constants).Distinct() : [];
+
+    /// <summary>The language's built-in type names, for the completion list.</summary>
+    public static IEnumerable<string> TypesOf(CodeSyntax syntax) =>
+        Defs.TryGetValue(syntax, out var def) ? def.Types : [];
+
     private const int ModeInBlockComment = 1;
     private const int ModeInTripleString = 2;
 
