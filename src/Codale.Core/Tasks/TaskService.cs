@@ -42,24 +42,6 @@ public interface ITaskService
     Task<TaskSnapshot> ReadTerminalAsync(string id, long? since, int? tailChars, CancellationToken ct);
 }
 
-/// <summary>
-/// Work the app does for the agent on its background-task model (a BYOK provider), so the
-/// chat model spends fewer tokens: exploring the codebase, answering questions about files
-/// it has not read, and condensing large shell output. Reached over the same pipe as the
-/// task tools; the hook and the MCP exe hold no model of their own.
-/// </summary>
-public interface ITaskAssist
-{
-    /// <summary>Answers an open-ended codebase question with file:line pointers.</summary>
-    Task<string> ExploreAsync(string question, CancellationToken ct);
-
-    /// <summary>A digest of a command's output that keeps every error, or null when no model is available for it.</summary>
-    Task<string?> DigestAsync(string command, string output, CancellationToken ct);
-
-    /// <summary>A tool result reached the agent as <paramref name="afterChars"/> instead of <paramref name="beforeChars"/>.</summary>
-    void RecordSaved(long beforeChars, long afterChars);
-}
-
 /// <summary><see cref="ITaskService"/> straight over the manager that owns the processes.</summary>
 public sealed class LocalTaskService(HostedTaskManager manager, ITerminalSource? terminals = null) : ITaskService
 {
@@ -134,15 +116,12 @@ public sealed class LocalTaskService(HostedTaskManager manager, ITerminalSource?
 public sealed class TaskPipeServer : IDisposable
 {
     private readonly ITaskService _service;
-    private readonly ITaskAssist? _assist;
     private readonly byte[] _token;
     private readonly CancellationTokenSource _cts = new();
 
-    /// <param name="assist">The model-backed helpers; null answers their requests with an error.</param>
-    public TaskPipeServer(ITaskService service, ITaskAssist? assist = null)
+    public TaskPipeServer(ITaskService service)
     {
         _service = service;
-        _assist = assist;
         PipeName = "codale-tasks-" + Guid.NewGuid().ToString("N");
         Token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
         _token = Encoding.UTF8.GetBytes(Token);
@@ -295,19 +274,6 @@ public sealed class TaskPipeServer : IDisposable
                         request["tailChars"]?.GetValue<int>(),
                         ct).ConfigureAwait(false));
 
-                case "explore":
-                    var exploreQuestion = request["question"]?.GetValue<string>()
-                        ?? request["prompt"]?.GetValue<string>()
-                        ?? request["query"]?.GetValue<string>()
-                        ?? "";
-                    return Text(await Assist.ExploreAsync(exploreQuestion, ct).ConfigureAwait(false));
-
-                case "digest":
-                    return Text(await Assist.DigestAsync(
-                        request["command"]?.GetValue<string>() ?? "",
-                        request["output"]?.GetValue<string>() ?? throw new TaskServiceException("output is required."),
-                        ct).ConfigureAwait(false));
-
                 case "panel":
                     var kind = request["kind"]?.GetValue<string>() ?? throw new TaskServiceException("kind is required.");
                     var input = request["input"] ?? throw new TaskServiceException("input is required.");
@@ -316,9 +282,6 @@ public sealed class TaskPipeServer : IDisposable
                         PanelPublished?.Invoke(kind, doc.RootElement.Clone());
                     }
 
-                    return new JsonObject { ["ok"] = true };
-                case "saved":
-                    Assist.RecordSaved(request["before"]?.GetValue<long>() ?? 0, request["after"]?.GetValue<long>() ?? 0);
                     return new JsonObject { ["ok"] = true };
 
                 default:
@@ -340,11 +303,6 @@ public sealed class TaskPipeServer : IDisposable
             return new JsonObject { ["ok"] = false, ["error"] = e.Message };
         }
     }
-
-    private ITaskAssist Assist =>
-        _assist ?? throw new TaskServiceException("Codale has no background-task model for this; use the normal tools.");
-
-    private static JsonObject Text(string? text) => new() { ["ok"] = true, ["text"] = text };
 
     internal static JsonObject Json(TaskSnapshot t) => new()
     {
@@ -368,51 +326,9 @@ public sealed class TaskPipeServer : IDisposable
 }
 
 /// <summary>The MCP exe's end of the pipe: an <see cref="ITaskService"/> that asks the app.</summary>
-public sealed class TaskPipeClient(string pipeName, string token) : ITaskService, ITaskAssist
+public sealed class TaskPipeClient(string pipeName, string token) : ITaskService
 {
-    /// <summary>
-    /// The hard limit on one explore. Claude sessions Codale starts raise the CLI's 120 s
-    /// background cut-over past this, so the agent waits for the answer itself.
-    /// </summary>
-    public static readonly TimeSpan ExploreTimeout = TimeSpan.FromMinutes(30);
-
-    /// <summary>A hook holds the agent up while it waits, so a slow digest is given up on.</summary>
-    public static readonly TimeSpan DigestTimeout = TimeSpan.FromSeconds(25);
-
     private readonly SemaphoreSlim _gate = new(1, 1);
-
-    public async Task<string> ExploreAsync(string question, CancellationToken ct) =>
-        TextOf(await CallAsync(new JsonObject { ["op"] = "explore", ["question"] = question }, ct, ExploreTimeout, exclusive: false)
-            .ConfigureAwait(false)) ?? "";
-
-    public async Task<string?> DigestAsync(string command, string output, CancellationToken ct) =>
-        TextOf(await CallAsync(
-                new JsonObject { ["op"] = "digest", ["command"] = command, ["output"] = output },
-                ct,
-                DigestTimeout,
-                exclusive: false)
-            .ConfigureAwait(false));
-
-    /// <remarks>Blocks for the 3 s the async form is bounded by; hosts that can await should call <see cref="RecordSavedAsync"/>.</remarks>
-    public void RecordSaved(long beforeChars, long afterChars) =>
-        Task.Run(() => RecordSavedAsync(beforeChars, afterChars, CancellationToken.None)).GetAwaiter().GetResult();
-
-    /// <summary>Reports a saving. Never throws: a lost tally is no reason to fail a tool call.</summary>
-    public async Task RecordSavedAsync(long beforeChars, long afterChars, CancellationToken ct)
-    {
-        try
-        {
-            await CallAsync(
-                    new JsonObject { ["op"] = "saved", ["before"] = beforeChars, ["after"] = afterChars },
-                    ct,
-                    TimeSpan.FromSeconds(3),
-                    exclusive: false)
-                .ConfigureAwait(false);
-        }
-        catch (Exception e) when (e is TaskServiceException or IOException or OperationCanceledException or JsonException)
-        {
-        }
-    }
 
     /// <summary>
     /// Shows a todos_set / artifact_add call of an agent CLI outside the chat in the session panel
@@ -436,8 +352,6 @@ public sealed class TaskPipeClient(string pipeName, string token) : ITaskService
             return e.Message;
         }
     }
-
-    private static string? TextOf(JsonObject response) => response["text"]?.GetValue<string>();
 
     public Task<TaskSnapshot> StartAsync(string command, string? name, int waitSeconds, CancellationToken ct) =>
         CallOneAsync(new JsonObject { ["op"] = "start", ["command"] = command, ["name"] = name, ["waitSeconds"] = waitSeconds }, ct);

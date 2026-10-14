@@ -7,7 +7,7 @@ namespace Codale.Search;
 /// endpoint backs it, and ripgrep's .gitignore handling is no protection outside a git
 /// repository, so these are refused by name before any content is read.
 /// </summary>
-internal static class SensitivePaths
+public static class SensitivePaths
 {
     private static readonly string[] FileNamePatterns =
     [

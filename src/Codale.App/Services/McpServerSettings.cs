@@ -69,9 +69,8 @@ public sealed class McpServerSettings
 
     /// <summary>The tasks server, wired to this chat's pipe; the exe finds the app through its environment.</summary>
     /// <param name="runDirectory">Where the chat's tasks run (its worktree, when it has one); the command list itself is always the project's.</param>
-    /// <param name="assist">Offer the explore tool, answered by the background-task model.</param>
     /// <param name="pushToPanel">For an agent CLI in a terminal, whose tool stream the app cannot read: todos_set and artifact_add are sent over the pipe.</param>
-    public McpServerSpec? TasksSpec(string pipeName, string token, string? runDirectory = null, bool assist = false, bool pushToPanel = false) => !TasksAvailable
+    public McpServerSpec? TasksSpec(string pipeName, string token, string? runDirectory = null, bool pushToPanel = false) => !TasksAvailable
         ? null
         : new McpServerSpec
         {
@@ -89,37 +88,9 @@ public sealed class McpServerSettings
                 ["CODALE_TASKS_TOKEN"] = token,
                 ["CODALE_PROJECT_DIR"] = _projectPath,
                 ["CODALE_RUN_DIR"] = runDirectory ?? _projectPath,
-                ["CODALE_ASSIST"] = assist ? "1" : "0",
                 ["CODALE_PANEL_PUSH"] = pushToPanel ? "1" : "0",
             },
         };
-
-    /// <summary>
-    /// The <c>PostToolUse</c> hook that condenses long shell output; with
-    /// <paramref name="digest"/> it asks the background-task model before cutting.
-    /// </summary>
-    public string? ShellOutputHookCommand(bool digest) => !TasksAvailable
-        ? null
-        : TasksHook($"--posttooluse-hook{(digest ? " --digest" : "")}");
-
-    /// <summary>The <c>PreToolUse</c> hook that turns away a first whole-file read of a large file.</summary>
-    public string? ReadGuardCommand() => !TasksAvailable
-        ? null
-        : TasksHook("--pretooluse-hook --read-guard 400");
-
-    /// <summary>Standing instruction that sends exploration to the background-task model.</summary>
-    public const string AssistDirective =
-        "To save context, codebase exploration goes through Codale's helper model: for any question about this project's code " +
-        "that you cannot answer from a file you already have open (where is X handled, how does Y work, which files are involved in Z) " +
-        "call mcp__codale-tasks__explore FIRST, instead of a chain of Grep/Glob/Read calls or an Explore/Task subagent. It answers " +
-        "with the files to read as path:lines and what each range declares; then Read only those ranges. When you already know the " +
-        "file or symbol, Grep and Read it directly, including large files when you need them. The tool is deferred: load it first " +
-        "with one ToolSearch (select:mcp__codale-tasks__explore).";
-
-    /// <summary>Standing instruction for short replies, when the user turned it on.</summary>
-    public const string TerseDirective =
-        "Keep replies short: no preamble and no recap of what you are about to do or just did. Do not reprint code you " +
-        "wrote or read; point to it as path:line. Report results in at most five bullets unless the user asks for more.";
 
     /// <summary>The CLI's own task-list tools, switched off when todos_set is available so the panel has one source.</summary>
     public const string NativeTodoTools = "TodoWrite,TaskCreate,TaskUpdate,TaskList,TaskGet";
@@ -246,13 +217,9 @@ public sealed class McpServerSettings
     private static void WriteAgyRules(string path, IReadOnlyList<McpServerSpec> servers)
     {
         var parts = new List<string>();
-        if (servers.FirstOrDefault(s => s.Name == TasksName) is { } tasks)
+        if (servers.Any(s => s.Name == TasksName))
         {
             parts.Add($"codale-tasks: {McpInstructions.Tasks}");
-            if (tasks.Env?.GetValueOrDefault("CODALE_ASSIST") == "1")
-            {
-                parts.Add($"codale-tasks: {McpInstructions.Explore}");
-            }
         }
 
         if (servers.Any(s => s.Name == BrowserName))

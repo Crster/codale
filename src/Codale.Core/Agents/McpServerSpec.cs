@@ -84,7 +84,7 @@ public sealed record McpServerSpec
 
     /// <summary>
     /// The one <c>--settings</c> document: ask rules for servers that require approval (and
-    /// for individual <see cref="AskTools"/>), deny rules, and the host's hooks - the shell
+    /// for individual <see cref="AskTools"/>) and the host's hooks - the shell
     /// guard being a <c>PreToolUse</c> hook that refuses background launches (see the tasks
     /// MCP exe). Null when there is nothing to say.
     /// </summary>
@@ -105,12 +105,6 @@ public sealed record McpServerSpec
             permissions["ask"] = new JsonArray(ask);
         }
 
-        var deny = hooks.DenyRules.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => (JsonNode)r.Trim()).ToArray();
-        if (deny.Length > 0)
-        {
-            permissions["deny"] = new JsonArray(deny);
-        }
-
         if (permissions.Count > 0)
         {
             settings["permissions"] = permissions;
@@ -122,26 +116,10 @@ public sealed record McpServerSpec
             pre.Add(Hook(ShellTools, guard));
         }
 
-        if (hooks.ReadGuardCommand is { Length: > 0 } readGuard)
-        {
-            pre.Add(Hook("Read", readGuard));
-        }
-
-        var post = new JsonArray();
-        if (hooks.ShellOutputCommand is { Length: > 0 } output)
-        {
-            post.Add(Hook(ShellTools, output, hooks.ShellOutputTimeoutSeconds));
-        }
-
         var events = new JsonObject();
         if (pre.Count > 0)
         {
             events["PreToolUse"] = pre;
-        }
-
-        if (post.Count > 0)
-        {
-            events["PostToolUse"] = post;
         }
 
         if (events.Count > 0)
@@ -166,21 +144,9 @@ public sealed record McpServerSpec
     }
 }
 
-/// <summary>The host's hooks and deny rules for a Claude session, rendered into its <c>--settings</c>.</summary>
+/// <summary>The host's hooks for a Claude session, rendered into its <c>--settings</c>.</summary>
 public sealed record ClaudeHookSettings
 {
     /// <summary><c>PreToolUse</c> on the shell tools: refuses background launches.</summary>
     public string? ShellGuardCommand { get; init; }
-
-    /// <summary><c>PreToolUse</c> on Read: turns away a first whole-file read of a large file.</summary>
-    public string? ReadGuardCommand { get; init; }
-
-    /// <summary><c>PostToolUse</c> on the shell tools: condenses long output before the model reads it.</summary>
-    public string? ShellOutputCommand { get; init; }
-
-    /// <summary>How long the CLI waits for the output hook, which may ask a model for a digest.</summary>
-    public int ShellOutputTimeoutSeconds { get; init; } = 45;
-
-    /// <summary>Permission rules the CLI refuses outright, e.g. <c>Read(**/bin/**)</c>.</summary>
-    public IReadOnlyList<string> DenyRules { get; init; } = [];
 }

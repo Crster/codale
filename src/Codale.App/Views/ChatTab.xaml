@@ -1336,11 +1336,32 @@
         </VisualStateManager.VisualStateGroups>
 
         <ScrollViewer x:Name="ChatScroller" VerticalScrollBarVisibility="Auto">
-            <ItemsControl
-                x:Name="Transcript"
-                Padding="0,0,8,8"
-                ItemTemplateSelector="{StaticResource ChatTemplateSelector}"
-                ItemsSource="{x:Bind ViewModel.Items}" />
+            <StackPanel>
+                <!--  The feature this chat works on: its summary, one click away; nothing of its past is loaded.  -->
+                <Expander
+                    Margin="0,0,8,8"
+                    HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Stretch"
+                    Expanding="OnFeatureCardExpanding"
+                    Visibility="{x:Bind ViewModel.HasFeature, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                    <Expander.Header>
+                        <TextBlock FontSize="12" Text="{x:Bind ViewModel.FeatureName, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                    </Expander.Header>
+                    <StackPanel Spacing="8">
+                        <TextBlock
+                            x:Name="FeatureSummaryText"
+                            FontSize="12"
+                            IsTextSelectionEnabled="True"
+                            TextWrapping="Wrap" />
+                        <HyperlinkButton Click="OnViewFeatureHistoryClick" Content="View full history" Padding="0" />
+                    </StackPanel>
+                </Expander>
+                <ItemsControl
+                    x:Name="Transcript"
+                    Padding="0,0,8,8"
+                    ItemTemplateSelector="{StaticResource ChatTemplateSelector}"
+                    ItemsSource="{x:Bind ViewModel.Items}" />
+            </StackPanel>
         </ScrollViewer>
 
         <!--  Shown until the first message arrives.  -->
@@ -1748,25 +1769,6 @@
             </Border>
             </StackPanel>
         </Grid>
-
-        <Button
-            x:Name="OpenPanelButton"
-            Grid.Row="0"
-            HorizontalAlignment="Right"
-            VerticalAlignment="Top"
-            Margin="0,0,4,0"
-            Width="32"
-            Height="32"
-            Padding="0"
-            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="6"
-            Click="OnOpenPanelClick"
-            ToolTipService.ToolTip="Session panel"
-            Visibility="Collapsed">
-            <FontIcon FontSize="13" Glyph="&#xE99A;" />
-        </Button>
     </Grid>
 
     <views:AgentSessionPanel

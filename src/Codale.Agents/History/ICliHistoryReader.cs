@@ -1,15 +1,12 @@
-using Codale.Agents.Claude;
-using Codale.Core.Agents;
-
 namespace Codale.Agents.History;
 
 /// <summary>
-/// Common interface for reading and replaying historical conversation sessions
+/// Common interface for listing historical conversation sessions
 /// recorded by AI coding agent CLIs running in Codale or externally.
 /// </summary>
 public interface ICliHistoryReader
 {
-    /// <summary>The identifier of the CLI this reader supports (e.g. "agy", "aider", "goose", "gemini").</summary>
+    /// <summary>The identifier of the CLI this reader supports (e.g. "claude", "codex").</summary>
     string CliId { get; }
 
     /// <summary>
@@ -23,7 +20,4 @@ public interface ICliHistoryReader
 
     /// <summary>Lists recorded sessions for the target project, sorted by most recently updated first.</summary>
     IReadOnlyList<TranscriptSummary> ListSessions();
-
-    /// <summary>Replays the turns of a session as <see cref="AgentEvent"/> instances that Codale's UI can render.</summary>
-    IEnumerable<AgentEvent> Replay(string sessionId);
 }

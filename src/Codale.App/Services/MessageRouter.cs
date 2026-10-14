@@ -1,4 +1,5 @@
 using Codale.App.ViewModels;
+using Codale.Core.Features;
 using Codale.Core.Helper;
 
 namespace Codale.App.Services;
@@ -24,7 +25,58 @@ public sealed class MessageRouter
     public bool IsAvailable => _client.IsAvailable;
 
     /// <summary>The user is typing a message this router will read: get the model ready.</summary>
-    public void Prewarm() => _client.Prewarm(MessageRouting.SystemPrompt, [MessageRouting.RouteTool]);
+    public void Prewarm(FeatureService? features)
+    {
+        if (features is not null && AppSettings.SmartHistory)
+        {
+            _client.Prewarm(FeatureRouting.SystemPrompt, [FeatureRouting.RouteTool(features.List())]);
+        }
+        else
+        {
+            _client.Prewarm(MessageRouting.SystemPrompt, [MessageRouting.RouteTool]);
+        }
+    }
+
+    /// <summary>
+    /// Smart history's single call: the mode for the message and the feature it is work on (or
+    /// none). The message goes out as typed; no CLI, a slow one or a timeout leave it where it
+    /// was typed, in the chat's feature.
+    /// </summary>
+    public async Task<FeatureDecision> RouteFeatureAsync(string text, ChatViewModel chat, FeatureService features, CancellationToken ct = default)
+    {
+        if (MessageRouting.TryRouteLocally(text) is { } local)
+        {
+            CrashLog.Trace("Routed locally: go-ahead");
+            return new FeatureDecision(local, FeatureAction.Stay);
+        }
+
+        if (!IsAvailable)
+        {
+            return new FeatureDecision(MessageRouting.RouteWithoutModel(text), FeatureAction.Stay);
+        }
+
+        var candidates = features.CandidatesFor(text, chat.FeatureId);
+        var lastAssistant = chat.Items.OfType<AssistantMessageItem>().LastOrDefault()?.Text?.Trim();
+        var conversation = FeatureRouting.BuildConversation(text, candidates, chat.FeatureId, lastAssistant);
+        var tool = FeatureRouting.RouteTool(candidates);
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(Timeout);
+
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var call = await _client.CallToolAsync(FeatureRouting.SystemPrompt, conversation, [tool], timeout.Token);
+            var decision = FeatureRouting.Interpret(call, text, candidates, chat.FeatureId);
+            CrashLog.Trace($"Feature-routed in {started.ElapsedMilliseconds}ms: intent={decision.Route.Intent} action={decision.Action}");
+            return decision;
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Trace($"Feature routing skipped after {started.ElapsedMilliseconds}ms: {ex.Message}");
+            return new FeatureDecision(MessageRouting.RouteWithoutModel(text), FeatureAction.Stay);
+        }
+    }
 
     public async Task<RouteDecision> RouteAsync(string text, ChatViewModel chat, CancellationToken ct = default)
     {

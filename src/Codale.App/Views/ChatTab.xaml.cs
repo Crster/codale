@@ -106,22 +106,8 @@ public sealed partial class ChatTab : UserControl
         set => SessionPanel.Workspace = value;
     }
 
-    /// <summary>Whether this tab's session panel is currently open.</summary>
-    public bool IsSessionPanelOpen => SessionPanel.Visibility == Visibility.Visible;
-
     /// <summary>CLI update was requested from the session panel.</summary>
     public event EventHandler<string>? UpdateCliRequested;
-
-    /// <summary>Toggles the session panel visibility for this chat tab.</summary>
-    public void ToggleSessionPanel() => SetSessionPanelOpen(SessionPanel.Visibility != Visibility.Visible);
-
-    public void SetSessionPanelOpen(bool open)
-    {
-        SessionPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
-        OpenPanelButton.Visibility = open ? Visibility.Collapsed : Visibility.Visible;
-    }
-
-    private void OnOpenPanelClick(object sender, RoutedEventArgs e) => SetSessionPanelOpen(true);
 
     /// <summary>Whether the transcript should ride the bottom. Only scroll events may
     /// change it: content growth is answered by following, so it must never count as
@@ -138,7 +124,6 @@ public sealed partial class ChatTab : UserControl
     {
         InitializeComponent();
 
-        SessionPanel.CollapseRequested += (_, _) => SetSessionPanelOpen(false);
         SessionPanel.FileDiffRequested += (_, path) => ToolFileRequested?.Invoke(this, new ToolFileRequestEventArgs(path, isEdit: true));
         SessionPanel.ArtifactRequested += (_, artifact) => ArtifactRequested?.Invoke(this, artifact);
         SessionPanel.TaskPeekRequested += (_, task) => RunningTaskPeekRequested?.Invoke(this, task);
@@ -306,6 +291,43 @@ public sealed partial class ChatTab : UserControl
     }
 
     /// <summary>A step's file target: edits open the call's own diff, reads open the file.</summary>
+    private void OnFeatureCardExpanding(Expander sender, ExpanderExpandingEventArgs args) =>
+        FeatureSummaryText.Text = ViewModel.FeatureSummary();
+
+    /// <summary>The feature's whole log, newest page first, read only when asked for: a chat never loads it by itself.</summary>
+    private async void OnViewFeatureHistoryClick(object sender, RoutedEventArgs e)
+    {
+        const int Page = 150;
+        var count = Page;
+
+        var text = new TextBlock { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, FontSize = 12 };
+        var more = new HyperlinkButton { Content = "Load earlier", Padding = new Thickness(0), Visibility = Visibility.Collapsed };
+        var body = new StackPanel { Spacing = 8, Width = 560, Children = { more, text } };
+        var scroller = new ScrollViewer { MaxHeight = 480, Content = body };
+
+        void Load()
+        {
+            var (history, hasMore) = ViewModel.FeatureHistoryText(count);
+            text.Text = history.Length > 0 ? history : "Nothing recorded for this feature yet.";
+            more.Visibility = hasMore ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        more.Click += (_, _) =>
+        {
+            count += Page;
+            Load();
+        };
+
+        Load();
+        await new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = ViewModel.FeatureName,
+            Content = scroller,
+            CloseButtonText = "Close",
+        }.ShowAsync();
+    }
+
     private void OnToolFileClick(object sender, RoutedEventArgs e)
     {
         if (((FrameworkElement)sender).Tag is ToolCallItem { PrimaryFile: { } file } call)

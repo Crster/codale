@@ -60,17 +60,40 @@
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                 <StackPanel Padding="20,0,20,24">
 
+                    <TextBlock Style="{StaticResource GroupTitle}" Text="Codale accounts" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock
+                                Margin="16,12,16,0"
+                                Style="{StaticResource Hint}"
+                                Text="Codale signs in to Claude and Codex on its own, separate from the claude and codex you run in a terminal. Use one for work and the other for personal. Chats already open keep their login until they restart." />
+                            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Claude" />
+                                    <TextBlock x:Name="ClaudeAccountStatus" Style="{StaticResource Hint}" Text="Checking..." />
+                                </StackPanel>
+                                <Button Grid.Column="1" x:Name="ClaudeSignInButton" Click="OnSignInClick" Tag="claude" Content="Sign in" />
+                                <Button Grid.Column="2" x:Name="ClaudeSignOutButton" Click="OnSignOutClick" Tag="claude" Content="Sign out" />
+                            </Grid>
+                            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Codex" />
+                                    <TextBlock x:Name="CodexAccountStatus" Style="{StaticResource Hint}" Text="Checking..." />
+                                </StackPanel>
+                                <Button Grid.Column="1" x:Name="CodexSignInButton" Click="OnSignInClick" Tag="codex" Content="Sign in" />
+                                <Button Grid.Column="2" x:Name="CodexSignOutButton" Click="OnSignOutClick" Tag="codex" Content="Sign out" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
                     <TextBlock Style="{StaticResource GroupTitle}" Text="Custom providers" />
                     <Border Style="{StaticResource Card}">
                         <StackPanel Padding="16,12" Spacing="10">
                             <TextBlock
                                 Style="{StaticResource Hint}"
-                                Text="Your own OpenAI-compatible endpoints, used by Claude through a local bridge. The base URL is the one an OpenAI SDK takes, usually ending in /v1. Pick one in the status bar; Default uses the Claude CLI login. Also editable in settings.json." />
+                                Text="Your own OpenAI-compatible endpoints, used by Claude through a local bridge. The base URL is the one an OpenAI SDK takes, usually ending in /v1. Pick one in the status bar; Default uses Codale's own Claude login, separate from the claude you run in a terminal. Also editable in settings.json." />
                             <StackPanel x:Name="ProvidersPanel" Spacing="6" />
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Button Click="OnAddProviderClick" Content="Add provider" />
-                                <Button Click="OnAddAccountClick" Content="Add account" ToolTipService.ToolTip="Add another Claude login, such as personal or work" />
-                            </StackPanel>
+                            <Button Click="OnAddProviderClick" Content="Add provider" />
                         </StackPanel>
                     </Border>
 
@@ -257,147 +280,111 @@
                                 </StackPanel>
                                 <ToggleSwitch x:Name="SuggestNextPromptToggle" Grid.Column="1" MinWidth="0" Toggled="OnSuggestNextPromptToggled" />
                             </Grid>
-                        </StackPanel>
-                    </Border>
-
-                    <TextBlock Style="{StaticResource GroupTitle}" Text="New chat defaults" />
-                    <Border Style="{StaticResource Card}">
-                        <StackPanel>
                             <Rectangle Style="{StaticResource Divider}" />
                             <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
                                 <StackPanel VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="Default permission mode" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="Auto picks a depth per message; Interactive asks before changes; Plan researches first; Full works without asking. Per-CLI picks in a session override this." TextWrapping="Wrap" />
+                                    <TextBlock Text="History by feature" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Sorts each message into a feature of the project (Login, Downloads...) and keeps one history per feature; a new session starts from that feature's summary instead of replaying old messages. Questions that are not about the project are not saved. Costs one small request per message." />
                                 </StackPanel>
-                                <ComboBox x:Name="DefaultChatModeBox" Grid.Column="1" VerticalAlignment="Center" Width="190" SelectionChanged="OnDefaultChatModeChanged">
+                                <ToggleSwitch x:Name="SmartHistoryToggle" Grid.Column="1" MinWidth="0" Toggled="OnSmartHistoryToggled" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource GroupTitle}" Text="Claude chat defaults" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Chat mode" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Auto picks a depth per message; Interactive asks before changes; Plan researches first; Full works without asking." />
+                                </StackPanel>
+                                <ComboBox x:Name="ClaudeModeBox" Grid.Column="1" VerticalAlignment="Center" Width="220">
                                     <ComboBoxItem Content="Auto" Tag="automatic" />
                                     <ComboBoxItem Content="Interactive" Tag="manual" />
                                     <ComboBoxItem Content="Plan" Tag="plan" />
                                     <ComboBoxItem Content="Full (no permission prompts)" Tag="auto" />
                                 </ComboBox>
                             </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
                             <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
                                 <StackPanel VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="Default model tier" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="Lite and Flash run the fast model, Pro and Plus the capable one, at the tier's effort. Applies to new chats." TextWrapping="Wrap" />
+                                    <TextBlock Text="Flash model" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Runs the Lite and Flash tiers. The list is read live from the Claude CLI." />
                                 </StackPanel>
-                                <ComboBox x:Name="DefaultTierBox" Grid.Column="1" VerticalAlignment="Center" Width="190" SelectionChanged="OnDefaultTierChanged">
-                                    <ComboBoxItem Content="CLI (whatever it starts with)" Tag="cli" />
-                                    <ComboBoxItem Content="Lite" Tag="lite" />
-                                    <ComboBoxItem Content="Flash" Tag="flash" />
-                                    <ComboBoxItem Content="Pro" Tag="pro" />
-                                    <ComboBoxItem Content="Plus" Tag="plus" />
-                                </ComboBox>
+                                <ComboBox x:Name="ClaudeFlashBox" Grid.Column="1" VerticalAlignment="Center" Width="220" DropDownOpened="OnModelDropDownOpened"></ComboBox>
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Pro model" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Runs the Pro and Plus tiers. The list is read live from the Claude CLI." />
+                                </StackPanel>
+                                <ComboBox x:Name="ClaudeProBox" Grid.Column="1" VerticalAlignment="Center" Width="220" DropDownOpened="OnModelDropDownOpened"></ComboBox>
                             </Grid>
                         </StackPanel>
                     </Border>
 
-                    <TextBlock Style="{StaticResource GroupTitle}" Text="Model tiers" />
-                    <Border Style="{StaticResource Card}">
-                        <StackPanel x:Name="TierModelsPanel" Spacing="4" />
-                    </Border>
-
-                    <TextBlock Style="{StaticResource GroupTitle}" Text="Background tasks" />
+                    <TextBlock Style="{StaticResource GroupTitle}" Text="Codex chat defaults" />
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
                             <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
                                 <StackPanel VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="Background tasks" />
+                                    <TextBlock Text="Chat mode" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Auto picks a depth per message; Interactive asks before changes; Plan researches first; Full works without asking." />
+                                </StackPanel>
+                                <ComboBox x:Name="CodexModeBox" Grid.Column="1" VerticalAlignment="Center" Width="220">
+                                    <ComboBoxItem Content="Auto" Tag="automatic" />
+                                    <ComboBoxItem Content="Interactive" Tag="manual" />
+                                    <ComboBoxItem Content="Plan" Tag="plan" />
+                                    <ComboBoxItem Content="Full (no permission prompts)" Tag="auto" />
+                                </ComboBox>
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Flash model" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Runs the Lite and Flash tiers. The list is read live from the Codex CLI." />
+                                </StackPanel>
+                                <ComboBox x:Name="CodexFlashBox" Grid.Column="1" VerticalAlignment="Center" Width="220" DropDownOpened="OnModelDropDownOpened"></ComboBox>
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Pro model" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Runs the Pro and Plus tiers. The list is read live from the Codex CLI." />
+                                </StackPanel>
+                                <ComboBox x:Name="CodexProBox" Grid.Column="1" VerticalAlignment="Center" Width="220" DropDownOpened="OnModelDropDownOpened"></ComboBox>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource GroupTitle}" Text="Provider override" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Claude CLI provider" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Where new Claude chats connect: your Claude login or one of your providers. Open chats keep theirs." TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ComboBox x:Name="ClaudeProviderBox" Grid.Column="1" VerticalAlignment="Center" Width="190" SelectionChanged="OnCliProviderChanged" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Codex CLI provider" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Where new Codex chats connect: your Codex login or a provider with an OpenAI-compatible base URL. Open chats keep theirs." TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ComboBox x:Name="CodexProviderBox" Grid.Column="1" VerticalAlignment="Center" Width="190" SelectionChanged="OnCliProviderChanged" />
+                            </Grid>
+                            <Rectangle Style="{StaticResource Divider}" />
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Background task provider" />
                                     <TextBlock Style="{StaticResource Hint}" Text="Writes commit messages, names sessions, reads Auto-mode messages and powers search. Uses Claude, Codex, or calls one of your custom providers directly (no process to start, the fastest)." TextWrapping="Wrap" />
                                 </StackPanel>
                                 <ComboBox x:Name="HelperProviderBox" Grid.Column="1" VerticalAlignment="Center" Width="190" SelectionChanged="OnHelperProviderChanged" />
                             </Grid>
-                            <Grid x:Name="CodexAuthRow" ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}" Visibility="Collapsed">
-                                <StackPanel VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="Codex login status" />
-                                    <TextBlock x:Name="CodexAuthStatusText" Style="{StaticResource Hint}" Text="Not checked" />
-                                </StackPanel>
-                                <Button x:Name="CodexSignInButton" Grid.Column="1" VerticalAlignment="Center" Content="Sign in" Click="OnCodexSignInClick" />
-                            </Grid>
-                        </StackPanel>
-                    </Border>
-
-                    <TextBlock Style="{StaticResource GroupTitle}" Text="Token saving" />
-                    <Border Style="{StaticResource Card}">
-                        <StackPanel>
-                            <TextBlock
-                                x:Name="TokenSaverByokHint"
-                                Margin="16,12,16,0"
-                                Style="{StaticResource Hint}"
-                                Text="Explore, output digests and the handoff note need a custom provider for background tasks. Until one is set they stay off, so they never spend Claude tokens."
-                                TextWrapping="Wrap" />
-                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                <StackPanel VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="Condense shell output" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="Build logs, test runs and installs reach Claude without progress noise, passing tests or repeated lines; errors always stay. The full output is kept in a file Claude can read." TextWrapping="Wrap" />
-                                </StackPanel>
-                                <ToggleSwitch x:Name="CompressShellToggle" Grid.Column="1" MinWidth="0" Toggled="OnTokenSaverToggled" />
-                            </Grid>
-                            <Rectangle Style="{StaticResource Divider}" />
-                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                <StackPanel VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="Digest long output" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="Output still long after condensing is summarised by the background-task model instead of being cut to its first and last lines." TextWrapping="Wrap" />
-                                </StackPanel>
-                                <ToggleSwitch x:Name="DigestToggle" Grid.Column="1" MinWidth="0" Toggled="OnTokenSaverToggled" />
-                            </Grid>
-                            <Rectangle Style="{StaticResource Divider}" />
-                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                <StackPanel VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="Explore with the background model" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="Claude gets an explore tool: the background-task model searches and reads the code, and Claude reads only its answer." TextWrapping="Wrap" />
-                                </StackPanel>
-                                <ToggleSwitch x:Name="ExploreToggle" Grid.Column="1" MinWidth="0" Toggled="OnTokenSaverToggled" />
-                            </Grid>
-                            <Rectangle Style="{StaticResource Divider}" />
-                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                <StackPanel VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="Guard large file reads" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="The first whole-file read of a file over 400 lines is turned away in favour of reading just the part needed. Asking again reads it all." TextWrapping="Wrap" />
-                                </StackPanel>
-                                <ToggleSwitch x:Name="ReadGuardToggle" Grid.Column="1" MinWidth="0" Toggled="OnTokenSaverToggled" />
-                            </Grid>
-                            <Rectangle Style="{StaticResource Divider}" />
-                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                <StackPanel VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="Offer a fresh session" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="Once the context is 60% full, offer a fresh session that starts from a handoff note (or a /compact without a custom provider)." TextWrapping="Wrap" />
-                                </StackPanel>
-                                <ToggleSwitch x:Name="HandoffNudgeToggle" Grid.Column="1" MinWidth="0" Toggled="OnTokenSaverToggled" />
-                            </Grid>
-                            <Rectangle Style="{StaticResource Divider}" />
-                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                <StackPanel VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="Cheaper subagents" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="Claude's Explore subagent runs on Haiku and its general-purpose one on Sonnet at medium effort, instead of the chat's model, and both are told to read in ranges and report briefly." TextWrapping="Wrap" />
-                                </StackPanel>
-                                <ToggleSwitch x:Name="CheapSubagentsToggle" Grid.Column="1" MinWidth="0" Toggled="OnTokenSaverToggled" />
-                            </Grid>
-                            <Rectangle Style="{StaticResource Divider}" />
-                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                <StackPanel VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="Short replies" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="Ask Claude for brief answers: no recaps, no reprinted code. Output tokens cost the most." TextWrapping="Wrap" />
-                                </StackPanel>
-                                <ToggleSwitch x:Name="TerseToggle" Grid.Column="1" MinWidth="0" Toggled="OnTokenSaverToggled" />
-                            </Grid>
-                            <Rectangle Style="{StaticResource Divider}" />
-                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                <StackPanel VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="Compact earlier" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="Context percentage at which Claude compacts on its own. 0 keeps the CLI's default." TextWrapping="Wrap" />
-                                </StackPanel>
-                                <NumberBox x:Name="AutoCompactBox" Grid.Column="1" VerticalAlignment="Center" Width="120" Maximum="100" Minimum="0" SmallChange="5" SpinButtonPlacementMode="Compact" ValueChanged="OnAutoCompactChanged" />
-                            </Grid>
-                            <Rectangle Style="{StaticResource Divider}" />
-                            <StackPanel Padding="16,12" Spacing="6">
-                                <StackPanel Spacing="2">
-                                    <TextBlock Text="Never read" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="Deny rules for paths Claude may not read or search, one per line, such as Read(**/bin/**)." TextWrapping="Wrap" />
-                                </StackPanel>
-                                <TextBox x:Name="DenyRulesBox" AcceptsReturn="True" FontFamily="Consolas" FontSize="12" MinHeight="96" LostFocus="OnDenyRulesLostFocus" TextWrapping="NoWrap" />
-                            </StackPanel>
-                            <TextBlock Margin="16,0,16,12" Style="{StaticResource Hint}" Text="These apply to new sessions." />
                         </StackPanel>
                     </Border>
 

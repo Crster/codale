@@ -138,6 +138,16 @@ public static class AppSettings
         set => Set("chat.suggestNextPrompt", value, FormatFlag);
     }
 
+    /// <summary>
+    /// Whether chats keep a history per feature of the project: each message is routed to a feature
+    /// (or to none, when it is no project work), and a session starts from that feature's summary.
+    /// </summary>
+    public static bool SmartHistory
+    {
+        get => Get("chat.smartHistory", () => ReadFlag("chat.smartHistory", true));
+        set => Set("chat.smartHistory", value, FormatFlag);
+    }
+
     /// <summary>Whether the editor draws the gutter with line numbers.</summary>
     public static bool EditorLineNumbers
     {
@@ -275,112 +285,7 @@ public static class AppSettings
         }
     }
 
-    /// <summary>True when background jobs reach a BYOK provider rather than the Claude CLI: the token savers that run a model need one, or they would spend the very tokens they save.</summary>
-    public static bool HasHelperApi => HelperApiProvider is not null;
-
-    /// <summary>Condense long shell output (build logs, test runs) before a Claude session reads it. Read when a session starts.</summary>
-    public static bool TokenSaverCompressShell
-    {
-        get => ReadFlag("tokens.compressShell", true);
-        set => WriteFlag("tokens.compressShell", value);
-    }
-
-    /// <summary>Have the background-task model digest shell output that is still long once condensed.</summary>
-    public static bool TokenSaverDigest
-    {
-        get => ReadFlag("tokens.digest", true);
-        set => WriteFlag("tokens.digest", value);
-    }
-
-    /// <summary>Give Claude sessions the explore tool, answered by the background-task model.</summary>
-    public static bool TokenSaverExplore
-    {
-        get => ReadFlag("tokens.explore", true);
-        set => WriteFlag("tokens.explore", value);
-    }
-
-    /// <summary>Turn away a first whole-file Read of a large file in favour of a ranged read.</summary>
-    public static bool TokenSaverReadGuard
-    {
-        get => ReadFlag("tokens.readGuard", false);
-        set => WriteFlag("tokens.readGuard", value);
-    }
-
-    /// <summary>Offer a fresh session with a handoff summary once the context fills up.</summary>
-    public static bool TokenSaverHandoffNudge
-    {
-        get => ReadFlag("tokens.handoffNudge", true);
-        set => WriteFlag("tokens.handoffNudge", value);
-    }
-
-    /// <summary>Run Claude's Explore subagent on Haiku and its general-purpose one on Sonnet at medium effort, instead of the chat's own model.</summary>
-    public static bool TokenSaverCheapSubagents
-    {
-        get => ReadFlag("tokens.cheapSubagents", true);
-        set => WriteFlag("tokens.cheapSubagents", value);
-    }
-
-    /// <summary>Ask Claude for short replies: no recaps, no reprinted code.</summary>
-    public static bool TokenSaverTerse
-    {
-        get => ReadFlag("tokens.terse", false);
-        set => WriteFlag("tokens.terse", value);
-    }
-
-    /// <summary>Paths Claude sessions may never read: build output, dependencies and lock files.</summary>
-    private static readonly IReadOnlyList<string> DefaultDenyRules =
-    [
-        "Read(**/bin/**)",
-        "Read(**/obj/**)",
-        "Read(**/node_modules/**)",
-        "Read(**/*.lock)",
-        "Read(**/package-lock.json)",
-        "Read(**/packages.lock.json)",
-    ];
-
-    /// <summary>The deny rules Claude sessions start with, one per line in the settings file; unset means the built-in defaults.</summary>
-    public static IReadOnlyList<string> TokenSaverDenyRules
-    {
-        get
-        {
-            var raw = Read("tokens.denyRules", "");
-            return raw.Length == 0
-                ? DefaultDenyRules
-                : [.. raw.Split('\n').Select(r => r.Trim()).Where(r => r.Length > 0 && r != "-")];
-        }
-        set
-        {
-            var lines = value.Select(r => r.Trim()).Where(r => r.Length > 0).ToList();
-
-            // "-" keeps an emptied list empty instead of falling back to the defaults.
-            Write("tokens.denyRules", lines.Count == 0 ? "-" : string.Join('\n', lines));
-            OnChanged();
-        }
-    }
-
-    /// <summary>Context percentage at which Claude compacts on its own; 0 leaves the CLI's default.</summary>
-    public static int TokenSaverAutoCompactPercent
-    {
-        get => Read("tokens.autoCompactPercent", 0, ParseInt) is var p and > 0 and <= 100 ? p : 0;
-        set
-        {
-            Write("tokens.autoCompactPercent", value is > 0 and <= 100 ? FormatInt(value) : "");
-            OnChanged();
-        }
-    }
-
     private static bool ReadFlag(string name, bool fallback) => Read(name, fallback ? "1" : "0") == "1";
-
-    private static void WriteFlag(string name, bool value)
-    {
-        if (Read(name, "") == FormatFlag(value))
-        {
-            return;
-        }
-
-        Write(name, FormatFlag(value));
-        OnChanged();
-    }
 
     private static bool IsChatMode(string? mode) =>
         mode is "automatic" or "ask" or "plan" or "manual" or "acceptEdits" or "auto";
@@ -427,6 +332,12 @@ public static class AppSettings
 
     public static void SetTierModel(string cli, string tier, string? model) => WriteDefault(cli, tier, model);
 
+    /// <summary>The provider new chats of a CLI connect through: a name from <see cref="ByokProviders"/>, or "" for the CLI's own login.</summary>
+    public static string CliProviderFor(string cli) =>
+        ReadDefault(cli, "provider") is { } name && FindByok(name) is not null ? name : "";
+
+    public static void SetCliProvider(string cli, string? name) => WriteDefault(cli, "provider", name?.Trim());
+
     /// <summary>The saved mode for a CLI, falling back to the global <see cref="DefaultChatMode"/> when unset.</summary>
     public static string DefaultModeFor(string cli) =>
         ReadDefault(cli, "mode") is { } saved && IsChatMode(saved) ? saved : DefaultChatMode;
@@ -454,7 +365,7 @@ public static class AppSettings
     private static ByokProvider Clone(ByokProvider p, string? apiKey = null) => new()
     {
         Name = p.Name, BaseUrl = p.BaseUrl, AnthropicBaseUrl = p.AnthropicBaseUrl, ApiKey = apiKey ?? p.ApiKey,
-        FlashModel = p.FlashModel, ProModel = p.ProModel, ConfigDir = p.ConfigDir,
+        FlashModel = p.FlashModel, ProModel = p.ProModel,
     };
 
     /// <summary>Serialises providers for the file (<paramref name="protect"/>: keys DPAPI-wrapped) or, unprotected, for change comparison.</summary>

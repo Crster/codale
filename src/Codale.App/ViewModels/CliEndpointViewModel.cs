@@ -81,9 +81,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
     public string RouteText => !CanSwitch
         ? "A turn is running. Switch the provider when it finishes."
         : ActiveProvider is not { } provider
-            ? "Claude uses your Claude login in this chat."
-            : provider.IsAccount
-                ? $"Claude uses the {provider.Name.Trim()} account in this chat."
+            ? "Claude uses Codale's Claude login in this chat."
             : provider.FlashModel.Length == 0 && provider.ProModel.Length == 0
                 ? $"This chat uses {provider.Name.Trim()}. It has no model name yet; add one in settings.json."
                 : $"This chat uses {provider.Name.Trim()}.";
@@ -97,11 +95,10 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
         // flyout's ListView drops its selection and focus (typing in Settings fires this per keystroke).
         var wanted = new List<ProviderChoice> { new("", "Default", "Claude CLI login") };
 
-        // Extra Claude logins sit right under Default, before the BYOK endpoints.
-        foreach (var provider in AppSettings.ByokProviders.OrderByDescending(p => p.IsAccount))
+        foreach (var provider in AppSettings.ByokProviders)
         {
             var name = provider.Name.Trim();
-            var detail = provider.IsAccount ? "Claude CLI login" : provider.BaseUrl.Length > 0 ? provider.BaseUrl : "No base URL set";
+            var detail = provider.BaseUrl.Length > 0 ? provider.BaseUrl : "No base URL set";
             wanted.Add(new ProviderChoice(name, name, detail));
         }
 

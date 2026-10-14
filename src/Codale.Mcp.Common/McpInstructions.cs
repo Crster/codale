@@ -24,11 +24,6 @@ public static class McpInstructions
         "list_commands, add_command and run_command use the project's saved run commands; list_terminals and read_terminal read the " +
         "user's terminal tabs. Use artifact_add for a deliverable that is not project source (a report, document, image or data file).";
 
-    public const string Explore =
-        "For a question about this project's code that you cannot answer from a file you already have open (where is X handled, " +
-        "how does Y work, which files are involved in Z), call explore first instead of a chain of searches and reads: it answers " +
-        "with the files to read as path:lines, so read only those ranges.";
-
     public const string Browser =
         "You can drive a real Chromium browser with these tools (Codale's own automation browser, not the user's). After you change " +
         "something a browser can show (a web page, UI, or a local dev server), open it with browser_navigate, read it with " +

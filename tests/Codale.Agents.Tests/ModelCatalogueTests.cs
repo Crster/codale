@@ -9,16 +9,6 @@ namespace Codale.Agents.Tests;
 /// </summary>
 public sealed class ModelCatalogueTests
 {
-    [Theory]
-    [InlineData("claude-opus-5-5", "Opus 5.5")]
-    [InlineData("claude-haiku-5-5", "Haiku 5.5")]
-    [InlineData("claude-sonnet-5", "Sonnet 5")]
-    [InlineData("claude-opus-5-5[1m]", "Opus 5.5 · 1M")]
-    [InlineData("claude-sonnet-5-5-20260101", "Sonnet 5.5")]
-    [InlineData("opus", "Opus")]
-    public void Model_ids_read_as_names(string id, string expected) =>
-        Assert.Equal(expected, ClaudeAgentSession.FriendlyModelName(id));
-
     [Fact]
     public void Sessions_start_automatic_and_foreign_modes_fall_back_to_it()
     {

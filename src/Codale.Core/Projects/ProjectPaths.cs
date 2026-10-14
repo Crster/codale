@@ -78,15 +78,32 @@ public static class ProjectPaths
         return sb.ToString();
     }
 
-    /// <summary>Full path to the folder holding this project's Claude session JSONL files.</summary>
-    public static string ClaudeHistoryDirectory(string projectPath, string? claudeHome = null)
-    {
-        claudeHome ??= Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".claude");
+    /// <summary>
+    /// Folder of the Claude CLI's own transcripts for this project, inside Codale's Claude account
+    /// (<see cref="Agents.CodaleAccount"/>). The CLI writes these for its own resume; Codale's
+    /// history is <see cref="ProjectHistoryDirectory"/>.
+    /// </summary>
+    public static string ClaudeHistoryDirectory(string projectPath) =>
+        Path.Combine(Agents.CodaleAccount.ClaudeHome, "projects", ClaudeHistoryFolderName(projectPath));
 
-        return Path.Combine(claudeHome, "projects", ClaudeHistoryFolderName(projectPath));
-    }
+    /// <summary>
+    /// Where Codale keeps what it knows of a project, whichever CLI worked on it:
+    /// <c>%LocalAppData%\Codale\project\{project-path}</c>, named like <see cref="ClaudeHistoryFolderName"/>.
+    /// </summary>
+    public static string ProjectDataDirectory(string projectPath) =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Codale",
+            "project",
+            ClaudeHistoryFolderName(projectPath));
+
+    /// <summary>The project's feature database: features, summaries and the index of the files written for them.</summary>
+    public static string FeatureDatabasePath(string projectPath) =>
+        Path.Combine(ProjectDataDirectory(projectPath), "features.db");
+
+    /// <summary>A feature's log folder: <c>log.jsonl</c> and its archives.</summary>
+    public static string FeatureDirectory(string projectPath, string featureId) =>
+        Path.Combine(ProjectDataDirectory(projectPath), "features", featureId);
 
     /// <summary>
     /// True when <paramref name="path"/> is <paramref name="root"/> itself or lies beneath it.

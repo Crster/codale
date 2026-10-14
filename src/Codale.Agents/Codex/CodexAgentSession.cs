@@ -71,16 +71,6 @@ public sealed class CodexAgentSession : IAgentSession
 
     public ChannelReader<AgentEvent> Events => _events.Reader;
 
-    /// <summary>A readable name for a codex model id: the catalogue's name, else "gpt-5.1-codex" spelled out ("GPT 5.1 Codex").</summary>
-    public static string FriendlyModelName(string id)
-    {
-        var words = id.Split('-', StringSplitOptions.RemoveEmptyEntries)
-            .Select(word => string.Equals(word, "gpt", StringComparison.OrdinalIgnoreCase)
-                ? "GPT"
-                : char.ToUpperInvariant(word[0]) + word[1..]);
-        return string.Join(' ', words);
-    }
-
     public async Task StartAsync(CancellationToken ct = default)
     {
         if (_process is not null)
@@ -108,6 +98,8 @@ public sealed class CodexAgentSession : IAgentSession
         {
             startInfo.ArgumentList.Add(arg);
         }
+
+        startInfo.EnvironmentVariables[CodaleAccount.CodexVariable] = CodaleAccount.CodexHome;
 
         if (_options.Environment is { } environment)
         {
@@ -149,6 +141,11 @@ public sealed class CodexAgentSession : IAgentSession
             threadParams["approvalPolicy"] = approvalPolicy;
             threadParams["sandboxPolicy"] = new { type = sandbox };
 
+            if (_options.SystemPromptAppend is { Length: > 0 } instructions)
+            {
+                threadParams["developerInstructions"] = instructions;
+            }
+
             var method = _options.ResumeSessionId is { Length: > 0 } resume ? "thread/resume" : "thread/start";
             if (_options.ResumeSessionId is { Length: > 0 } id)
             {
@@ -187,6 +184,18 @@ public sealed class CodexAgentSession : IAgentSession
             throw new TimeoutException(
                 $"'{_options.Executable}' did not answer the app-server handshake within 30s. " +
                 $"stderr: {string.Join(Environment.NewLine, StderrSnapshot().TakeLast(5))}");
+        }
+    }
+
+    private static JsonElement? ParseObject(string? json)
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(json) ? null : JsonDocument.Parse(json).RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 
@@ -772,10 +781,17 @@ public sealed class CodexAgentSession : IAgentSession
             case "mcpToolCall":
                 if (!completed)
                 {
+                    // Named as Claude names MCP tools (mcp__server__tool), with the call's own arguments as
+                    // its input: the panel recognizes Codale's todos_set and artifact_add by exactly that.
                     var tool = item.Str("tool") ?? "";
                     var server = item.Str("server") ?? "";
-                    var input = JsonSerializer.SerializeToElement(new { tool, server }, WireJson);
-                    await _events.Writer.WriteAsync(new ToolCallStarted { ToolUseId = itemId, ToolName = "mcp", Input = input })
+                    var arguments = item.Prop("arguments") is { } raw && raw.ValueKind == JsonValueKind.String
+                        ? ParseObject(raw.GetString())
+                        : item.Prop("arguments");
+                    var input = arguments is { ValueKind: JsonValueKind.Object } given
+                        ? given
+                        : JsonSerializer.SerializeToElement(new { tool, server }, WireJson);
+                    await _events.Writer.WriteAsync(new ToolCallStarted { ToolUseId = itemId, ToolName = $"mcp__{server}__{tool}", Input = input })
                         .ConfigureAwait(false);
                 }
                 else
@@ -880,6 +896,7 @@ public sealed class CodexAgentSession : IAgentSession
             FiveHourResetsAt = updated.FiveHourResetsAt ?? previous?.FiveHourResetsAt,
             SevenDayUtilization = updated.SevenDayUtilization ?? previous?.SevenDayUtilization,
             SevenDayResetsAt = updated.SevenDayResetsAt ?? previous?.SevenDayResetsAt,
+            LongWindowMins = updated.LongWindowMins ?? previous?.LongWindowMins,
         };
         _rateLimits = merged;
         await _events.Writer.WriteAsync(new RateLimitUpdated(merged)).ConfigureAwait(false);
@@ -909,7 +926,7 @@ public sealed class CodexAgentSession : IAgentSession
 
             if (durationMins > 600)
             {
-                limits = limits with { SevenDayUtilization = percent / 100.0, SevenDayResetsAt = resetsAt };
+                limits = limits with { SevenDayUtilization = percent / 100.0, SevenDayResetsAt = resetsAt, LongWindowMins = durationMins };
             }
             else
             {

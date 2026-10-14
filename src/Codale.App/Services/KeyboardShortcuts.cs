@@ -182,7 +182,6 @@ public static class KeyboardShortcuts
     public const string NewFile = "newFile";
     public const string OpenChat = "openChat";
     public const string ToggleCommands = "toggleCommands";
-    public const string ToggleRightPanel = "toggleRightPanel";
     public const string Search = "search";
     public const string OpenBrowser = "openBrowser";
     public const string CycleMode = "cycleMode";
@@ -200,7 +199,6 @@ public static class KeyboardShortcuts
         new(NewFile, "New file", "An untitled editor tab.", "Ctrl+N"),
         new(OpenChat, "Open chat", "Brings up the chat and focuses its prompt.", "Ctrl+I"),
         new(ToggleCommands, "Toggle command menu", "The project commands menu.", "Ctrl+P"),
-        new(ToggleRightPanel, "Toggle right panel and open chat", "The session panel; opens the chat if it is not in front.", "Ctrl+Shift+I"),
         new(Search, "Search", "Focuses the search bar; scoped to the file while an editor is in front.", "Ctrl+F"),
         new(OpenBrowser, "Open browser", "The browser the agent's browser tools attach to.", "Ctrl+Shift+B"),
         new(CycleMode, "Cycle chat mode", "Auto, Ask, Planning, Manual, Accept edits, Full.", "Ctrl+."),

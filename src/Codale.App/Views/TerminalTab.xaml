@@ -6,42 +6,8 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:controls="using:Codale.App.Controls"
-    xmlns:views="using:Codale.App.Views"
     mc:Ignorable="d">
 
-    <Grid>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*" MinWidth="320" />
-            <ColumnDefinition Width="Auto" />
-        </Grid.ColumnDefinitions>
-
-        <!--  Codale's own native terminal: Win2D rendering over TerminalEmulator  -->
-        <controls:TerminalView x:Name="Terminal" ContextRequested="OnTerminalContextRequested" />
-
-        <!--  Open session panel button shown when the panel is collapsed in an agent CLI terminal  -->
-        <Button
-            x:Name="OpenPanelButton"
-            HorizontalAlignment="Right"
-            VerticalAlignment="Top"
-            Margin="0,8,12,0"
-            Width="32"
-            Height="32"
-            Padding="0"
-            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="6"
-            Click="OnOpenPanelClick"
-            ToolTipService.ToolTip="Session panel"
-            Visibility="Collapsed">
-            <FontIcon FontSize="13" Glyph="&#xE99A;" />
-        </Button>
-
-        <!--  Per-tab session panel for Agent CLI sessions  -->
-        <views:AgentSessionPanel
-            x:Name="SessionPanel"
-            Grid.Column="1"
-            Width="380"
-            Visibility="Collapsed" />
-    </Grid>
+    <!--  Codale's own native terminal: Win2D rendering over TerminalEmulator  -->
+    <controls:TerminalView x:Name="Terminal" ContextRequested="OnTerminalContextRequested" />
 </UserControl>

@@ -5,9 +5,11 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
+using Codale.Agents;
 using Codale.Agents.Claude;
 using Codale.App.Services;
 using Codale.Core.Agents;
+using Codale.Core.Features;
 using Codale.Core.Helper;
 using Codale.Core.Tasks;
 using Codale.Core.Text;
@@ -59,9 +61,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private DateTimeOffset _turnStarted;
 
-    /// <summary>True when <see cref="_turnStarted"/> came from an event timestamp rather than the host clock.</summary>
-    private bool _turnStartFromEvent;
-
     /// <summary>Effort the running session was actually started with; spawn-time, so a change means a restart.</summary>
     private string? _liveEffort;
 
@@ -83,9 +82,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>Set when the user pressed Stop, cleared when the turn ends.</summary>
     private bool _interruptPending;
-
-    /// <summary>True inside <see cref="LoadHistory"/>: replay is shown but not persisted.</summary>
-    private bool _replayingHistory;
 
     /// <summary>Endpoint overrides (proxy/gateway) the user configured; null keeps the CLI defaults.</summary>
     private readonly CliEndpointSettings? _endpointSettings;
@@ -129,6 +125,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _status = status;
         _endpointSettings = endpointSettings;
         _mcpSettings = mcpSettings;
+        EndpointName = AppSettings.CliProviderFor(CliId);
         RefreshCustomProviderName();
 
         // A new chat starts where the user last left this CLI: the saved tier (resolved
@@ -238,9 +235,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private readonly Dictionary<string, RunningTaskItem> _tasksByToolUse = [];
 
-    /// <summary>Explore tool-call tasks already receiving a run's live steps.</summary>
-    private readonly HashSet<RunningTaskItem> _exploreLinked = [];
-
     // Commands Codale itself runs for the agent (codale-tasks). One host per chat, kept
     // across session restarts (DisposeSessionAsync) so a dev server survives a model
     // switch; it dies with the chat (DisposeAsync), or when the conversation is reset.
@@ -271,15 +265,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             _taskManager = new HostedTaskManager(workingDirectory);
             _taskManagerDir = workingDirectory;
             _taskManager.TaskStarted += task => _dispatcher.TryEnqueue(() => OnHostedTaskStarted(task));
-            HelperAssistService? assist = null;
-            if (Helper is { } helper)
-            {
-                assist = new HelperAssistService(helper, workingDirectory, () => AppSettings.HasHelperApi, () => LastUserPrompt);
-                assist.Saved += (before, after) => _dispatcher.TryEnqueue(() => _status.AddSaved(before - after));
-                assist.ExploreStarted += run => _dispatcher.TryEnqueue(() => OnExploreStarted(run));
-            }
-
-            _taskPipe = new TaskPipeServer(new LocalTaskService(_taskManager, Terminals), assist);
+            _taskPipe = new TaskPipeServer(new LocalTaskService(_taskManager, Terminals));
 
             // An agent CLI in a terminal reports its task list and artifacts here (see ServersForTerminalCli).
             _taskPipe.PanelPublished = (kind, input) => _dispatcher.TryEnqueue(() =>
@@ -314,7 +300,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         var workingDirectory = WorktreePath ?? _projectPath;
         if (_mcpSettings.TasksAvailable &&
             EnsureTaskHost(workingDirectory) is { } host &&
-            _mcpSettings.TasksSpec(host.Pipe, host.Token, workingDirectory, Helper is not null && AppSettings.HasHelperApi && AppSettings.TokenSaverExplore, pushToPanel: true) is { } tasks)
+            _mcpSettings.TasksSpec(host.Pipe, host.Token, workingDirectory, pushToPanel: true) is { } tasks)
         {
             servers = [.. servers, tasks];
         }
@@ -335,58 +321,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             t.Status = RunningTaskStatus.Ended;
         }
-    }
-
-    /// <summary>Lists an explore as a task and streams its steps into the peek pane and status bar.</summary>
-    private void OnExploreStarted(ExploreRun run)
-    {
-        var question = run.Question.Trim();
-
-        // The model's own explore tool call is already listed as a subagent-style task:
-        // stream the steps into that one instead of listing the run a second time.
-        var existing = RunningTasks.LastOrDefault(t => t.Kind == RunningTaskKind.Subagent
-            && t.IsRunning
-            && (t.Prompt == question || string.IsNullOrWhiteSpace(t.Prompt) || t.Prompt == (LastUserPrompt ?? "").Trim())
-            && !_exploreLinked.Contains(t));
-        if (existing is not null)
-        {
-            _exploreLinked.Add(existing);
-            existing.Cancel = run.Cancel;
-            existing.AppendOutput("Searching the code...\n");
-            existing.AddText("Searching the code...");
-
-            // A subagent's peek shows its transcript entries, not the raw log.
-            run.Progress += line => _dispatcher.TryEnqueue(() =>
-            {
-                existing.AppendOutput(line + "\n");
-                existing.AddText(line);
-            });
-            run.Finished += _ => _dispatcher.TryEnqueue(() =>
-            {
-                _exploreLinked.Remove(existing);
-                existing.Cancel = null;
-            });
-            return;
-        }
-
-        var item = new RunningTaskItem
-        {
-            ToolUseId = $"explore:{Guid.NewGuid():N}",
-            Kind = RunningTaskKind.Shell,
-            Title = "explore: " + run.Question.Trim().ReplaceLineEndings(" "),
-            StartedAt = run.StartedAt,
-            Header = $"[explore]\n{run.Question.Trim()}\n\n",
-            Cancel = run.Cancel,
-        };
-        AddTask(item);
-        item.AppendOutput("Searching the code...\n");
-
-        run.Progress += line => _dispatcher.TryEnqueue(() => item.AppendOutput(line + "\n"));
-        run.Finished += failed => _dispatcher.TryEnqueue(() =>
-        {
-            item.Cancel = null;
-            item.Status = failed ? RunningTaskStatus.Failed : RunningTaskStatus.Completed;
-        });
     }
 
     private void OnHostedTaskStarted(HostedTask hosted)
@@ -662,10 +596,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 if (completed.IsError)
                 {
                     task.Status = RunningTaskStatus.Failed;
-                }
-                else if (_replayingHistory)
-                {
-                    task.Status = RunningTaskStatus.Ended;
                 }
             }
             else
@@ -1027,11 +957,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private void SetActivity(string? activity, string? toolUseId)
     {
-        if (_replayingHistory)
-        {
-            return;
-        }
-
         CurrentActivity = activity is { Length: > 90 } ? activity[..90] + "…" : activity;
         _activityToolId = toolUseId;
     }
@@ -1090,19 +1015,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public bool HasModelCatalog { get; private set; }
 
     /// <summary>The model and effort chips unlock when the session can take changes and the catalogue has landed.</summary>
-    public bool CanPickModel => CanChangeMode && HasModelCatalog;
+    public bool CanPickModel => CanChangeMode;
 
     /// <summary>Running a turn without waiting on anyone: the tab's blue dot. Waiting shows amber instead.</summary>
     public bool IsBusyWorking => IsBusy && !IsWaitingForYou;
 
     [ObservableProperty]
     public partial bool IsConnected { get; set; }
-
-    /// <summary>
-    /// A forked session's briefing, waiting to ride on the first message the user sends
-    /// (see <see cref="SessionForking.ContextBlock"/>); null once it has gone out.
-    /// </summary>
-    public string? ForkContext { get; set; }
 
     public const string DefaultPlaceholder = "Ask anything…  / for commands, @ to mention a file";
 
@@ -1124,9 +1043,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // Automatic mode reads the message on send; starting the reader while the user
         // types takes its few seconds of start-up off the wait. A busy turn counts too:
         // the next message is often typed while the agent works and sent once it is done.
-        if (IsAutomaticMode && value.Length > 0 && !value.StartsWith('/') && Router is { } router)
+        if ((IsAutomaticMode || SmartHistory) && value.Length > 0 && !value.StartsWith('/') && Router is { } router)
         {
-            router.Prewarm();
+            router.Prewarm(Features);
         }
     }
 
@@ -1206,8 +1125,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public MessageRouter? Router { get; init; }
 
     /// <summary>
-    /// The background-task model, which answers the session's explore and
-    /// digest requests (on a BYOK provider) and writes handoff summaries. Null turns those off.
+    /// The background-task model, which names sessions and writes summaries. Null turns those off.
     /// </summary>
     public IHelperModel? Helper { get; init; }
 
@@ -1303,13 +1221,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// The model chip: the tier the user picked, else what the CLI reported it connected
     /// with - the CLI's own pick is not guessed before it connects.
     /// </summary>
-    public string ModelDisplay => CurrentTier == "cli" && ConnectedModel is { } connected
-        ? ModelName(connected)
-        : TierTitle(CurrentTier);
-
-    /// <summary>The model the running session reported, or null before it has.</summary>
-    private string? ConnectedModel =>
-        _status.Model is { Length: > 0 } model && model != StatusViewModel.NotConnected ? model : null;
+    public string ModelDisplay => TierTitle(CurrentTier);
 
     /// <summary>
     /// The model or effort to hand the CLI: the pick, else null so the CLI uses its own
@@ -1317,30 +1229,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     private static string? LaunchValue(string? requested) =>
         requested is { Length: > 0 } ? requested : null;
-
-    /// <summary>A catalogue name for a model id, else Claude's id spelled out, else the id itself.</summary>
-    public string ModelName(string? id)
-    {
-        if (id is not { Length: > 0 })
-        {
-            // "CLI": no pick saved, so the session uses whatever the CLI starts with.
-            return "CLI";
-        }
-
-        if (AvailableModels.FirstOrDefault(m => string.Equals(m.Id, id, StringComparison.OrdinalIgnoreCase))
-            is { DisplayName.Length: > 0 } listed)
-        {
-            // The endpoint's model names are shown exactly as typed.
-            if (listed.DisplayName != listed.Id || IsEndpointActive)
-            {
-                return listed.DisplayName;
-            }
-        }
-
-        return IsCodexSession
-            ? Codale.Agents.Codex.CodexAgentSession.FriendlyModelName(id)
-            : ClaudeAgentSession.FriendlyModelName(id);
-    }
 
     /// <summary>Records the user's permission-mode pick as this CLI's new default.</summary>
     public void RememberModeAsDefault(string mode) => AppSettings.SetDefaultMode(CliId, mode);
@@ -1478,79 +1366,55 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public static IReadOnlyList<AgentModelInfo>? KnownCatalogue(string cliId) =>
         CachedModels.TryGetValue(cliId, out var models) ? models : null;
 
-    private static bool SameModels(IReadOnlyList<AgentModelInfo> a, IReadOnlyList<AgentModelInfo> b) =>
-        a.Count == b.Count &&
-        a.Zip(b).All(p =>
-            p.First.Id == p.Second.Id &&
-            p.First.DisplayName == p.Second.DisplayName &&
-            p.First.Description == p.Second.Description &&
-            p.First.DefaultEffort == p.Second.DefaultEffort &&
-            p.First.SupportedEfforts.SequenceEqual(p.Second.SupportedEfforts));
-
     /// <summary>
-    /// Asks the connected session what models it offers and caches the answer for the
-    /// picker. Scoped like the pump: a session replaced mid-query contributes nothing.
+    /// Asks the CLI itself for its model list by starting a throwaway session, caches the
+    /// answer and returns it. Empty when the CLI is missing, signed out or too old to say.
     /// </summary>
-    private async Task LoadModelsAsync()
+    public static async Task<IReadOnlyList<AgentModelInfo>> FetchCatalogueAsync(string cliId)
     {
-        // The endpoint's two model names are the whole catalogue; ConnectAsync set it.
-        if (IsEndpointActive && EndpointModels().Count > 0)
-        {
-            return;
-        }
-
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        IAgentSession? session = null;
         try
         {
-            var session = _session;
-            if (session is null)
+            session = cliId == "codex"
+                ? new Codale.Agents.Codex.CodexAgentSession(new Codale.Agents.Codex.CodexSessionOptions { WorkingDirectory = home })
+                : new ClaudeAgentSession(new ClaudeSessionOptions { WorkingDirectory = home });
+            await session.StartAsync();
+            // StartAsync returns once the CLI answered its handshake; it can still be loading
+            // its catalogue, so ask again until it answers instead of giving up on one reply.
+            IReadOnlyList<AgentModelInfo> models = [];
+            for (var attempt = 0; attempt < 4 && models.Count == 0; attempt++)
             {
-                return;
+                if (attempt > 0)
+                {
+                    await Task.Delay(2000);
+                }
+
+                models = await session.ListModelsAsync();
             }
 
-            var models = await session.ListModelsAsync();
-
-            if (models.Count == 0)
+            if (models.Count > 0)
             {
-                CrashLog.Trace($"Model list: {ProviderName} returned none");
+                CachedModels[cliId] = models;
+            }
+            else
+            {
+                CrashLog.Trace($"Model list fetch for {cliId}: the CLI returned none");
             }
 
-            if (!ReferenceEquals(_session, session) || models.Count == 0)
-            {
-                return;
-            }
-
-            // A proxy-backed or renamed model the CLI connected with belongs in the
-            // list even when its catalogue missed it. The status bar's "not connected"
-            // placeholder is not a model.
-            if (ConnectedModel is { } connected &&
-                !models.Any(m => string.Equals(m.Id, connected, StringComparison.OrdinalIgnoreCase)))
-            {
-                var name = ModelName(connected);
-                models = models.Append(new AgentModelInfo { Id = connected, DisplayName = name, Description = connected }).ToList();
-            }
-
-            if (!IsEndpointActive)
-            {
-                CachedModels[CliId] = models;
-            }
-
-            // A refresh that found nothing new must not re-fire the pickers.
-            if (SameModels(AvailableModels, models))
-            {
-                return;
-            }
-
-            AvailableModels = models;
-            HasModelCatalog = models.Count > 0;
-            OnPropertyChanged(nameof(AvailableModels));
-            OnPropertyChanged(nameof(HasModelCatalog));
-            OnPropertyChanged(nameof(CanPickModel));
-            NotifyModelDisplays();
-            CrashLog.Trace($"Model list: {models.Count} available from {ProviderName}");
+            return models;
         }
         catch (Exception ex)
         {
-            CrashLog.Trace($"Model list failed: {ex.Message}");
+            CrashLog.Trace($"Model list fetch for {cliId} failed: {ex.Message}");
+            return [];
+        }
+        finally
+        {
+            if (session is not null)
+            {
+                await session.DisposeAsync();
+            }
         }
     }
 
@@ -1569,7 +1433,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private void CheckLoginRequired(string? text)
     {
-        if (_replayingHistory || string.IsNullOrEmpty(text))
+        if (string.IsNullOrEmpty(text))
         {
             return;
         }
@@ -1687,6 +1551,18 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        // Codale's own account must be signed in before the CLI is started; a provider or an
+        // ANTHROPIC_* override brings its own credentials and needs no login.
+        var cliId = IsCodexSession ? "codex" : "claude";
+        if (endpointEnv is null && (IsCodexSession || !EnvironmentOverridesEndpoint()) &&
+            !await CodaleAccountCli.IsSignedInAsync(cliId))
+        {
+            CrashLog.Trace($"Connect: Codale's {cliId} account is signed out");
+            Add(new NoticeItem { Text = $"Codale isn't signed in to {ProviderName}. Sign in, then resend your message.", Severity = NoticeSeverity.Warning });
+            LoginRequired?.Invoke(this, IsCodexSession ? "Codex" : ProviderName);
+            return;
+        }
+
         _connectedProvider = SelectedProviderName();
         _status.IsCustomProvider = endpointEnv is not null;
         RefreshCustomProviderName();
@@ -1695,16 +1571,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             AvailableModels = endpointModels;
             HasModelCatalog = endpointModels.Count > 0;
-            OnPropertyChanged(nameof(AvailableModels));
-            OnPropertyChanged(nameof(HasModelCatalog));
-            OnPropertyChanged(nameof(CanPickModel));
-            NotifyModelDisplays();
-        }
-
-        else if (endpointEnv is null && AvailableModels.Count == 0 && CachedModels.TryGetValue(CliId, out var cachedModels))
-        {
-            AvailableModels = cachedModels;
-            HasModelCatalog = cachedModels.Count > 0;
             OnPropertyChanged(nameof(AvailableModels));
             OnPropertyChanged(nameof(HasModelCatalog));
             OnPropertyChanged(nameof(CanPickModel));
@@ -1743,48 +1609,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             // Long-running commands go through Codale's own task server; only when it
             // shipped are the agent's background shells refused (there'd be no other way).
             string? shellGuard = null;
-            var hooks = new ClaudeHookSettings { DenyRules = AppSettings.TokenSaverDenyRules };
             var environment = endpointEnv is null ? new Dictionary<string, string>() : new Dictionary<string, string>(endpointEnv);
-            if (!IsCodexSession && AppSettings.FindByok(EndpointName) is { IsAccount: true } account)
-            {
-                environment["CLAUDE_CONFIG_DIR"] = account.ConfigDir;
-            }
-
-            var assist = Helper is not null && AppSettings.HasHelperApi;
             var tasksHost = _mcpSettings is { TasksAvailable: true } ? EnsureTaskHost(workingDirectory) : null;
             if (tasksHost is { } host &&
-                _mcpSettings?.TasksSpec(host.Pipe, host.Token, workingDirectory, assist && AppSettings.TokenSaverExplore) is { } tasksSpec)
+                _mcpSettings?.TasksSpec(host.Pipe, host.Token, workingDirectory) is { } tasksSpec)
             {
                 mcpServers = [.. mcpServers, tasksSpec];
-
-                // With the read guard on, the shell hook also refuses cat/type/Get-Content of a big file.
-                shellGuard = AppSettings.TokenSaverReadGuard
-                    ? _mcpSettings.ReadGuardCommand()
-                    : _mcpSettings.TasksGuardCommand();
-
-                // Hooks run as children of the CLI, not of the MCP server: they reach this chat
-                // (savings tally, digests) through the CLI's environment.
-                environment["CODALE_TASKS_PIPE"] = host.Pipe;
-                environment["CODALE_TASKS_TOKEN"] = host.Token;
-                hooks = hooks with
-                {
-                    ShellOutputCommand = AppSettings.TokenSaverCompressShell
-                        ? _mcpSettings.ShellOutputHookCommand(digest: assist && AppSettings.TokenSaverDigest)
-                        : null,
-                    ReadGuardCommand = AppSettings.TokenSaverReadGuard
-                        ? _mcpSettings.ReadGuardCommand()
-                        : null,
-                };
+                shellGuard = _mcpSettings.TasksGuardCommand();
             }
 
-            _readGuardActive = hooks.ReadGuardCommand is not null;
             _sessionMcpServers = mcpServers;
-            _handoffOffered = false;
-
-            if (AppSettings.TokenSaverAutoCompactPercent is > 0 and var compactAt && !IsCodexSession)
-            {
-                environment["CLAUDE_CODE_AUTOCOMPACT_PCT_OVERRIDE"] = compactAt.ToString(CultureInfo.InvariantCulture);
-            }
 
             if (endpointEnv is not null)
             {
@@ -1793,7 +1627,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             var activeCli = SessionCli;
             var cliExecutable = activeCli.ResolvedPath ?? activeCli.Executable;
-            _status.CliName = $"{activeCli.DisplayName} CLI";
+            var cliName = $"{activeCli.DisplayName} CLI";
+            if (_status.CliName != cliName)
+            {
+                // Context and subscription windows belong to the CLI that reported them;
+                // switching Claude <-> Codex must not carry the other one's readings over.
+                _status.ResetCliReadings();
+            }
+
+            _status.CliName = cliName;
 
             IAgentSession session = starting = IsCodexSession
                 ? new Codale.Agents.Codex.CodexAgentSession(new Codale.Agents.Codex.CodexSessionOptions
@@ -1804,6 +1646,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     Effort = effort,
                     PermissionMode = permissionMode,
                     McpServers = mcpServers,
+                    SystemPromptAppend = mcpServers.Count > 0 ? WithMcpDirective("", mcpServers).Trim() : null,
                     ResumeSessionId = ResumeSessionId,
                     RawLogPath = CrashLog.NewRawLogPath($"{activeCli.Id}-{ResumeSessionId?[..8] ?? "new"}"),
                     Environment = environment.Count == 0 ? null : environment,
@@ -1820,11 +1663,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     SystemPromptAppend = WithMcpDirective(AlwaysPlanDirective, mcpServers),
                     McpServers = mcpServers,
                     BackgroundShellGuardCommand = shellGuard,
-                    Hooks = hooks,
                     DisallowedTools = shellGuard is not null ? McpServerSettings.NativeTodoTools : null,
-                    Agents = AppSettings.TokenSaverCheapSubagents
-                        ? ClaudeSubagents.Build(model, tasksHost is not null && assist && AppSettings.TokenSaverExplore)
-                        : null,
                     PromptSuggestions = AppSettings.SuggestNextPrompt,
                     SessionId = ResumeSessionId is null ? Guid.NewGuid() : null,
                     ResumeSessionId = ResumeSessionId,
@@ -1850,13 +1689,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             RunInBackground(() => PumpAsync(session), "event pump");
             RunInBackground(() => PollTasksAsync(session), "task poll");
-            _ = LoadModelsAsync();
 
             // Usage otherwise arrives only with a turn's rate_limit_event; a BYOK endpoint or
             // an inherited ANTHROPIC_* override has no Claude subscription behind it.
-            var overrideCli = endpointEnv is not null || EnvironmentOverridesEndpoint();
+            // ANTHROPIC_* / Bedrock / Vertex variables redirect the Claude CLI only; Codex is
+            // overridden solely by its own configured provider (endpointEnv).
+            var overrideCli = endpointEnv is not null || (!IsCodexSession && EnvironmentOverridesEndpoint());
             _status.IsOverrideCli = overrideCli;
-            if (!overrideCli)
+            // The usage endpoint is Claude's; Codex reports its own windows through its session.
+            if (!overrideCli && !IsCodexSession)
             {
                 RunInBackground(LoadUsageAsync, "usage fetch");
             }
@@ -1932,109 +1773,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>Whether the running session has the large-file read guard, whose refusals are redirects.</summary>
-    private bool _readGuardActive;
 
     /// <summary>The MCP servers the running session was started with; their auto-approved tools skip the prompt outside Manual.</summary>
     private IReadOnlyList<McpServerSpec> _sessionMcpServers = [];
-
-    /// <summary>The context-full nudge shows once per session.</summary>
-    private bool _handoffOffered;
-
-    /// <summary>How full the context is when the nudge offers a fresh session.</summary>
-    private const double HandoffThreshold = 0.6;
-
-    /// <summary>The user asked to carry this conversation into a fresh session with a handoff note.</summary>
-    public event EventHandler? HandoffRequested;
-
-    /// <summary>
-    /// Once the context passes <see cref="HandoffThreshold"/>, offers to move on: a fresh
-    /// session with a handoff note from the background-task model when it is a BYOK one,
-    /// else the CLI's own /compact.
-    /// </summary>
-    private void OfferHandoff()
-    {
-        if (_handoffOffered || !AppSettings.TokenSaverHandoffNudge || ComposerNotice is not null ||
-            _status.ContextFraction < HandoffThreshold)
-        {
-            return;
-        }
-
-        _handoffOffered = true;
-        var percent = $"{_status.ContextFraction * 100:0}%";
-        ComposerNotice = Helper is not null && AppSettings.HasHelperApi && HandoffRequested is not null
-            ? new NoticeItem
-            {
-                Text = $"The context is {percent} full, and every turn re-sends all of it. A fresh session with a handoff note costs far less.",
-                ActionText = "Fresh session",
-                Action = () =>
-                {
-                    HandoffRequested?.Invoke(this, EventArgs.Empty);
-                    return Task.CompletedTask;
-                },
-            }
-            : new NoticeItem
-            {
-                Text = $"The context is {percent} full, and every turn re-sends all of it. Compacting it now saves tokens on every turn after.",
-                ActionText = "Compact",
-                Action = () => SendRoutedAsync("/compact", [], RouteIntent.Act),
-            };
-    }
-
-    /// <summary>The conversation so far, as the handoff writer reads it.</summary>
-    public IReadOnlyList<HandoffEntry> HandoffEntries()
-    {
-        var entries = new List<HandoffEntry>();
-        foreach (var item in Items)
-        {
-            switch (item)
-            {
-                case UserMessageItem user:
-                    entries.Add(new HandoffEntry(HandoffRole.User, user.Text));
-                    break;
-
-                case AssistantMessageItem assistant:
-                    entries.Add(new HandoffEntry(HandoffRole.Assistant, assistant.Text));
-                    break;
-
-                case ToolCallItem tool:
-                    entries.Add(new HandoffEntry(HandoffRole.Tool, DescribeTool(tool)));
-                    break;
-            }
-        }
-
-        return entries;
-    }
-
-    private static readonly string[] DescribeKeys = ["file_path", "path", "pattern", "command", "description", "query", "question"];
-
-    private static string DescribeTool(ToolCallItem tool)
-    {
-        if (tool.Command.Length > 0)
-        {
-            return $"{tool.ToolName}: {tool.Command}";
-        }
-
-        if (tool.Input.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var key in DescribeKeys)
-            {
-                if (tool.Input.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String)
-                {
-                    return $"{tool.ToolName}({value.GetString()})";
-                }
-            }
-        }
-
-        return tool.ToolName;
-    }
-
-    private bool IsReadGuardRedirect(PermissionDenied denied) =>
-        denied.Message is { } message &&
-        (message.Contains("was skipped to save context", StringComparison.Ordinal) ||
-         (_readGuardActive && denied.ToolName == "Read" && message.Contains("hook", StringComparison.OrdinalIgnoreCase)));
-
-    /// <summary>True when this chat runs against the custom endpoint.</summary>
-    private bool IsEndpointActive => _endpointSettings?.IsActive(EndpointName, openAiCompatible: !IsCodexSession) == true;
 
     /// <summary>
     /// A saved pick such as "sonnet" or "claude-opus-5-5" means nothing to a custom provider:
@@ -2089,17 +1830,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private string WithMcpDirective(string directive, IReadOnlyList<McpServerSpec> servers)
     {
         var text = servers.Count > 0 && _mcpSettings?.Directive(servers) is { Length: > 0 } note ? $"{directive} {note}" : directive;
-        var tasks = servers.FirstOrDefault(s => s.Name == McpServerSettings.TasksName);
-        if (tasks is not null)
-        {
-            text = $"{text} {McpServerSettings.TasksDirective}";
-            if (tasks.Env?.GetValueOrDefault("CODALE_ASSIST") == "1")
-            {
-                text = $"{text} {McpServerSettings.AssistDirective}";
-            }
-        }
-
-        return AppSettings.TokenSaverTerse ? $"{text} {McpServerSettings.TerseDirective}" : text;
+        return servers.Any(s => s.Name == McpServerSettings.TasksName) ? $"{text} {McpServerSettings.TasksDirective}" : text;
     }
 
     /// <summary>
@@ -2171,6 +1902,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         ResumeUnpromptedTurn(e);
 
+        RecordFeatureEvent(e);
+
         switch (e)
         {
             case SessionInitialized init:
@@ -2230,7 +1963,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             case AssistantMessageCompleted done:
                 if (_status.IsCustomProvider && done.Usage is { } served && ServedByHelperProvider())
                 {
-                    _status.RecordCustomCall(served, AppSettings.FindByok(EndpointName));
+                    _status.RecordCustomCall(served);
                 }
 
                 if (done.ParentToolUseId is { } owner && _tasksByToolUse.TryGetValue(owner, out var subagent))
@@ -2257,7 +1990,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             case ToolCallStarted nested when OwnerOf(nested.ParentToolUseId) is not null:
                 // A subagent's own tool calls are its log's business, not main-transcript rows.
-                TrackTaskStart(nested, CreateToolCall(nested.ToolUseId, nested.ToolName, nested.Input, nested.Timestamp));
+                TrackTaskStart(nested, CreateToolCall(nested.ToolUseId, nested.ToolName, nested.Input));
                 break;
 
             case ToolCallStarted started:
@@ -2272,7 +2005,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     RecordAgentArtifact(started.Input);
                 }
 
-                var item = CreateToolCall(started.ToolUseId, started.ToolName, started.Input, started.Timestamp);
+                var item = CreateToolCall(started.ToolUseId, started.ToolName, started.Input);
                 _toolCalls[started.ToolUseId] = item;
                 TrackTaskStart(started, item);
 
@@ -2306,10 +2039,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     : $"{item.Verb} {item.Target}".Trim(),
                     started.ToolUseId);
 
-                if (!_replayingHistory)
-                {
-                    CrashLog.Trace($"Tool start: {started.ToolName} id={started.ToolUseId}");
-                }
+                CrashLog.Trace($"Tool start: {started.ToolName} id={started.ToolUseId}");
 
                 break;
 
@@ -2318,10 +2048,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             case ToolCallCompleted completed:
-                if (!_replayingHistory)
-                {
-                    CrashLog.Trace($"Tool done: id={completed.ToolUseId} error={completed.IsError}");
-                }
+                CrashLog.Trace($"Tool done: id={completed.ToolUseId} error={completed.IsError}");
 
                 if (_activityToolId == completed.ToolUseId)
                 {
@@ -2333,9 +2060,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 if (_toolCalls.TryGetValue(completed.ToolUseId, out var call))
                 {
                     call.Status = completed.IsError ? ToolCallStatus.Failed : ToolCallStatus.Succeeded;
-                    call.Duration = _replayingHistory && completed.Timestamp is { } ended
-                        ? ElapsedSince(ended, call.Timestamp)
-                        : DateTimeOffset.Now - call.Timestamp;
+                    call.Duration = DateTimeOffset.Now - call.Timestamp;
 
                     // A result is a terminal page, not a sentence: keep its shape and
                     // cap it. Flattening newlines turned a directory table into one
@@ -2352,7 +2077,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                         SetPlanStatus(call.ToolUseId, completed.IsError ? SessionArtifactStatus.Revised : SessionArtifactStatus.Accepted);
                     }
 
-                    if (completed.Images is { Count: > 0 } images && !_replayingHistory)
+                    if (completed.Images is { Count: > 0 } images)
                     {
                         RecordImageArtifacts(call, images);
                     }
@@ -2365,12 +2090,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                         var resolved = change with { FilePath = ResolvePath(change.FilePath) };
                         TrackPlanFile(resolved);
 
-                        // A replay shows what happened then; the session panel is about now.
-                        if (!_replayingHistory)
-                        {
-                            _status.RecordFileChange(resolved, call.Diff);
-                            FilesChanged?.Invoke(this, EventArgs.Empty);
-                        }
+                        _status.RecordFileChange(resolved, call.Diff);
+                        IndexWrittenFile(resolved.FilePath);
+                        FilesChanged?.Invoke(this, EventArgs.Empty);
                     }
 
                     // The step is done: fold it to its one-line row.
@@ -2393,13 +2115,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             case PermissionDenied denied:
                 MarkDenied(denied.ToolUseId);
-
-                // The read guard steering the agent to a ranged read is not the user's
-                // denial: nothing for the reader to act on, so nothing is pinned.
-                if (IsReadGuardRedirect(denied))
-                {
-                    break;
-                }
 
                 // Pinned above the composer rather than appended to the transcript: it
                 // always lands last in the chat, where the reader is about to type.
@@ -2445,8 +2160,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     // No message seen this turn; an inflated reading beats none.
                     _status.Apply(usage);
                 }
-
-                OfferHandoff();
 
                 AbandonPendingApprovals();
 
@@ -2508,7 +2221,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 CrashLog.Debug("cli-ignored", $"{ignored.Kind}: {ignored.Raw}");
                 break;
 
-            case HookFailed hook when !_replayingHistory:
+            case HookFailed hook:
                 ComposerNotice = new NoticeItem
                 {
                     Text = $"Hook {hook.HookName} failed" +
@@ -2534,7 +2247,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
                 break;
 
-            case CliInformation info when !_replayingHistory:
+            case CliInformation info:
                 // A notification about the CLI itself, not part of the conversation: pinned
                 // above the composer, where it can be dismissed.
                 ComposerNotice = new NoticeItem { Text = info.Text, Severity = info.IsWarning ? NoticeSeverity.Warning : NoticeSeverity.Info };
@@ -2547,12 +2260,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             case HookFailed or CliStatusChanged or CliInformation:
                 break;
 
-            case VcsStateChanged when !_replayingHistory:
+            case VcsStateChanged:
                 // Same refresh a file edit triggers: git status and the diff are stale.
                 FilesChanged?.Invoke(this, EventArgs.Empty);
-                break;
-
-            case VcsStateChanged:
                 break;
 
             case PromptSuggested suggested:
@@ -2570,7 +2280,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 IsBusy = false;
                 NextPromptSuggestion = null;
                 ComposerNotice = null;
-                _handoffOffered = false;
                 // /clear: the CLI has dropped its own history, so the transcript
                 // follows - same process, fresh conversation.
                 EndTurn(TurnOutcome.Stopped, end: null);
@@ -2620,16 +2329,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>
-    /// Event timestamps are the CLI's clock, not ours; a skewed or reordered pair must
-    /// never yield a negative duration, so anything before the start reads as zero.
-    /// </summary>
-    private static TimeSpan ElapsedSince(DateTimeOffset end, DateTimeOffset start)
-    {
-        var taken = end - start;
-        return taken > TimeSpan.Zero ? taken : TimeSpan.Zero;
-    }
-
-    /// <summary>
     /// Folds the turn's finished tool cards to their summary lines - the agent has
     /// replied in prose or the turn has landed, so the steps before it are history.
     /// </summary>
@@ -2644,11 +2343,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>
     /// Builds a tool call's step. What opens by default depends on what the body shows:
     /// a command about to run, a diff being made, a question or a plan are worth seeing
-    /// live; a read or a search is not - its row says it all. A replay shows turns as
-    /// they ended, everything folded but the plan. The timestamp comes from the event
-    /// only in replay, where the host clock would be "now" for every row.
+    /// live; a read or a search is not - its row says it all.
     /// </summary>
-    private ToolCallItem CreateToolCall(string toolUseId, string toolName, JsonElement input, DateTimeOffset? at)
+    private ToolCallItem CreateToolCall(string toolUseId, string toolName, JsonElement input)
     {
         var plan = ToolCallItem.PlanInput(toolName, input);
         var kind = ToolKinds.Of(toolName);
@@ -2663,10 +2360,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             PlanText = plan,
             Files = ToolCallItem.FileInputs(toolName, input),
             Diff = ToolDiffs.FromInput(toolName, input),
-            IsExpanded = _replayingHistory
-                ? plan is not null
-                : plan is not null || kind is ToolKind.Shell or ToolKind.Edit or ToolKind.Write or ToolKind.Ask,
-            Timestamp = _replayingHistory && at is { } stamp ? stamp : DateTimeOffset.Now,
+            IsExpanded = plan is not null || kind is ToolKind.Shell or ToolKind.Edit or ToolKind.Write or ToolKind.Ask,
+            Timestamp = DateTimeOffset.Now,
         };
     }
 
@@ -3196,7 +2891,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             // An approval with no transcript row yet: give it a row of its own, so
             // the question is visible and answerable regardless.
-            pending = CreateToolCall(approval.ToolUseId ?? approval.RequestId, approval.ToolName, approval.Input, at: null);
+            pending = CreateToolCall(approval.ToolUseId ?? approval.RequestId, approval.ToolName, approval.Input);
 
             if (approval.ToolUseId is { Length: > 0 } id)
             {
@@ -3241,18 +2936,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         };
 
         // The turn is blocked on the reader from here: say so, in case they are elsewhere.
-        if (!_replayingHistory)
+        AttentionNeeded?.Invoke(this, pending.Approval switch
         {
-            AttentionNeeded?.Invoke(this, pending.Approval switch
-            {
-                { IsAskUserQuestion: true } ask => new AttentionRequest(
-                    AttentionKind.Question, ask.Questions[0].Text),
-                { IsPlan: true } => new AttentionRequest(
-                    AttentionKind.Plan, pending.Summary is { Length: > 0 } headline ? headline : "A plan is ready for review."),
-                var permission => new AttentionRequest(
-                    AttentionKind.Permission, $"{permission.QuestionHeader} {pending.Target}".Trim()),
-            });
-        }
+            { IsAskUserQuestion: true } ask => new AttentionRequest(
+                AttentionKind.Question, ask.Questions[0].Text),
+            { IsPlan: true } => new AttentionRequest(
+                AttentionKind.Plan, pending.Summary is { Length: > 0 } headline ? headline : "A plan is ready for review."),
+            var permission => new AttentionRequest(
+                AttentionKind.Permission, $"{permission.QuestionHeader} {pending.Target}".Trim()),
+        });
 
         var decision = await answered.Task;
 
@@ -3451,6 +3143,38 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        // Smart history reads the message first: which feature it is work on (or that it is no
+        // project work), and in Automatic mode the mode for the turn. Slash commands are the CLI's
+        // own syntax and go out untouched; so does anything sent mid-turn, which the running turn covers.
+        if (SmartHistory && !planOnly && !IsBusy && text.Length > 0 && !text.StartsWith('/') && Router is { } featureRouter)
+        {
+            FeatureDecision feature;
+            IsRouting = true;
+            try
+            {
+                feature = await featureRouter.RouteFeatureAsync(text, this, Features!);
+                if (!await ApplyFeatureDecisionAsync(feature, text))
+                {
+                    return;
+                }
+            }
+            finally
+            {
+                IsRouting = false;
+            }
+
+            if (IsAutomaticMode)
+            {
+                await SendRoutedAsync(feature.Route.Text, attachments, feature.Route.Intent);
+            }
+            else
+            {
+                await SendTurnAsync(text, attachments, planOnly: false, askOnly: IsAskMode);
+            }
+
+            return;
+        }
+
         // Automatic mode reads the message first. Slash commands are the CLI's own
         // syntax and go out untouched; so does anything sent mid-turn, which the
         // running turn's mode already covers.
@@ -3539,7 +3263,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         // A message sent while a turn runs steers it: the CLI folds it into the running
         // turn (one result closes both), so it must not stop or restart anything here.
-        if (IsBusy && _activeTurn is not null && !_replayingHistory && _session is { } running)
+        if (IsBusy && _activeTurn is not null && _session is { } running)
         {
             await SteerTurnAsync(running, text, attachments);
             return;
@@ -3565,6 +3289,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         IsBusy = true;
         _lastUserPrompt = text;
         Add(new UserMessageItem { Text = text, Attachments = attachments, SentAsPlan = planOnly });
+        RecordUserTurn(text);
 
         // The first prompt names the tab - its gist, not a copy - until something better
         // (the helper model's name, a history title) does.
@@ -3572,17 +3297,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             Title = SessionTitles.FromPrompt(text);
         }
-        BeginTurn(eventStart: null);
+        BeginTurn();
 
         try
         {
-            // The fork briefing rides on the first real message; a slash command is the
+            // The feature's briefing rides on the first real message; a slash command is the
             // CLI's own syntax and would not survive a prefix.
-            var context = ForkContext is { Length: > 0 } fork && !text.StartsWith('/') ? SessionForking.ContextBlock(fork) : null;
-            if (context is not null)
-            {
-                ForkContext = null;
-            }
+            var seed = text.StartsWith('/') ? null : TakeFeatureSeed(text);
+            var context = seed is { Length: > 0 } ? SessionBriefing.ContextBlock(seed) : null;
 
             await session.SendAsync(new UserTurn(text) { Attachments = attachments, PlanOnly = planOnly, AskOnly = askOnly, ContextPrefix = context });
         }
@@ -3611,7 +3333,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         var started = _turnStarted;
         EndTurn(TurnOutcome.Completed, end: null);
         Add(new UserMessageItem { Text = text, Attachments = attachments, IsSteer = true });
-        BeginTurn(eventStart: null);
+        RecordUserTurn(text);
+        BeginTurn();
         _turnStarted = started;
 
         try
@@ -3634,7 +3357,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     private void ResumeUnpromptedTurn(AgentEvent e)
     {
-        if (IsBusy || _replayingHistory)
+        if (IsBusy)
         {
             return;
         }
@@ -3656,7 +3379,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         CrashLog.Trace($"Unprompted turn started by the CLI ({e.GetType().Name})");
         NextPromptSuggestion = null;
         IsBusy = true;
-        BeginTurn(eventStart: null);
+        BeginTurn();
     }
 
     /// <summary>
@@ -3664,8 +3387,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// and stays at the top of the turn's block - prompt, status line, tool calls,
     /// replies - until the turn lands, whatever happens in between.
     /// </summary>
-    /// <param name="eventStart">Event timestamp for a replayed turn; null runs on the host clock.</param>
-    private void BeginTurn(DateTimeOffset? eventStart)
+    private void BeginTurn()
     {
         // A second prompt while a turn is still open: the CLI interleaves them, but
         // the older turn is over as a unit, so its timeline settles rather than
@@ -3673,15 +3395,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // is the only sign a turn ended - so a replayed turn ends as completed.
         if (_activeTurn is not null)
         {
-            EndTurn(_replayingHistory ? TurnOutcome.Completed : TurnOutcome.Stopped, end: null);
+            EndTurn(TurnOutcome.Stopped, end: null);
         }
 
-        _turnStarted = eventStart ?? DateTimeOffset.Now;
-        _turnStartFromEvent = eventStart is not null;
+        _turnStarted = DateTimeOffset.Now;
         _turnTodo = null;
         _turnPlanFile = null;
 
-        _activeTurn = new TurnActivityItem { HasClock = !_replayingHistory || eventStart is not null };
+        _activeTurn = new TurnActivityItem { HasClock = true };
 
         // A revision request that has not met its plan yet rides on this new turn; an
         // older one not bound to a turn (its plan's turn ended long ago) does not.
@@ -3692,13 +3413,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         Add(_activeTurn);
 
-        if (!_replayingHistory)
-        {
-            _workingTicks = 0;
-            WorkingElapsed = "";
-            WorkingMessage = WorkingPhrases.Next(WorkingMessage);
-            _turnTimer.Start();
-        }
+        _workingTicks = 0;
+        WorkingElapsed = "";
+        WorkingMessage = WorkingPhrases.Next(WorkingMessage);
+        _turnTimer.Start();
     }
 
     /// <summary>
@@ -3721,22 +3439,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         if (_activeTurn is { } turn)
         {
-            // Live turns read the host clock end to end; a replay can only be clocked
-            // when both ends carry event timestamps, and otherwise shows no duration.
-            if (!_replayingHistory)
-            {
-                turn.Elapsed = DateTimeOffset.Now - _turnStarted;
-                turn.HasClock = true;
-            }
-            else if (_turnStartFromEvent && end?.Timestamp is { } finished)
-            {
-                turn.Elapsed = ElapsedSince(finished, _turnStarted);
-                turn.HasClock = true;
-            }
-            else
-            {
-                turn.HasClock = false;
-            }
+            turn.Elapsed = DateTimeOffset.Now - _turnStarted;
+            turn.HasClock = true;
 
             foreach (var tool in turn.AllTools)
             {
@@ -4328,12 +4032,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(ActiveTask));
         OnPropertyChanged(nameof(StatusDetail));
 
-        // A history replay shows the list but must not persist it over the live
-        // session's stored todos.
-        if (!_replayingHistory)
-        {
-            TodosChanged?.Invoke(this, todos);
-        }
+        TodosChanged?.Invoke(this, todos);
     }
 
     /// <summary>Raised so the workspace can persist the list.</summary>
@@ -4359,53 +4058,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         Artifacts.Clear();
         _status.ClearSessionChanges();
         ResumeSessionId = null;
+        ClearFeature();
         WorktreePath = null;
-    }
-
-    /// <summary>Replays a stored transcript into the transcript view, read only.</summary>
-    public void LoadHistory(IReadOnlyList<AgentEvent> events)
-    {
-        EndTurn(TurnOutcome.Stopped, end: null);
-        Items.Clear();
-        _toolCalls.Clear();
-        _hiddenCalls.Clear();
-        ClearTasks();
-        _streaming = null;
-        Artifacts.Clear();
-        _replayingHistory = true;
-
-        try
-        {
-            foreach (var e in events)
-            {
-                switch (e)
-                {
-                    case UserMessageRecorded user:
-                        Add(new UserMessageItem { Text = user.Text });
-                        BeginTurn(user.Timestamp);
-                        break;
-
-                    default:
-                        Handle(e);
-                        break;
-                }
-            }
-        }
-        finally
-        {
-            // A stored transcript can end mid-turn; nothing is coming to finish the
-            // line, so it settles here with whatever it had - while the replay flag
-            // still holds, so it doesn't clock "now minus hours-ago event".
-            if (_activeTurn is not null)
-            {
-                EndTurn(TurnOutcome.Completed, end: null);
-            }
-
-            _replayingHistory = false;
-
-            // Nothing from a stored transcript is still running.
-            EndAllTasks();
-        }
     }
 
     /// <summary>The prose being streamed: a narration step in the running turn, or a bare message outside one.</summary>
@@ -4572,6 +4226,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
+        if (SmartHistory && _recording && FeatureId is { } featureId)
+        {
+            Features!.Summarize(featureId, force: true);
+        }
+
         StopTaskHost();
         await DisposeSessionAsync();
     }

@@ -37,7 +37,11 @@ public sealed partial class SettingsPanel : UserControl
         InitializeComponent();
 
         // Only listen while in the visual tree: the settings event is static and windows come and go.
-        Loaded += (_, _) => AppSettings.Changed += OnAppSettingsChanged;
+        Loaded += async (_, _) =>
+        {
+            AppSettings.Changed += OnAppSettingsChanged;
+            await RefreshAccountsAsync();
+        };
         Unloaded += (_, _) => AppSettings.Changed -= OnAppSettingsChanged;
 
         Reload();
@@ -68,15 +72,7 @@ public sealed partial class SettingsPanel : UserControl
         RefreshSyntaxSection();
         WordWrapToggle.IsOn = AppSettings.EditorWordWrap;
         SuggestNextPromptToggle.IsOn = AppSettings.SuggestNextPrompt;
-        CompressShellToggle.IsOn = AppSettings.TokenSaverCompressShell;
-        DigestToggle.IsOn = AppSettings.TokenSaverDigest;
-        ExploreToggle.IsOn = AppSettings.TokenSaverExplore;
-        ReadGuardToggle.IsOn = AppSettings.TokenSaverReadGuard;
-        HandoffNudgeToggle.IsOn = AppSettings.TokenSaverHandoffNudge;
-        CheapSubagentsToggle.IsOn = AppSettings.TokenSaverCheapSubagents;
-        TerseToggle.IsOn = AppSettings.TokenSaverTerse;
-        AutoCompactBox.Value = AppSettings.TokenSaverAutoCompactPercent;
-        DenyRulesBox.Text = string.Join("\r", AppSettings.TokenSaverDenyRules);
+        SmartHistoryToggle.IsOn = AppSettings.SmartHistory;
 
         ThemeBox.SelectedIndex = AppSettings.Theme switch
         {
@@ -101,12 +97,6 @@ public sealed partial class SettingsPanel : UserControl
             <= 50_000 => 2,
             _ => 3,
         };
-
-        DefaultChatModeBox.SelectedIndex = Math.Max(0, DefaultChatModeBox.Items.ToList().FindIndex(
-            i => (i as ComboBoxItem)?.Tag as string == AppSettings.DefaultChatMode));
-
-        DefaultTierBox.SelectedIndex = Math.Max(0, DefaultTierBox.Items.ToList().FindIndex(
-            i => (i as ComboBoxItem)?.Tag as string == AppSettings.DefaultTierFor("claude")));
 
         BuildTierModelRows();
 
@@ -310,6 +300,45 @@ public sealed partial class SettingsPanel : UserControl
         RefreshShortcutRows();
     }
 
+    /// <summary>Asks each CLI whether Codale's account is signed in and shows it beside the sign in / out buttons.</summary>
+    private async Task RefreshAccountsAsync()
+    {
+        foreach (var (cli, status, signIn, signOut) in new[]
+        {
+            ("claude", ClaudeAccountStatus, ClaudeSignInButton, ClaudeSignOutButton),
+            ("codex", CodexAccountStatus, CodexSignInButton, CodexSignOutButton),
+        })
+        {
+            var signedIn = await CodaleAccountCli.IsSignedInAsync(cli);
+            status.Text = signedIn ? "Signed in" : "Signed out";
+            signIn.Content = signedIn ? "Sign in again" : "Sign in";
+            signOut.IsEnabled = signedIn;
+        }
+    }
+
+    /// <summary>Opens a console running the CLI's login against Codale's account folder; it is re-read when the window is back.</summary>
+    private async void OnSignInClick(object sender, RoutedEventArgs e)
+    {
+        var cli = (string)((FrameworkElement)sender).Tag;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", "/k " + CodaleAccountCli.LoginCommand(cli)) { UseShellExecute = false })?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Error("settings", "Account sign-in failed to start", ex);
+        }
+
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        await RefreshAccountsAsync();
+    }
+
+    private async void OnSignOutClick(object sender, RoutedEventArgs e)
+    {
+        await CodaleAccountCli.SignOutAsync((string)((FrameworkElement)sender).Tag);
+        await RefreshAccountsAsync();
+    }
+
     private void BuildProviderEditors()
     {
         ProvidersPanel.Children.Clear();
@@ -335,7 +364,7 @@ public sealed partial class SettingsPanel : UserControl
             HelperProviderBox.Items.Add("Claude");
             HelperProviderBox.Items.Add("Codex");
 
-            var named = _providers.Where(p => p.Name.Trim().Length > 0 && !p.IsAccount).ToList();
+            var named = _providers.Where(p => p.Name.Trim().Length > 0).ToList();
             foreach (var provider in named)
             {
                 HelperProviderBox.Items.Add(provider.Name.Trim());
@@ -349,9 +378,53 @@ public sealed partial class SettingsPanel : UserControl
         finally
         {
             _loading = wasLoading;
-            RefreshTokenSaverHint();
-            RefreshCodexAuthStatus();
         }
+
+        RefreshCliProviderBoxes();
+    }
+
+    private ComboBox CliProviderBoxFor(string cli) => cli == "codex" ? CodexProviderBox : ClaudeProviderBox;
+
+    /// <summary>Default plus the providers each CLI can reach: Claude needs a Claude account or an Anthropic-compatible base URL, Codex an OpenAI-compatible one.</summary>
+    private void RefreshCliProviderBoxes()
+    {
+        var wasLoading = _loading;
+        _loading = true;
+        try
+        {
+            foreach (var cli in new[] { "claude", "codex" })
+            {
+                var box = CliProviderBoxFor(cli);
+                var wanted = AppSettings.CliProviderFor(cli);
+                box.Items.Clear();
+                box.Items.Add(new ComboBoxItem { Content = "Default (CLI login)", Tag = "" });
+                foreach (var provider in _providers.Where(p => p.Name.Trim().Length > 0 &&
+                    (cli == "claude"
+                        ? p.AnthropicBaseUrl.Trim().Length > 0
+                        : p.BaseUrl.Trim().Length > 0)))
+                {
+                    box.Items.Add(new ComboBoxItem { Content = provider.Name.Trim(), Tag = provider.Name.Trim() });
+                }
+
+                var index = box.Items.ToList().FindIndex(i => string.Equals((i as ComboBoxItem)?.Tag as string, wanted, StringComparison.OrdinalIgnoreCase));
+                box.SelectedIndex = Math.Max(index, 0);
+            }
+        }
+        finally
+        {
+            _loading = wasLoading;
+        }
+    }
+
+    private void OnCliProviderChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || sender is not ComboBox box || box.SelectedItem is not ComboBoxItem item)
+        {
+            return;
+        }
+
+        var cli = ReferenceEquals(box, CodexProviderBox) ? "codex" : "claude";
+        WriteSettings(() => AppSettings.SetCliProvider(cli, item.Tag as string));
     }
 
     private void OnHelperProviderChanged(object sender, SelectionChangedEventArgs e)
@@ -361,135 +434,7 @@ public sealed partial class SettingsPanel : UserControl
             var selected = HelperProviderBox.SelectedItem as string ?? "";
             var name = string.Equals(selected, "Claude", StringComparison.OrdinalIgnoreCase) ? "" : selected;
             WriteSettings(() => AppSettings.HelperProvider = name);
-            RefreshTokenSaverHint();
-            RefreshCodexAuthStatus();
         }
-    }
-
-    private void RefreshCodexAuthStatus()
-    {
-        var isCodex = string.Equals(AppSettings.HelperProvider, "Codex", StringComparison.OrdinalIgnoreCase);
-        CodexAuthRow.Visibility = isCodex ? Visibility.Visible : Visibility.Collapsed;
-        if (!isCodex)
-        {
-            return;
-        }
-
-        CodexAuthStatusText.Text = "Checking login status...";
-        _ = Task.Run(async () =>
-        {
-            var loggedIn = false;
-            try
-            {
-                var codexPath = Codale.Agents.CliLocator.Find("codex");
-                if (codexPath is null)
-                {
-                    DispatcherQueue.TryEnqueue(() =>
-                    {
-                        CodexAuthStatusText.Text = "Codex CLI is not installed.";
-                        CodexSignInButton.IsEnabled = false;
-                    });
-                    return;
-                }
-
-                var startInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = codexPath,
-                    Arguments = "login status",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
-
-                using var proc = System.Diagnostics.Process.Start(startInfo);
-                if (proc is not null)
-                {
-                    await proc.WaitForExitAsync();
-                    loggedIn = proc.ExitCode == 0;
-                }
-            }
-            catch
-            {
-                loggedIn = false;
-            }
-
-            DispatcherQueue.TryEnqueue(() =>
-            {
-                CodexAuthStatusText.Text = loggedIn ? "Logged in to OpenAI Codex" : "Not logged in";
-                CodexSignInButton.IsEnabled = true;
-                CodexSignInButton.Content = loggedIn ? "Re-authenticate" : "Sign in";
-            });
-        });
-    }
-
-    private void OnCodexSignInClick(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var start = new System.Diagnostics.ProcessStartInfo("cmd.exe", "/k codex login")
-            {
-                UseShellExecute = false,
-                CreateNoWindow = false,
-            };
-            System.Diagnostics.Process.Start(start);
-        }
-        catch (Exception ex)
-        {
-            CrashLog.Error("settings", "Codex sign-in failed to start", ex);
-        }
-    }
-
-    /// <summary>The model-backed token savers say why they are idle when background tasks have no custom provider.</summary>
-    private void RefreshTokenSaverHint()
-    {
-        var hasApi = AppSettings.HasHelperApi;
-        TokenSaverByokHint.Visibility = hasApi ? Visibility.Collapsed : Visibility.Visible;
-        DigestToggle.IsEnabled = hasApi;
-        ExploreToggle.IsEnabled = hasApi;
-    }
-
-    private void OnTokenSaverToggled(object sender, RoutedEventArgs e)
-    {
-        if (_loading || sender is not ToggleSwitch toggle)
-        {
-            return;
-        }
-
-        var on = toggle.IsOn;
-        WriteSettings(() =>
-        {
-            if (ReferenceEquals(toggle, CompressShellToggle)) AppSettings.TokenSaverCompressShell = on;
-            else if (ReferenceEquals(toggle, DigestToggle)) AppSettings.TokenSaverDigest = on;
-            else if (ReferenceEquals(toggle, ExploreToggle)) AppSettings.TokenSaverExplore = on;
-            else if (ReferenceEquals(toggle, ReadGuardToggle)) AppSettings.TokenSaverReadGuard = on;
-            else if (ReferenceEquals(toggle, HandoffNudgeToggle)) AppSettings.TokenSaverHandoffNudge = on;
-            else if (ReferenceEquals(toggle, CheapSubagentsToggle)) AppSettings.TokenSaverCheapSubagents = on;
-            else if (ReferenceEquals(toggle, TerseToggle)) AppSettings.TokenSaverTerse = on;
-        });
-    }
-
-    private void OnAutoCompactChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
-    {
-        if (_loading)
-        {
-            return;
-        }
-
-        var percent = double.IsFinite(sender.Value) ? (int)Math.Round(sender.Value) : 0;
-        WriteSettings(() => AppSettings.TokenSaverAutoCompactPercent = percent);
-    }
-
-    private void OnDenyRulesLostFocus(object sender, RoutedEventArgs e)
-    {
-        if (_loading)
-        {
-            return;
-        }
-
-        // A WinUI TextBox keeps line breaks as a bare \r.
-        var rules = DenyRulesBox.Text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-        WriteSettings(() => AppSettings.TokenSaverDenyRules = rules);
     }
 
     private Expander BuildProviderEditor(ByokProvider provider, bool expanded)
@@ -535,34 +480,6 @@ public sealed partial class SettingsPanel : UserControl
                 previousName = provider.Name;
             }
         });
-
-        if (provider.IsAccount)
-        {
-            panel.Children.Add(new TextBlock
-            {
-                Text = "A separate Claude CLI login. Sign in once, then pick it in the provider picker.",
-                TextWrapping = TextWrapping.Wrap,
-                Opacity = 0.7,
-            });
-
-            var signIn = new Button { Content = "Sign in" };
-            signIn.Click += (_, _) => SignInAccount(provider);
-            var removeAccount = new Button { Content = "Remove account", HorizontalAlignment = HorizontalAlignment.Right };
-            removeAccount.Click += (_, _) =>
-            {
-                _providers.Remove(provider);
-                SaveProviders();
-                BuildProviderEditors();
-            };
-            var buttons = new Grid { ColumnDefinitions = { new ColumnDefinition(), new ColumnDefinition { Width = GridLength.Auto } } };
-            buttons.Children.Add(signIn);
-            Grid.SetColumn(removeAccount, 1);
-            buttons.Children.Add(removeAccount);
-            panel.Children.Add(buttons);
-
-            expander.Content = panel;
-            return expander;
-        }
 
         Field("OpenAI-compatible base URL", "https://api.example.com/v1 (used by Codex CLI)", provider.BaseUrl, v => provider.BaseUrl = v);
         Field("Anthropic-compatible base URL", "https://api.example.com (used by Claude CLI; blank = OpenAI only)", provider.AnthropicBaseUrl, v => provider.AnthropicBaseUrl = v);
@@ -840,45 +757,6 @@ public sealed partial class SettingsPanel : UserControl
         ProvidersPanel.Children.Add(BuildProviderEditor(provider, expanded: true));
     }
 
-    private void OnAddAccountClick(object sender, RoutedEventArgs e)
-    {
-        var number = _providers.Count(p => p.IsAccount) + 1;
-        string name;
-        do
-        {
-            name = $"Default {number++}";
-        }
-        while (_providers.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)));
-
-        var root = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale", "accounts");
-        var dir = System.IO.Path.Combine(root,Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(dir);
-
-        var account = new ByokProvider { Name = name, ConfigDir = dir };
-        _providers.Add(account);
-        SaveProviders();
-        ProvidersPanel.Children.Add(BuildProviderEditor(account, expanded: true));
-    }
-
-    /// <summary>Opens a console running the Claude CLI's login against the account's own config directory.</summary>
-    private static void SignInAccount(ByokProvider account)
-    {
-        try
-        {
-            var start = new System.Diagnostics.ProcessStartInfo("cmd.exe", "/k claude auth login")
-            {
-                UseShellExecute = false,
-                CreateNoWindow = false,
-            };
-            start.Environment["CLAUDE_CONFIG_DIR"] = account.ConfigDir;
-            System.Diagnostics.Process.Start(start);
-        }
-        catch (Exception ex)
-        {
-            CrashLog.Error("settings", "Account sign-in failed to start", ex);
-        }
-    }
-
     /// <summary>The chat reading fonts worth offering; a stored custom family stays selectable.</summary>
     private void PopulateChatFontFamilies()
     {
@@ -1095,6 +973,14 @@ public sealed partial class SettingsPanel : UserControl
         }
     }
 
+    private void OnSmartHistoryToggled(object sender, RoutedEventArgs e)
+    {
+        if (!_loading)
+        {
+            AppSettings.SmartHistory = SmartHistoryToggle.IsOn;
+        }
+    }
+
     private void OnWordWrapToggled(object sender, RoutedEventArgs e)
     {
         if (!_loading)
@@ -1186,96 +1072,117 @@ public sealed partial class SettingsPanel : UserControl
         };
     }
 
-    private void OnDefaultChatModeChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (!_loading)
-        {
-            AppSettings.DefaultChatMode = (DefaultChatModeBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
-        }
-    }
+    private ComboBox ModeBoxFor(string cli) => cli == "codex" ? CodexModeBox : ClaudeModeBox;
 
-    private void OnDefaultTierChanged(object sender, SelectionChangedEventArgs e)
+    private ComboBox TierBoxFor(string cli, string tier) => (cli, tier) switch
     {
-        if (_loading)
-        {
-            return;
-        }
-
-        // The tier is remembered per CLI; the settings row sets the starting point for both.
-        var tier = (DefaultTierBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "cli";
-        AppSettings.SetDefaultTier("claude", tier);
-        AppSettings.SetDefaultTier("codex", tier);
-    }
+        ("codex", "flash") => CodexFlashBox,
+        ("codex", _) => CodexProBox,
+        (_, "flash") => ClaudeFlashBox,
+        _ => ClaudeProBox,
+    };
 
     /// <summary>
-    /// One row per CLI and tier: which model plays "flash" (fast) and "pro" (capable).
-    /// The choices are the models the CLI itself reported this run; before its first
-    /// chat has connected there is no list, so the row only offers the auto guess.
+    /// Per CLI: the start mode and which model plays "flash" (fast) and "pro" (capable).
+    /// The model lists come from the CLI itself, read live in the background and again
+    /// whenever a dropdown opens.
     /// </summary>
     private void BuildTierModelRows()
     {
-        TierModelsPanel.Children.Clear();
-
-        foreach (var (cli, title) in new[] { ("claude", "Claude"), ("codex", "Codex") })
+        foreach (var cli in new[] { "claude", "codex" })
         {
-            var catalogue = ChatViewModel.KnownCatalogue(cli);
-
-            foreach (var (tier, tierTitle) in new[] { ("flash", "Flash"), ("pro", "Pro") })
+            var modeBox = ModeBoxFor(cli);
+            var current = AppSettings.DefaultModeFor(cli);
+            modeBox.SelectedIndex = Math.Max(0, modeBox.Items.ToList().FindIndex(i => (i as ComboBoxItem)?.Tag as string == current));
+            var pickedCli = cli;
+            modeBox.SelectionChanged += (_, _) =>
             {
-                var row = new Grid { ColumnSpacing = 12 };
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-                var label = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2 };
-                label.Children.Add(new TextBlock { Text = $"{title} {tierTitle} model" });
-                label.Children.Add(new TextBlock
+                if (!_loading && modeBox.SelectedItem is ComboBoxItem item)
                 {
-                    Text = catalogue is null
-                        ? $"Open a {title} chat once to load its model list"
-                        : tier == "flash"
-                            ? "Runs the Lite and Flash tiers"
-                            : "Runs the Pro and Plus tiers",
-                    FontSize = 11,
-                    Opacity = 0.6,
-                    TextWrapping = TextWrapping.Wrap,
-                });
-                row.Children.Add(label);
-
-                var combo = new ComboBox { VerticalAlignment = VerticalAlignment.Center, MinWidth = 220 };
-                combo.Items.Add(new ComboBoxItem { Content = "Auto (pick from model names)", Tag = "" });
-                var configured = AppSettings.TierModelFor(cli, tier) ?? "";
-                var selected = 0;
-                if (catalogue is { Count: > 0 })
-                {
-                    foreach (var model in catalogue)
-                    {
-                        combo.Items.Add(new ComboBoxItem { Content = string.IsNullOrEmpty(model.DisplayName) ? model.Id : model.DisplayName, Tag = model.Id });
-                        if (string.Equals(model.Id, configured, StringComparison.OrdinalIgnoreCase))
-                        {
-                            selected = combo.Items.Count - 1;
-                        }
-                    }
+                    AppSettings.SetDefaultMode(pickedCli, item.Tag as string);
                 }
-                else if (configured.Length > 0)
-                {
-                    combo.Items.Add(new ComboBoxItem { Content = configured, Tag = configured });
-                    selected = 1;
-                }
+            };
 
-                combo.SelectedIndex = selected;
+            foreach (var tier in new[] { "flash", "pro" })
+            {
+                var combo = TierBoxFor(cli, tier);
                 var pickedTier = tier;
-                var pickedCli = cli;
                 combo.SelectionChanged += (sender, _) =>
                 {
-                    if (sender is ComboBox box && box.SelectedItem is ComboBoxItem item)
+                    if (!_populating && sender is ComboBox box && box.SelectedItem is ComboBoxItem item)
                     {
                         AppSettings.SetTierModel(pickedCli, pickedTier, item.Tag as string);
                     }
                 };
-                Grid.SetColumn(combo, 1);
-                row.Children.Add(combo);
-                TierModelsPanel.Children.Add(row);
             }
+
+            FillTierBoxes(cli, ChatViewModel.KnownCatalogue(cli));
+            _ = RefreshCatalogueAsync(cli);
+        }
+    }
+
+    private bool _populating;
+
+    private void FillTierBoxes(string cli, IReadOnlyList<Codale.Core.Agents.AgentModelInfo>? catalogue)
+    {
+        _populating = true;
+        try
+        {
+            foreach (var tier in new[] { "flash", "pro" })
+            {
+                var combo = TierBoxFor(cli, tier);
+                var configured = AppSettings.TierModelFor(cli, tier) ?? "";
+                combo.Items.Clear();
+                combo.PlaceholderText = "Select a model";
+                var selected = -1;
+                var found = false;
+                foreach (var model in catalogue ?? [])
+                {
+                    combo.Items.Add(new ComboBoxItem { Content = string.IsNullOrEmpty(model.DisplayName) ? model.Id : model.DisplayName, Tag = model.Id });
+                    if (string.Equals(model.Id, configured, StringComparison.OrdinalIgnoreCase))
+                    {
+                        selected = combo.Items.Count - 1;
+                        found = true;
+                    }
+                }
+
+                if (!found && configured.Length > 0)
+                {
+                    combo.Items.Add(new ComboBoxItem { Content = configured, Tag = configured });
+                    selected = combo.Items.Count - 1;
+                }
+
+                combo.SelectedIndex = selected;
+            }
+        }
+        finally
+        {
+            _populating = false;
+        }
+    }
+
+    private async Task RefreshCatalogueAsync(string cli)
+    {
+        try
+        {
+            var models = await ChatViewModel.FetchCatalogueAsync(cli);
+            if (models.Count > 0)
+            {
+                FillTierBoxes(cli, models);
+            }
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Error("settings", $"Could not load the {cli} model list", ex);
+        }
+    }
+
+    private void OnModelDropDownOpened(object? sender, object e)
+    {
+        var cli = ReferenceEquals(sender, CodexFlashBox) || ReferenceEquals(sender, CodexProBox) ? "codex" : "claude";
+        if (ChatViewModel.KnownCatalogue(cli) is null)
+        {
+            _ = RefreshCatalogueAsync(cli);
         }
     }
 

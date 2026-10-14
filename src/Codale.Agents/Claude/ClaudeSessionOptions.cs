@@ -84,20 +84,8 @@ public sealed record ClaudeSessionOptions
     /// </summary>
     public string? BackgroundShellGuardCommand { get; init; }
 
-    /// <summary>
-    /// The host's token-saving hooks and deny rules (output condensing, the large-file read
-    /// guard). Its shell guard, when unset, falls back to <see cref="BackgroundShellGuardCommand"/>.
-    /// </summary>
-    public Codale.Core.Agents.ClaudeHookSettings? Hooks { get; init; }
-
     /// <summary>Comma-separated tool names removed from the model's context (--disallowedTools); null removes none.</summary>
     public string? DisallowedTools { get; init; }
-
-    /// <summary>
-    /// Subagent definitions for this session (--agents JSON); one named like a built-in
-    /// (Explore, general-purpose) replaces it. Null keeps the CLI's own.
-    /// </summary>
-    public string? Agents { get; init; }
 
     /// <summary>
     /// Extra environment variables for the CLI process, layered over the inherited
@@ -189,12 +177,7 @@ public sealed record ClaudeSessionOptions
             args.Add(mcpConfig);
         }
 
-        var hooks = Hooks ?? new Codale.Core.Agents.ClaudeHookSettings();
-        if (hooks.ShellGuardCommand is null)
-        {
-            hooks = hooks with { ShellGuardCommand = BackgroundShellGuardCommand };
-        }
-
+        var hooks = new Codale.Core.Agents.ClaudeHookSettings { ShellGuardCommand = BackgroundShellGuardCommand };
         if (Codale.Core.Agents.McpServerSpec.ToClaudeSettings(McpServers, hooks) is { } settings)
         {
             args.Add("--settings");
@@ -205,12 +188,6 @@ public sealed record ClaudeSessionOptions
         {
             args.Add("--disallowedTools");
             args.Add(disallowed);
-        }
-
-        if (Agents is { Length: > 0 } agents)
-        {
-            args.Add("--agents");
-            args.Add(agents);
         }
 
         args.AddRange(ExtraArguments);

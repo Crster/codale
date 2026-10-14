@@ -1,13 +1,13 @@
-using Codale.Agents.Claude;
+using Codale.Agents.History;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Codale.App.ViewModels;
 
 /// <summary>
-/// One past conversation in the session panel's history, plus what the transcript on
-/// disk cannot know: whether it is open in a chat tab right now, and whether that tab
-/// is mid-turn.
+/// One row of the history list - a feature, or a terminal CLI's conversation - plus what
+/// the stored data cannot know: whether it is open in a chat tab right now, and whether
+/// that tab is mid-turn.
 /// </summary>
 public sealed partial class SessionListItem : ObservableObject
 {
@@ -15,16 +15,11 @@ public sealed partial class SessionListItem : ObservableObject
 
     public string SessionId => Summary.SessionId;
 
-    /// <summary>Ran in its own git worktree: the title carries a lock.</summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Title))]
-    public partial bool IsIsolated { get; set; }
-
-    public string Title => IsIsolated ? "\U0001F512 " + Summary.Title : Summary.Title;
+    public string Title => Summary.Title;
 
     public int UserTurns => Summary.UserTurns;
 
-    public string TurnsText => UserTurns == 1 ? "1 turn" : $"{UserTurns} turns";
+    public string TurnsText => Summary.Detail ?? (UserTurns == 1 ? "1 turn" : $"{UserTurns} turns");
 
     public DateTimeOffset UpdatedAt => Summary.UpdatedAt;
 
@@ -40,11 +35,9 @@ public sealed partial class SessionListItem : ObservableObject
 
     public bool IsOpenIdle => IsOpen && !IsWorking;
 
-    public void ApplyOpenState(
-        IReadOnlyDictionary<string, bool> open, IReadOnlySet<string> isolated, IReadOnlyDictionary<string, string> worktrees)
+    public void ApplyOpenState(IReadOnlyDictionary<string, bool> open)
     {
         IsOpen = open.TryGetValue(SessionId, out var working);
         IsWorking = IsOpen && working;
-        IsIsolated = isolated.Contains(SessionId) || worktrees.ContainsKey(SessionId);
     }
 }

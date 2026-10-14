@@ -261,20 +261,22 @@ public sealed partial class WorkspacePage : Page
         _editorTabs.FirstOrDefault(t => ReferenceEquals(t.Item, CentreTabs.SelectedItem))?.Tab;
 
     /// <summary>
-    /// Shows the language colouring the file in front (or hides the control when the tab in front is not
+    /// Shows the language colouring the file in front (or "No File", disabled, when the tab in front is not
     /// a saved file). A language picked by hand is marked so it is not mistaken for detection.
     /// </summary>
     private void UpdateLanguageButton()
     {
         if (ActiveEditorTab() is not { } tab || !tab.ViewModel.HasFile)
         {
-            LanguageHost.Visibility = Visibility.Collapsed;
+            LanguageText.Text = "No File";
+            LanguageButton.IsEnabled = false;
             return;
         }
 
+        LanguageButton.IsEnabled = true;
+
         var name = SyntaxService.Catalog.ById(tab.LanguageId)?.Name ?? "Plain Text";
         LanguageText.Text = tab.HasManualLanguage ? $"{name} (manual)" : name;
-        LanguageHost.Visibility = Visibility.Visible;
     }
 
     private void OnLanguageFlyoutOpening(object? sender, object e)
@@ -477,11 +479,13 @@ public sealed partial class WorkspacePage : Page
             var isCodex = string.Equals(cliName, "Codex", StringComparison.OrdinalIgnoreCase) ||
                           (sender is ChatViewModel { SessionCli.Id: "codex" });
             var targetCli = isCodex ? "Codex" : "Claude";
-            var command = isCodex ? "codex login" : "claude";
+
+            // Codale keeps its own login, apart from the CLI's default one: the login runs
+            // against Codale's folder, so a terminal's claude/codex stays on its own account.
+            var command = CodaleAccountCli.LoginCommand(isCodex ? "codex" : "claude");
             var description = isCodex
-                ? "Open a terminal to log in? It runs 'codex login' to authenticate with OpenAI."
-                : "Open a terminal to log in? It starts 'claude'; type /login there, finish " +
-                  "sign-in in your browser, then exit with /exit and resend your message here.";
+                ? "Open a terminal to log in? It runs 'codex login' for Codale's own Codex account, separate from the codex you run in a terminal."
+                : "Open a terminal to log in? It runs 'claude auth login' for Codale's own Claude account, separate from the claude you run in a terminal.";
 
             _loginPromptOpen = true;
             try
@@ -489,7 +493,7 @@ public sealed partial class WorkspacePage : Page
                 var dialog = new ContentDialog
                 {
                     XamlRoot = XamlRoot,
-                    Title = $"{targetCli} CLI isn't logged in",
+                    Title = $"Codale isn't signed in to {targetCli}",
                     Content = new TextBlock
                     {
                         TextWrapping = TextWrapping.Wrap,
@@ -821,14 +825,34 @@ public sealed partial class WorkspacePage : Page
             // session's MCP servers (see TryOpenCliTab), so nothing is written for it here.
             terminal.LaunchRewriter ??= OnTerminalLaunchTyped;
 
-            var tab = new TerminalTab { ViewModel = terminal, Workspace = ViewModel };
+            ITerminalHost tab;
+            if (terminal.AgentSession is not null)
+            {
+                // An agent CLI: its TUI in a rounded card beside the session panel.
+                var cli = new CliTerminalTab { ViewModel = terminal, Workspace = ViewModel };
+                cli.FileDiffRequested += (_, path) => OnChatToolFileRequested(cli, new ToolFileRequestEventArgs(path, isEdit: true));
+                cli.ArtifactRequested += (_, artifact) => ShowArtifact(artifact);
+                cli.UpdateCliRequested += (_, cmd) => _ = RunInNewTerminalAsync(cmd);
+                cli.TaskPeekRequested += (_, task) => SetPeek(ReferenceEquals(PeekPane.Task, task) && PeekPane.Visibility == Visibility.Visible ? null : task);
+                cli.ResumeRequested += (_, resume) =>
+                {
+                    // A past conversation resumes natively: the CLI is launched again with its own resume
+                    // arguments, through the same path as a launch typed at a shell prompt.
+                    if (ViewModel is { } workspace)
+                    {
+                        TryOpenCliTab($"PS {workspace.ProjectPath}> {resume.Cli.Executable} {resume.Arguments}", TerminalTabInFront());
+                    }
+                };
+                tab = cli;
+            }
+            else
+            {
+                tab = new TerminalTab { ViewModel = terminal };
+            }
+
             tab.LinkActivated += OnTerminalLinkActivated;
-            tab.FileDiffRequested += (_, path) => OnChatToolFileRequested(tab, new ToolFileRequestEventArgs(path, isEdit: true));
-            tab.ArtifactRequested += (_, artifact) => ShowArtifact(artifact);
-            tab.UpdateCliRequested += (_, cmd) => _ = RunInNewTerminalAsync(cmd);
-            tab.TaskPeekRequested += (_, task) => SetPeek(ReferenceEquals(PeekPane.Task, task) && PeekPane.Visibility == Visibility.Visible ? null : task);
             var item = new TabViewItem { IsClosable = true, Header = BuildTerminalHeader(terminal) };
-            item.Content = tab;
+            item.Content = (UIElement)tab;
 
             var entry = new TerminalTabEntry(item, tab, terminal);
             _terminalTabs.Add(entry);
@@ -2176,22 +2200,6 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
-    private void ToggleActiveSessionPanel()
-    {
-        if (ChatTabInFront() is { } chatEntry)
-        {
-            chatEntry.Tab.ToggleSessionPanel();
-            if (chatEntry.Tab.IsSessionPanelOpen)
-            {
-                chatEntry.Tab.FocusDraft();
-            }
-        }
-        else if (TerminalTabInFront() is { } terminalEntry && terminalEntry.Tab.AgentSession is not null)
-        {
-            terminalEntry.Tab.ToggleSessionPanel();
-        }
-    }
-
     /// <summary>
     /// The chat that was last in front if it still has a tab, else any chat tab, else a
     /// new conversation (offering the CLI install when it is missing).
@@ -2265,9 +2273,6 @@ public sealed partial class WorkspacePage : Page
             case KeyboardShortcuts.ToggleCommands:
                 ToggleCommandsFlyout();
                 break;
-            case KeyboardShortcuts.ToggleRightPanel:
-                RunShortcut(ToggleRightPanelAndChatAsync);
-                break;
             case KeyboardShortcuts.Search:
                 FocusSearchFromShortcut();
                 break;
@@ -2310,19 +2315,6 @@ public sealed partial class WorkspacePage : Page
             await BringChatToFrontAsync();
         }
 
-        ChatTabInFront()?.Tab.FocusDraft();
-    }
-
-    /// <summary>Toggles the session panel for the active session tab; bringing the chat up if no session tab is in front.</summary>
-    private async Task ToggleRightPanelAndChatAsync()
-    {
-        if (ChatTabInFront() is not null || (TerminalTabInFront() is { } terminalEntry && terminalEntry.Tab.AgentSession is not null))
-        {
-            ToggleActiveSessionPanel();
-            return;
-        }
-
-        await BringChatToFrontAsync();
         ChatTabInFront()?.Tab.FocusDraft();
     }
 
@@ -3197,19 +3189,6 @@ public sealed partial class WorkspacePage : Page
     private void OnStatusBarCommandBoxGotFocus(object sender, RoutedEventArgs e)
     {
         StatusBarCommandBox.ItemsSource = GetCommandSuggestions(StatusBarCommandBox.Text);
-
-        if (Application.Current.Resources.TryGetValue("AccentFillColorDefaultBrush", out var accent) && accent is Brush brush)
-        {
-            StatusBarCommandContainer.BorderBrush = brush;
-        }
-    }
-
-    private void OnStatusBarCommandBoxLostFocus(object sender, RoutedEventArgs e)
-    {
-        if (Application.Current.Resources.TryGetValue("ControlStrokeColorDefaultBrush", out var normal) && normal is Brush brush)
-        {
-            StatusBarCommandContainer.BorderBrush = brush;
-        }
     }
 
     private void OnStatusBarCommandBoxKeyDown(object sender, KeyRoutedEventArgs e)
@@ -3851,11 +3830,11 @@ public sealed partial class WorkspacePage : Page
     /// One open terminal tab: its <see cref="TabViewItem"/>, its display surface and
     /// the shell view model whose lifetime matches the tab.
     /// </summary>
-    private sealed class TerminalTabEntry(TabViewItem item, TerminalTab tab, TerminalViewModel terminal)
+    private sealed class TerminalTabEntry(TabViewItem item, ITerminalHost tab, TerminalViewModel terminal)
     {
         public TabViewItem Item { get; } = item;
 
-        public TerminalTab Tab { get; } = tab;
+        public ITerminalHost Tab { get; } = tab;
 
         public TerminalViewModel Terminal { get; } = terminal;
     }

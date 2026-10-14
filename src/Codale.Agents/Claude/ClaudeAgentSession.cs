@@ -53,6 +53,9 @@ public sealed class ClaudeAgentSession : IAgentSession
     /// <summary>Slash commands the CLI reported during the initialize handshake.</summary>
     public IReadOnlyList<string> SlashCommands { get; private set; } = [];
 
+    /// <summary>The account's model catalogue, as the initialize handshake reported it.</summary>
+    private IReadOnlyList<AgentModelInfo> _initModels = [];
+
     public async Task StartAsync(CancellationToken ct = default)
     {
         if (_process is not null)
@@ -92,14 +95,7 @@ public sealed class ClaudeAgentSession : IAgentSession
         // stream-json host fails; this env var is its explicit opt-in that skips both.
         startInfo.EnvironmentVariables["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] = _options.PromptSuggestions ? "1" : "0";
 
-        // The CLI moves an MCP call still running after 120 s to the background, and the
-        // explore tool may search for up to its own timeout: it waits for the answer
-        // rather than handing the model a placeholder. A value the user set wins.
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS")))
-        {
-            startInfo.EnvironmentVariables["CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS"] =
-                ((long)(Codale.Core.Tasks.TaskPipeClient.ExploreTimeout + TimeSpan.FromMinutes(1)).TotalMilliseconds).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        }
+        startInfo.EnvironmentVariables[CodaleAccount.ClaudeVariable] = CodaleAccount.ClaudeHome;
 
         if (_options.Environment is { } environment)
         {
@@ -139,6 +135,8 @@ public sealed class ClaudeAgentSession : IAgentSession
                 $"'{_options.Executable}' did not answer the initialize handshake within 30s. " +
                 $"stderr: {string.Join(Environment.NewLine, StderrSnapshot().TakeLast(5))}");
         }
+
+        _initModels = ParseModelCatalog(init);
 
         SlashCommands = init.Prop("commands") is { } cmds
             ? cmds.EnumerateArray().Select(c => c.Str("name")).OfType<string>().ToList()
@@ -664,41 +662,6 @@ public sealed class ClaudeAgentSession : IAgentSession
         }
     }
 
-    /// <summary>
-    /// A readable name for a Claude model id: the catalogue's name when it is listed,
-    /// else "claude-opus-5-5[1m]" style ids spelled out ("Opus 5.5 · 1M"). Aliases
-    /// ("opus") and anything unrecognised come back capitalised as they are.
-    /// </summary>
-    public static string FriendlyModelName(string id)
-    {
-        var suffix = "";
-        var bare = id;
-        if (bare.EndsWith("[1m]", StringComparison.OrdinalIgnoreCase))
-        {
-            suffix = " · 1M";
-            bare = bare[..^4];
-        }
-
-        var parts = bare.Split('-', StringSplitOptions.RemoveEmptyEntries).ToList();
-        if (parts.Count >= 2 && string.Equals(parts[0], "claude", StringComparison.OrdinalIgnoreCase))
-        {
-            parts.RemoveAt(0);
-
-            // A trailing date stamp (20251001) is a snapshot, not part of the name.
-            if (parts.Count > 1 && parts[^1].Length == 8 && parts[^1].All(char.IsDigit))
-            {
-                parts.RemoveAt(parts.Count - 1);
-            }
-
-            var family = parts[0];
-            var version = string.Join('.', parts.Skip(1));
-            var name = char.ToUpperInvariant(family[0]) + family[1..];
-            return (version.Length > 0 ? $"{name} {version}" : name) + suffix;
-        }
-
-        return id.Length > 0 ? char.ToUpperInvariant(id[0]) + id[1..] : id;
-    }
-
     public async Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(CancellationToken ct = default)
     {
         // Newer CLIs answer a list_models control request with the same catalogue their
@@ -713,12 +676,13 @@ public sealed class ClaudeAgentSession : IAgentSession
             var catalog = await SendControlRequestAsync("list_models", _ => { }, timeout.Token)
                 .ConfigureAwait(false);
 
-            return ParseModelCatalog(catalog);
+            var listed = ParseModelCatalog(catalog);
+            return listed.Count > 0 ? listed : _initModels;
         }
         catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or OperationCanceledException)
         {
-            // Older CLI without the subtype: no catalogue, so the picker stays on "CLI".
-            return [];
+            // Older CLI without the subtype: the handshake's own catalogue, if it carried one.
+            return _initModels;
         }
     }
 
@@ -738,14 +702,14 @@ public sealed class ClaudeAgentSession : IAgentSession
 
         foreach (var entry in entries.EnumerateArray())
         {
-            var id = entry.Str("id") ?? entry.Str("model");
+            var id = entry.Str("id") ?? entry.Str("model") ?? entry.Str("value");
             if (id is not { Length: > 0 })
             {
                 continue;
             }
 
             var efforts = new List<string>();
-            if ((entry.Prop("supportedReasoningEfforts") ?? entry.Prop("supportedEfforts"))
+            if ((entry.Prop("supportedReasoningEfforts") ?? entry.Prop("supportedEfforts") ?? entry.Prop("supportedEffortLevels"))
                 is { ValueKind: JsonValueKind.Array } effortList)
             {
                 efforts.AddRange(effortList.EnumerateArray()

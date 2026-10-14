@@ -61,4 +61,24 @@ public sealed class HelperModelTests
         Assert.Throws<Codale.Core.Helper.HelperModelException>(() => HelperModel.ReadStreamResult(
             """{"type":"result","is_error":false,"result":""}"""));
     }
+
+    [Fact]
+    public void A_json_run_gives_its_reply_and_what_it_spent()
+    {
+        Codale.Core.Agents.UsageSnapshot? seen = null;
+        var reply = HelperModel.ReadJsonResult(
+            """{"type":"result","is_error":false,"result":"hi","usage":{"input_tokens":12,"output_tokens":3}}""", u => seen = u);
+
+        Assert.Equal("hi", reply);
+        Assert.Equal(12, seen!.Value.InputTokens);
+        Assert.Equal(3, seen.Value.OutputTokens);
+        Assert.Equal("plain text", HelperModel.ReadJsonResult("plain text", null));
+    }
+
+    [Fact]
+    public void Codex_reports_one_token_total()
+    {
+        Assert.Equal(1234, HelperModel.ReadCodexTokens("done" + Environment.NewLine + "tokens used" + Environment.NewLine + "1,234"));
+        Assert.Equal(0, HelperModel.ReadCodexTokens("no counts here"));
+    }
 }

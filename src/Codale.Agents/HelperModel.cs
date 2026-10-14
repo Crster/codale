@@ -55,7 +55,7 @@ public sealed class HelperModel(
     /// <summary>The API endpoint background jobs use instead of a CLI, or null to use the CLI.</summary>
     private OpenAiEndpoint? ApiEndpoint => api?.Invoke();
 
-    /// <summary>Raised after each request the custom API endpoint answered, with what it reported spending.</summary>
+    /// <summary>Raised after each background request a provider answered (API endpoint or CLI), with what it reported spending.</summary>
     public event Action<UsageSnapshot>? ApiRequestServed;
 
     /// <summary>Raised when a background job fails because the CLI is not logged in.</summary>
@@ -135,7 +135,7 @@ public sealed class HelperModel(
         {
             try
             {
-                return HelperToolCalls.Parse(await spare.AskAsync(conversation, ct, CliTimeout).ConfigureAwait(false), tools);
+                return HelperToolCalls.Parse(await spare.AskAsync(conversation, ct, CliTimeout, OnApiRequestServed).ConfigureAwait(false), tools);
             }
             catch (HelperModelException ex)
             {
@@ -303,7 +303,7 @@ public sealed class HelperModel(
         "--strict-mcp-config",
         "--no-session-persistence",
         "--disable-slash-commands",
-        "--output-format", "text",
+        "--output-format", "json",
         "--system-prompt", systemPrompt,
     ];
 
@@ -347,11 +347,12 @@ public sealed class HelperModel(
         // Extended thinking took a routing reply from ~1s to ~4s and changed nothing
         // in what came back: these jobs are one-liners.
         startInfo.Environment["MAX_THINKING_TOKENS"] = "0";
+        startInfo.Environment[CodaleAccount.ClaudeVariable] = CodaleAccount.ClaudeHome;
 
         return startInfo;
     }
 
-    private static async Task<string> RunAsync(string systemPrompt, string prompt, CancellationToken ct)
+    private async Task<string> RunAsync(string systemPrompt, string prompt, CancellationToken ct)
     {
         var executable = CliLocator.Find(CliLocator.Executable);
         if (executable is null)
@@ -412,8 +413,69 @@ public sealed class HelperModel(
                     (detail.Length > 0 ? $": {TextClip.Truncate(detail, 300)}" : "."));
             }
 
-            return text;
+            return ReadJsonResult(text, OnApiRequestServed);
         }
+    }
+
+    /// <summary>
+    /// The reply of a one-shot <c>--output-format json</c> run, reporting what it spent. Output that
+    /// is not that JSON (an older CLI printing plain text) is the reply itself.
+    /// </summary>
+    internal static string ReadJsonResult(string output, Action<UsageSnapshot>? onUsage)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(output);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("type", out var type) || type.GetString() != "result")
+            {
+                return output;
+            }
+
+            if (root.TryGetProperty("is_error", out var error) && error.ValueKind == JsonValueKind.True)
+            {
+                throw new HelperModelException("The Claude CLI returned an error: " +
+                    (root.TryGetProperty("result", out var failure) ? failure.GetString() : "no detail"));
+            }
+
+            onUsage?.Invoke(ReadClaudeUsage(root));
+            return root.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.String
+                ? result.GetString() ?? ""
+                : "";
+        }
+        catch (JsonException)
+        {
+            return output;
+        }
+    }
+
+    /// <summary>The token counts of a Claude <c>result</c> event; a call with no counts still counts as a call.</summary>
+    internal static UsageSnapshot ReadClaudeUsage(JsonElement result)
+    {
+        if (!result.TryGetProperty("usage", out var usage) || usage.ValueKind != JsonValueKind.Object)
+        {
+            return new UsageSnapshot();
+        }
+
+        int Field(string name) => usage.TryGetProperty(name, out var v) && v.TryGetInt32(out var n) ? n : 0;
+        return new UsageSnapshot
+        {
+            InputTokens = Field("input_tokens"),
+            OutputTokens = Field("output_tokens"),
+            CacheReadInputTokens = Field("cache_read_input_tokens"),
+            CacheCreationInputTokens = Field("cache_creation_input_tokens"),
+        };
+    }
+
+    /// <summary>The total <c>codex exec</c> reports on finishing ("tokens used" then the count), or 0.</summary>
+    internal static int ReadCodexTokens(string output)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(
+            output, @"tokens used\D{0,5}([\d,\.]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return match.Success && int.TryParse(match.Groups[1].Value.Replace(",", "").Replace(".", ""), out var tokens)
+            ? tokens
+            : 0;
     }
 
     private async Task<string> RunCodexAsync(string systemPrompt, string prompt, CancellationToken ct)
@@ -490,6 +552,9 @@ public sealed class HelperModel(
                     (detail.Length > 0 ? $": {TextClip.Truncate(detail, 300)}" : "."));
             }
 
+            // Codex reports one total, not a split: it is tallied as input so the call and its size show.
+            var spent = ReadCodexTokens(await errors.ConfigureAwait(false) + " " + text);
+            OnApiRequestServed(new UsageSnapshot { InputTokens = spent });
             return text;
         }
     }
@@ -551,6 +616,20 @@ public sealed class HelperModel(
         return text;
     }
 
+    /// <summary>What a stream-json <c>result</c> line reports spending.</summary>
+    internal static UsageSnapshot ReadStreamUsage(string line)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            return ReadClaudeUsage(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            return new UsageSnapshot();
+        }
+    }
+
     /// <summary>A started Claude CLI waiting for one stream-json request.</summary>
     private sealed class WarmProcess : IDisposable
     {
@@ -606,7 +685,7 @@ public sealed class HelperModel(
         }
 
         /// <summary>Sends the one request and returns the reply text; the process is spent after.</summary>
-        public async Task<string> AskAsync(string prompt, CancellationToken ct, TimeSpan timeoutAfter)
+        public async Task<string> AskAsync(string prompt, CancellationToken ct, TimeSpan timeoutAfter, Action<UsageSnapshot>? onUsage = null)
         {
             using (this)
             {
@@ -632,6 +711,7 @@ public sealed class HelperModel(
                 {
                     if (ReadStreamResult(line) is { } result)
                     {
+                        onUsage?.Invoke(ReadStreamUsage(line));
                         return result;
                     }
                 }

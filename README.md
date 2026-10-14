@@ -20,7 +20,7 @@ Modern AI coding CLIs are formidable agents, but standard terminal TUIs are a po
   - [Integrated ConPTY Terminal Drawer](#integrated-conpty-terminal-drawer)
   - [Supported AI Coding Agent CLIs in Terminal](#supported-ai-coding-agent-clis-in-terminal)
   - [Built-in Model Context Protocol (MCP) Servers](#built-in-model-context-protocol-mcp-servers)
-  - [Token Saver & Helper Model Suite](#token-saver--helper-model-suite)
+  - [Helper Model](#helper-model)
   - [Git Panel & Worktree Isolation](#git-panel--worktree-isolation)
   - [Fast Code Editor & Syntax Highlighting](#fast-code-editor--syntax-highlighting)
   - [Search & Autonomous Ask Mode](#search--autonomous-ask-mode)
@@ -103,15 +103,13 @@ Rather than letting the CLI run as an isolated, uncoordinated process, Codale:
 | `goose` | **Block Goose** | `goose` | Supported in terminal with attention tracking | Goose binary / installer |
 | `cursor` | **Cursor CLI** | `cursor` | Supported in terminal with attention tracking | Cursor IDE CLI tools |
 
-#### Comprehensive CLI History Reading & Session Replay
+#### Native Session Resume
 
-Codale features an extensible history reader registry (`CliHistoryRegistry`) implementing `ICliHistoryReader` across all supported AI coding CLIs. When you switch to a CLI terminal tab, Codale automatically reads its conversation logs, populates the session browser, watches for new turns in real-time, and enables full session replay:
+The session panel of an agent CLI terminal tab lists that CLI's own conversations for the project, and clicking one relaunches the CLI with its native resume arguments in a new tab (with Codale's MCP servers attached). Supported where the CLI resumes by session id:
 
-- **Claude Code (`claude`)**: Powered by `ClaudeTranscriptReader`, parsing full JSONL session transcripts with tool results and message blocks.
-- **Google Antigravity (`agy`)**: Powered by `AgyHistoryReader`, reading detailed JSONL transcripts (`brain/<conversation-id>/.system_generated/logs/transcript.jsonl`) with user requests and planner responses, with prompt history fallback (`history.jsonl`).
-- **Aider (`aider`)**: Powered by `AiderHistoryReader`, parsing Markdown chat transcripts (`.aider.chat.history.md`) and input prompt logs (`.aider.input.history`) directly from the project root.
-- **Block Goose (`goose`)**: Powered by `GooseHistoryReader`, reading Goose session JSON files (`<session-id>.json`) across application data directories, filtering sessions by active workspace.
-- **Gemini Code Assist (`gemini`)**, **Qwen Code (`qwen`)**, **GitHub Copilot (`copilot`)**, **OpenAI Codex (`codex`)**, **OpenCode (`opencode`)**, and **Cursor (`cursor`)**: Powered by `JsonlPromptHistoryReader`, parsing JSONL and prompt logs with workspace targeting.
+- **Claude Code (`claude`)**: `claude --resume <id>`, from `~/.claude/projects/<project>/*.jsonl`.
+- **OpenAI Codex (`codex`)**: `codex resume <id>`, from `~/.codex/sessions/**/rollout-*.jsonl`.
+- **GitHub Copilot (`copilot`)** and **OpenCode (`opencode`)**: launched with `--resume <id>` / `--session <id>`; no history list yet.
 
 ---
 
@@ -145,19 +143,13 @@ Optional desktop automation for tasks requiring GUI interaction beyond web pages
 
 ---
 
-### Token Saver & Helper Model Suite
+### Helper Model
 
-Codale minimizes LLM token consumption and context bloat with a suite of automated guards:
+Codale hands peripheral tasks to a lightweight model (via one-shot Claude CLI calls or a configured BYOK endpoint) so they stay off the main conversation thread:
 
-- **Background Helper Model**: Uses a lightweight model (via one-shot Claude CLI calls or a configured BYOK endpoint) to handle peripheral tasks off the main conversation thread:
-  - Automatic commit message generation.
-  - Session auto-titling based on prompt contents.
-  - Message routing in Auto mode.
-  - Deep code exploration queries via `explore`.
-- **Shell Output Compressor (`--posttooluse-hook`)**: Automatically trims verbose terminal outputs (e.g., massive build logs or dependency dumps), optionally summarizing them before injection into the prompt context.
-- **Read Guard (`--pretooluse-hook`)**: Prevents the agent from accidentally reading massive files (>400 lines) into context on the first try, encouraging targeted line-range reads or ripgrep searches instead.
-- **Terse Mode Directive**: Automatically prompts the agent to skip repetitive conversational preambles and cite code locations as concise `path:line` references.
-- **Auto-Compact Trigger**: Warns or triggers context compaction when the context window reaches a configured threshold (e.g., 80%).
+- Automatic commit message generation.
+- Session auto-titling based on prompt contents.
+- Message routing in Auto mode.
 
 ---
 
@@ -296,10 +288,6 @@ Settings are stored in `%LOCALAPPDATA%\Codale\settings.json` (or within the MSIX
   "chat.fontSize": 12.5,
   "chat.defaultModel": "sonnet",
   "chat.defaultEffort": "medium",
-  "tokensaver.compressShell": true,
-  "tokensaver.explore": true,
-  "tokensaver.readGuard": true,
-  "tokensaver.terse": false,
   "byok.providers": [
     {
       "name": "My Gateway",

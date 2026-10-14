@@ -1,0 +1,430 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="Codale.App.Views.TerminalAgentSessionPanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:agents="using:Codale.Core.Agents"
+    xmlns:vm="using:Codale.App.ViewModels"
+    xmlns:views="using:Codale.App.Views"
+    mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <views:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+        <views:UsageToBrushConverter x:Key="UsageToBrush" />
+        <views:CountToVisibilityConverter x:Key="CountToVisibility" />
+        <views:CountToInverseVisibilityConverter x:Key="CountToInverseVisibility" />
+        <views:RelativeTimeConverter x:Key="RelativeTime" />
+        <views:TodoGlyphConverter x:Key="TodoGlyph" />
+        <views:TodoBrushConverter x:Key="TodoBrush" />
+        <views:TodoTextBrushConverter x:Key="TodoTextBrush" />
+        <views:FileChangeBrushConverter x:Key="FileChangeBrush" />
+        <views:ArtifactStatusBrushConverter x:Key="ArtifactStatusBrush" />
+
+        <Style x:Key="CardCaption" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="CharacterSpacing" Value="60" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
+        </Style>
+
+        <Style x:Key="SectionCard" TargetType="Border">
+            <Setter Property="Padding" Value="12,10" />
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="10" />
+        </Style>
+
+        <Style x:Key="RowItem" TargetType="ListViewItem">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Padding" Value="6,5" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="UseSystemFocusVisuals" Value="False" />
+        </Style>
+
+        <DataTemplate x:Key="UsageBar" x:DataType="views:UsageMeter">
+            <StackPanel Spacing="4">
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Style="{StaticResource CardCaption}" Text="{x:Bind Label}" />
+                    <TextBlock
+                        Grid.Column="1"
+                        HorizontalAlignment="Right"
+                        FontSize="11"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{x:Bind Summary}"
+                        TextTrimming="CharacterEllipsis" />
+                </Grid>
+                <ProgressBar
+                    MinHeight="5"
+                    CornerRadius="3"
+                    Foreground="{x:Bind Percent, Converter={StaticResource UsageToBrush}}"
+                    Maximum="100"
+                    Value="{x:Bind Percent}" />
+            </StackPanel>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Border
+        Margin="0,8,8,8"
+        Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
+        BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+        BorderThickness="1"
+        CornerRadius="12">
+        <Grid CornerRadius="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!--  Header: which CLI, its version, a way to update it  -->
+            <Grid Padding="14,12,12,8" ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Ellipse
+                        Width="8"
+                        Height="8"
+                        VerticalAlignment="Center"
+                        Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind CliName, Mode=OneWay}" />
+                        <TextBlock
+                            FontSize="10.5"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Text="{x:Bind CliUpdate.VersionText, Mode=OneWay}" />
+                    </StackPanel>
+                </StackPanel>
+                <Button
+                    Grid.Column="1"
+                    Width="26"
+                    Height="26"
+                    Padding="0"
+                    VerticalAlignment="Center"
+                    Click="OnUpdateCliClick"
+                    ToolTipService.ToolTip="{x:Bind CliUpdate.UpdateTip, Mode=OneWay}"
+                    Visibility="{x:Bind CliUpdate.UpdateAvailable, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                    <FontIcon FontSize="13" Foreground="{ThemeResource SystemFillColorCautionBrush}" Glyph="&#xE896;" />
+                </Button>
+            </Grid>
+
+            <!--  Vitals and the two views  -->
+            <StackPanel Grid.Row="1" Padding="12,0,12,6" Spacing="10">
+                <Border Style="{StaticResource SectionCard}" Visibility="{x:Bind HasVitals, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                    <ItemsControl ItemTemplate="{StaticResource UsageBar}" ItemsSource="{x:Bind Vitals, Mode=OneWay}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Spacing="10" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                </Border>
+
+                <SelectorBar x:Name="Views" SelectionChanged="OnViewChanged">
+                    <SelectorBarItem x:Name="LiveItem" IsSelected="True" Text="Session" />
+                    <SelectorBarItem x:Name="HistoryItem" Text="History" />
+                </SelectorBar>
+            </StackPanel>
+
+            <!--  Session: todos, running tasks, changes, artifacts  -->
+            <ScrollViewer x:Name="LiveHost" Grid.Row="2" Padding="12,0,12,12">
+                <StackPanel Spacing="10">
+                    <TextBlock
+                        Margin="6,20,6,0"
+                        FontSize="12"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        HorizontalTextAlignment="Center"
+                        Text="Todos, file changes and artifacts show up here as the agent works."
+                        TextWrapping="Wrap"
+                        Visibility="{x:Bind IsLiveEmpty, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+
+                    <!--  Todos  -->
+                    <Border Style="{StaticResource SectionCard}" Visibility="{x:Bind Session.Todos.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                        <StackPanel Spacing="8">
+                            <Grid>
+                                <TextBlock Style="{StaticResource CardCaption}" Text="TODOS" />
+                                <TextBlock
+                                    HorizontalAlignment="Right"
+                                    FontSize="11"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}">
+                                    <Run Text="{x:Bind Session.TasksDone, Mode=OneWay}" /><Run Text=" / " /><Run Text="{x:Bind Session.TasksTotal, Mode=OneWay}" />
+                                </TextBlock>
+                            </Grid>
+                            <ProgressBar
+                                MinHeight="4"
+                                CornerRadius="2"
+                                Maximum="{x:Bind Session.TasksTotal, Mode=OneWay}"
+                                Value="{x:Bind Session.TasksDone, Mode=OneWay}" />
+                            <ListView
+                                ItemContainerStyle="{StaticResource RowItem}"
+                                ItemsSource="{x:Bind Session.Todos, Mode=OneWay}"
+                                SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="agents:TodoItem">
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <FontIcon
+                                                Margin="0,2,0,0"
+                                                VerticalAlignment="Top"
+                                                FontSize="12"
+                                                Foreground="{x:Bind Status, Converter={StaticResource TodoBrush}}"
+                                                Glyph="{x:Bind Status, Converter={StaticResource TodoGlyph}}" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                FontSize="12"
+                                                Foreground="{x:Bind Status, Converter={StaticResource TodoTextBrush}}"
+                                                Text="{x:Bind Content}"
+                                                TextWrapping="Wrap" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </StackPanel>
+                    </Border>
+
+                    <!--  Running tasks  -->
+                    <Border Style="{StaticResource SectionCard}" Visibility="{x:Bind Session.RunningTasks.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                        <StackPanel Spacing="6">
+                            <TextBlock Style="{StaticResource CardCaption}" Text="RUNNING" />
+                            <ListView
+                                MaxHeight="220"
+                                IsItemClickEnabled="True"
+                                ItemClick="OnRunningTaskClick"
+                                ItemContainerStyle="{StaticResource RowItem}"
+                                ItemsSource="{x:Bind Session.RunningTasks, Mode=OneWay}"
+                                SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:RunningTaskItem">
+                                        <Grid ColumnSpacing="8" ToolTipService.ToolTip="{x:Bind Title}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <FontIcon VerticalAlignment="Center" FontSize="12" Glyph="{x:Bind KindGlyph}" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                FontSize="12"
+                                                Text="{x:Bind Title, Mode=OneWay}"
+                                                TextTrimming="CharacterEllipsis"
+                                                TextWrapping="NoWrap" />
+                                            <StackPanel
+                                                Grid.Column="2"
+                                                VerticalAlignment="Center"
+                                                Orientation="Horizontal"
+                                                Spacing="5">
+                                                <Ellipse
+                                                    Width="6"
+                                                    Height="6"
+                                                    VerticalAlignment="Center"
+                                                    Fill="{StaticResource StatusRunningBrush}"
+                                                    Visibility="{x:Bind IsRunning, Mode=OneWay}"
+                                                    views:Pulse.IsActive="{x:Bind IsRunning, Mode=OneWay}" />
+                                                <TextBlock
+                                                    FontSize="10"
+                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                    Text="{x:Bind StatusLabel, Mode=OneWay}" />
+                                            </StackPanel>
+                                            <Button
+                                                Grid.Column="3"
+                                                Padding="5"
+                                                VerticalAlignment="Center"
+                                                Background="Transparent"
+                                                BorderThickness="0"
+                                                Click="OnStopTaskClick"
+                                                Tag="{x:Bind}"
+                                                ToolTipService.ToolTip="Stop this task"
+                                                Visibility="{x:Bind CanStop, Mode=OneWay}">
+                                                <FontIcon FontSize="10" Glyph="&#xE71A;" />
+                                            </Button>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </StackPanel>
+                    </Border>
+
+                    <!--  File changes  -->
+                    <Border Style="{StaticResource SectionCard}" Visibility="{x:Bind Session.Status.ChangeCount, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                        <StackPanel Spacing="6">
+                            <Grid>
+                                <TextBlock Style="{StaticResource CardCaption}" Text="FILE CHANGES" />
+                                <TextBlock
+                                    HorizontalAlignment="Right"
+                                    FontSize="11"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="{x:Bind Session.Status.ChangeSummary, Mode=OneWay}" />
+                            </Grid>
+                            <ListView
+                                MaxHeight="260"
+                                IsItemClickEnabled="True"
+                                ItemClick="OnChangeClick"
+                                ItemContainerStyle="{StaticResource RowItem}"
+                                ItemsSource="{x:Bind Session.Status.Changes, Mode=OneWay}"
+                                SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:SessionFileChange">
+                                        <Grid ColumnSpacing="8" ToolTipService.ToolTip="{x:Bind Path}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Ellipse
+                                                Width="7"
+                                                Height="7"
+                                                VerticalAlignment="Center"
+                                                Fill="{x:Bind Kind, Mode=OneWay, Converter={StaticResource FileChangeBrush}}"
+                                                views:Pulse.IsActive="{x:Bind IsFresh, Mode=OneWay}" />
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                                                <TextBlock
+                                                    VerticalAlignment="Center"
+                                                    FontSize="12"
+                                                    Text="{x:Bind Name}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    VerticalAlignment="Center"
+                                                    FontSize="11"
+                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                    Text="{x:Bind Directory}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                            <TextBlock
+                                                Grid.Column="2"
+                                                VerticalAlignment="Center"
+                                                FontFamily="Cascadia Mono, Consolas"
+                                                FontSize="11">
+                                                <Run Foreground="{StaticResource DiffAddedForegroundBrush}" Text="{x:Bind AddedText, Mode=OneWay}" />
+                                                <Run Foreground="{StaticResource DiffRemovedForegroundBrush}" Text="{x:Bind RemovedText, Mode=OneWay}" />
+                                            </TextBlock>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </StackPanel>
+                    </Border>
+
+                    <!--  Artifacts  -->
+                    <Border Style="{StaticResource SectionCard}" Visibility="{x:Bind Session.Artifacts.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                        <StackPanel Spacing="6">
+                            <TextBlock Style="{StaticResource CardCaption}" Text="ARTIFACTS" />
+                            <ListView
+                                IsItemClickEnabled="True"
+                                ItemClick="OnArtifactClick"
+                                ItemContainerStyle="{StaticResource RowItem}"
+                                ItemsSource="{x:Bind Session.Artifacts, Mode=OneWay}"
+                                SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:SessionArtifact">
+                                        <Grid ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <FontIcon
+                                                VerticalAlignment="Center"
+                                                FontSize="13"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Glyph="{x:Bind Glyph}" />
+                                            <StackPanel Grid.Column="1" Spacing="1">
+                                                <TextBlock
+                                                    FontSize="12"
+                                                    FontWeight="SemiBold"
+                                                    Text="{x:Bind Title, Mode=OneWay}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                    TextTrimming="CharacterEllipsis">
+                                                    <Run Text="{x:Bind Subtitle}" /><Run Text=" · " /><Run Text="{x:Bind UpdatedAt, Mode=OneWay, Converter={StaticResource RelativeTime}}" />
+                                                </TextBlock>
+                                            </StackPanel>
+                                            <TextBlock
+                                                Grid.Column="2"
+                                                VerticalAlignment="Center"
+                                                FontSize="10"
+                                                Foreground="{x:Bind Status, Mode=OneWay, Converter={StaticResource ArtifactStatusBrush}}"
+                                                Text="{x:Bind StatusText, Mode=OneWay}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!--  History: pick a past conversation to resume natively  -->
+            <Grid
+                x:Name="HistoryHost"
+                Grid.Row="2"
+                Padding="12,0,12,12"
+                RowSpacing="8"
+                Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <TextBlock
+                    x:Name="HistoryHint"
+                    Margin="6,0"
+                    FontSize="11"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    TextWrapping="Wrap" />
+
+                <ListView
+                    x:Name="HistoryList"
+                    Grid.Row="1"
+                    IsItemClickEnabled="True"
+                    ItemClick="OnHistoryClick"
+                    ItemContainerStyle="{StaticResource RowItem}"
+                    SelectionMode="None">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="views:TerminalHistoryRow">
+                            <Grid Padding="4,2" ColumnSpacing="10" ToolTipService.ToolTip="{x:Bind Tip}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="2">
+                                    <TextBlock
+                                        FontSize="12"
+                                        Text="{x:Bind Title}"
+                                        TextTrimming="CharacterEllipsis" />
+                                    <TextBlock
+                                        FontSize="11"
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                        Text="{x:Bind Meta}" />
+                                </StackPanel>
+                                <FontIcon
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Glyph="&#xE768;"
+                                    Visibility="{x:Bind ResumeVisibility}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

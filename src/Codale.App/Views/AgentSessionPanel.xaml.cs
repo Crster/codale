@@ -110,20 +110,15 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     public bool ShowSessionPickers => Session is not null && !Session.IsTerminalSession;
 
-    public bool ShowNewSessionButtons => ShowSessionPickers && !IsIsolated;
-
     public string WorkingDirectory => Session?.WorktreePath ?? Workspace?.ProjectPath ?? "";
 
     public bool IsIsolated => Session?.IsIsolated ?? false;
 
     // Events raised to parent container
-    public event EventHandler? CollapseRequested;
     public event EventHandler<string>? FileDiffRequested;
     public event EventHandler<SessionArtifact>? ArtifactRequested;
     public event EventHandler<RunningTaskItem>? TaskPeekRequested;
     public event EventHandler<string>? UpdateCliRequested;
-    public event EventHandler? NewSessionRequested;
-    public event EventHandler? IsolatedSessionRequested;
     public event EventHandler? MergeIsolatedRequested;
     public event EventHandler? DiscardIsolatedRequested;
 
@@ -131,7 +126,6 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EndpointLabel)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowSessionPickers)));
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowNewSessionButtons)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(WorkingDirectory)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsIsolated)));
     }
@@ -183,15 +177,6 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         }
     }
 
-    private void OnCollapseClick(object sender, RoutedEventArgs e) =>
-        CollapseRequested?.Invoke(this, EventArgs.Empty);
-
-    private void OnCliEndpointFlyoutOpening(object sender, object e) =>
-        Workspace?.CliEndpoint.Reload();
-
-    private void OnOpenProviderSettingsClick(object sender, RoutedEventArgs e) =>
-        App.Current.MainWindow?.SetSettingsOpen(true);
-
     private async void OnUpdateCliClick(object sender, RoutedEventArgs e)
     {
         try
@@ -216,8 +201,20 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         }
     }
 
-    private void OnInterruptedInfoBarClosed(InfoBar sender, InfoBarClosedEventArgs args) =>
-        sender.Visibility = Visibility.Collapsed;
+    private async void OnCompactContextClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (Session is { } session)
+            {
+                await session.CompactAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("AgentSessionPanel.OnCompactContextClick", ex.Message, ex);
+        }
+    }
 
     private void OnReturnToLiveClick(object sender, RoutedEventArgs e) =>
         Workspace?.ReturnToLiveSession();
@@ -232,10 +229,8 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         }
 
         var chat = Session;
-        var panel = new StackPanel { Spacing = 2, MinWidth = 320 };
+        var panel = new StackPanel { Spacing = 2, MinWidth = PickerWidth(sender) };
         var flyout = PickerFlyout(panel);
-
-        panel.Children.Add(PickerTitle("Model"));
 
         // "CLI" is always selectable; the tiers appear once the catalogue and the tier
         // models behind them are known. Without them the menu points at Settings
@@ -254,22 +249,18 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
                 tiersKnown = true;
             }
 
-            string detail = tier switch
+            var detail = tier switch
             {
-                "lite" => "Fast model, low effort - quickest useful answers",
-                "flash" => "Fast model, medium effort - balanced everyday work",
-                "pro" => "Capable model, medium effort - most coding tasks",
-                "plus" => "Capable model, high effort - hard problems",
+                "lite" => "Fast model, low effort. Quickest useful answers",
+                "flash" => "Fast model, medium effort. Balanced everyday work",
+                "pro" => "Capable model, medium effort. Most coding tasks",
+                "plus" => "Capable model, high effort. Hard problems",
                 _ => $"Whatever {chat.ProviderName} starts with",
             };
-            if (model is { Length: > 0 } id)
-            {
-                detail += $" \u00B7 {chat.ModelName(id)}";
-            }
 
             var picked = tier;
             panel.Children.Add(PickOption(
-                OptionContent("\uE99A", ChatViewModel.TierTitle(picked), detail),
+                OptionContent("", ChatViewModel.TierTitle(picked), detail),
                 chat.CurrentTier == picked,
                 "model",
                 () => _ = chat.ApplyTierAsync(picked),
@@ -286,7 +277,6 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             });
         }
 
-        panel.Children.Add(PickerHint());
         flyout.ShowAt((FrameworkElement)sender);
     }
 
@@ -298,7 +288,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         }
 
         var chat = Session;
-        var panel = new StackPanel { Spacing = 2, MinWidth = 320 };
+        var panel = new StackPanel { Spacing = 2, MinWidth = PickerWidth(sender) };
         var flyout = PickerFlyout(panel);
         var current = chat.PermissionMode;
 
@@ -310,37 +300,32 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
                     _ = chat.SetPermissionModeAsync(mode);
                 }, flyout));
 
-        panel.Children.Add(PickerTitle("Mode"));
         Add(ChatViewModel.AutomaticMode, "\uE82F", "Auto",
             chat.Router?.IsAvailable == true
-                ? "Picks the right depth per message: answer, clarify, plan, or work"
+                ? "Picks the right depth per message: answer, clarify, plan or work"
                 : "Needs the Claude CLI to pick modes",
             current == ChatViewModel.AutomaticMode);
         Add("manual", "\uE7C9", "Interactive",
-            "Reads freely; shell, edits, creates and deletes ask first. Asks when the goal is unclear",
+            "Reads freely; edits, shell and deletes ask first",
             current is "manual" or "default");
         Add("plan", "\uE707", "Plan",
-            "Plans and questions you first, researches and tests, then implements with full permission",
+            "Plans and asks first, then implements with full permission",
             current == "plan");
         Add("auto", "\uE945", "Full",
-            "Fully automated, no asking; only risky shell commands and deletes confirm",
+            "Fully automated; only risky shell commands and deletes confirm",
             current is "auto" or "dontAsk" or "bypassPermissions");
-        panel.Children.Add(PickerHint());
-
         flyout.ShowAt((FrameworkElement)sender);
     }
 
     private static Grid OptionContent(string glyph, string title, string? detail)
     {
-        var grid = new Grid { ColumnSpacing = 10 };
+        var grid = new Grid { ColumnSpacing = 12 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.Children.Add(new FontIcon { Glyph = glyph, FontSize = 16, Opacity = 0.85, VerticalAlignment = VerticalAlignment.Center });
 
-        var icon = new FontIcon { Glyph = glyph, FontSize = 14, Opacity = 0.8, VerticalAlignment = VerticalAlignment.Center };
-        grid.Children.Add(icon);
-
-        var text = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
-        text.Children.Add(new TextBlock { Text = title, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        var text = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock { Text = title, FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
         if (detail is { Length: > 0 })
         {
             text.Children.Add(new TextBlock { Text = detail, FontSize = 11, Opacity = 0.6, TextWrapping = TextWrapping.Wrap });
@@ -351,23 +336,23 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         return grid;
     }
 
+    /// <summary>The flyout is as wide as the chip that opened it, with a floor so the notes stay readable.</summary>
+    private static double PickerWidth(object chip) =>
+        Math.Max(400, (chip as FrameworkElement)?.ActualWidth ?? 0);
+
     private Flyout PickerFlyout(UIElement content) => new()
     {
         Content = content,
         FlyoutPresenterStyle = (Style)Resources["PickerFlyout"],
+        Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.Bottom,
     };
-
-    private TextBlock PickerTitle(string text) =>
-        new() { Text = text, Style = (Style)Resources["PickerTitleText"] };
-
-    private TextBlock PickerHint() =>
-        new() { Text = "Applies without restarting the conversation.", Style = (Style)Resources["PickerHintText"] };
 
     private RadioButton PickOption(object content, bool isChecked, string group, Action apply, Flyout flyout)
     {
         var radio = new RadioButton
         {
             Style = (Style)Resources["PickerRow"],
+            Padding = new Thickness(12, 7, 12, 7),
             GroupName = group,
             Content = content,
             IsChecked = isChecked,
@@ -382,30 +367,6 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     #endregion
 
     #region Isolated and New Session
-
-    private void OnNewSessionClick(object sender, RoutedEventArgs e)
-    {
-        if (NewSessionRequested is not null)
-        {
-            NewSessionRequested.Invoke(this, EventArgs.Empty);
-        }
-        else if (Workspace is not null)
-        {
-            _ = Workspace.StartNewChatSessionAsync();
-        }
-    }
-
-    private async void OnIsolatedSessionClick(object sender, RoutedEventArgs e)
-    {
-        if (IsolatedSessionRequested is not null)
-        {
-            IsolatedSessionRequested.Invoke(this, EventArgs.Empty);
-        }
-        else if (Workspace is not null)
-        {
-            await Workspace.StartIsolatedSessionAsync();
-        }
-    }
 
     private async void OnMergeIsolatedClick(object sender, RoutedEventArgs e)
     {
@@ -575,136 +536,6 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         }
     }
 
-    private async void OnCopySessionHandoutClick(object sender, RoutedEventArgs e)
-    {
-        if ((sender as FrameworkElement)?.DataContext is not SessionListItem session || Workspace is null)
-        {
-            return;
-        }
-
-        try
-        {
-            CopyText(await Workspace.Sessions.BuildHandoutAsync(session));
-        }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync("Could not create handout", ex.Message);
-        }
-    }
-
-    private void OnCopySessionIdClick(object sender, RoutedEventArgs e)
-    {
-        if ((sender as FrameworkElement)?.DataContext is SessionListItem session)
-        {
-            CopyText(session.SessionId);
-        }
-    }
-
-    private async void OnForkSessionClick(object sender, RoutedEventArgs e)
-    {
-        if ((sender as FrameworkElement)?.DataContext is not SessionListItem session || Workspace is null)
-        {
-            return;
-        }
-
-        var ring = new ProgressRing { Width = 18, Height = 18, IsActive = true };
-        var status = new TextBlock
-        {
-            Text = "Summarizing the session…",
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-
-        var progress = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { ring, status } };
-        var summaryBox = new TextBox
-        {
-            AcceptsReturn = true,
-            TextWrapping = TextWrapping.Wrap,
-            MinHeight = 220,
-            MaxHeight = 360,
-            Header = "Briefing the new session starts with (editable)",
-            Visibility = Visibility.Collapsed,
-        };
-
-        ScrollViewer.SetVerticalScrollBarVisibility(summaryBox, ScrollBarVisibility.Auto);
-
-        var hint = new TextBlock
-        {
-            FontSize = 11,
-            TextWrapping = TextWrapping.Wrap,
-            Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
-            Text = "Written on a small model in a throwaway session, so the original is untouched. " +
-                   "The briefing goes out with your first message in the new session.",
-        };
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = $"Fork “{session.Title}”",
-            Content = new StackPanel { Width = 520, Spacing = 12, Children = { progress, summaryBox, hint } },
-            PrimaryButtonText = "Start forked session",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-            IsPrimaryButtonEnabled = false,
-        };
-
-        using var cts = new CancellationTokenSource();
-        dialog.Closing += (_, _) => cts.Cancel();
-
-        async Task SummarizeAsync()
-        {
-            try
-            {
-                var summary = await Workspace.SummarizeSessionAsync(session, cts.Token);
-                summaryBox.Text = summary;
-                summaryBox.Visibility = Visibility.Visible;
-                progress.Visibility = Visibility.Collapsed;
-                dialog.IsPrimaryButtonEnabled = true;
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception ex)
-            {
-                ring.IsActive = false;
-                ring.Visibility = Visibility.Collapsed;
-                status.Text = $"Could not summarize: {ex.Message}";
-            }
-        }
-
-        dialog.Opened += (_, _) => _ = SummarizeAsync();
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary || string.IsNullOrWhiteSpace(summaryBox.Text))
-        {
-            return;
-        }
-
-        try
-        {
-            await Workspace.ForkSessionAsync(session, summaryBox.Text.Trim());
-        }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync("Could not fork session", ex.Message);
-        }
-    }
-
-    private async void OnCompactSessionClick(object sender, RoutedEventArgs e)
-    {
-        if ((sender as FrameworkElement)?.DataContext is not SessionListItem session || Workspace is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await Workspace.CompactSessionAsync(session.Summary);
-        }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync("Could not compact session", ex.Message);
-        }
-    }
-
     private async void OnRetitleSessionClick(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is not SessionListItem session || Workspace is null)
@@ -715,7 +546,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         var input = new TextBox
         {
             Text = session.Title,
-            PlaceholderText = "Give this session a short name",
+            PlaceholderText = "Give this feature a short name",
             SelectionStart = 0,
             SelectionLength = session.Title.Length,
         };
@@ -744,7 +575,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
-            Title = "Rename session",
+            Title = "Rename feature",
             Content = content,
             PrimaryButtonText = "Save",
             CloseButtonText = "Cancel",
@@ -769,7 +600,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
                 }
                 else
                 {
-                    hint.Text = "This session has no prompt to name it from.";
+                    hint.Text = "This feature has no description to name it from.";
                 }
             }
             catch (OperationCanceledException)
@@ -796,7 +627,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         }
         catch (Exception ex)
         {
-            await ShowErrorAsync("Could not retitle session", ex.Message);
+            await ShowErrorAsync("Could not rename feature", ex.Message);
         }
     }
 
@@ -809,7 +640,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
         if (session.IsOpen)
         {
-            await ShowErrorAsync("Session is open", "Close its tab before deleting it.");
+            await ShowErrorAsync("Feature is open", "Close its tab before deleting it.");
             return;
         }
 
@@ -817,7 +648,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         {
             XamlRoot = XamlRoot,
             Title = $"Delete \"{session.Title}\"?",
-            Content = "This removes the session's transcript from disk. The work it did in your workspace is kept.",
+            Content = "This removes the feature's summary, history and file index. The work it did in your workspace is kept.",
             PrimaryButtonText = "Delete",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
@@ -827,20 +658,13 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         {
             try
             {
-                await Workspace.Sessions.DeleteAsync(session);
+                Workspace.Sessions.Delete(session);
             }
             catch (Exception ex)
             {
-                await ShowErrorAsync("Could not delete session", ex.Message);
+                await ShowErrorAsync("Could not delete feature", ex.Message);
             }
         }
-    }
-
-    private static void CopyText(string text)
-    {
-        var package = new DataPackage();
-        package.SetText(text);
-        Clipboard.SetContent(package);
     }
 
     private async Task ShowErrorAsync(string title, string message)

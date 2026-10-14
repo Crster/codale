@@ -26,6 +26,7 @@ public sealed partial class StatusViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ContextText))]
+    [NotifyPropertyChangedFor(nameof(ContextSummary))]
     [NotifyPropertyChangedFor(nameof(ContextFraction))]
     [NotifyPropertyChangedFor(nameof(ContextPercent))]
     [NotifyPropertyChangedFor(nameof(ContextPercentText))]
@@ -36,6 +37,7 @@ public sealed partial class StatusViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ContextText))]
+    [NotifyPropertyChangedFor(nameof(ContextSummary))]
     [NotifyPropertyChangedFor(nameof(ContextFraction))]
     [NotifyPropertyChangedFor(nameof(ContextPercent))]
     [NotifyPropertyChangedFor(nameof(ContextPercentText))]
@@ -43,8 +45,6 @@ public sealed partial class StatusViewModel : ObservableObject
     public partial int ContextWindow { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CostText))]
-    [NotifyPropertyChangedFor(nameof(HasCost))]
     public partial decimal SessionCostUsd { get; set; }
 
     [ObservableProperty]
@@ -61,6 +61,11 @@ public sealed partial class StatusViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSevenDay))]
+    [NotifyPropertyChangedFor(nameof(HasUsage))]
+    [NotifyPropertyChangedFor(nameof(HasClaudeUsage))]
+    [NotifyPropertyChangedFor(nameof(HasLongWindowOnly))]
+    [NotifyPropertyChangedFor(nameof(HasUsageMeter))]
+    [NotifyPropertyChangedFor(nameof(UsageMeterText))]
     [NotifyPropertyChangedFor(nameof(SevenDayPercent))]
     [NotifyPropertyChangedFor(nameof(SevenDayText))]
     [NotifyPropertyChangedFor(nameof(SevenDaySummary))]
@@ -87,25 +92,6 @@ public sealed partial class StatusViewModel : ObservableObject
     public partial long SessionTokens { get; set; }
 
     public bool HasSessionTokens => SessionTokens > 0;
-
-    /// <summary>Characters of tool output Codale kept out of this session's context by condensing it.</summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(SavedText))]
-    [NotifyPropertyChangedFor(nameof(HasSaved))]
-    public partial long SavedChars { get; set; }
-
-    public bool HasSaved => SavedChars > 0;
-
-    /// <summary>"≈12.3k tokens saved", estimated at four characters a token (there is no tokenizer here).</summary>
-    public string SavedText => $"≈{Format((int)Math.Min(SavedChars / 4, int.MaxValue))} tokens saved";
-
-    public void AddSaved(long chars)
-    {
-        if (chars > 0)
-        {
-            SavedChars += chars;
-        }
-    }
 
     public string TokensText => $"{Format((int)Math.Min(SessionTokens, int.MaxValue))} tokens";
 
@@ -138,16 +124,25 @@ public sealed partial class StatusViewModel : ObservableObject
         }
     }
 
+    /// <summary>Drops the context and subscription readings of the CLI this chat used before.</summary>
+    public void ResetCliReadings()
+    {
+        ContextTokens = 0;
+        ContextWindow = 0;
+        FiveHourUtilization = null;
+        SevenDayUtilization = null;
+        FiveHourResetsAt = null;
+        SevenDayResetsAt = null;
+        LongWindowMins = null;
+        OnPropertyChanged(nameof(LongWindowLabel));
+    }
+
     /// <summary>The background-task provider's name (or "Claude"); labels its usage button.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CustomButtonText))]
     public partial string CustomProviderName { get; set; } = "Claude";
 
     /// <summary>The Claude CLI's subscription meter only applies while talking to Anthropic itself.</summary>
     public bool HasClaudeUsage => HasUsage;
-
-    /// <summary>"test · 3 calls · 12.3k tokens": the provider name, its requests and what it has spent.</summary>
-    public string CustomButtonText => $"{CustomProviderName} · {CustomCallsText} · {FormatLong(CustomInputTokens + CustomOutputTokens)} tokens";
 
     /// <summary>Window-wide: shared by every chat, so it outlives any one session.</summary>
     private readonly CustomUsageTally _custom;
@@ -170,9 +165,6 @@ public sealed partial class StatusViewModel : ObservableObject
         OnPropertyChanged(nameof(CustomCallsText));
         OnPropertyChanged(nameof(CustomTokensText));
         OnPropertyChanged(nameof(CustomTokensDetail));
-        OnPropertyChanged(nameof(CustomButtonText));
-        OnPropertyChanged(nameof(CustomAverageText));
-        OnPropertyChanged(nameof(CustomCostText));
     }
 
     /// <summary>API requests the custom provider has served since the window opened.</summary>
@@ -194,15 +186,8 @@ public sealed partial class StatusViewModel : ObservableObject
     public string CustomTokensDetail =>
         $"Input {CustomInputTokens:N0} · Output {CustomOutputTokens:N0} · Cache read {CustomCacheReadTokens:N0} · Cache write {CustomCacheWriteTokens:N0}";
 
-    public string CustomAverageText => CustomCalls > 0
-        ? $"avg {FormatLong((CustomInputTokens + CustomOutputTokens) / CustomCalls)} / call"
-        : "";
-
     /// <summary>Tallies one request served by the custom endpoint.</summary>
-    public void RecordCustomCall(UsageSnapshot usage, ByokProvider? provider = null) => _custom.Record(usage, provider);
-
-    /// <summary>"≈$0.0123": what the custom provider's requests have cost so far.</summary>
-    public string CustomCostText => $"≈${_custom.CostUsd:0.0000}";
+    public void RecordCustomCall(UsageSnapshot usage) => _custom.Record(usage);
 
     internal static string FormatLong(long tokens) => Format((int)Math.Min(tokens, int.MaxValue));
 
@@ -210,10 +195,22 @@ public sealed partial class StatusViewModel : ObservableObject
     /// A subscription reading has arrived. Under a CLI override there is no subscription to
     /// read - the meter shows context only - so rate-limit windows are never applied.
     /// </summary>
-    public bool HasUsage => FiveHourUtilization is not null && !IsOverrideCli;
+    public bool HasUsage => (FiveHourUtilization is not null || SevenDayUtilization is not null) && !IsOverrideCli;
 
     /// <summary>Same as <see cref="HasUsage"/>; the XAML binds the name.</summary>
-    public bool HasFiveHour => HasUsage;
+    public bool HasFiveHour => FiveHourUtilization is not null && !IsOverrideCli;
+
+    /// <summary>A long window with no five-hour one (a Codex free plan's single 30-day quota); the panel shows it on its own row.</summary>
+    public bool HasLongWindowOnly => SevenDayUtilization is not null && FiveHourUtilization is null && !IsOverrideCli;
+
+    /// <summary>"Weekly limit", or "Monthly limit" when the CLI reported a ~30-day window.</summary>
+    public string LongWindowLabel => LongWindowMins switch
+    {
+        > 20000 => "Monthly limit",
+        _ => "Weekly limit",
+    };
+
+    public long? LongWindowMins { get; private set; }
 
     /// <summary>The status bar's usage button: Claude subscription windows, or context only under an override.</summary>
     public bool HasUsageMeter => HasUsage || HasContext;
@@ -236,12 +233,15 @@ public sealed partial class StatusViewModel : ObservableObject
         ? $"{Format(ContextTokens)} / {Format(ContextWindow)}"
         : Format(ContextTokens);
 
+    /// <summary>"45k / 200k · 22%" for the session panel's context bar; a dash before the session reports anything.</summary>
+    public string ContextSummary => !HasContext
+        ? "-"
+        : HasContextWindow ? $"{ContextText} · {ContextPercentText}" : ContextText;
+
     public bool HasContextWindow => ContextWindow > 0;
 
     /// <summary>Only once the session has reported something to show.</summary>
     public bool HasContext => ContextTokens > 0;
-
-    public bool HasCost => SessionCostUsd > 0;
 
     /// <summary>0-100, for the status bar meter.</summary>
     public double ContextPercent => ContextFraction * 100;
@@ -250,8 +250,6 @@ public sealed partial class StatusViewModel : ObservableObject
 
     public double ContextFraction =>
         ContextWindow > 0 ? Math.Clamp(ContextTokens / (double)ContextWindow, 0, 1) : 0;
-
-    public string CostText => $"${SessionCostUsd:0.0000}";
 
     /// <summary>0-100, for the status bar meters.</summary>
     public double FiveHourPercent => Math.Clamp((FiveHourUtilization ?? 0) * 100, 0, 100);
@@ -325,10 +323,13 @@ public sealed partial class StatusViewModel : ObservableObject
             return;
         }
 
-        FiveHourUtilization = limits.FiveHourUtilization;
-        SevenDayUtilization = limits.SevenDayUtilization;
-        FiveHourResetsAt = limits.FiveHourResetsAt;
-        SevenDayResetsAt = limits.SevenDayResetsAt;
+        // A turn's rate_limit_event can carry one window only; keep the other's last reading.
+        FiveHourUtilization = limits.FiveHourUtilization ?? FiveHourUtilization;
+        SevenDayUtilization = limits.SevenDayUtilization ?? SevenDayUtilization;
+        FiveHourResetsAt = limits.FiveHourResetsAt ?? FiveHourResetsAt;
+        SevenDayResetsAt = limits.SevenDayResetsAt ?? SevenDayResetsAt;
+        LongWindowMins = limits.LongWindowMins ?? LongWindowMins;
+        OnPropertyChanged(nameof(LongWindowLabel));
     }
 
     /// <summary>

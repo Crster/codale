@@ -22,6 +22,9 @@ public readonly record struct RateLimitSnapshot
 
     public DateTimeOffset? SevenDayResetsAt { get; init; }
 
+    /// <summary>Length of the long window in minutes when the CLI reports it (Codex free plans have one 30-day window); null means weekly.</summary>
+    public long? LongWindowMins { get; init; }
+
     /// <summary>The window closest to exhaustion — what the status bar should lead with.</summary>
     public double? WorstUtilization => new[] { FiveHourUtilization, SevenDayUtilization }
         .Where(u => u is not null)

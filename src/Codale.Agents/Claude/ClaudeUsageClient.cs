@@ -88,7 +88,7 @@ public static class ClaudeUsageClient
 
     private static string? ReadAccessToken()
     {
-        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", ".credentials.json");
+        var path = Path.Combine(CodaleAccount.ClaudeHome, ".credentials.json");
         if (!File.Exists(path))
         {
             return null;

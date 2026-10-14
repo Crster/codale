@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 
+using Codale.Agents.History;
 using Codale.Agents;
 using Codale.Agents.Claude;
 using Codale.Agents.OpenAi;
@@ -27,7 +28,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     private readonly DateTimeOffset _startedAt = DateTimeOffset.Now;
 
     /// <summary>Sessions this window has already tried to title, so each is attempted once.</summary>
-    private readonly HashSet<string> _titledSessions = [];
 
     /// <summary>
     /// Background jobs (titles, commit messages, routing, search) answered by one-shot calls
@@ -39,6 +39,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
     /// <summary>Raised when a background task fails due to missing CLI authentication.</summary>
     public event EventHandler<string?>? HelperLoginRequired;
+
+    /// <summary>The project's features: the history every chat in the window shares.</summary>
+    public FeatureService Features { get; }
 
     /// <summary>Automatic mode's message reader, shared by every chat in the window.</summary>
     private readonly MessageRouter _router;
@@ -57,7 +60,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         Search = new SearchViewModel(ProjectPath, _helper);
         Diff = new DiffViewModel(ProjectPath);
         DiffViewer = new DiffViewerViewModel(ProjectPath);
-        Sessions = new SessionsViewModel(ProjectPath, _store, _databasePath);
+        Features = new FeatureService(ProjectPath, _helper);
+        Sessions = new SessionsViewModel(ProjectPath, Features);
         _endpoints = new CliEndpointSettings();
         _mcp = new McpServerSettings(_store, ProjectPath);
         _mcp.TerminalServersProvider = () => Panel is { IsTerminalSession: true } session ? session.ServersForTerminalCli() : _mcp.Servers();
@@ -79,7 +83,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         _helper.ApiRequestServed += OnBackgroundRequestServed;
 
         Sessions.SessionOpened += OnSessionOpened;
-        Sessions.SessionResumed += OnSessionResumed;
         Git.SnapshotRefreshed += OnGitSnapshotRefreshed;
         Git.NestedSnapshotsRefreshed += OnNestedSnapshotsRefreshed;
         Git.WorkingTreeChanged += OnGitWorkingTreeChanged;
@@ -142,14 +145,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     [NotifyPropertyChangedFor(nameof(IsIsolated))]
     [NotifyPropertyChangedFor(nameof(EndpointLabel))]
     [NotifyPropertyChangedFor(nameof(ShowSessionPickers))]
-    [NotifyPropertyChangedFor(nameof(ShowNewSessionButtons))]
     public partial ChatViewModel Panel { get; set; }
 
     /// <summary>The provider picker follows the session on the panel; a terminal CLI's has none to switch.</summary>
     partial void OnPanelChanged(ChatViewModel value)
     {
         CliEndpoint.Attach(value);
-        Sessions.TerminalCliId = value.TerminalCli?.Id;
     }
 
     /// <summary>The chat in front is also the one the panel shows, unless a terminal CLI's session is (the page moves the panel when a tab comes to front).</summary>
@@ -171,8 +172,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     public bool ShowSessionPickers => !Panel.IsTerminalSession;
 
     /// <summary>The start-over buttons begin a Claude conversation, so they belong to a chat's panel.</summary>
-    public bool ShowNewSessionButtons => ShowSessionPickers && !IsIsolated;
-
     /// <summary>Each terminal CLI's headless session, one per CLI tab; kept apart from <see cref="Chats"/> (those are tabs).</summary>
     public ObservableCollection<ChatViewModel> TerminalSessions { get; } = [];
 
@@ -217,14 +216,13 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>One background request the custom API answered; may arrive off the UI thread.</summary>
     private void OnBackgroundRequestServed(UsageSnapshot usage)
     {
-        var provider = AppSettings.HelperApiProvider?.Provider;
         if (_uiContext is null)
         {
-            _customUsage.Record(usage, provider);
+            _customUsage.Record(usage);
         }
         else
         {
-            _uiContext.Post(_ => _customUsage.Record(usage, provider), null);
+            _uiContext.Post(_ => _customUsage.Record(usage), null);
         }
     }
 
@@ -283,7 +281,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     {
         var chat = new ChatViewModel(ProjectPath, new StatusViewModel(_customUsage), _endpoints, _mcp)
         {
-            Router = _router, Helper = _helper, ExtraFolders = ExtraFolders, Terminals = new TerminalSource(this),
+            Router = _router, Helper = _helper, Features = Features, ExtraFolders = ExtraFolders, Terminals = new TerminalSource(this),
             CliId = cliId is { Length: > 0 } ? cliId : Codale.Agents.CliLocator.ActiveCli.Id,
         };
 
@@ -296,7 +294,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         chat.SessionStateChanged += OnSessionStateChanged;
         chat.TodosChanged += OnTodosChanged;
         chat.NewTopicRequested += OnNewTopicRequested;
-        chat.HandoffRequested += OnHandoffRequested;
         chat.PropertyChanged += OnChatPropertyChanged;
         Chats.Add(chat);
         return chat;
@@ -328,17 +325,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     {
         CrashLog.Trace($"Close chat: session={chat.SessionId ?? "none"}");
 
-        if (chat.SessionId is { Length: > 0 } id)
-        {
-            _store.MarkStopped(id);
-        }
-
         chat.TurnFinished -= OnTurnFinished;
         chat.FilesChanged -= OnChatFilesChanged;
         chat.SessionStateChanged -= OnSessionStateChanged;
         chat.TodosChanged -= OnTodosChanged;
         chat.NewTopicRequested -= OnNewTopicRequested;
-        chat.HandoffRequested -= OnHandoffRequested;
         chat.PropertyChanged -= OnChatPropertyChanged;
         Chats.Remove(chat);
 
@@ -355,7 +346,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
     private void OnChatPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(ChatViewModel.IsBusy) or nameof(ChatViewModel.IsConnected))
+        if (e.PropertyName is nameof(ChatViewModel.IsBusy) or nameof(ChatViewModel.IsConnected) or nameof(ChatViewModel.FeatureId))
         {
             PublishOpenSessions();
         }
@@ -363,22 +354,15 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         {
             OnPropertyChanged(nameof(WorkingDirectory));
             OnPropertyChanged(nameof(IsIsolated));
-            OnPropertyChanged(nameof(ShowNewSessionButtons));
         }
     }
 
-    /// <summary>Tells the history list which sessions are open in a tab, and which are working.</summary>
-    private void PublishOpenSessions()
-    {
-        var open = Chats
-            .Where(c => c.IsConnected && (c.SessionId ?? c.ResumeSessionId) is { Length: > 0 })
-            .ToList();
-
+    /// <summary>Tells the history list which features are open in a tab, and which are working.</summary>
+    private void PublishOpenSessions() =>
         Sessions.UpdateOpenSessions(
-            open.GroupBy(c => (c.SessionId ?? c.ResumeSessionId)!)
-                .ToDictionary(g => g.Key, g => g.Any(c => c.IsBusy)),
-            open.Where(c => c.IsIsolated).Select(c => (c.SessionId ?? c.ResumeSessionId)!).ToHashSet(StringComparer.Ordinal));
-    }
+            Chats.Where(c => c.IsConnected && c.FeatureId is not null)
+                .GroupBy(c => c.FeatureId!)
+                .ToDictionary(g => g.Key, g => g.Any(c => c.IsBusy)));
 
     /// <summary>Every open terminal, each with its own shell; closed ones are removed.</summary>
     private readonly List<TerminalViewModel> _terminals = [];
@@ -722,13 +706,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     [ObservableProperty]
     public partial EditorViewModel? ActiveEditor { get; set; }
 
-    /// <summary>
-    /// Whether the session panel is on screen. Populating it means scanning every
-    /// transcript on disk, so the history list refreshes only while it can be seen.
-    /// </summary>
-    [ObservableProperty]
-    public partial bool IsSessionPanelOpen { get; set; }
-
     /// <summary>True while an old transcript is being read instead of the live session.</summary>
     [ObservableProperty]
     public partial bool IsViewingHistory { get; set; }
@@ -743,9 +720,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// </summary>
     public async Task InitializeAsync()
     {
-        Sessions.DetectInterrupted();
-
         Git.Start();
+        await Sessions.RefreshAsync();
 
         await Diff.RefreshAsync();
     }
@@ -1070,45 +1046,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         }
     }
 
-    /// <summary>
-    /// A chat's context is filling up and the user took the offer: the background-task
-    /// model writes a handoff note, and a fresh session opens with it in the composer, for
-    /// the user to add to and send. The old conversation stays in its own tab.
-    /// </summary>
-    private async void OnHandoffRequested(object? sender, EventArgs e)
-    {
-        if (sender is not ChatViewModel source)
-        {
-            return;
-        }
-
-        source.ComposerNotice = new NoticeItem { Text = "Writing a handoff note for a fresh session..." };
-        try
-        {
-            var note = await SessionHandoff.WriteAsync(_helper, source.HandoffEntries());
-
-            var chat = FreshChat();
-            chat.RequestedModel = source.RequestedModel;
-            chat.RequestedEffort = source.RequestedEffort;
-            chat.PermissionMode = source.PermissionMode;
-            ChatActivationRequested?.Invoke(this, chat);
-
-            if (!chat.IsConnected)
-            {
-                await chat.ConnectAsync();
-            }
-
-            chat.Draft = SessionHandoff.FirstMessage(note);
-            source.ComposerNotice = null;
-            CrashLog.Trace("Handoff: fresh session opened with the note in its composer");
-        }
-        catch (Exception ex)
-        {
-            CrashLog.Trace($"Handoff failed: {ex.Message}");
-            source.ComposerNotice = new NoticeItem { Text = $"Could not write the handoff note: {ex.Message}", Severity = NoticeSeverity.Error };
-        }
-    }
-
     private async void OnTurnFinished(object? sender, EventArgs e)
     {
         try
@@ -1127,7 +1064,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
             if (sender is ChatViewModel chat)
             {
-                _ = GenerateSessionTitleAsync(chat);
             }
         }
         catch (OperationCanceledException)
@@ -1250,94 +1186,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         return fallback.Length > 0 ? fallback : null;
     }
 
-    /// <summary>
-    /// Names the session with the helper model once the first turn is done, and persists
-    /// it through <see cref="CodaleStore.UpsertSession"/>.
-    /// </summary>
-    /// <remarks>
-    /// A background nicety, so it stays quiet on failure and is attempted once per
-    /// session. Without an installed agent CLI, the session keeps the short name
-    /// <see cref="SessionTitles.FromPrompt"/> gave it, so the history list does not
-    /// fall back to the whole opening prompt.
-    /// </remarks>
-    private async Task GenerateSessionTitleAsync(ChatViewModel chat)
-    {
-        try
-        {
-            await GenerateSessionTitleCoreAsync(chat);
-        }
-        catch (Exception ex)
-        {
-            // Started detached from the turn handler: nobody awaits this.
-            CrashLog.Error("workspace", "session titling failed", ex);
-        }
-    }
-
-    private async Task GenerateSessionTitleCoreAsync(ChatViewModel chat)
-    {
-        if (chat.SessionId is not { Length: > 0 } id || _titledSessions.Contains(id))
-        {
-            return;
-        }
-
-        // A bare /clear is not a prompt worth naming the session after: wait for the next turn.
-        var userTurns = chat.Items.OfType<UserMessageItem>().Where(u => !SessionTitles.IsResetCommand(u.Text)).ToList();
-        var firstUserTurn = userTurns.FirstOrDefault()?.Text;
-        if (string.IsNullOrWhiteSpace(firstUserTurn) || !_titledSessions.Add(id))
-        {
-            return;
-        }
-
-        // A brand-new session keeps its short name even if the model never answers; a
-        // resumed one already has whatever name it had.
-        if (userTurns.Count == 1 && chat.Title is { Length: > 0 } shortName)
-        {
-            PersistSession(chat, shortName);
-        }
-
-        if (!_helper.IsAvailable)
-        {
-            return;
-        }
-
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-
-        try
-        {
-            var title = await NameFromPromptAsync(firstUserTurn, timeout.Token);
-
-            if (title.Length > 0)
-            {
-                PersistSession(chat, title);
-                chat.Title = title;
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // The 90 s budget ran out: the short name stays.
-        }
-        catch (Exception)
-        {
-            // No CLI, or the call failed: the short name stays, the correct degradation.
-        }
-    }
-
     private void OnSessionStateChanged(object? sender, EventArgs e)
     {
-        // A conversation changed: the history list re-badges what is open and working,
-        // and the transcript the CLI just wrote shows up on the next scan - which is
-        // only worth doing while the panel can actually be seen.
-        if (sender is ChatViewModel chat)
-        {
-            PersistSession(chat);
-        }
-
+        // A conversation changed: the history list re-badges what is open and working.
         PublishOpenSessions();
 
-        if (IsSessionPanelOpen)
-        {
-            ScheduleSessionRefresh();
-        }
+        ScheduleSessionRefresh();
     }
 
     private bool _sessionRefreshPending;
@@ -1366,10 +1220,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
         try
         {
-            if (IsSessionPanelOpen)
-            {
-                await Sessions.RefreshAsync();
-            }
+            await Sessions.RefreshAsync();
         }
         catch (Exception ex)
         {
@@ -1458,114 +1309,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         }
     }
 
-    /// <summary>The provider column of the sessions table.</summary>
-    private const string StoredProvider = "claude";
-
-    private void PersistSession(ChatViewModel chat, string? title = null)
-    {
-        if (chat.SessionId is not { Length: > 0 } id)
-        {
-            return;
-        }
-
-        // A null title keeps whatever is already stored: the upsert coalesces, so a
-        // routine state change never clobbers a generated title.
-        _store.UpsertSession(new SessionRecord
-        {
-            SessionId = id,
-            ProjectKey = ProjectPaths.InstanceKey(ProjectPath),
-            ProjectPath = ProjectPath,
-            Provider = StoredProvider,
-            Title = title,
-            WorktreePath = chat.WorktreePath,
-            StartedAt = _startedAt,
-            UpdatedAt = DateTimeOffset.Now,
-            IsRunning = chat.IsConnected,
-            CostUsd = chat.Status.SessionCostUsd,
-        });
-    }
-
-    /// <summary>The cheap model summaries run on without a custom endpoint.</summary>
-    private const string SummaryModel = "haiku";
-
-    /// <summary>
-    /// Boils a past session down to a briefing. The work happens in a throwaway session -
-    /// in an empty scratch directory, on a small model, in ask mode - so the original is
-    /// never touched and no history entry is left behind. The prompt embeds a past
-    /// transcript, which is untrusted text: ask mode runs the CLI on "manual" and the chat
-    /// denies every tool request that reaches it, so nothing in that text can act.
-    /// </summary>
-    public async Task<string> SummarizeSessionAsync(SessionListItem item, CancellationToken ct = default)
-    {
-        var source = await Sessions.BuildForkSourceAsync(item);
-        var scratch = Path.Combine(Path.GetTempPath(), "codale-fork", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(scratch);
-
-        var worker = new ChatViewModel(ProjectPath, new StatusViewModel(), _endpoints)
-        {
-            PermissionMode = ChatViewModel.AskMode,
-            WorktreePath = scratch,
-        };
-
-        // A fresh chat starts on Default, whatever the chat in front uses.
-        worker.RequestedModel = SummaryModel;
-
-        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        worker.TurnFinished += (_, _) => finished.TrySetResult();
-        worker.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(ChatViewModel.IsConnected) && !worker.IsConnected)
-            {
-                finished.TrySetResult();
-            }
-        };
-
-        try
-        {
-            await worker.ConnectAsync();
-            if (!worker.IsConnected)
-            {
-                throw new InvalidOperationException($"Could not start a {worker.ProviderName} session to write the summary.");
-            }
-
-            worker.Draft = SessionForking.SummaryPrompt(source);
-            await worker.SendCommand.ExecuteAsync(null);
-            await finished.Task.WaitAsync(TimeSpan.FromMinutes(4), ct);
-
-            var summary = worker.Items.OfType<AssistantMessageItem>().LastOrDefault()?.Text.Trim();
-            if (string.IsNullOrEmpty(summary))
-            {
-                var error = worker.Items.OfType<NoticeItem>().LastOrDefault()?.Text;
-                throw new InvalidOperationException(error ?? "The agent returned no summary.");
-            }
-
-            return summary;
-        }
-        finally
-        {
-            await worker.DisposeAsync();
-            Sessions.DiscardScratchSession(scratch);
-        }
-    }
-
-    /// <summary>
-    /// Starts a new session that carries <paramref name="summary"/>
-    /// as its context: the briefing rides on the first message the user sends, so it costs
-    /// no turn of its own and survives a later resume.
-    /// </summary>
-    public async Task ForkSessionAsync(SessionListItem source, string summary)
-    {
-        var chat = FreshChat();
-        chat.ForkContext = summary;
-        chat.Title = "Fork: " + (source.Title.Length > 22 ? source.Title[..22].TrimEnd() + "…" : source.Title);
-        IsViewingHistory = false;
-        HistoryTitle = null;
-
-        ChatActivationRequested?.Invoke(this, chat);
-        await chat.ConnectAsync();
-        chat.Items.Add(new NoticeItem { Text = $"Forked from \"{source.Title}\". A briefing on it goes out with your first message." });
-    }
-
     private async void OnSessionOpened(object? sender, TranscriptSummary summary)
     {
         try
@@ -1574,39 +1317,19 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         }
         catch (Exception ex)
         {
-            CrashLog.Error("workspace", $"opening session {summary.SessionId} failed", ex);
+            CrashLog.Error("workspace", $"opening {summary.SessionId} failed", ex);
         }
     }
 
     /// <summary>
-    /// Compacts a past session from the history list: opens it (or brings its tab
-    /// forward) and sends the CLI's own /compact.
-    /// </summary>
-    public async Task CompactSessionAsync(TranscriptSummary summary)
-    {
-        var chat = await OpenSessionAsync(summary);
-        if (chat is null || !chat.IsConnected)
-        {
-            throw new InvalidOperationException("The session could not be resumed.");
-        }
-
-        if (chat.IsBusy)
-        {
-            throw new InvalidOperationException("The session is working right now; compact it when it is idle.");
-        }
-
-        await chat.CompactAsync();
-    }
-
-    /// <summary>
-    /// Opening a past session continues it, and never at another's expense: a session
-    /// already open just comes to the front; otherwise it resumes in the chat in front
-    /// when that chat holds nothing yet, or in a new chat tab when it does - a running
-    /// conversation is never cut off by a click in the history list. Null if it failed to open.
+    /// Opening a feature from the history list puts a chat on it - and never at another's
+    /// expense: a feature already open just comes to the front; otherwise the chat in front
+    /// takes it when it holds nothing yet, or a new chat tab does. Nothing of the feature's
+    /// past is loaded: its first message carries the summary.
     /// </summary>
     private async Task<ChatViewModel?> OpenSessionAsync(TranscriptSummary summary)
     {
-        CrashLog.Trace($"Open session: {summary.SessionId}");
+        CrashLog.Trace($"Open: {summary.SessionId}");
 
         if (FindOpenChat(summary.SessionId) is { } open)
         {
@@ -1614,68 +1337,22 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             return open;
         }
 
-        var events = await Sessions.LoadTranscriptAsync(summary);
-        var title = summary.Title.Length > 28 ? summary.Title[..28].TrimEnd() + "…" : summary.Title;
-
-        if (Sessions.IsTerminalCliSession(summary))
+        if (Features.Get(summary.SessionId) is not { } feature)
         {
-            // The panel cannot drive the terminal's CLI: show the conversation without connecting,
-            // since handing its id to Claude would start an unrelated session.
-            var viewer = FreshChat();
-            await viewer.DisposeSessionAsync();
-            viewer.Status.ClearSessionChanges();
-            viewer.LoadHistory(events);
-            viewer.Title = title;
-            ChatActivationRequested?.Invoke(this, viewer);
-            return viewer;
+            return null;
         }
 
-        return await ResumeInChatAsync(summary.SessionId, events, Sessions.WorktreeOf(summary.SessionId), title);
-    }
-
-    private async void OnSessionResumed(object? sender, SessionRecord record)
-    {
-        try
-        {
-            CrashLog.Trace($"Resume session: {record.SessionId}");
-
-            if (FindOpenChat(record.SessionId) is { } open)
-            {
-                ChatActivationRequested?.Invoke(this, open);
-                return;
-            }
-
-            var events = await Sessions.LoadTranscriptAsync(record);
-            await ResumeInChatAsync(record.SessionId, events, record.WorktreePath, record.Title);
-        }
-        catch (Exception ex)
-        {
-            CrashLog.Error("workspace", $"resuming session {record.SessionId} failed", ex);
-        }
-    }
-
-    private ChatViewModel? FindOpenChat(string sessionId) =>
-        Chats.FirstOrDefault(c => c.SessionId == sessionId || c.ResumeSessionId == sessionId);
-
-    /// <summary>Shows a stored transcript in a chat that holds nothing yet (or a new one) and continues it with the CLI.</summary>
-    private async Task<ChatViewModel> ResumeInChatAsync(
-        string sessionId, IReadOnlyList<AgentEvent> events, string? worktreePath, string? title)
-    {
         var chat = FreshChat();
-        await chat.DisposeSessionAsync();
-        chat.Status.ClearSessionChanges();
-        chat.LoadHistory(events);
-        chat.ResumeSessionId = sessionId;
-        chat.WorktreePath = worktreePath;
-        chat.Title = title;
         IsViewingHistory = false;
         HistoryTitle = null;
-
         ChatActivationRequested?.Invoke(this, chat);
-        await chat.ConnectAsync();
+        await chat.AttachFeatureAsync(feature);
         await Diff.RefreshAsync();
         return chat;
     }
+
+    private ChatViewModel? FindOpenChat(string featureId) =>
+        Chats.FirstOrDefault(c => c.FeatureId == featureId);
 
     private static readonly DateTime WindowOpenedAt = DateTime.Now;
 
@@ -1725,24 +1402,15 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             chat.SessionStateChanged -= OnSessionStateChanged;
             chat.TodosChanged -= OnTodosChanged;
             chat.NewTopicRequested -= OnNewTopicRequested;
-            chat.HandoffRequested -= OnHandoffRequested;
-            chat.PropertyChanged -= OnChatPropertyChanged;
-
-            // A clean shutdown is not a crash: clear the running flag so the next launch
-            // does not offer to recover a session the user closed deliberately.
-            if (chat.SessionId is { Length: > 0 } id)
-            {
-                _store.MarkStopped(id);
-            }
+                chat.PropertyChanged -= OnChatPropertyChanged;
         }
 
-        // Every session is told to go at once (the running flags above are already cleared):
+        // Every session is told to go at once:
         // awaiting them one by one means the process can exit after the first, leaving the
         // other CLIs running.
         var shutdown = Task.WhenAll(Chats.Concat(TerminalSessions).ToList().Select(chat => chat.DisposeAsync().AsTask()));
 
         Sessions.SessionOpened -= OnSessionOpened;
-        Sessions.SessionResumed -= OnSessionResumed;
         Git.SnapshotRefreshed -= OnGitSnapshotRefreshed;
         Git.NestedSnapshotsRefreshed -= OnNestedSnapshotsRefreshed;
         Git.WorkingTreeChanged -= OnGitWorkingTreeChanged;
@@ -1776,6 +1444,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             CrashLog.Warn("workspace", $"closing sessions: {ex.GetType().Name}: {ex.Message}");
         }
 
+        Features.Dispose();
         _store.Dispose();
 
         if (StorageWarning is not null)

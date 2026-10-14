@@ -46,6 +46,9 @@ public sealed record CodexSessionOptions
         _ => ("never", "workspaceWrite"), // auto
     };
 
+    /// <summary>Standing instructions for the thread (developer instructions), such as how to use the host's MCP tools.</summary>
+    public string? SystemPromptAppend { get; init; }
+
     /// <summary>Resume an existing conversation (thread) instead of starting a new one.</summary>
     public string? ResumeSessionId { get; init; }
 

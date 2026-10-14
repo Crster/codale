@@ -1365,7 +1365,7 @@
         <StackPanel Grid.Row="1">
         <Border
             Margin="6,2,6,6"
-            Padding="8,4,8,4"
+            Padding="12,4,8,4"
             MinHeight="38"
             Background="{ThemeResource LayerFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -1378,7 +1378,7 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <!--  Left: the repository, then this run's clock  -->
+                <!--  Left: the repository and the file language  -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="16">
 
                     <!--  Icons center on their label: 10px keeps the glyph inside the text band,
@@ -1430,18 +1430,13 @@
                         </StackPanel>
                     </StackPanel>
 
-                    <Rectangle
-                        VerticalAlignment="Center"
-                        Width="1"
-                        Height="14"
-                        Fill="{ThemeResource DividerStrokeColorDefaultBrush}"
-                        Visibility="{x:Bind ViewModel.Git.IsRepository, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
 
                     <!--  Language of the file in front: shows what colours it, and lets the user override that  -->
-                    <StackPanel x:Name="LanguageHost" Orientation="Horizontal" Spacing="16" Visibility="Collapsed">
+                    <StackPanel x:Name="LanguageHost" Orientation="Horizontal" Spacing="16">
                         <Button
                             x:Name="LanguageButton"
                             Padding="8,2"
+                            IsEnabled="False"
                             ToolTipService.ToolTip="Language mode: change how this file is coloured">
                             <Button.Flyout>
                                 <Flyout
@@ -1457,53 +1452,24 @@
                                 <TextBlock
                                     x:Name="LanguageText"
                                     VerticalAlignment="Center"
+                                    Text="No File"
                                     FontSize="12"
                                     Opacity="0.8" />
                             </StackPanel>
                         </Button>
-                        <Rectangle
-                            VerticalAlignment="Center"
-                            Width="1"
-                            Height="14"
-                            Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
                     </StackPanel>
-
-                    <!--  Run time: when this window started, and how long it has been running  -->
-                    <StackPanel
-                        Orientation="Horizontal"
-                        Spacing="6"
-                        ToolTipService.ToolTip="Run started at · time elapsed since">
-                        <FontIcon VerticalAlignment="Center" Margin="0,1.3,0,0" FontSize="10" Glyph="&#xE916;" Opacity="0.6" />
-                        <TextBlock
-                            VerticalAlignment="Center"
-                            FontSize="12"
-                            Opacity="0.6"
-                            Text="{x:Bind ViewModel.StartedAtText}" />
-                        <TextBlock
-                            MinWidth="52"
-                            VerticalAlignment="Center"
-                            FontSize="12"
-                            Opacity="0.8"
-                            Text="{x:Bind ViewModel.ElapsedText, Mode=OneWay}" />
-                    </StackPanel>
-
-                    <Rectangle
-                        VerticalAlignment="Center"
-                        Width="1"
-                        Height="14"
-                        Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
                 </StackPanel>
 
                 <!--  Center: Terminal command input bar  -->
                 <Border
                     x:Name="StatusBarCommandContainer"
                     Grid.Column="1"
-                    Margin="8,0,8,0"
+                    Margin="12,0,12,0"
                     VerticalAlignment="Stretch"
-                    Background="Transparent"
+                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                     BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                    BorderThickness="1,0,1,0"
-                    CornerRadius="0">
+                    BorderThickness="1"
+                    CornerRadius="6">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
@@ -1570,8 +1536,7 @@
                             SuggestionChosen="OnStatusBarCommandBoxSuggestionChosen"
                             QuerySubmitted="OnStatusBarCommandBoxQuerySubmitted"
                             KeyDown="OnStatusBarCommandBoxKeyDown"
-                            GotFocus="OnStatusBarCommandBoxGotFocus"
-                            LostFocus="OnStatusBarCommandBoxLostFocus">
+                            GotFocus="OnStatusBarCommandBoxGotFocus">
                             <AutoSuggestBox.Resources>
                                 <x:Double x:Key="TextControlThemeMinHeight">0</x:Double>
                                 <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
@@ -1621,151 +1586,63 @@
                     </Grid>
                 </Border>
 
-                <!--  Right: usage (Claude CLI, then the custom provider), then the provider override  -->
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
-                    <!--  Usage: a percentage summary here, the full breakdown on click  -->
-                    <Button
-                        Padding="8,2"
-                        Visibility="{x:Bind ViewModel.Status.HasUsageMeter, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                        <Button.Flyout>
-                            <Flyout FlyoutPresenterStyle="{StaticResource EndpointFlyout}" Placement="TopEdgeAlignedRight">
-                                <StackPanel Width="320" Padding="16,14,16,14" Spacing="16">
-                                    <TextBlock FontSize="14" FontWeight="SemiBold" Text="{x:Bind ViewModel.Status.UsageFlyoutTitle, Mode=OneWay}" />
-
-                                    <!--  5-hour window  -->
-                                    <StackPanel Spacing="6" Visibility="{x:Bind ViewModel.Status.HasFiveHour, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                        <Grid ColumnSpacing="12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="5-hour limit" />
-                                            <TextBlock
-                                                Grid.Column="1"
-                                                FontSize="12"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                Text="{x:Bind ViewModel.Status.FiveHourSummary, Mode=OneWay}" />
-                                        </Grid>
-                                        <ProgressBar
-                                            MinHeight="4"
-                                            CornerRadius="2"
-                                            Foreground="{x:Bind ViewModel.Status.FiveHourPercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}"
-                                            Maximum="100"
-                                            Value="{x:Bind ViewModel.Status.FiveHourPercent, Mode=OneWay}" />
-                                    </StackPanel>
-
-                                    <!--  Weekly window  -->
-                                    <StackPanel Spacing="6" Visibility="{x:Bind ViewModel.Status.HasSevenDay, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                        <Grid ColumnSpacing="12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="Weekly" />
-                                            <TextBlock
-                                                Grid.Column="1"
-                                                FontSize="12"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                Text="{x:Bind ViewModel.Status.SevenDaySummary, Mode=OneWay}" />
-                                        </Grid>
-                                        <ProgressBar
-                                            MinHeight="4"
-                                            CornerRadius="2"
-                                            Foreground="{x:Bind ViewModel.Status.SevenDayPercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}"
-                                            Maximum="100"
-                                            Value="{x:Bind ViewModel.Status.SevenDayPercent, Mode=OneWay}" />
-                                    </StackPanel>
-
-                                    <!--  Context window of this conversation  -->
-                                    <StackPanel Spacing="6" Visibility="{x:Bind ViewModel.Status.HasContext, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                        <Grid ColumnSpacing="12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="Context" />
-                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                                                <TextBlock
-                                                    FontSize="12"
-                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                    Text="{x:Bind ViewModel.Status.ContextText, Mode=OneWay}" />
-                                                <TextBlock
-                                                    FontSize="12"
-                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                    Text="{x:Bind ViewModel.Status.ContextPercentText, Mode=OneWay}"
-                                                    Visibility="{x:Bind ViewModel.Status.HasContextWindow, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
-                                            </StackPanel>
-                                        </Grid>
-                                        <ProgressBar
-                                            MinHeight="4"
-                                            CornerRadius="2"
-                                            Foreground="{x:Bind ViewModel.Status.ContextPercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}"
-                                            Maximum="100"
-                                            Value="{x:Bind ViewModel.Status.ContextPercent, Mode=OneWay}" />
-                                    </StackPanel>
-                                </StackPanel>
-                            </Flyout>
-                        </Button.Flyout>
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="10" Glyph="&#xEC4A;" Opacity="0.6" />
-                            <TextBlock VerticalAlignment="Center" FontSize="12" Opacity="0.6" Text="{x:Bind ViewModel.Status.UsageMeterLabel, Mode=OneWay}" />
-                            <TextBlock
-                                VerticalAlignment="Center"
-                                FontSize="12"
-                                Opacity="0.8"
-                                Text="{x:Bind ViewModel.Status.UsageMeterText, Mode=OneWay}" />
-                        </StackPanel>
-                    </Button>
-
-                    <!--  Background-task provider: labeled with its name, never the chat's CLI override; what it has served since the window opened, background tasks and chats on the same provider alike  -->
-                    <Button Padding="8,2">
-                        <Button.Flyout>
-                            <Flyout FlyoutPresenterStyle="{StaticResource EndpointFlyout}" Placement="TopEdgeAlignedRight">
-                                <StackPanel Width="320" Padding="16,14,16,14" Spacing="12">
-                                    <TextBlock FontSize="14" FontWeight="SemiBold" Text="{x:Bind ViewModel.Status.CustomProviderName, Mode=OneWay}" ToolTipService.ToolTip="Provider used for background tasks: commit messages, titles, routing, search" />
-
-                                    <Grid ColumnSpacing="12">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock FontSize="13" FontWeight="SemiBold" Text="Requests" />
-                                        <TextBlock Grid.Column="1" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind ViewModel.Status.CustomCallsText, Mode=OneWay}" />
-                                    </Grid>
-
-                                    <Grid ColumnSpacing="12">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock FontSize="13" FontWeight="SemiBold" Text="Tokens" />
-                                        <TextBlock Grid.Column="1" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind ViewModel.Status.CustomTokensText, Mode=OneWay}" />
-                                    </Grid>
-
-                                    <Grid ColumnSpacing="12">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock FontSize="13" FontWeight="SemiBold" Text="Estimated Cost" />
-                                        <TextBlock Grid.Column="1" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind ViewModel.Status.CustomCostText, Mode=OneWay}" />
-                                    </Grid>
-                                </StackPanel>
-                            </Flyout>
-                        </Button.Flyout>
+                <!--  Right: the background-task provider and its usage  -->
+                <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="16">
+                    <!--  Background-task provider: its name and what it has served since the window opened (background tasks and chats on the same provider alike)  -->
+                    <StackPanel
+                        VerticalAlignment="Center"
+                        Orientation="Horizontal"
+                        Spacing="10"
+                        ToolTipService.ToolTip="Provider used for background tasks: commit messages, titles, routing, search">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="10" Glyph="&#xE968;" Opacity="0.6" />
                             <TextBlock
                                 VerticalAlignment="Center"
                                 FontSize="12"
-                                Opacity="0.8"
-                                Text="{x:Bind ViewModel.Status.CustomButtonText, Mode=OneWay}" />
+                                FontWeight="SemiBold"
+                                Opacity="0.85"
+                                Text="{x:Bind ViewModel.Status.CustomProviderName, Mode=OneWay}" />
                         </StackPanel>
-                    </Button>
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind ViewModel.Status.CustomCallsText, Mode=OneWay}" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind ViewModel.Status.CustomTokensText, Mode=OneWay}" />
+                    </StackPanel>
+
+                    <Rectangle
+                        VerticalAlignment="Center"
+                        Width="1"
+                        Height="14"
+                        Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                    <!--  Run time: when this window started, and how long it has been running  -->
+                    <StackPanel
+                        Orientation="Horizontal"
+                        Spacing="6"
+                        ToolTipService.ToolTip="Run started at · time elapsed since">
+                        <FontIcon VerticalAlignment="Center" Margin="0,1.3,0,0" FontSize="10" Glyph="&#xE916;" Opacity="0.6" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            Opacity="0.6"
+                            Text="{x:Bind ViewModel.StartedAtText}" />
+                        <TextBlock
+                            MinWidth="0"
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            Opacity="0.8"
+                            Text="{x:Bind ViewModel.ElapsedText, Mode=OneWay}" />
+                    </StackPanel>
 
                     <!--  Built-in MCP servers: a browser to verify work in, and desktop control  -->
                     <!--  Opened from the title bar's Browser button; this host only owns the flyout  -->
-                    <Border x:Name="McpToolsHost" Width="0" Height="0">
+                    <Border x:Name="McpToolsHost" Width="0" Height="0" Margin="-16,0,0,0">
                         <FlyoutBase.AttachedFlyout>
                             <Flyout FlyoutPresenterStyle="{StaticResource EndpointFlyout}" Placement="BottomEdgeAlignedRight">
                                 <StackPanel Width="320" Padding="16,14,16,14" Spacing="14">

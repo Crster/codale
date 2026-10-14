@@ -58,7 +58,7 @@ public sealed class CliEndpointSettings
     public IReadOnlyDictionary<string, string>? ClaudeEnvironment(string providerName)
     {
         var active = AppSettings.FindByok(providerName);
-        if (active is null || active.IsAccount)
+        if (active is null)
         {
             return null;
         }

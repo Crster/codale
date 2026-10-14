@@ -20,37 +20,12 @@ public static class TaskTools
     /// tools out (a server started without it has no project to talk about).
     /// </param>
     /// <param name="runDirectory">What a command's relative working directory resolves against; defaults to the project root.</param>
-    /// <param name="assist">The app's background model; null leaves the explore tool out.</param>
     public static IReadOnlyList<McpTool> Create(
-        ITaskService tasks, string? projectRoot = null, string? runDirectory = null, ITaskAssist? assist = null) =>
+        ITaskService tasks, string? projectRoot = null, string? runDirectory = null) =>
     [
         .. Core(tasks),
         .. string.IsNullOrWhiteSpace(projectRoot) ? [] : CommandTools(tasks, projectRoot, runDirectory ?? projectRoot),
         .. Panel(tasks),
-        .. assist is null ? [] : AssistTools(assist),
-    ];
-
-    /// <summary>
-    /// Questions answered by Codale's background model instead of the agent's own reads, so
-    /// the files it would have read never enter (and stay in) the chat model's context.
-    /// </summary>
-    private static IReadOnlyList<McpTool> AssistTools(ITaskAssist assist) =>
-    [
-        new McpTool(
-            "explore",
-            "Ask a question about THIS project's source code and get back the answer plus the exact files and line ranges that hold it. " +
-            "A separate helper model does the searching and reading, so nothing it reads enters your context. " +
-            "Use it for any question you cannot answer from a file you already have open: where is X implemented, how does Y work end to end, " +
-            "which files are involved in Z, what calls W, how is feature F wired up. Call it BEFORE a chain of Grep/Glob/Read calls or an Explore subagent. " +
-            "Do not use it when you already know the file or symbol (Grep/Read that directly), for files outside the project, or for general programming questions. " +
-            "Reply: a direct answer, then 'Files to read' with one line per file as path:start-end, what that range declares (types, methods, properties) " +
-            "and the words to grep for inside it. Read only the ranges it names. Takes 10-60 seconds; wait for it rather than searching in parallel.",
-            McpTool.Schema([("question", "string", "One specific, self-contained question about this project's code, e.g. \"How does the editor save a file and which service writes it?\" Include the names you already know. If omitted, the user's prompt is used.")]),
-            async (a, ct) =>
-            {
-                var question = a.String("question") ?? a.String("prompt") ?? a.String("query") ?? "";
-                return await McpTool.Text(await Call(() => assist.ExploreAsync(question, ct)));
-            }),
     ];
 
     /// <summary>

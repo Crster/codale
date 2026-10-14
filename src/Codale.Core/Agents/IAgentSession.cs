@@ -67,7 +67,7 @@ public sealed record UserTurn(string Text)
     private const string AskMarker = "[Ask mode] ";
 
     /// <summary>
-    /// A forked session's briefing (<see cref="SessionForking.ContextBlock"/>), carried on its
+    /// A feature's briefing (<see cref="SessionBriefing.ContextBlock"/>), carried on a session's
     /// first turn only. Hidden from the transcript on replay, like the ask-mode prefix.
     /// </summary>
     public string? ContextPrefix { get; init; }
@@ -82,7 +82,7 @@ public sealed record UserTurn(string Text)
     /// </summary>
     public static string StripHostInstructions(string text)
     {
-        text = SessionForking.StripContext(text);
+        text = SessionBriefing.StripContext(text);
         if (!text.StartsWith(AskMarker, StringComparison.Ordinal))
         {
             return text;
