@@ -510,7 +510,7 @@ public sealed partial class SettingsPanel : UserControl
         });
 
         Field("OpenAI-compatible base URL", "https://api.example.com/v1 (used by Codex CLI)", provider.BaseUrl, v => provider.BaseUrl = v);
-        Field("Anthropic-compatible base URL", "https://api.example.com (used by Claude CLI; blank = OpenAI only)", provider.AnthropicBaseUrl, v => provider.AnthropicBaseUrl = v);
+        Field("Anthropic-compatible base URL", "https://api.example.com (used by Claude CLI)", provider.AnthropicBaseUrl, v => provider.AnthropicBaseUrl = v);
 
         var key = new PasswordBox { Header = "API key", Password = provider.ApiKey };
         key.PasswordChanged += (_, _) =>
