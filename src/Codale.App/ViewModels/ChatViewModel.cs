@@ -41,6 +41,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// meter must not take its context number from there.
     /// </summary>
     private UsageSnapshot? _lastMessageUsage;
+
+    /// <summary>
+    /// Tokens per API request this session, by message id, for the BYOK usage bar on a CLI
+    /// with no running total (Claude). Keyed because one request can land as several
+    /// messages repeating its usage; each id counts once, at its latest reading.
+    /// </summary>
+    private readonly Dictionary<string, long> _messageTokens = [];
     private readonly Dictionary<string, ToolCallItem> _toolCalls = [];
     private readonly Dictionary<string, TaskCompletionSource<ApprovalDecision>> _approvals = [];
 
@@ -1978,6 +1985,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     _status.RecordCustomCall(served);
                 }
 
+                // Codex reports its own session total (SessionTokensUpdated); Claude's has
+                // to be summed here, subagents' requests included.
+                if (_status.IsOverrideCli && !IsCodexSession && done.Usage is { } spent)
+                {
+                    _messageTokens.TryGetValue(done.MessageId, out var counted);
+                    _messageTokens[done.MessageId] = spent.TotalTokens;
+                    _status.SessionTokens += spent.TotalTokens - counted;
+                }
+
                 if (done.ParentToolUseId is { } owner && _tasksByToolUse.TryGetValue(owner, out var subagent))
                 {
                     // A subagent's own words belong in its log, not in the main transcript.
@@ -1995,7 +2011,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     break;
                 }
 
-                CheckLoginRequired(done.Text);
+                // Only the CLI's own messages ("<synthetic>": its login and API errors) can
+                // mean signed out. A model's reply that quotes "Not logged in" or
+                // "codex login" - reading Codale's own source, say - is just conversation.
+                if (done.Model == "<synthetic>")
+                {
+                    CheckLoginRequired(done.Text);
+                }
+
                 CompleteStreaming(done);
                 FoldTurnSteps();
                 break;
@@ -2152,6 +2175,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 // Mid-turn context readings (one after every model
                 // call), so the meter moves while the turn runs, not just when it lands.
                 _status.Apply(usage.Usage);
+
+                // The CLI's own window size, only when the provider settings publish none
+                // for this model: a configured size is the better-informed number.
+                if (usage.ContextWindow is int reportedWindow && _status.ContextWindow <= 0)
+                {
+                    _status.ContextWindow = reportedWindow;
+                }
                 break;
 
             case TurnCompleted turn:
@@ -4076,6 +4106,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         ShowTodos([]);
         Artifacts.Clear();
         _status.ClearSessionChanges();
+        _messageTokens.Clear();
+        _status.SessionTokens = 0;
         ResumeSessionId = null;
         ClearFeature();
         WorktreePath = null;

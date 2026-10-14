@@ -156,7 +156,11 @@ public sealed record ConversationCompacted(string? Trigger, long? PreTokens, lon
 /// <summary>A provider-level failure that is not tied to a particular tool call.</summary>
 public sealed record AgentError(string Message) : AgentEvent;
 
-public sealed record UsageUpdated(UsageSnapshot Usage) : AgentEvent;
+public sealed record UsageUpdated(UsageSnapshot Usage) : AgentEvent
+{
+    /// <summary>The window size the CLI itself is working with, when it reports one alongside the usage.</summary>
+    public int? ContextWindow { get; init; }
+}
 
 public sealed record RateLimitUpdated(RateLimitSnapshot Limits) : AgentEvent;
 

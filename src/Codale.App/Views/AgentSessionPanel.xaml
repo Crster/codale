@@ -601,7 +601,7 @@
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Style="{StaticResource SessionControlCaption}" Text="5-HOUR" />
+                                            <TextBlock Style="{StaticResource SessionControlCaption}" Text="USAGE" />
                                             <TextBlock
                                                 Grid.Column="1"
                                                 HorizontalAlignment="Right"
@@ -623,7 +623,7 @@
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Style="{StaticResource SessionControlCaption}" Text="{x:Bind Workspace.Status.LongWindowLabel, Mode=OneWay}" />
+                                            <TextBlock Style="{StaticResource SessionControlCaption}" Text="USAGE" />
                                             <TextBlock
                                                 Grid.Column="1"
                                                 HorizontalAlignment="Right"
@@ -638,6 +638,29 @@
                                             Foreground="{x:Bind Workspace.Status.SevenDayPercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}"
                                             Maximum="100"
                                             Value="{x:Bind Workspace.Status.SevenDayPercent, Mode=OneWay}" />
+                                    </StackPanel>
+                                    <!--  A BYOK endpoint has no readable quota: session tokens against a fixed budget  -->
+                                    <StackPanel Spacing="4" Visibility="{x:Bind Workspace.Status.HasTokenUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Style="{StaticResource SessionControlCaption}" Text="USAGE" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                HorizontalAlignment="Right"
+                                                FontSize="11"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Text="{x:Bind Workspace.Status.TokenUsageSummary, Mode=OneWay}"
+                                                TextTrimming="CharacterEllipsis" />
+                                        </Grid>
+                                        <ProgressBar
+                                            MinHeight="6"
+                                            CornerRadius="3"
+                                            Foreground="{x:Bind Workspace.Status.TokenUsagePercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}"
+                                            Maximum="100"
+                                            Value="{x:Bind Workspace.Status.TokenUsagePercent, Mode=OneWay}" />
                                     </StackPanel>
                                 </StackPanel>
                             </Grid>

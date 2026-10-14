@@ -89,11 +89,30 @@ public sealed partial class StatusViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(TokensText))]
     [NotifyPropertyChangedFor(nameof(HasSessionTokens))]
+    [NotifyPropertyChangedFor(nameof(HasTokenUsage))]
+    [NotifyPropertyChangedFor(nameof(TokenUsagePercent))]
+    [NotifyPropertyChangedFor(nameof(TokenUsageSummary))]
     public partial long SessionTokens { get; set; }
 
     public bool HasSessionTokens => SessionTokens > 0;
 
     public string TokensText => $"{Format((int)Math.Min(SessionTokens, int.MaxValue))} tokens";
+
+    /// <summary>
+    /// What a full usage bar stands for under an override. The endpoint publishes no quota
+    /// Codale can read, so the bar measures the session's tokens against a fixed budget.
+    /// </summary>
+    public const long TokenUsageBudget = 100_000_000;
+
+    /// <summary>The usage bar replaces the subscription windows while an override is active.</summary>
+    public bool HasTokenUsage => IsOverrideCli && SessionTokens > 0;
+
+    /// <summary>0-100: the session's tokens as a share of <see cref="TokenUsageBudget"/>.</summary>
+    public double TokenUsagePercent => Math.Clamp(SessionTokens * 100.0 / TokenUsageBudget, 0, 100);
+
+    /// <summary>"1.2M / 100M   1%" for the usage bar's row.</summary>
+    public string TokenUsageSummary =>
+        $"{FormatLong(SessionTokens)} / {FormatLong(TokenUsageBudget)}   {TokenUsagePercent:0}%";
 
     /// <summary>True while this chat talks to a custom endpoint; the second status bar shows only then.</summary>
     [ObservableProperty]
@@ -109,6 +128,7 @@ public sealed partial class StatusViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasUsageMeter))]
     [NotifyPropertyChangedFor(nameof(UsageMeterLabel))]
     [NotifyPropertyChangedFor(nameof(UsageMeterText))]
+    [NotifyPropertyChangedFor(nameof(HasTokenUsage))]
     public partial bool IsOverrideCli { get; set; }
 
     partial void OnIsOverrideCliChanged(bool value)
@@ -129,6 +149,7 @@ public sealed partial class StatusViewModel : ObservableObject
     {
         ContextTokens = 0;
         ContextWindow = 0;
+        SessionTokens = 0;
         FiveHourUtilization = null;
         SevenDayUtilization = null;
         FiveHourResetsAt = null;

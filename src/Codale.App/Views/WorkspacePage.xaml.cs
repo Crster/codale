@@ -2514,11 +2514,6 @@ public sealed partial class WorkspacePage : Page
             }
         }
 
-        menu.Items.Add(new MenuFlyoutSeparator());
-        menu.Items.Add(MenuAction("Add folder to workspace…", () => _ = AddWorkspaceFolderAsync(), ""));
-        menu.Items.Add(MenuAction("Refresh", AfterTreeMutation, ""));
-        menu.Items.Add(MenuAction("Reveal in File Explorer", () => RevealInExplorer(node), ""));
-
         menu.ShowAt(
             (FrameworkElement)sender,
             new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions
@@ -2526,26 +2521,6 @@ public sealed partial class WorkspacePage : Page
                 Position = e.GetPosition((FrameworkElement)sender),
             });
         e.Handled = true;
-    }
-
-    /// <summary>
-    /// Adds a folder beside the project root (e.g. the backend of the frontend that is open).
-    /// The agent is granted it with --add-dir, so a session started afterwards may work there.
-    /// </summary>
-    private async Task AddWorkspaceFolderAsync()
-    {
-        var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
-        picker.FileTypeFilter.Add("*");
-
-        if (App.Current.MainWindowHandle is { } hwnd)
-        {
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-        }
-
-        if (await picker.PickSingleFolderAsync() is { } folder)
-        {
-            ViewModel.ExtraFolders.Add(folder.Path);
-        }
     }
 
     private static async Task OpenWithDefaultAppAsync(FileNode node)
@@ -2716,9 +2691,6 @@ public sealed partial class WorkspacePage : Page
         Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
     }
 
-    private void RevealInExplorer(FileNode node) =>
-        _ = Windows.System.Launcher.LaunchFolderPathAsync(
-            node.IsDirectory ? node.FullPath : Path.GetDirectoryName(node.FullPath) ?? ViewModel.ProjectPath);
 
     private async Task CreateChildAsync(FileNode parent, bool file)
     {
@@ -3845,7 +3817,3 @@ public sealed partial class WorkspacePage : Page
         public TerminalViewModel Terminal { get; } = terminal;
     }
 }
-
-
-
-

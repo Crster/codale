@@ -688,12 +688,21 @@ public sealed class CodexAgentSession : IAgentSession
                 return;
 
             case "thread/tokenUsage/updated":
-                if (parameters.Prop("usage") is { } usage)
+                // tokenUsage.last is the latest model call - what the window holds now;
+                // .total sums every call of the thread, the running count BYOK shows.
+                if (parameters.Prop("tokenUsage") is { } tokenUsage)
                 {
-                    var snapshot = ReadUsage(usage);
-                    if (snapshot is { } known)
+                    if (tokenUsage.Prop("last") is { } last && ReadUsage(last) is { } known)
                     {
-                        await _events.Writer.WriteAsync(new UsageUpdated(known)).ConfigureAwait(false);
+                        int? window = tokenUsage.Prop("modelContextWindow") is { ValueKind: JsonValueKind.Number } size
+                            && size.TryGetInt32(out var reported) && reported > 0 ? reported : null;
+                        await _events.Writer.WriteAsync(new UsageUpdated(known) { ContextWindow = window }).ConfigureAwait(false);
+                    }
+
+                    if (tokenUsage.Prop("total")?.Prop("totalTokens") is { ValueKind: JsonValueKind.Number } total
+                        && total.TryGetInt64(out var totalTokens))
+                    {
+                        await _events.Writer.WriteAsync(new SessionTokensUpdated(totalTokens)).ConfigureAwait(false);
                     }
                 }
 
@@ -905,10 +914,13 @@ public sealed class CodexAgentSession : IAgentSession
             .FirstOrDefault(value => value is { ValueKind: JsonValueKind.Number }) is { } number
             && number.TryGetInt64(out var parsed) ? parsed : 0;
 
+        // Codex counts cached tokens inside the input total (OpenAI style); the snapshot
+        // keeps them apart, as ContextTokens adds the two back together.
+        var cached = Field("cached_input_tokens", "cachedInputTokens", "cacheReadInputTokens");
         var snapshot = new UsageSnapshot
         {
-            InputTokens = (int)Field("input_tokens", "inputTokens", "preTokens"),
-            CacheReadInputTokens = (int)Field("cached_input_tokens", "cachedInputTokens", "cacheReadInputTokens"),
+            InputTokens = (int)Math.Max(0, Field("input_tokens", "inputTokens", "preTokens") - cached),
+            CacheReadInputTokens = (int)cached,
             OutputTokens = (int)Field("output_tokens", "outputTokens"),
         };
         return snapshot.InputTokens == 0 && snapshot.OutputTokens == 0 ? null : snapshot;
