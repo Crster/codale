@@ -378,6 +378,35 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         await RunWriteAsync(_repository.StageAllAsync()).ConfigureAwait(true);
     }
 
+    /// <summary>The stash stack, newest first; reloaded by <see cref="LoadStashesAsync"/>.</summary>
+    public RangeObservableCollection<GitStash> Stashes { get; } = [];
+
+    public async Task LoadStashesAsync()
+    {
+        Replace(Stashes, await _repository.GetStashesAsync().ConfigureAwait(true), s => s.Ref + s.Message);
+    }
+
+    /// <summary>Shelves all uncommitted changes, including untracked files.</summary>
+    public async Task StashChangesAsync()
+    {
+        if (await RunWriteAsync(_repository.StashPushAsync(CommitMessage)).ConfigureAwait(true))
+        {
+            await LoadStashesAsync().ConfigureAwait(true);
+        }
+    }
+
+    public async Task PopStashAsync(GitStash stash)
+    {
+        await RunWriteAsync(_repository.StashPopAsync(stash.Ref)).ConfigureAwait(true);
+        await LoadStashesAsync().ConfigureAwait(true);
+    }
+
+    public async Task DropStashAsync(GitStash stash)
+    {
+        await RunWriteAsync(_repository.StashDropAsync(stash.Ref)).ConfigureAwait(true);
+        await LoadStashesAsync().ConfigureAwait(true);
+    }
+
     /// <summary>Takes one staged change back out of the index.</summary>
     [RelayCommand]
     public async Task UnstageChangeAsync(GitFileStatus? change)

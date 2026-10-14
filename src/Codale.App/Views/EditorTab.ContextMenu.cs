@@ -23,10 +23,8 @@ public sealed partial class EditorTab
     /// <summary>Longest stretch of the file sent to the model around the cursor or in a whole-file job.</summary>
     private const int MaxContextChars = 60_000;
 
-    private MenuFlyoutItem _cutItem = null!;
     private MenuFlyoutItem _copyItem = null!;
     private MenuFlyoutItem _pasteItem = null!;
-    private MenuFlyoutItem _deleteItem = null!;
     private MenuFlyoutItem _formatItem = null!;
     private MenuFlyoutItem _askItem = null!;
     private MenuFlyoutItem _checkItem = null!;
@@ -87,11 +85,8 @@ public sealed partial class EditorTab
 
     private void BuildContextMenu()
     {
-        _cutItem = Item("Cut", FileEditor.CutToClipboard, "Ctrl+X", "");
         _copyItem = Item("Copy", FileEditor.CopyToClipboard, "Ctrl+C", "");
         _pasteItem = Item("Paste", FileEditor.PasteFromClipboard, "Ctrl+V", "");
-        _deleteItem = Item("Delete", FileEditor.DeleteSelection, null, "");
-        var selectAll = Item("Select All", FileEditor.SelectEverything, "Ctrl+A", "");
         _formatItem = Item("Format Document", () => _ = FormatDocumentAsync(), null, "");
         _askItem = Item("Edit here…", () => _ = AskClaudeAsync(), null, "\uE9CE");
         _checkItem = Item("Check Issues", () => _ = CheckIssuesAsync(), null, "");
@@ -101,7 +96,7 @@ public sealed partial class EditorTab
         var menu = new MenuFlyout();
         foreach (var item in new MenuFlyoutItemBase[]
         {
-            _cutItem, _copyItem, _pasteItem, _deleteItem, selectAll, new MenuFlyoutSeparator(),
+            _copyItem, _pasteItem, new MenuFlyoutSeparator(),
             _referencesItem, new MenuFlyoutSeparator(),
             _formatItem, _askItem, _checkItem, _previewItem,
         })
@@ -143,10 +138,8 @@ public sealed partial class EditorTab
         var editable = ViewModel is { CanEdit: true };
         var hasSelection = FileEditor.HasSelection;
 
-        _cutItem.IsEnabled = editable && hasSelection;
         _copyItem.IsEnabled = hasSelection;
         _pasteItem.IsEnabled = editable;
-        _deleteItem.IsEnabled = editable && hasSelection;
         _referencesItem.IsEnabled = ReferenceTarget() is { } target && target.Trim().Length > 0;
 
         var canAsk = editable && Helper is { IsAvailable: true } && !IsModelBusy;

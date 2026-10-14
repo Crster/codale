@@ -571,6 +571,16 @@
                                                 </Border>
                                             </StackPanel>
 
+                                            <!--  Filter the list; Enter on a lone match switches to it  -->
+                                            <TextBox
+                                                x:Name="BranchFilterBox"
+                                                Margin="4,0"
+                                                FontSize="12"
+                                                KeyDown="OnBranchFilterKeyDown"
+                                                PlaceholderText="Filter branches…"
+                                                TextChanged="OnBranchFilterChanged"
+                                                Visibility="{x:Bind ViewModel.Git.Branches.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}" />
+
                                             <!--  A fresh repository has no branch refs until the first commit  -->
                                             <StackPanel
                                                 Margin="8,6,8,6"
@@ -590,7 +600,7 @@
 
                                             <ListView
                                                 x:Name="BranchList"
-                                                MaxHeight="240"
+                                                MaxHeight="260"
                                                 IsItemClickEnabled="True"
                                                 ItemClick="OnBranchClick"
                                                 ItemContainerStyle="{StaticResource PanelItem}"
@@ -731,6 +741,110 @@
                                 IsEnabled="{x:Bind ViewModel.Git.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
                                 ToolTipService.ToolTip="Pull (fast-forward)">
                                 <FontIcon FontSize="13" Glyph="&#xE896;" />
+                            </Button>
+                            <!--  Stash: shelve the working changes, and pop them back later  -->
+                            <Button
+                                Padding="6,3"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                ToolTipService.ToolTip="Stashes">
+                                <FontIcon FontSize="13" Glyph="&#xE7B8;" />
+                                <Button.Flyout>
+                                    <Flyout
+                                        FlyoutPresenterStyle="{StaticResource PickerFlyout}"
+                                        Opening="OnStashFlyoutOpening"
+                                        Placement="Bottom">
+                                        <StackPanel Width="300" Spacing="6">
+                                            <StackPanel Margin="8,4,8,0" Orientation="Horizontal" Spacing="6">
+                                                <TextBlock
+                                                    VerticalAlignment="Center"
+                                                    CharacterSpacing="60"
+                                                    FontSize="11"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="STASHES" />
+                                                <Border
+                                                    Padding="6,0"
+                                                    VerticalAlignment="Center"
+                                                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                                    CornerRadius="8">
+                                                    <TextBlock
+                                                        FontSize="10"
+                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                        Text="{x:Bind ViewModel.Git.Stashes.Count, Mode=OneWay}" />
+                                                </Border>
+                                            </StackPanel>
+
+                                            <TextBlock
+                                                Margin="8,2"
+                                                FontSize="12"
+                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                Text="Nothing stashed."
+                                                Visibility="{x:Bind ViewModel.Git.Stashes.Count, Mode=OneWay, Converter={StaticResource CountToInverseVisibility}}" />
+
+                                            <ListView
+                                                MaxHeight="240"
+                                                ItemContainerStyle="{StaticResource PanelItem}"
+                                                ItemsSource="{x:Bind ViewModel.Git.Stashes}"
+                                                SelectionMode="None">
+                                                <ListView.ItemTemplate>
+                                                    <DataTemplate x:DataType="git:GitStash">
+                                                        <Grid ColumnSpacing="4" ToolTipService.ToolTip="{x:Bind Message}">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <StackPanel VerticalAlignment="Center">
+                                                                <TextBlock
+                                                                    FontSize="12"
+                                                                    Text="{x:Bind Message}"
+                                                                    TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock
+                                                                    FontSize="10"
+                                                                    Opacity="0.55"
+                                                                    Text="{x:Bind Age}" />
+                                                            </StackPanel>
+                                                            <Button
+                                                                Grid.Column="1"
+                                                                Padding="6,3"
+                                                                Background="Transparent"
+                                                                BorderBrush="Transparent"
+                                                                Click="OnPopStashClick"
+                                                                ToolTipService.ToolTip="Pop: re-apply and remove">
+                                                                <FontIcon FontSize="12" Glyph="&#xE898;" />
+                                                            </Button>
+                                                            <Button
+                                                                Grid.Column="2"
+                                                                Padding="6,3"
+                                                                Background="Transparent"
+                                                                BorderBrush="Transparent"
+                                                                Click="OnDropStashClick"
+                                                                ToolTipService.ToolTip="Drop without applying">
+                                                                <FontIcon FontSize="12" Glyph="&#xE74D;" />
+                                                            </Button>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ListView.ItemTemplate>
+                                            </ListView>
+
+                                            <Border
+                                                Padding="8,10,8,6"
+                                                BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                                BorderThickness="0,1,0,0">
+                                                <Button
+                                                    HorizontalAlignment="Stretch"
+                                                    Click="OnStashChangesClick"
+                                                    ToolTipService.ToolTip="Shelve all uncommitted changes, untracked files included. The commit message, if any, names the stash.">
+                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        <FontIcon FontSize="12" Glyph="&#xE896;" />
+                                                        <TextBlock Text="Stash changes" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </Border>
+                                        </StackPanel>
+                                    </Flyout>
+                                </Button.Flyout>
                             </Button>
                             <Button
                                 Padding="6,3"

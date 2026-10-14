@@ -147,14 +147,6 @@ public sealed partial class EditorTab : UserControl
         new(Windows.UI.Color.FromArgb(0x90, 0xE5, 0xB2, 0x3C));
     private (double Scroll, double LineHeight, double Width, double Height, int Current) _drawn;
 
-    // The search result amber, as bands: a faint fill and a stronger edge for the current one.
-    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush BandBrush =
-        new(Windows.UI.Color.FromArgb(0x2E, 0xE5, 0xB2, 0x3C));
-    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush CurrentBandBrush =
-        new(Windows.UI.Color.FromArgb(0x48, 0xE5, 0xB2, 0x3C));
-    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush EdgeBrush =
-        new(Windows.UI.Color.FromArgb(0xE0, 0xE5, 0xB2, 0x3C));
-
     private int _targetColumn;
     private int _targetEndColumn;
 
@@ -213,8 +205,9 @@ public sealed partial class EditorTab : UserControl
     /// Highlights what in this file relates to <paramref name="query"/>: the search's own
     /// words at once, then the ranges the helper model picks after reading the whole file.
     /// </summary>
-    public async Task FocusOnQueryAsync(string query, Func<CancellationToken, Task<ISearchModel?>> connectModel)
+    public async Task<int> FocusOnQueryAsync(string query, Func<CancellationToken, Task<ISearchModel?>> connectModel)
     {
+        var found = 0;
         _focusSearch?.Cancel();
         var cts = new CancellationTokenSource();
         _focusSearch = cts;
@@ -235,11 +228,12 @@ public sealed partial class EditorTab : UserControl
 
             if (cts.IsCancellationRequested)
             {
-                return;
+                return 0;
             }
 
             if (spans is { Count: > 0 })
             {
+                found = spans.Count;
                 ShowHighlights(spans, spans.Count == 1 ? "1 related part" : $"{spans.Count} related parts", reveal: true);
             }
             else
@@ -259,6 +253,8 @@ public sealed partial class EditorTab : UserControl
 
             cts.Dispose();
         }
+
+        return found;
     }
 
     private void OnPreviousHighlightClick(object sender, Microsoft.UI.Xaml.RoutedEventArgs e) => MoveHighlight(-1);
@@ -359,26 +355,8 @@ public sealed partial class EditorTab : UserControl
                 continue;
             }
 
-            var band = new Microsoft.UI.Xaml.Shapes.Rectangle
-            {
-                Width = width,
-                Height = height,
-                Fill = i == _currentHighlight ? CurrentBandBrush : BandBrush,
-            };
-            Canvas.SetTop(band, top);
-            HighlightLayer.Children.Add(band);
-
-            var edge = new Microsoft.UI.Xaml.Shapes.Rectangle
-            {
-                Width = 3,
-                Height = height,
-                Fill = EdgeBrush,
-                Opacity = i == _currentHighlight ? 1 : 0.5,
-            };
-            Canvas.SetTop(edge, top);
-            HighlightLayer.Children.Add(edge);
-
-            // The search's exact words inside the span, only those in view.
+            // Only the search's exact words are marked, not the whole span, so the
+            // highlights stay easy to tell apart while navigating.
             if (_focusQuery.Length > 0)
             {
                 foreach (var (line, col, length) in FileFocus.Occurrences(_focusQuery, _focusLines, firstLine, lastLine))

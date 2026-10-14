@@ -153,6 +153,17 @@ public sealed record GitCommit
 }
 
 /// <summary>One local branch from <c>git branch</c>, for the switcher.</summary>
+/// <summary>One entry of <c>git stash list</c>.</summary>
+public sealed record GitStash
+{
+    /// <summary>The ref, such as <c>stash@{0}</c>.</summary>
+    public required string Ref { get; init; }
+
+    public required string Message { get; init; }
+
+    public string Age { get; init; } = "";
+}
+
 public sealed record GitBranch
 {
     public required string Name { get; init; }

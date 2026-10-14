@@ -317,6 +317,8 @@ public sealed partial class MainWindow : Window
         TitleSearchBox.Focus(FocusState.Programmatic);
     }
 
+    public void ClearSearchText() => TitleSearchBox.Text = "";
+
     private void SetSearchScope(string? fileName)
     {
         _searchFileScope = fileName;

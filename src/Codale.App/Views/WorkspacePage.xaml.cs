@@ -2406,7 +2406,13 @@ public sealed partial class WorkspacePage : Page
 
             try
             {
-                await editor.Tab.FocusOnQueryAsync(query, ViewModel.Search.ConnectModelAsync);
+                var found = await editor.Tab.FocusOnQueryAsync(query, ViewModel.Search.ConnectModelAsync);
+
+                // Several results are stepped through with the arrows, so the box is free for the next search.
+                if (found > 1 && sender is MainWindow window)
+                {
+                    window.ClearSearchText();
+                }
             }
             catch (Exception ex)
             {
@@ -2471,7 +2477,6 @@ public sealed partial class WorkspacePage : Page
             }
 
             menu.Items.Add(MenuAction("Open with default app", () => _ = OpenWithDefaultAppAsync(node), ""));
-            menu.Items.Add(MenuAction("Add to chat", () => AddFileToChat(node), ""));
 
             if (TurnAttachment.KindOf(node.FullPath) is not null)
             {
@@ -2500,7 +2505,6 @@ public sealed partial class WorkspacePage : Page
 
         if (!isRoot)
         {
-            menu.Items.Add(MenuAction("Copy name", () => CopyText(node.Name)));
             menu.Items.Add(new MenuFlyoutSeparator());
 
             if (isFolderRoot)
@@ -2674,12 +2678,6 @@ public sealed partial class WorkspacePage : Page
     /// <summary>The @-reference the composer's own autocomplete would have inserted.</summary>
     private string RelativeToProject(string path) =>
         Path.GetRelativePath(ViewModel.ProjectPath, path).Replace('\\', '/');
-
-    private void AddFileToChat(FileNode node)
-    {
-        var reference = $"@{RelativeToProject(node.FullPath)} ";
-        ViewModel.Chat.Draft = ViewModel.Chat.Draft is { Length: > 0 } draft ? draft + reference : reference;
-    }
 
     private void CopyText(string text)
     {
@@ -2890,8 +2888,59 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>A fresh opening should not show a failure from an earlier attempt.</summary>
-    private void OnBranchFlyoutOpening(object? sender, object e) =>
+    private void OnBranchFlyoutOpening(object? sender, object e)
+    {
         ViewModel.Git.ActionError = null;
+        BranchFilterBox.Text = "";
+        BranchList.ItemsSource = ViewModel.Git.Branches;
+    }
+
+    private async void OnStashFlyoutOpening(object? sender, object e)
+    {
+        ViewModel.Git.ActionError = null;
+        await ViewModel.Git.LoadStashesAsync();
+    }
+
+    private async void OnStashChangesClick(object sender, RoutedEventArgs e) =>
+        await ViewModel.Git.StashChangesAsync();
+
+    private async void OnPopStashClick(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).DataContext is GitStash stash)
+        {
+            await ViewModel.Git.PopStashAsync(stash);
+        }
+    }
+
+    private async void OnDropStashClick(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).DataContext is GitStash stash)
+        {
+            await ViewModel.Git.DropStashAsync(stash);
+        }
+    }
+
+    private void OnBranchFilterChanged(object sender, TextChangedEventArgs e)
+    {
+        var filter = BranchFilterBox.Text.Trim();
+        BranchList.ItemsSource = filter.Length == 0
+            ? ViewModel.Git.Branches
+            : ViewModel.Git.Branches
+                .Where(b => b.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+    }
+
+    private async void OnBranchFilterKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Enter
+            && BranchList.ItemsSource is IEnumerable<GitBranch> shown
+            && shown.Take(2).ToList() is [var only]
+            && await ViewModel.Git.SwitchBranchAsync(only)
+            && BranchButton.Flyout is { } flyout)
+        {
+            flyout.Hide();
+        }
+    }
 
     private async void OnCreateBranchClick(object sender, RoutedEventArgs e) => await CreateBranchAsync();
 

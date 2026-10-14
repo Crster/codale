@@ -564,6 +564,41 @@ public sealed class GitRepository
     public Task<GitWriteResult> StageAsync(string path, CancellationToken ct = default) =>
         RunWriteAsync(["add", "--", path], ct);
 
+    /// <summary>Shelves every uncommitted change, untracked files included, leaving a clean tree.</summary>
+    public Task<GitWriteResult> StashPushAsync(string? message, CancellationToken ct = default) =>
+        RunWriteAsync(string.IsNullOrWhiteSpace(message)
+            ? ["stash", "push", "--include-untracked"]
+            : ["stash", "push", "--include-untracked", "-m", message.Trim()], ct);
+
+    /// <summary>Re-applies a stash and removes it; git keeps it if the apply conflicts.</summary>
+    public Task<GitWriteResult> StashPopAsync(string stashRef, CancellationToken ct = default) =>
+        RunWriteAsync(["stash", "pop", "--end-of-options", stashRef], ct);
+
+    public Task<GitWriteResult> StashDropAsync(string stashRef, CancellationToken ct = default) =>
+        RunWriteAsync(["stash", "drop", "--end-of-options", stashRef], ct);
+
+    /// <summary>The stash stack, newest first.</summary>
+    public async Task<IReadOnlyList<GitStash>> GetStashesAsync(CancellationToken ct = default)
+    {
+        var result = await RunReadAsync(["stash", "list", "--format=%gd%x1f%s%x1f%cr"], ct).ConfigureAwait(false);
+        if (!result.Success)
+        {
+            return [];
+        }
+
+        var stashes = new List<GitStash>();
+        foreach (var line in result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var fields = line.Split('\u001f');
+            if (fields.Length >= 3)
+            {
+                stashes.Add(new GitStash { Ref = fields[0], Message = fields[1], Age = fields[2] });
+            }
+        }
+
+        return stashes;
+    }
+
     /// <summary>Stages every change in the working tree, including untracked files.</summary>
     public Task<GitWriteResult> StageAllAsync(CancellationToken ct = default) =>
         RunWriteAsync(["add", "-A"], ct);
