@@ -290,9 +290,21 @@ public sealed partial class ChatTab : UserControl
         });
     }
 
-    /// <summary>A step's file target: edits open the call's own diff, reads open the file.</summary>
-    private void OnFeatureCardExpanding(Expander sender, ExpanderExpandingEventArgs args) =>
-        FeatureSummaryText.Text = ViewModel.FeatureSummary();
+    private void OnBriefingToggleClick(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).Tag is FeatureBriefingItem briefing)
+        {
+            briefing.IsExpanded = !briefing.IsExpanded;
+        }
+    }
+
+    private async void OnBriefingBackClick(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).Tag is FeatureBriefingItem { BackAction: { } back })
+        {
+            await back();
+        }
+    }
 
     /// <summary>The feature's whole log, newest page first, read only when asked for: a chat never loads it by itself.</summary>
     private async void OnViewFeatureHistoryClick(object sender, RoutedEventArgs e)

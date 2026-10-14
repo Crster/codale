@@ -1,6 +1,7 @@
 using System.Diagnostics;
 
 using Codale.Core.Agents;
+using Codale.Core.Processes;
 
 namespace Codale.Agents;
 
@@ -62,7 +63,7 @@ public static class CodaleAccountCli
 
         try
         {
-            using var process = Process.Start(startInfo);
+            using var process = await ProcessUtil.StartAsync(startInfo).ConfigureAwait(false);
             if (process is null)
             {
                 return -1;

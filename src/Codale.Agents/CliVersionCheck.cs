@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
+using Codale.Core.Processes;
+
 namespace Codale.Agents;
 
 /// <summary>
@@ -45,7 +47,7 @@ public static partial class CliVersionCheck
                 CreateNoWindow = true,
             };
 
-            using var process = Process.Start(startInfo);
+            using var process = await ProcessUtil.StartAsync(startInfo).ConfigureAwait(false);
             if (process is null)
             {
                 return null;

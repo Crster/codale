@@ -77,7 +77,7 @@ internal static class GitProcess
             startInfo.ArgumentList.Add(argument);
         }
 
-        using var process = Process.Start(startInfo)
+        using var process = await ProcessUtil.StartAsync(startInfo).ConfigureAwait(false)
             ?? throw new InvalidOperationException("git is not installed or not on PATH.");
 
         // A timeout kills the whole tree and surfaces as a cancelled (failed) call.

@@ -6,6 +6,15 @@ namespace Codale.Core.Processes;
 public static class ProcessUtil
 {
     /// <summary>
+    /// <see cref="Process.Start(ProcessStartInfo)"/> on the thread pool. Starting a process takes a
+    /// process-wide lock; a UI thread blocked on it while another start holds it pumps messages, and
+    /// WinUI re-entered from inside an event handler fails fast (0xc000027b), which is how a launch
+    /// that spawns several CLIs at once crashed. Every caller that may sit on the UI thread uses this.
+    /// </summary>
+    public static Task<Process?> StartAsync(ProcessStartInfo startInfo) =>
+        Task.Run(() => Process.Start(startInfo));
+
+    /// <summary>
     /// Kills <paramref name="process"/> and its descendants. Never throws: the process
     /// having already exited, or access being denied, both mean there is nothing to do.
     /// </summary>

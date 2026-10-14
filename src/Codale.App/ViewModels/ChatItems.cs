@@ -1519,6 +1519,34 @@ public sealed record AttentionRequest(AttentionKind Kind, string Message)
     public bool NeedsAnswer => Kind is AttentionKind.Question or AttentionKind.Permission or AttentionKind.Plan;
 }
 
+/// <summary>
+/// The feature a fresh session continues, as its transcript's opening row: folded to the
+/// feature's name, it opens to the summary the session started from.
+/// </summary>
+public sealed partial class FeatureBriefingItem : ChatItem
+{
+    public override TranscriptBlock Block => TranscriptBlock.Notice;
+
+    protected override Thickness NaturalMargin => new(0, 4, 40, 4);
+
+    public required string FeatureName { get; init; }
+
+    /// <summary>The feature's summary as it stood when the session started.</summary>
+    public required string Summary { get; init; }
+
+    public bool HasSummary => Summary.Length > 0;
+
+    [ObservableProperty]
+    public partial bool IsExpanded { get; set; }
+
+    /// <summary>The label of the way back to the feature the chat left, or null when it left none.</summary>
+    public string? BackText { get; init; }
+
+    public Func<Task>? BackAction { get; init; }
+
+    public bool HasBack => BackText is not null && BackAction is not null;
+}
+
 public enum NoticeSeverity
 {
     Info,

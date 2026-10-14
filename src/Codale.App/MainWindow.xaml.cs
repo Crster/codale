@@ -181,6 +181,7 @@ public sealed partial class MainWindow : Window
         if (open)
         {
             SettingsHost.Reload();
+            _ = SettingsHost.RefreshAccountsAsync();
             SettingsHost.Visibility = Visibility.Visible;
             SettingsBackdrop.Visibility = Visibility.Visible;
         }

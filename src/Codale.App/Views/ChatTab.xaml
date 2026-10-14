@@ -1230,10 +1230,88 @@
             </Grid>
         </DataTemplate>
 
+        <!--  The feature a session continues: a folded row like a turn header that opens
+              to the summary it started from, on the timeline rail.  -->
+        <DataTemplate x:Key="BriefingTemplate" x:DataType="vm:FeatureBriefingItem">
+            <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="2">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <Button
+                        Padding="0,3,10,3"
+                        Click="OnBriefingToggleClick"
+                        IsEnabled="{x:Bind HasSummary}"
+                        Style="{StaticResource ToolToggle}"
+                        Tag="{x:Bind}"
+                        ToolTipService.ToolTip="Show or hide what this session carries over">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Border
+                                Width="20"
+                                Height="20"
+                                Margin="1,0,1,0"
+                                VerticalAlignment="Center"
+                                Background="{StaticResource KindPlanTintBrush}"
+                                CornerRadius="10">
+                                <FontIcon
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    FontSize="{x:Bind S10, Mode=OneWay}"
+                                    Foreground="{StaticResource KindPlanBrush}"
+                                    Glyph="&#xE81C;" />
+                            </Border>
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                FontSize="{x:Bind S12, Mode=OneWay}"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Text="Continuing" />
+                            <TextBlock
+                                MaxWidth="420"
+                                VerticalAlignment="Center"
+                                FontSize="{x:Bind S12, Mode=OneWay}"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{x:Bind FeatureName}"
+                                TextTrimming="CharacterEllipsis" />
+                            <FontIcon
+                                FontSize="{x:Bind S8, Mode=OneWay}"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Glyph="{x:Bind IsExpanded, Mode=OneWay, Converter={StaticResource ChevronGlyph}}"
+                                Visibility="{x:Bind HasSummary, Converter={StaticResource BoolToVisibility}}" />
+                        </StackPanel>
+                    </Button>
+                    <HyperlinkButton
+                        Padding="6,2"
+                        VerticalAlignment="Center"
+                        Click="OnBriefingBackClick"
+                        Content="{x:Bind BackText}"
+                        FontSize="{x:Bind S12, Mode=OneWay}"
+                        Tag="{x:Bind}"
+                        Visibility="{x:Bind HasBack, Converter={StaticResource BoolToVisibility}}" />
+                </StackPanel>
+                <Grid Visibility="{x:Bind IsExpanded, Mode=OneWay}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="22" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Rectangle Width="1" Fill="{StaticResource TimelineRailBrush}" />
+                    <StackPanel
+                        Grid.Column="1"
+                        Margin="6,2,0,4"
+                        Spacing="6">
+                        <views:MarkdownView BaseFontSize="{x:Bind S13, Mode=OneWay}" Markdown="{x:Bind Summary}" />
+                        <HyperlinkButton
+                            Padding="0"
+                            Click="OnViewFeatureHistoryClick"
+                            Content="View full history"
+                            FontSize="{x:Bind S12, Mode=OneWay}" />
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+        </DataTemplate>
+
         <views:ChatItemTemplateSelector
             x:Key="ChatTemplateSelector"
             ActivityTemplate="{StaticResource ActivityTemplate}"
             AssistantTemplate="{StaticResource AssistantTemplate}"
+            BriefingTemplate="{StaticResource BriefingTemplate}"
             NoticeTemplate="{StaticResource NoticeTemplate}"
             ToolTemplate="{StaticResource ToolTemplate}"
             UserTemplate="{StaticResource UserTemplate}" />
@@ -1336,32 +1414,11 @@
         </VisualStateManager.VisualStateGroups>
 
         <ScrollViewer x:Name="ChatScroller" VerticalScrollBarVisibility="Auto">
-            <StackPanel>
-                <!--  The feature this chat works on: its summary, one click away; nothing of its past is loaded.  -->
-                <Expander
-                    Margin="0,0,8,8"
-                    HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
-                    Expanding="OnFeatureCardExpanding"
-                    Visibility="{x:Bind ViewModel.HasFeature, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                    <Expander.Header>
-                        <TextBlock FontSize="12" Text="{x:Bind ViewModel.FeatureName, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
-                    </Expander.Header>
-                    <StackPanel Spacing="8">
-                        <TextBlock
-                            x:Name="FeatureSummaryText"
-                            FontSize="12"
-                            IsTextSelectionEnabled="True"
-                            TextWrapping="Wrap" />
-                        <HyperlinkButton Click="OnViewFeatureHistoryClick" Content="View full history" Padding="0" />
-                    </StackPanel>
-                </Expander>
-                <ItemsControl
-                    x:Name="Transcript"
-                    Padding="0,0,8,8"
-                    ItemTemplateSelector="{StaticResource ChatTemplateSelector}"
-                    ItemsSource="{x:Bind ViewModel.Items}" />
-            </StackPanel>
+            <ItemsControl
+                x:Name="Transcript"
+                Padding="0,0,8,8"
+                ItemTemplateSelector="{StaticResource ChatTemplateSelector}"
+                ItemsSource="{x:Bind ViewModel.Items}" />
         </ScrollViewer>
 
         <!--  Shown until the first message arrives.  -->

@@ -373,7 +373,7 @@ public sealed class HelperModel(
         Process process;
         try
         {
-            process = Process.Start(startInfo)
+            process = await ProcessUtil.StartAsync(startInfo).ConfigureAwait(false)
                 ?? throw new HelperModelException("Could not start the Claude CLI.");
         }
         catch (Exception ex) when (ex is not HelperModelException)
@@ -462,7 +462,7 @@ public sealed class HelperModel(
             return new UsageSnapshot();
         }
 
-        int Field(string name) => usage.TryGetProperty(name, out var v) && v.TryGetInt32(out var n) ? n : 0;
+        int Field(string name) => usage.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n) ? n : 0;
         return new UsageSnapshot
         {
             InputTokens = Field("input_tokens"),
@@ -512,7 +512,7 @@ public sealed class HelperModel(
         Process process;
         try
         {
-            process = Process.Start(startInfo)
+            process = await ProcessUtil.StartAsync(startInfo).ConfigureAwait(false)
                 ?? throw new HelperModelException("Could not start the Codex CLI.");
         }
         catch (Exception ex) when (ex is not HelperModelException)

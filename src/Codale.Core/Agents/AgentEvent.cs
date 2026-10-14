@@ -25,6 +25,9 @@ public sealed record SessionInitialized : AgentEvent
     public IReadOnlyList<string> Agents { get; init; } = [];
     public IReadOnlyList<string> Skills { get; init; } = [];
     public string? Version { get; init; }
+
+    /// <summary>Total context size in tokens, when the configured provider publishes it.</summary>
+    public int? ContextWindow { get; init; }
 }
 
 /// <summary>

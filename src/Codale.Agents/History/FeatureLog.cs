@@ -121,6 +121,26 @@ public sealed class FeatureLog(string directory)
         return events;
     }
 
+    /// <summary>The newest task-list tool call in the feature, for restoring the session panel.</summary>
+    public ToolCallStarted? LatestTodoUpdate()
+    {
+        foreach (var file in Files().Reverse())
+        {
+            var records = ReadRecords(file, 0).ToList();
+            for (var i = records.Count - 1; i >= 0; i--)
+            {
+                if (records[i].Str("type") == "tool" &&
+                    TodoParser.IsTodosTool(records[i].Str("name") ?? "") &&
+                    Translate(records[i]) is ToolCallStarted started)
+                {
+                    return started;
+                }
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>Moves the current log to the next archive and starts an empty one.</summary>
     public void Archive()
     {

@@ -79,5 +79,5 @@ public static class ClaudeContextProbe
     public static int WindowFor(int tokens) => tokens > 200_000 ? 1_000_000 : 200_000;
 
     private static int Count(JsonElement usage, string name) =>
-        usage.TryGetProperty(name, out var value) && value.TryGetInt32(out var n) ? n : 0;
+        usage.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var n) ? n : 0;
 }

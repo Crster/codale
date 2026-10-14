@@ -993,6 +993,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
         if (chat.IsConnected)
         {
+            // Settings' CLI provider may have changed since this blank chat connected.
+            await chat.SetEndpointAsync(AppSettings.CliProviderFor(chat.CliId));
+
             if (AppSettings.DefaultModeFor(chat.CliId) is { Length: > 0 } mode)
             {
                 await chat.SetPermissionModeAsync(mode);
@@ -1000,6 +1003,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         }
         else
         {
+            chat.ReloadCliDefaults();
             chat.PermissionMode = AppSettings.DefaultModeFor(chat.CliId);
         }
     }

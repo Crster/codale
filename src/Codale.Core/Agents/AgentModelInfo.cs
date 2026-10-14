@@ -22,5 +22,8 @@ public sealed record AgentModelInfo
     /// <summary>Efforts this model advertises, when the CLI knows them.</summary>
     public IReadOnlyList<string> SupportedEfforts { get; init; } = [];
 
+    /// <summary>Total context size in tokens, when the provider or CLI publishes it.</summary>
+    public int? ContextWindow { get; init; }
+
     public override string ToString() => Description is { Length: > 0 } d ? $"{DisplayName} · {d}" : DisplayName;
 }

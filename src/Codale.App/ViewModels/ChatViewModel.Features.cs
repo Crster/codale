@@ -130,6 +130,10 @@ public sealed partial class ChatViewModel
 
         SetFeature(feature, seed: true);
         Title = feature.Name;
+        if (_featureLog?.LatestTodoUpdate() is { } todos)
+        {
+            ApplyTodos(todos.Input);
+        }
 
         if (hadConversation)
         {
@@ -140,11 +144,29 @@ public sealed partial class ChatViewModel
             }
         }
 
-        if (announce && (hadConversation || !created))
+        // A chat that never spoke keeps its transcript, so the briefing of the feature it left goes.
+        foreach (var stale in Items.OfType<FeatureBriefingItem>().ToList())
+        {
+            Items.Remove(stale);
+            Reflow();
+        }
+
+        if (!created)
+        {
+            // The transcript opens on what the session carries over: the feature and its summary.
+            Add(new FeatureBriefingItem
+            {
+                FeatureName = feature.Name,
+                Summary = FeatureSummary(),
+                BackText = announce && previous is not null ? $"Back to {previous.Name}" : null,
+                BackAction = announce && previous is not null ? () => AttachFeatureAsync(previous) : null,
+            });
+        }
+        else if (announce && hadConversation)
         {
             Add(new NoticeItem
             {
-                Text = created ? $"New history: {feature.Name}" : $"Continuing history: {feature.Name}",
+                Text = $"New history: {feature.Name}",
                 ActionText = previous is null ? null : $"Back to {previous.Name}",
                 Action = previous is null ? null : () => AttachFeatureAsync(previous),
             });

@@ -229,16 +229,16 @@ public static class AppSettings
     }
 
     /// <summary>
-    /// The endpoint background jobs call, or null to fall back to the Claude CLI: no BYOK
-    /// provider exists, or none has a base URL, key and model. The provider's everyday
+    /// The endpoint background jobs call, or null to use a CLI: Settings picks Claude or
+    /// Codex, or the picked provider lacks a base URL, key and model. The provider's everyday
     /// model is used - these jobs are short and latency is what the user feels.
     /// </summary>
     public static (string BaseUrl, string ApiKey, string Model)? HelperApiEndpoint =>
         HelperApiProvider is { } found ? found.Endpoint : null;
 
     /// <summary>
-    /// The name of the BYOK provider background jobs call, or "" to use the first
-    /// provider that is usable. Independent of the status bar's agent provider picker.
+    /// What background jobs run on: "" for the Claude CLI, "Codex" for the Codex CLI, else
+    /// the name of a BYOK provider. Independent of the status bar's agent provider picker.
     /// </summary>
     public static string HelperProvider
     {
@@ -257,20 +257,22 @@ public static class AppSettings
     }
 
     /// <summary>
-    /// The provider background jobs call first: the one named by <see cref="HelperProvider"/>,
-    /// else the first configured provider with a base URL, key and model. Null when nothing
-    /// usable exists, and jobs fall back to the Claude CLI. Never follows the agent provider picked in the status bar.
+    /// The BYOK provider background jobs call: only the one named by <see cref="HelperProvider"/>,
+    /// and only when it has a base URL, key and model. Null otherwise - Claude or Codex was
+    /// picked, or the provider is incomplete - and jobs run on the CLI. Never picks a provider
+    /// on its own, and never follows the agent provider picked in the status bar.
     /// </summary>
     public static (ByokProvider Provider, (string BaseUrl, string ApiKey, string Model) Endpoint)? HelperApiProvider
     {
         get
         {
             var wanted = HelperProvider;
-            var all = ByokProviders;
-            var candidates = wanted.Length > 0
-                ? all.Where(p => string.Equals(p.Name.Trim(), wanted, StringComparison.OrdinalIgnoreCase)).ToList()
-                : all;
-            foreach (var provider in candidates)
+            if (wanted.Length == 0)
+            {
+                return null;
+            }
+
+            foreach (var provider in ByokProviders.Where(p => string.Equals(p.Name.Trim(), wanted, StringComparison.OrdinalIgnoreCase)))
             {
                 var model = string.IsNullOrWhiteSpace(provider.FlashModel) ? provider.ProModel : provider.FlashModel;
                 if (!string.IsNullOrWhiteSpace(provider.BaseUrl) && !string.IsNullOrWhiteSpace(provider.ApiKey) && !string.IsNullOrWhiteSpace(model))
@@ -307,12 +309,18 @@ public static class AppSettings
     {
         var key = DefaultsKey(cli, leaf);
         var raw = value is { Length: > 0 } ? value : "";
-        if (Read(key, "") == raw)
+        lock (FileLock)
         {
-            return;
+            if (Read(key, "") == raw)
+            {
+                return;
+            }
+
+            Write(key, raw);
+            // ReadDefault answers from the cache, so it must see the new value too.
+            Cache[key] = raw;
         }
 
-        Write(key, raw);
         OnChanged();
     }
 
@@ -364,6 +372,10 @@ public static class AppSettings
     {
         Name = p.Name, BaseUrl = p.BaseUrl, AnthropicBaseUrl = p.AnthropicBaseUrl, ApiKey = apiKey ?? p.ApiKey,
         FlashModel = p.FlashModel, ProModel = p.ProModel,
+        ModelContextWindows = p.ModelContextWindows is not null
+            ? new(p.ModelContextWindows, StringComparer.OrdinalIgnoreCase)
+            : new(StringComparer.OrdinalIgnoreCase),
+        ContextWindow = p.ContextWindow,
     };
 
     /// <summary>Serialises providers for the file (<paramref name="protect"/>: keys DPAPI-wrapped) or, unprotected, for change comparison.</summary>

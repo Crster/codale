@@ -72,6 +72,29 @@ public sealed class FeatureLogTests : IDisposable
     }
 
     [Fact]
+    public void The_latest_task_list_is_found_for_a_reopened_feature()
+    {
+        var log = new FeatureLog(_directory);
+        log.Append(new ToolCallStarted
+        {
+            ToolUseId = "todo1",
+            ToolName = "mcp__codale-tasks__todos_set",
+            Input = Json("""{"todos":[{"content":"first","status":"completed"}]}"""),
+        });
+        log.Append(new ToolCallStarted
+        {
+            ToolUseId = "todo2",
+            ToolName = "mcp__codale-tasks__todos_set",
+            Input = Json("""{"todos":[{"content":"second","status":"in_progress"}]}"""),
+        });
+
+        var latest = log.LatestTodoUpdate();
+
+        Assert.NotNull(latest);
+        Assert.Equal("second", TodoParser.FromToolInput(latest!.Input).Single().Content);
+    }
+
+    [Fact]
     public void The_tail_is_limited_and_says_when_there_is_more()
     {
         var log = new FeatureLog(_directory);

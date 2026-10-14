@@ -3437,7 +3437,8 @@ public sealed partial class WorkspacePage : Page
             process.OutputDataReceived += (_, args) => AppendOutput(args.Data);
             process.ErrorDataReceived += (_, args) => AppendOutput(args.Data);
 
-            process.Start();
+            // Off the UI thread: see ProcessUtil.StartAsync.
+            await Task.Run(process.Start);
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
             SetCommandRunning(true);

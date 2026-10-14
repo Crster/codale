@@ -38,12 +38,12 @@ public sealed class CliEndpointSettings
         var proModel = Clean(active?.ProModel);
         if (flashModel.Length > 0)
         {
-            models.Add(new AgentModelInfo { Id = flashModel, DisplayName = flashModel, Description = "Flash model", IsDefault = true });
+            models.Add(new AgentModelInfo { Id = flashModel, DisplayName = flashModel, Description = "Flash model", IsDefault = true, ContextWindow = ContextWindowFor(providerName, flashModel) });
         }
 
         if (proModel.Length > 0 && !string.Equals(proModel, flashModel, StringComparison.Ordinal))
         {
-            models.Add(new AgentModelInfo { Id = proModel, DisplayName = proModel, Description = "Pro model" });
+            models.Add(new AgentModelInfo { Id = proModel, DisplayName = proModel, Description = "Pro model", ContextWindow = ContextWindowFor(providerName, proModel) });
         }
 
         return models;
@@ -136,5 +136,20 @@ public sealed class CliEndpointSettings
             BaseUrl: baseUrl.TrimEnd('/'),
             EnvKey: "OPENAI_API_KEY",
             WireApi: "responses");
+    }
+
+    /// <summary>A model's published context size, falling back to the provider-wide setting.</summary>
+    public int? ContextWindowFor(string providerName, string? model)
+    {
+        var active = AppSettings.FindByok(providerName);
+        if (active is null || Clean(model) is not { Length: > 0 } id)
+        {
+            return active?.ContextWindow is > 0 ? active.ContextWindow : null;
+        }
+
+        return active.ModelContextWindows is not null &&
+            active.ModelContextWindows.TryGetValue(id, out var window) && window > 0
+            ? window
+            : active.ContextWindow is > 0 ? active.ContextWindow : null;
     }
 }

@@ -108,8 +108,33 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             {
                 _cliId = value;
                 OnPropertyChanged(nameof(ProviderName));
+
+                // Provider and tier are per CLI: the constructor read them for the default CLI.
+                ReloadCliDefaults();
             }
         }
+    }
+
+    /// <summary>
+    /// Re-reads Settings' provider and tier for <see cref="CliId"/> while nothing is
+    /// connected yet; a live session keeps what it was started with.
+    /// </summary>
+    public void ReloadCliDefaults()
+    {
+        if (IsConnected || _connecting)
+        {
+            return;
+        }
+
+        var provider = AppSettings.CliProviderFor(CliId);
+        if (!string.Equals(EndpointName, provider, StringComparison.OrdinalIgnoreCase))
+        {
+            EndpointName = provider;
+            OnPropertyChanged(nameof(EndpointName));
+        }
+
+        (RequestedModel, RequestedEffort) = TierConfig(AppSettings.DefaultTierFor(CliId));
+        RefreshCustomProviderName();
     }
 
     /// <summary>The CLI descriptor behind <see cref="CliId"/>.</summary>
@@ -174,7 +199,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
         else
         {
-            _status.CustomProviderName = Codale.Agents.CliLocator.ActiveCli.DisplayName;
+            // Settings' "Claude" entry is stored as "": background tasks run on the Claude CLI.
+            _status.CustomProviderName = "Claude";
         }
 
         OnPropertyChanged(nameof(ProviderName));
@@ -1234,6 +1260,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private string? ModelForTier(string tier)
     {
+        // A BYOK provider serves only its own flash / pro models: the CLI's tier settings and
+        // catalogue name models it rejects ("Unknown Model"). Pro falls back to flash.
+        if (_endpointSettings?.IsActive(EndpointName, openAiCompatible: IsCodexSession) == true)
+        {
+            var models = EndpointModels();
+            var pick = tier == "pro" ? models.FirstOrDefault(m => !m.IsDefault) : null;
+            return (pick ?? models.FirstOrDefault())?.Id;
+        }
+
         if (AppSettings.TierModelFor(CliId, tier) is { Length: > 0 } configured)
         {
             return configured;
@@ -1339,6 +1374,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public static IReadOnlyList<AgentModelInfo>? KnownCatalogue(string cliId) =>
         CachedModels.TryGetValue(cliId, out var models) ? models : null;
 
+    /// <summary>Drops <paramref name="cliId"/>'s cached catalogue: the account changed, and with it the plan's models.</summary>
+    public static void ForgetCatalogue(string cliId) => CachedModels.Remove(cliId);
+
     /// <summary>
     /// Asks the CLI itself for its model list by starting a throwaway session, caches the
     /// answer and returns it. Empty when the CLI is missing, signed out or too old to say.
@@ -1349,6 +1387,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         IAgentSession? session = null;
         try
         {
+            // A signed-out CLI still answers with a generic list that ignores the plan; caching
+            // it would keep offering models the account cannot use after the login.
+            if ((cliId == "codex" || !EnvironmentOverridesEndpoint()) && !await CodaleAccountCli.IsSignedInAsync(cliId))
+            {
+                CachedModels.Remove(cliId);
+                CrashLog.Trace($"Model list fetch for {cliId}: skipped, Codale's account is signed out");
+                return [];
+            }
+
             session = cliId == "codex"
                 ? new Codale.Agents.Codex.CodexAgentSession(new Codale.Agents.Codex.CodexSessionOptions { WorkingDirectory = home })
                 : new ClaudeAgentSession(new ClaudeSessionOptions { WorkingDirectory = home });
@@ -1616,6 +1663,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     WorkingDirectory = workingDirectory,
                     Executable = cliExecutable,
                     Model = model,
+                    ContextWindow = _endpointSettings?.ContextWindowFor(EndpointName, model),
                     Effort = effort,
                     PermissionMode = permissionMode,
                     McpServers = mcpServers,
@@ -1874,6 +1922,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             case SessionInitialized init:
                 _status.Model = init.Model;
+                if (init.ContextWindow is int contextWindow && contextWindow > 0)
+                {
+                    _status.ContextWindow = contextWindow;
+                }
                 _cliReportedMode = init.PermissionMode;
 
                 // Ask and automatic are the host's, riding on the CLI's manual and auto:
@@ -2019,7 +2071,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
                 if (_toolCalls.TryGetValue(completed.ToolUseId, out var call))
                 {
-                    call.Status = completed.IsError ? ToolCallStatus.Failed : ToolCallStatus.Succeeded;
+                    // A refused call stays refused: its "result" is only the refusal echoed back.
+                    call.Status = call.Status == ToolCallStatus.Denied && completed.IsError
+                        ? ToolCallStatus.Denied
+                        : completed.IsError ? ToolCallStatus.Failed : ToolCallStatus.Succeeded;
                     call.Duration = DateTimeOffset.Now - call.Timestamp;
 
                     // A result is a terminal page, not a sentence: keep its shape and
@@ -2811,7 +2866,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         // Ask mode backs its instruction with enforcement: anything the CLI had to ask
-        // about is an action, and the answer is no - without bothering the reader.
+        // about is an action, and the answer is no - without bothering the reader,
+        // except shell commands (below).
         // Questions for the user are conversation, not action, so they still get through.
         // Looking things up on the web reads, it changes nothing, and it often makes the
         // answer: ask mode lets it through unasked.
@@ -2827,7 +2883,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        if (IsAskMode && !string.Equals(approval.ToolName, "AskUserQuestion", StringComparison.Ordinal))
+        // Shell commands are often just reads (listing, searching), and a CLI that cannot
+        // sandbox them - codex on Windows - asks about every one: the reader decides those.
+        if (IsAskMode && approval.ToolName is not ("AskUserQuestion" or "Bash"))
         {
             if (_toolCalls.TryGetValue(approval.ToolUseId ?? "", out var refused))
             {
@@ -3623,6 +3681,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             if (applied)
             {
                 _liveEffort = effort;
+                if (_endpointSettings?.ContextWindowFor(EndpointName, model) is { } window && window > 0)
+                {
+                    _status.ContextWindow = window;
+                }
                 CrashLog.Trace($"Model/effort applied live: model={model ?? "default"} effort={effort ?? "default"}");
             }
 

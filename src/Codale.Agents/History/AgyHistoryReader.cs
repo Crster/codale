@@ -82,7 +82,7 @@ public sealed class AgyHistoryReader : ICliHistoryReader
                         continue;
                     }
 
-                    var at = root.TryGetProperty("timestamp", out var ts) && ts.TryGetInt64(out var ms)
+                    var at = root.TryGetProperty("timestamp", out var ts) && ts.ValueKind == JsonValueKind.Number && ts.TryGetInt64(out var ms)
                         ? DateTimeOffset.FromUnixTimeMilliseconds(ms)
                         : default;
 

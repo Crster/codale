@@ -112,7 +112,7 @@ public sealed class CodexAgentSession : IAgentSession
             }
         }
 
-        _process = Process.Start(startInfo)
+        _process = await ProcessUtil.StartAsync(startInfo).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Failed to start '{_options.Executable}'.");
 
         _readLoop = Task.Run(() => ReadLoopAsync(_process), CancellationToken.None);
@@ -178,6 +178,7 @@ public sealed class CodexAgentSession : IAgentSession
                 WorkingDirectory = _options.WorkingDirectory,
                 PermissionMode = _permissionMode,
                 Version = thread.Prop("thread")?.Str("version") ?? thread.Str("version"),
+                ContextWindow = _options.ContextWindow,
             }).ConfigureAwait(false);
 
             await ReadRateLimitsAsync(CancellationToken.None).ConfigureAwait(false);
@@ -236,7 +237,7 @@ public sealed class CodexAgentSession : IAgentSession
         }
 
         var parameters = new Dictionary<string, object?> { ["threadId"] = threadId, ["input"] = input };
-        ApplyTurnOverrides(parameters);
+        ApplyTurnOverrides(parameters, turn.AskOnly);
 
         var started = await SendRequestAsync("turn/start", request => CopyParams(request, parameters), ct)
             .ConfigureAwait(false);
@@ -244,7 +245,7 @@ public sealed class CodexAgentSession : IAgentSession
     }
 
     /// <summary>Folds the live model, effort and permission mode into a turn's parameters.</summary>
-    private void ApplyTurnOverrides(Dictionary<string, object?> parameters)
+    private void ApplyTurnOverrides(Dictionary<string, object?> parameters, bool askOnly)
     {
         if (_liveModel is { Length: > 0 } model)
         {
@@ -256,7 +257,9 @@ public sealed class CodexAgentSession : IAgentSession
             parameters["effort"] = effort;
         }
 
-        var (approvalPolicy, sandbox) = CodexSessionOptions.PermissionPolicy(_permissionMode);
+        var (approvalPolicy, sandbox) = askOnly
+            ? CodexSessionOptions.AskPolicy
+            : CodexSessionOptions.PermissionPolicy(_permissionMode);
         parameters["approvalPolicy"] = approvalPolicy;
         parameters["sandboxPolicy"] = new { type = sandbox };
     }
@@ -556,7 +559,7 @@ public sealed class CodexAgentSession : IAgentSession
     /// <summary>Routes our requests' responses; a JSON-RPC error rejects with <see cref="InvalidOperationException"/>.</summary>
     private void HandleResponse(JsonElement message)
     {
-        if (message.TryGetProperty("id", out var idElement) && idElement.TryGetInt32(out var id))
+        if (message.Int("id") is { } id)
         {
             lock (_pendingRequests)
             {
@@ -601,6 +604,8 @@ public sealed class CodexAgentSession : IAgentSession
             RequestId = approvalId.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ToolName = toolName,
             DisplayName = toolName,
+            // The item the approval is about, so the question lands on its transcript row.
+            ToolUseId = parameters.Str("itemId") ?? item?.Str("id"),
             Input = input,
         }).ConfigureAwait(false);
     }
@@ -794,12 +799,15 @@ public sealed class CodexAgentSession : IAgentSession
                 else
                 {
                     var output = item.Str("aggregatedOutput");
-                    var exitCode = item.TryGetProperty("exitCode", out var code) && code.TryGetInt32(out var parsed) ? parsed : 0;
+                    // exitCode is null when the command never ran (declined, or the sandbox refused it).
+                    var exitCode = item.Int("exitCode") ?? 0;
+                    var status = item.Str("status");
+                    var declined = string.Equals(status, "declined", StringComparison.OrdinalIgnoreCase);
                     await _events.Writer.WriteAsync(new ToolCallCompleted
                     {
                         ToolUseId = itemId,
-                        IsError = exitCode != 0 || string.Equals(item.Str("status"), "failed", StringComparison.OrdinalIgnoreCase),
-                        ResultText = output,
+                        IsError = declined || exitCode != 0 || string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase),
+                        ResultText = declined && string.IsNullOrEmpty(output) ? "Command declined." : output,
                     }).ConfigureAwait(false);
                 }
 

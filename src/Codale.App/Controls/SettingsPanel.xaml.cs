@@ -37,11 +37,7 @@ public sealed partial class SettingsPanel : UserControl
         InitializeComponent();
 
         // Only listen while in the visual tree: the settings event is static and windows come and go.
-        Loaded += async (_, _) =>
-        {
-            AppSettings.Changed += OnAppSettingsChanged;
-            await RefreshAccountsAsync();
-        };
+        Loaded += (_, _) => AppSettings.Changed += OnAppSettingsChanged;
         Unloaded += (_, _) => AppSettings.Changed -= OnAppSettingsChanged;
 
         Reload();
@@ -314,8 +310,12 @@ public sealed partial class SettingsPanel : UserControl
         RefreshShortcutRows();
     }
 
-    /// <summary>Asks each CLI whether Codale's account is signed in and shows it beside the sign in / out buttons.</summary>
-    private async Task RefreshAccountsAsync()
+    /// <summary>
+    /// Asks each CLI whether Codale's account is signed in and shows it beside the sign in / out buttons.
+    /// The pane stays in the window collapsed, so this runs every time it opens rather than once on load:
+    /// a login made from the chat's prompt would otherwise never show here.
+    /// </summary>
+    public async Task RefreshAccountsAsync()
     {
         foreach (var (cli, status, signIn, signOut) in new[]
         {
@@ -330,27 +330,41 @@ public sealed partial class SettingsPanel : UserControl
         }
     }
 
-    /// <summary>Opens a console running the CLI's login against Codale's account folder; it is re-read when the window is back.</summary>
+    /// <summary>Opens a console running the CLI's login against Codale's account folder; it is re-read when that console closes.</summary>
     private async void OnSignInClick(object sender, RoutedEventArgs e)
     {
         var cli = (string)((FrameworkElement)sender).Tag;
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", "/k " + CodaleAccountCli.LoginCommand(cli)) { UseShellExecute = false })?.Dispose();
+            using var login = await Codale.Core.Processes.ProcessUtil.StartAsync(new System.Diagnostics.ProcessStartInfo("cmd.exe", "/k " + CodaleAccountCli.LoginCommand(cli)) { UseShellExecute = false });
+            if (login is not null)
+            {
+                await login.WaitForExitAsync();
+            }
         }
         catch (Exception ex)
         {
             CrashLog.Error("settings", "Account sign-in failed to start", ex);
         }
 
-        await Task.Delay(TimeSpan.FromSeconds(2));
         await RefreshAccountsAsync();
+        await ReloadCatalogueAfterAccountChangeAsync(cli);
     }
 
     private async void OnSignOutClick(object sender, RoutedEventArgs e)
     {
-        await CodaleAccountCli.SignOutAsync((string)((FrameworkElement)sender).Tag);
+        var cli = (string)((FrameworkElement)sender).Tag;
+        await CodaleAccountCli.SignOutAsync(cli);
         await RefreshAccountsAsync();
+        await ReloadCatalogueAfterAccountChangeAsync(cli);
+    }
+
+    /// <summary>A different account (or none) may have a different plan, so the old model list is dropped and read again.</summary>
+    private async Task ReloadCatalogueAfterAccountChangeAsync(string cli)
+    {
+        ChatViewModel.ForgetCatalogue(cli);
+        FillTierBoxes(cli, null);
+        await RefreshCatalogueAsync(cli);
     }
 
     private void BuildProviderEditors()
@@ -546,6 +560,11 @@ public sealed partial class SettingsPanel : UserControl
 
         ModelField("Flash model", "Select a model", provider.FlashModel, v => provider.FlashModel = v);
         ModelField("Pro model", "Select a model (optional)", provider.ProModel, v => provider.ProModel = v);
+        Field(
+            "Context window (tokens)",
+            "Fallback when the model list has no context size",
+            provider.ContextWindow > 0 ? provider.ContextWindow.ToString() : "",
+            v => provider.ContextWindow = int.TryParse(v, out var size) && size > 0 ? size : 0);
 
         var remove = new Button { Content = "Remove provider", HorizontalAlignment = HorizontalAlignment.Right };
         remove.Click += (_, _) =>
@@ -567,58 +586,6 @@ public sealed partial class SettingsPanel : UserControl
 
     private static readonly System.Net.Http.HttpClient ModelHttp = new() { Timeout = TimeSpan.FromSeconds(10) };
 
-    /// <summary>Model ids from an OpenAI-style list: <c>data</c>, <c>models</c>, <c>data.data</c> or a bare array; items are strings or objects with id/model/name.</summary>
-    private static List<string> ReadModelIds(System.Text.Json.JsonElement root)
-    {
-        static System.Text.Json.JsonElement? FindArray(System.Text.Json.JsonElement e, int depth = 0)
-        {
-            if (e.ValueKind == System.Text.Json.JsonValueKind.Array)
-            {
-                return e;
-            }
-
-            if (e.ValueKind != System.Text.Json.JsonValueKind.Object || depth > 2)
-            {
-                return null;
-            }
-
-            foreach (var name in new[] { "data", "models", "result" })
-            {
-                if (e.TryGetProperty(name, out var inner) && FindArray(inner, depth + 1) is { } found)
-                {
-                    return found;
-                }
-            }
-
-            return null;
-        }
-
-        if (FindArray(root) is not { } array)
-        {
-            return [];
-        }
-
-        static string Id(System.Text.Json.JsonElement m)
-        {
-            if (m.ValueKind == System.Text.Json.JsonValueKind.String)
-            {
-                return m.GetString() ?? "";
-            }
-
-            foreach (var key in new[] { "id", "slug", "model", "name" })
-            {
-                if (m.ValueKind == System.Text.Json.JsonValueKind.Object &&
-                    m.TryGetProperty(key, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String)
-                {
-                    return v.GetString() ?? "";
-                }
-            }
-
-            return "";
-        }
-
-        return array.EnumerateArray().Select(Id).Where(id => id.Length > 0).Distinct().Order().ToList();
-    }
 
     /// <summary>Shows why the list could not load as a tooltip on the model boxes; null clears it.</summary>
     private static void SetModelStatus(List<ComboBox> boxes, string? message)
@@ -630,7 +597,7 @@ public sealed partial class SettingsPanel : UserControl
     }
 
     /// <summary>Fills the model dropdowns from the endpoint's OpenAI-style GET /models; failures leave the current list.</summary>
-    private static async Task LoadModelsAsync(ByokProvider provider, List<ComboBox> boxes)
+    private async Task LoadModelsAsync(ByokProvider provider, List<ComboBox> boxes)
     {
         var anthropicOnly = string.IsNullOrWhiteSpace(provider.BaseUrl);
         if (anthropicOnly && string.IsNullOrWhiteSpace(provider.AnthropicBaseUrl))
@@ -649,7 +616,7 @@ public sealed partial class SettingsPanel : UserControl
             url = provider.BaseUrl.TrimEnd('/') + "/models";
         }
 
-        List<string> ids;
+        List<(string Id, int? ContextWindow)> models;
         try
         {
             using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, url);
@@ -667,8 +634,8 @@ public sealed partial class SettingsPanel : UserControl
             var body = await response.Content.ReadAsStringAsync();
             response.EnsureSuccessStatusCode();
             using var doc = System.Text.Json.JsonDocument.Parse(body);
-            ids = ReadModelIds(doc.RootElement);
-            if (ids.Count == 0)
+            models = OpenAiModelParser.ReadModels(doc.RootElement);
+            if (models.Count == 0)
             {
                 // Some gateways answer 200 with an error envelope ({"code":401,"msg":...}).
                 var detail = doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object &&
@@ -684,6 +651,16 @@ public sealed partial class SettingsPanel : UserControl
         }
 
         SetModelStatus(boxes, null);
+        provider.ModelContextWindows ??= new(StringComparer.OrdinalIgnoreCase);
+        foreach (var model in models)
+        {
+            if (model.ContextWindow is int window && window > 0)
+            {
+                provider.ModelContextWindows[model.Id] = window;
+            }
+        }
+        var ids = models.Select(model => model.Id).ToList();
+        SaveProviders();
 
         foreach (var box in boxes)
         {
@@ -1109,6 +1086,13 @@ public sealed partial class SettingsPanel : UserControl
             var modeBox = ModeBoxFor(cli);
             var current = AppSettings.DefaultModeFor(cli);
             modeBox.SelectedIndex = Math.Max(0, modeBox.Items.ToList().FindIndex(i => (i as ComboBoxItem)?.Tag as string == current));
+            FillTierBoxes(cli, ChatViewModel.KnownCatalogue(cli));
+            _ = RefreshCatalogueAsync(cli);
+            if (_tierHandlersWired)
+            {
+                continue;
+            }
+
             var pickedCli = cli;
             modeBox.SelectionChanged += (_, _) =>
             {
@@ -1130,11 +1114,13 @@ public sealed partial class SettingsPanel : UserControl
                     }
                 };
             }
-
-            FillTierBoxes(cli, ChatViewModel.KnownCatalogue(cli));
-            _ = RefreshCatalogueAsync(cli);
         }
+
+        // Reload runs on every open; the handlers are attached once.
+        _tierHandlersWired = true;
     }
+
+    private bool _tierHandlersWired;
 
     private bool _populating;
 

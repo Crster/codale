@@ -27,4 +27,10 @@ public sealed class ByokProvider
 
     /// <summary>The most capable model, offered next to the flash model; may be blank.</summary>
     public string ProModel { get; set; } = "";
+
+    /// <summary>Context windows discovered from each model's metadata, in tokens.</summary>
+    public Dictionary<string, int> ModelContextWindows { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Fallback context size in tokens for models whose endpoint publishes no metadata.</summary>
+    public int ContextWindow { get; set; }
 }

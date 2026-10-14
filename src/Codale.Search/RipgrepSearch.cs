@@ -174,7 +174,7 @@ public sealed class RipgrepSearch
         startInfo.ArgumentList.Add(query.Text);
         startInfo.ArgumentList.Add(".");
 
-        using var process = Process.Start(startInfo);
+        using var process = await ProcessUtil.StartAsync(startInfo).ConfigureAwait(false);
         if (process is null)
         {
             yield break;
@@ -257,7 +257,7 @@ public sealed class RipgrepSearch
 
         var files = new List<string>();
 
-        using var process = Process.Start(startInfo);
+        using var process = await ProcessUtil.StartAsync(startInfo).ConfigureAwait(false);
         if (process is null)
         {
             return files;
@@ -316,7 +316,7 @@ public sealed class RipgrepSearch
                 return null;
             }
 
-            var lineNumber = data.TryGetProperty("line_number", out var n) && n.TryGetInt32(out var parsed)
+            var lineNumber = data.TryGetProperty("line_number", out var n) && n.ValueKind == JsonValueKind.Number && n.TryGetInt32(out var parsed)
                 ? parsed
                 : 0;
 
@@ -328,8 +328,8 @@ public sealed class RipgrepSearch
                 submatches.GetArrayLength() > 0)
             {
                 var first = submatches[0];
-                start = first.TryGetProperty("start", out var s) && s.TryGetInt32(out var sv) ? sv : 0;
-                var end = first.TryGetProperty("end", out var e) && e.TryGetInt32(out var ev) ? ev : start;
+                start = first.TryGetProperty("start", out var s) && s.ValueKind == JsonValueKind.Number && s.TryGetInt32(out var sv) ? sv : 0;
+                var end = first.TryGetProperty("end", out var e) && e.ValueKind == JsonValueKind.Number && e.TryGetInt32(out var ev) ? ev : start;
                 length = Math.Max(0, end - start);
             }
 

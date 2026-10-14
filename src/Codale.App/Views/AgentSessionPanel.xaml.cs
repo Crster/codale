@@ -52,7 +52,9 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             if (_session is not null)
             {
                 _session.PropertyChanged -= OnSessionPropertyChanged;
-                _session.Todos.CollectionChanged -= OnTodosCollectionChanged;
+                _session.Todos.CollectionChanged -= OnSessionCollectionChanged;
+                _session.RunningTasks.CollectionChanged -= OnSessionCollectionChanged;
+                _session.Artifacts.CollectionChanged -= OnSessionCollectionChanged;
             }
 
             _session = value;
@@ -61,7 +63,9 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             if (_session is not null)
             {
                 _session.PropertyChanged += OnSessionPropertyChanged;
-                _session.Todos.CollectionChanged += OnTodosCollectionChanged;
+                _session.Todos.CollectionChanged += OnSessionCollectionChanged;
+                _session.RunningTasks.CollectionChanged += OnSessionCollectionChanged;
+                _session.Artifacts.CollectionChanged += OnSessionCollectionChanged;
                 OpenTodosOnFirstGoals();
             }
 
@@ -124,6 +128,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void NotifySessionProperties()
     {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Session)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EndpointLabel)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowSessionPickers)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(WorkingDirectory)));
@@ -168,7 +173,9 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         if (_session is not null)
         {
             _session.PropertyChanged -= OnSessionPropertyChanged;
-            _session.Todos.CollectionChanged -= OnTodosCollectionChanged;
+            _session.Todos.CollectionChanged -= OnSessionCollectionChanged;
+            _session.RunningTasks.CollectionChanged -= OnSessionCollectionChanged;
+            _session.Artifacts.CollectionChanged -= OnSessionCollectionChanged;
         }
 
         if (_workspace is not null)
@@ -450,8 +457,15 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         }
     }
 
-    private void OnTodosCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, OpenTodosOnFirstGoals);
+    private void OnSessionCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            OpenTodosOnFirstGoals();
+
+            // ObservableCollection does not raise PropertyChanged for Count, but the
+            // section headers bind to Session.*.Count; refresh those nested paths.
+            NotifySessionProperties();
+        });
 
     private void OpenTodosOnFirstGoals()
     {

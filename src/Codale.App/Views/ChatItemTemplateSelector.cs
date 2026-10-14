@@ -17,9 +17,11 @@ public sealed partial class ChatItemTemplateSelector : DataTemplateSelector
     public DataTemplate? ToolTemplate { get; set; }
     public DataTemplate? ActivityTemplate { get; set; }
     public DataTemplate? NoticeTemplate { get; set; }
+    public DataTemplate? BriefingTemplate { get; set; }
 
     protected override DataTemplate? SelectTemplateCore(object item) => item switch
     {
+        FeatureBriefingItem => BriefingTemplate,
         UserMessageItem => UserTemplate,
         AssistantMessageItem => AssistantTemplate,
         ToolCallItem => ToolTemplate,

@@ -11,6 +11,9 @@ public sealed record CodexSessionOptions
     /// <summary>A model id the provider serves, passed per turn. Null uses the CLI default.</summary>
     public string? Model { get; init; }
 
+    /// <summary>Total context size for the selected custom model, when the provider publishes it.</summary>
+    public int? ContextWindow { get; init; }
+
     /// <summary>How hard the model thinks: low, medium, high or xhigh. Null uses the CLI default.</summary>
     public string? Effort { get; init; }
 
@@ -45,6 +48,13 @@ public sealed record CodexSessionOptions
         "dontAsk" => ("never", "workspaceWrite"),
         _ => ("never", "workspaceWrite"), // auto
     };
+
+    /// <summary>
+    /// An ask turn: the read-only sandbox lets codex read the project unasked (every shell
+    /// command needs approval under "untrusted", and the host denies all of them in ask
+    /// mode), while anything that would write still has to ask - and is denied.
+    /// </summary>
+    public static (string ApprovalPolicy, string SandboxType) AskPolicy => ("on-request", "readOnly");
 
     /// <summary>Standing instructions for the thread (developer instructions), such as how to use the host's MCP tools.</summary>
     public string? SystemPromptAppend { get; init; }
@@ -107,6 +117,20 @@ public sealed record CodexSessionOptions
             args.Add($"model='{model}'");
         }
 
+        if (ContextWindow is > 0)
+        {
+            args.Add("-c");
+            args.Add($"model_context_window={ContextWindow}");
+        }
+
+        // Without a Windows sandbox codex cannot enforce readOnly, so it asks before every
+        // command - which ask mode denies. The unelevated one needs no admin setup.
+        if (OperatingSystem.IsWindows())
+        {
+            args.Add("-c");
+            args.Add("windows.sandbox='unelevated'");
+        }
+
         foreach (var (key, value) in McpOverrides(McpServers))
         {
             args.Add("-c");
@@ -119,7 +143,8 @@ public sealed record CodexSessionOptions
 
     /// <summary>
     /// MCP servers as TOML config override pairs: <c>mcp_servers.NAME.command</c>,
-    /// <c>.args</c> and <c>.env</c>, values as TOML literal strings. Exposed for the tests.
+    /// <c>.args</c>, <c>.env</c>, and per-server tool approval modes, values as TOML
+    /// literal strings. Exposed for the tests.
     /// </summary>
     public static IReadOnlyList<(string Key, string Value)> McpOverrides(IReadOnlyList<Codale.Core.Agents.McpServerSpec> servers)
     {
@@ -134,6 +159,22 @@ public sealed record CodexSessionOptions
             if (server.Env is { Count: > 0 } env)
             {
                 pairs.Add(($"{key}.env", $"{{{string.Join(",", env.Select(e => $"{e.Key}={Literal(e.Value)}"))}}}"));
+            }
+
+            if (server.RequireApproval)
+            {
+                pairs.Add(($"{key}.default_tools_approval_mode", "'prompt'"));
+                continue;
+            }
+
+            if (server.AutoApprove)
+            {
+                pairs.Add(($"{key}.default_tools_approval_mode", "'approve'"));
+            }
+
+            foreach (var tool in server.AskTools.Where(tool => !string.IsNullOrWhiteSpace(tool)).Select(tool => tool.Trim()))
+            {
+                pairs.Add(($"{key}.tools.{tool}.approval_mode", "'prompt'"));
             }
         }
 

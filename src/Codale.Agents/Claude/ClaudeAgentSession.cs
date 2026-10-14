@@ -105,7 +105,7 @@ public sealed class ClaudeAgentSession : IAgentSession
             }
         }
 
-        _process = Process.Start(startInfo)
+        _process = await ProcessUtil.StartAsync(startInfo).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Failed to start '{_options.Executable}'.");
 
         _readLoop = Task.Run(() => ReadLoopAsync(_process), CancellationToken.None);
