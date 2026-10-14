@@ -84,7 +84,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
             ? "Claude uses your Claude login in this chat."
             : provider.IsAccount
                 ? $"Claude uses the {provider.Name.Trim()} account in this chat."
-            : provider.LiteModel.Length == 0 && provider.SmartModel.Length == 0
+            : provider.FlashModel.Length == 0 && provider.ProModel.Length == 0
                 ? $"This chat uses {provider.Name.Trim()}. It has no model name yet; add one in settings.json."
                 : $"This chat uses {provider.Name.Trim()}.";
 

@@ -264,7 +264,7 @@ public static class AppSettings
                 : all;
             foreach (var provider in candidates)
             {
-                var model = string.IsNullOrWhiteSpace(provider.LiteModel) ? provider.SmartModel : provider.LiteModel;
+                var model = string.IsNullOrWhiteSpace(provider.FlashModel) ? provider.ProModel : provider.FlashModel;
                 if (!string.IsNullOrWhiteSpace(provider.BaseUrl) && !string.IsNullOrWhiteSpace(provider.ApiKey) && !string.IsNullOrWhiteSpace(model))
                 {
                     return (provider, (provider.BaseUrl.Trim(), provider.ApiKey.Trim(), model.Trim()));
@@ -392,19 +392,46 @@ public static class AppSettings
         set => Set("chat.defaultMode", IsChatMode(value) ? value : "automatic", FormatText);
     }
 
-    /// <summary>The model new chats start with, or "" for the CLI's own default. A custom endpoint serves its own ids.</summary>
-    public static string DefaultModel
+    /// <summary>The last model/effort/mode the user picked for a CLI ("claude" or "codex"), saved as
+    /// the default its new chats start with. An empty stored value (or null) means unset: the CLI's
+    /// own default. Model and effort ids are CLI-specific, so the defaults are kept per CLI.</summary>
+    private static string DefaultsKey(string cli, string leaf) => $"chat.defaults.{cli}.{leaf}";
+
+    private static string? ReadDefault(string cli, string leaf) =>
+        Get(DefaultsKey(cli, leaf), () => Read(DefaultsKey(cli, leaf), "")) is { Length: > 0 } stored ? stored : null;
+
+    private static void WriteDefault(string cli, string leaf, string? value)
     {
-        get => Get("chat.defaultModel", () => Read("chat.defaultModel", ""));
-        set => Set("chat.defaultModel", value?.Trim() ?? "", FormatText);
+        var key = DefaultsKey(cli, leaf);
+        var raw = value is { Length: > 0 } ? value : "";
+        if (Read(key, "") == raw)
+        {
+            return;
+        }
+
+        Write(key, raw);
+        OnChanged();
     }
 
-    /// <summary>The reasoning effort new chats start with, or "" for the model's own default.</summary>
-    public static string DefaultEffort
-    {
-        get => Get("chat.defaultEffort", () => Read("chat.defaultEffort", "") is var raw && IsEffort(raw) ? raw : "");
-        set => Set("chat.defaultEffort", IsEffort(value) ? value : "", FormatText);
-    }
+    /// <summary>The model tier a fresh chat starts with: "cli", "lite", "flash", "pro" or "plus". Null means "cli".</summary>
+    private static bool IsTier(string? tier) => tier is "cli" or "lite" or "flash" or "pro" or "plus";
+
+    public static string DefaultTierFor(string cli) =>
+        ReadDefault(cli, "tier") is { } saved && IsTier(saved) ? saved : "cli";
+
+    public static void SetDefaultTier(string cli, string? tier) => WriteDefault(cli, "tier", IsTier(tier) ? tier : "");
+
+    /// <summary>Which CLI model plays the "flash" (fast) or "pro" (capable) tier. Null means
+    /// the app guesses from the CLI's catalogue; the tier's effort is fixed per tier.</summary>
+    public static string? TierModelFor(string cli, string tier) => ReadDefault(cli, tier);
+
+    public static void SetTierModel(string cli, string tier, string? model) => WriteDefault(cli, tier, model);
+
+    /// <summary>The saved mode for a CLI, falling back to the global <see cref="DefaultChatMode"/> when unset.</summary>
+    public static string DefaultModeFor(string cli) =>
+        ReadDefault(cli, "mode") is { } saved && IsChatMode(saved) ? saved : DefaultChatMode;
+
+    public static void SetDefaultMode(string cli, string? value) => WriteDefault(cli, "mode", IsChatMode(value) ? value : "");
 
     /// <summary>Seconds between the git panel's working-tree checks.</summary>
     public static int GitPollSeconds
@@ -426,8 +453,8 @@ public static class AppSettings
 
     private static ByokProvider Clone(ByokProvider p, string? apiKey = null) => new()
     {
-        Name = p.Name, BaseUrl = p.BaseUrl, ApiKey = apiKey ?? p.ApiKey, LiteModel = p.LiteModel, SmartModel = p.SmartModel,
-        ConfigDir = p.ConfigDir,
+        Name = p.Name, BaseUrl = p.BaseUrl, AnthropicBaseUrl = p.AnthropicBaseUrl, ApiKey = apiKey ?? p.ApiKey,
+        FlashModel = p.FlashModel, ProModel = p.ProModel, ConfigDir = p.ConfigDir,
     };
 
     /// <summary>Serialises providers for the file (<paramref name="protect"/>: keys DPAPI-wrapped) or, unprotected, for change comparison.</summary>
@@ -718,8 +745,8 @@ public static class AppSettings
                     Name = "Custom endpoint",
                     BaseUrl = legacyUrl,
                     ApiKey = store.GetSetting("endpoint.apiKey") ?? "",
-                    LiteModel = store.GetSetting("endpoint.model") ?? "",
-                    SmartModel = store.GetSetting("endpoint.smartModel") ?? "",
+                    FlashModel = store.GetSetting("endpoint.model") ?? "",
+                    ProModel = store.GetSetting("endpoint.smartModel") ?? "",
                 });
             }
         }

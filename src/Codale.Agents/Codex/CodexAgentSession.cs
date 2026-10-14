@@ -1,0 +1,976 @@
+using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Channels;
+
+using Codale.Agents.Claude;
+using Codale.Core.Agents;
+using Codale.Core.Processes;
+
+namespace Codale.Agents.Codex;
+
+/// <summary>
+/// Drives one <c>codex app-server</c> child process over its JSON-RPC-over-stdio
+/// protocol and projects it onto <see cref="IAgentSession"/>. Threads become sessions,
+/// turns become turns, thread items become tool calls and messages, and the app
+/// server's approval requests become <see cref="ApprovalRequested"/>.
+/// </summary>
+public sealed class CodexAgentSession : IAgentSession
+{
+    private static readonly JsonSerializerOptions WireJson = new(JsonSerializerDefaults.Web);
+
+    private readonly CodexSessionOptions _options;
+    private readonly Channel<AgentEvent> _events =
+        Channel.CreateUnbounded<AgentEvent>(new UnboundedChannelOptions { SingleReader = false, SingleWriter = true });
+
+    /// <summary>Guards stdin: the UI thread and the read loop both write frames.</summary>
+    private readonly SemaphoreSlim _stdinLock = new(1, 1);
+
+    /// <summary>Open once for the session; replaces re-opening the raw log per streamed line.</summary>
+    private StreamWriter? _rawLog;
+    private long _rawLogBytes;
+
+    /// <summary>A raw log past this size is rotated to <c>.1</c> so it cannot grow without bound.</summary>
+    private const long RawLogMaxBytes = 32 * 1024 * 1024;
+
+    /// <summary>Our JSON-RPC requests awaiting their response, keyed by the id we chose.</summary>
+    private readonly Dictionary<int, TaskCompletionSource<JsonElement>> _pendingRequests = [];
+
+    /// <summary>The app server's requests awaiting our answer, keyed by its id: pending approvals.</summary>
+    private readonly Dictionary<int, PendingApproval> _pendingApprovals = [];
+
+    private Process? _process;
+    private Task? _readLoop;
+    private Task? _errorLoop;
+    private int _requestCounter;
+    private readonly List<string> _stderr = [];
+
+    /// <summary>The mode and model/effort applied to the next turn; codex takes them per turn, not mid-turn.</summary>
+    private string _permissionMode = CodexSessionOptions.ClampPermissionMode("");
+    private string? _liveModel;
+    private string? _liveEffort;
+
+    private string? _threadId;
+    private string? _currentTurnId;
+
+    /// <summary>The model codex reported for the thread; null until it says, so the CLI default is never guessed.</summary>
+    private string? _threadModel;
+
+    private sealed record PendingApproval(string ThreadId, string ToolName, JsonElement Input);
+
+    public CodexAgentSession(CodexSessionOptions options)
+    {
+        _options = options;
+        _permissionMode = CodexSessionOptions.ClampPermissionMode(options.PermissionMode ?? "");
+        _liveModel = options.Model;
+        _liveEffort = CodexSessionOptions.ClampEffort(options.Effort);
+        SessionId = options.ResumeSessionId;
+    }
+
+    public string? SessionId { get; private set; }
+
+    public ChannelReader<AgentEvent> Events => _events.Reader;
+
+    /// <summary>A readable name for a codex model id: the catalogue's name, else "gpt-5.1-codex" spelled out ("GPT 5.1 Codex").</summary>
+    public static string FriendlyModelName(string id)
+    {
+        var words = id.Split('-', StringSplitOptions.RemoveEmptyEntries)
+            .Select(word => string.Equals(word, "gpt", StringComparison.OrdinalIgnoreCase)
+                ? "GPT"
+                : char.ToUpperInvariant(word[0]) + word[1..]);
+        return string.Join(' ', words);
+    }
+
+    public async Task StartAsync(CancellationToken ct = default)
+    {
+        if (_process is not null)
+        {
+            throw new InvalidOperationException("Session already started.");
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = _options.Executable,
+            WorkingDirectory = _options.WorkingDirectory,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+
+            // The protocol is UTF-8 JSON. A BOM would corrupt the first frame.
+            StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            StandardOutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            StandardErrorEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+        };
+
+        foreach (var arg in _options.BuildArguments())
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        if (_options.Environment is { } environment)
+        {
+            foreach (var (name, value) in environment)
+            {
+                startInfo.EnvironmentVariables[name] = value;
+            }
+        }
+
+        _process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException($"Failed to start '{_options.Executable}'.");
+
+        _readLoop = Task.Run(() => ReadLoopAsync(_process), CancellationToken.None);
+        _errorLoop = Task.Run(() => ReadStderrAsync(_process), CancellationToken.None);
+
+        using var startTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        startTimeout.CancelAfter(TimeSpan.FromSeconds(30));
+
+        try
+        {
+            // Declare ourselves as the host, then open the conversation. The CLI gates
+            // everything else on the initialize handshake.
+            await SendRequestAsync("initialize", request =>
+                request["clientInfo"] = new { name = "codale", title = "Codale", version = typeof(CodexAgentSession).Assembly.GetName().Version?.ToString(3) ?? "0.0.0" },
+                startTimeout.Token).ConfigureAwait(false);
+            await WriteNotificationAsync("initialized", new { }, startTimeout.Token).ConfigureAwait(false);
+
+            var threadParams = new Dictionary<string, object?> { ["cwd"] = _options.WorkingDirectory };
+            if (_options.CustomProvider is not null)
+            {
+                threadParams["modelProvider"] = "custom";
+            }
+            if (_liveModel is { Length: > 0 } model)
+            {
+                threadParams["model"] = model;
+            }
+
+            var (approvalPolicy, sandbox) = CodexSessionOptions.PermissionPolicy(_permissionMode);
+            threadParams["approvalPolicy"] = approvalPolicy;
+            threadParams["sandboxPolicy"] = new { type = sandbox };
+
+            var method = _options.ResumeSessionId is { Length: > 0 } resume ? "thread/resume" : "thread/start";
+            if (_options.ResumeSessionId is { Length: > 0 } id)
+            {
+                threadParams["threadId"] = id;
+            }
+
+            var thread = await SendRequestAsync(method, request => CopyParams(request, threadParams), startTimeout.Token)
+                .ConfigureAwait(false);
+
+            _threadId = thread.Prop("thread")?.Str("id") ?? thread.Str("id") ?? thread.Str("sessionId") ?? thread.Str("threadId");
+            if (_threadId is not { Length: > 0 })
+            {
+                throw new InvalidOperationException("codex did not return a thread id; it may predate the app-server thread protocol.");
+            }
+
+            SessionId = _threadId;
+
+            // The thread object echoes the model codex actually resolved (a forced pick,
+            // a config default, or the CLI's own); when it does, the status bar shows
+            // the real thing instead of the "codex default" placeholder.
+            var threadBody = thread.Prop("thread") ?? thread;
+            _threadModel = threadBody.Str("model") is { Length: > 0 } reported ? reported : null;
+
+            await _events.Writer.WriteAsync(new SessionInitialized
+            {
+                Model = _threadModel ?? _liveModel ?? "CLI",
+                WorkingDirectory = _options.WorkingDirectory,
+                PermissionMode = _permissionMode,
+                Version = thread.Prop("thread")?.Str("version") ?? thread.Str("version"),
+            }).ConfigureAwait(false);
+
+            await ReadRateLimitsAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"'{_options.Executable}' did not answer the app-server handshake within 30s. " +
+                $"stderr: {string.Join(Environment.NewLine, StderrSnapshot().TakeLast(5))}");
+        }
+    }
+
+    /// <summary>Merges the given parameters into a JSON-RPC request object under construction.</summary>
+    private static void CopyParams(Dictionary<string, object?> request, Dictionary<string, object?> parameters)
+    {
+        foreach (var (name, value) in parameters)
+        {
+            request[name] = value;
+        }
+    }
+
+    public async Task SendAsync(UserTurn turn, CancellationToken ct = default)
+    {
+        var threadId = RequireThread();
+
+        var input = new List<object>();
+        if (turn.ProviderText.Length > 0)
+        {
+            input.Add(new { type = "text", text = turn.ProviderText });
+        }
+
+        foreach (var attachment in turn.Attachments)
+        {
+            switch (attachment.Kind)
+            {
+                case TurnAttachmentKind.Image:
+                    input.Add(new { type = "localImage", path = attachment.Path });
+                    break;
+                default:
+                    // codex reads files from the workspace itself; hand it the path as text.
+                    input.Add(new { type = "text", text = $"[Attached file: {attachment.Path}]" });
+                    break;
+            }
+        }
+
+        var parameters = new Dictionary<string, object?> { ["threadId"] = threadId, ["input"] = input };
+        ApplyTurnOverrides(parameters);
+
+        var started = await SendRequestAsync("turn/start", request => CopyParams(request, parameters), ct)
+            .ConfigureAwait(false);
+        _currentTurnId = started.Prop("turn")?.Str("id") ?? started.Str("turnId") ?? started.Str("id");
+    }
+
+    /// <summary>Folds the live model, effort and permission mode into a turn's parameters.</summary>
+    private void ApplyTurnOverrides(Dictionary<string, object?> parameters)
+    {
+        if (_liveModel is { Length: > 0 } model)
+        {
+            parameters["model"] = model;
+        }
+
+        if (_liveEffort is { Length: > 0 } effort)
+        {
+            parameters["effort"] = effort;
+        }
+
+        var (approvalPolicy, sandbox) = CodexSessionOptions.PermissionPolicy(_permissionMode);
+        parameters["approvalPolicy"] = approvalPolicy;
+        parameters["sandboxPolicy"] = new { type = sandbox };
+    }
+
+    public async Task InterruptAsync(CancellationToken ct = default)
+    {
+        var threadId = RequireThread();
+        var parameters = new Dictionary<string, object?> { ["threadId"] = threadId };
+        if (_currentTurnId is { Length: > 0 } turnId)
+        {
+            parameters["turnId"] = turnId;
+        }
+
+        await SendRequestAsync("turn/interrupt", request => CopyParams(request, parameters), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Codex takes the permission mode per turn rather than mid-turn: recording it here
+    /// means the very next turn (including a plan-mode turn raised while one runs, which
+    /// the host restarts anyway) runs under it.
+    /// </summary>
+    public Task<bool> TrySetPermissionModeAsync(string mode, CancellationToken ct = default)
+    {
+        _permissionMode = CodexSessionOptions.ClampPermissionMode(mode);
+        return Task.FromResult(true);
+    }
+
+    /// <summary>
+    /// Same per-turn story for model and effort: recorded and applied from the next
+    /// turn/start on. Never false, so the host does not restart the session for a
+    /// change codex can carry across turns.
+    /// </summary>
+    public Task<bool> TrySetModelEffortAsync(string? model, string? effort, CancellationToken ct = default)
+    {
+        if (model is not null)
+        {
+            _liveModel = model.Length > 0 ? model : null;
+        }
+
+        if (effort is not null)
+        {
+            _liveEffort = CodexSessionOptions.ClampEffort(effort);
+        }
+
+        return Task.FromResult(true);
+    }
+
+    public async Task RespondToApprovalAsync(string requestId, ApprovalDecision decision, CancellationToken ct = default)
+    {
+        if (!int.TryParse(requestId, out var id) || !_pendingApprovals.Remove(id, out _))
+        {
+            return;
+        }
+
+        var result = decision.Behavior == ApprovalBehavior.Allow
+            ? new { decision = "accept" }
+            : new { decision = "decline" };
+        await WriteResponseAsync(id, result, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The codex model catalogue, read live from the app server's <c>model/list</c> so
+    /// the picker shows what this account can actually run (the catalogue rotates; the
+    /// documented list below is only the stand-in when the read fails).
+    /// </summary>
+    public async Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var models = new List<AgentModelInfo>();
+            string? cursor = null;
+            do
+            {
+                var result = await SendRequestAsync("model/list", request =>
+                {
+                    if (cursor is { Length: > 0 } page)
+                    {
+                        request["cursor"] = page;
+                    }
+                }, ct).ConfigureAwait(false);
+
+                if (result.Prop("data") is { ValueKind: JsonValueKind.Array } page)
+                {
+                    foreach (var model in page.EnumerateArray())
+                    {
+                        if (model.Bool("hidden") || model.Str("id") is not { Length: > 0 } id)
+                        {
+                            continue;
+                        }
+
+                        var efforts = model.Prop("supportedReasoningEfforts") is { ValueKind: JsonValueKind.Array } effortList
+                            ? effortList.EnumerateArray()
+                                .Select(effort => effort.Str("reasoningEffort") ?? "")
+                                .Where(effort => effort.Length > 0)
+                                .ToList()
+                            : [];
+                        models.Add(new AgentModelInfo
+                        {
+                            Id = id,
+                            DisplayName = model.Str("displayName") ?? id,
+                            Description = model.Str("description"),
+                            IsDefault = model.Bool("isDefault"),
+                            DefaultEffort = model.Str("defaultReasoningEffort"),
+                            SupportedEfforts = efforts,
+                        });
+                    }
+                }
+
+                cursor = result.Str("nextCursor");
+            }
+            while (cursor is { Length: > 0 });
+
+            if (models.Count > 0)
+            {
+                return models;
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or OperationCanceledException)
+        {
+            // No catalogue behind this endpoint (BYOK, older CLI): the picker stays on "CLI".
+        }
+
+        return [];
+    }
+
+    private string RequireThread() => _threadId is { Length: > 0 } id
+        ? id
+        : throw new InvalidOperationException("Session not started.");
+
+    private string[] StderrSnapshot()
+    {
+        lock (_stderr)
+        {
+            return [.. _stderr];
+        }
+    }
+
+    /// <summary>Appends one line to the raw log, rotating it once it passes <see cref="RawLogMaxBytes"/>. Logging never fails the session.</summary>
+    private async Task AppendRawLogAsync(string path, string line)
+    {
+        try
+        {
+            if (_rawLog is not null && _rawLogBytes > RawLogMaxBytes)
+            {
+                await _rawLog.DisposeAsync().ConfigureAwait(false);
+                _rawLog = null;
+                File.Move(path, path + ".1", overwrite: true);
+            }
+
+            if (_rawLog is null)
+            {
+                var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
+                _rawLogBytes = stream.Length;
+                _rawLog = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
+            }
+
+            await _rawLog.WriteLineAsync(line).ConfigureAwait(false);
+            _rawLogBytes += line.Length + 1;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private async Task WriteMessageAsync(object message, CancellationToken ct)
+    {
+        var process = _process ?? throw new InvalidOperationException("Session not started.");
+        var json = JsonSerializer.Serialize(message, WireJson);
+
+        await _stdinLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await process.StandardInput.WriteAsync(json.AsMemory(), ct).ConfigureAwait(false);
+            await process.StandardInput.WriteAsync("\n".AsMemory(), ct).ConfigureAwait(false);
+            await process.StandardInput.FlushAsync(ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _stdinLock.Release();
+        }
+    }
+
+    private async Task<JsonElement> SendRequestAsync(string method, Action<Dictionary<string, object?>> configure, CancellationToken ct)
+    {
+        var id = Interlocked.Increment(ref _requestCounter);
+        var parameters = new Dictionary<string, object?>();
+        configure(parameters);
+
+        var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_pendingRequests)
+        {
+            _pendingRequests[id] = completion;
+        }
+
+        try
+        {
+            await WriteMessageAsync(new { jsonrpc = "2.0", id, method, @params = parameters }, ct).ConfigureAwait(false);
+            return await completion.Task.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            if (_errorLoop is { } errorLoop)
+            {
+                await Task.WhenAny(errorLoop, Task.Delay(500, CancellationToken.None)).ConfigureAwait(false);
+            }
+
+            var stderr = string.Join(Environment.NewLine, StderrSnapshot().TakeLast(8));
+            throw new TimeoutException(
+                $"codex did not answer the '{method}' request." +
+                (stderr.Length > 0 ? $" It exited with: {stderr}" : " It exited without any error output."));
+        }
+        finally
+        {
+            lock (_pendingRequests)
+            {
+                _pendingRequests.Remove(id);
+            }
+        }
+    }
+
+    private Task WriteNotificationAsync(string method, object parameters, CancellationToken ct) =>
+        WriteMessageAsync(new { jsonrpc = "2.0", method, @params = parameters }, ct);
+
+    /// <summary>Answers a server-initiated request (an approval). Exposed shape pinned by tests.</summary>
+    private Task WriteResponseAsync(int id, object result, CancellationToken ct) =>
+        WriteMessageAsync(new { jsonrpc = "2.0", id, result }, ct);
+
+    private async Task ReadLoopAsync(Process process)
+    {
+        try
+        {
+            while (await process.StandardOutput.ReadLineAsync().ConfigureAwait(false) is { } line)
+            {
+                if (_options.RawLogPath is { Length: > 0 } rawLog)
+                {
+                    await AppendRawLogAsync(rawLog, line).ConfigureAwait(false);
+                }
+
+                if (line.Length == 0)
+                {
+                    continue;
+                }
+
+                JsonElement message;
+                try
+                {
+                    message = JsonDocument.Parse(line).RootElement.Clone();
+                }
+                catch (JsonException)
+                {
+                    continue;
+                }
+
+                if (message.Prop("method") is { } methodElement)
+                {
+                    var method = methodElement.GetString() ?? "";
+                    if (message.ValueKind == JsonValueKind.Object && message.TryGetProperty("id", out var serverRequestId))
+                    {
+                        await HandleServerRequestAsync(serverRequestId, method, message).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await HandleNotificationAsync(method, message).ConfigureAwait(false);
+                    }
+
+                    continue;
+                }
+
+                HandleResponse(message);
+            }
+
+            await process.WaitForExitAsync().ConfigureAwait(false);
+            await _events.Writer.WriteAsync(
+                new SessionEnded(process.ExitCode, StderrSnapshot() is { Length: > 0 } stderr ? string.Join(Environment.NewLine, stderr) : null))
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await _events.Writer.WriteAsync(new SessionEnded(-1, ex.Message)).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_pendingRequests)
+            {
+                foreach (var completion in _pendingRequests.Values)
+                {
+                    completion.TrySetCanceled();
+                }
+
+                _pendingRequests.Clear();
+            }
+
+            _events.Writer.TryComplete();
+        }
+    }
+
+    /// <summary>Routes our requests' responses; a JSON-RPC error rejects with <see cref="InvalidOperationException"/>.</summary>
+    private void HandleResponse(JsonElement message)
+    {
+        if (message.TryGetProperty("id", out var idElement) && idElement.TryGetInt32(out var id))
+        {
+            lock (_pendingRequests)
+            {
+                if (_pendingRequests.Remove(id, out var completion))
+                {
+                    if (message.Prop("error") is { } error)
+                    {
+                        completion.TrySetException(new InvalidOperationException(
+                            $"codex rejected the request: {error.Str("message") ?? error.GetRawText()}"));
+                    }
+                    else
+                    {
+                        completion.TrySetResult(message.Prop("result")?.Clone() ?? default);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// A server-initiated request. Approval requests become <see cref="ApprovalRequested"/>;
+    /// anything else is declined so the server never blocks on us.
+    /// </summary>
+    private async Task HandleServerRequestAsync(JsonElement id, string method, JsonElement message)
+    {
+        if (!method.Contains("requestApproval", StringComparison.Ordinal) ||
+            message.Prop("params") is not { } parameters)
+        {
+            await WriteResponseAsync(id.GetInt32(), new { error = $"Codale does not support the '{method}' server request." }, CancellationToken.None)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        var threadId = parameters.Str("threadId") ?? _threadId ?? "";
+        var item = parameters.Prop("item");
+        var (toolName, input) = DescribeApproval(parameters, item);
+
+        var approvalId = id.GetInt32();
+        _pendingApprovals[approvalId] = new PendingApproval(threadId, toolName, input);
+        await _events.Writer.WriteAsync(new ApprovalRequested
+        {
+            RequestId = approvalId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ToolName = toolName,
+            DisplayName = toolName,
+            Input = input,
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The tool call an approval is about: the command for exec approvals, the paths for
+    /// patch approvals, tolerating the params carrying the fields directly or under "item".
+    /// </summary>
+    private static (string ToolName, JsonElement Input) DescribeApproval(JsonElement parameters, JsonElement? item)
+    {
+        var source = item ?? parameters;
+        var type = source.Str("type") ?? "commandExecution";
+
+        var command = source.Prop("command") ?? parameters.Prop("command");
+        if (command is { ValueKind: JsonValueKind.Array or JsonValueKind.String })
+        {
+            var text = command.Value.ValueKind == JsonValueKind.Array
+                ? string.Join(' ', command.Value.EnumerateArray().Select(part => part.GetString() ?? ""))
+                : command.Value.GetString() ?? "";
+            var input = new Dictionary<string, object?> { ["command"] = text };
+            var cwd = source.Str("cwd") ?? parameters.Str("cwd");
+            if (cwd is { Length: > 0 })
+            {
+                input["cwd"] = cwd;
+            }
+
+            return ("Bash", JsonSerializer.SerializeToElement(input, WireJson));
+        }
+
+        if (source.Prop("changes") is { ValueKind: JsonValueKind.Object } changes)
+        {
+            var paths = changes.EnumerateObject().Select(property => property.Name).ToList();
+            return ("Edit", JsonSerializer.SerializeToElement(new { paths }, WireJson));
+        }
+
+        return (type, JsonSerializer.SerializeToElement(new { type }, WireJson));
+    }
+
+    /// <summary>Projects one app-server notification onto the normalised event stream.</summary>
+    private async Task HandleNotificationAsync(string method, JsonElement message)
+    {
+        var parameters = message.Prop("params") ?? message;
+
+        switch (method)
+        {
+            case "item/agentMessage/delta":
+                if (parameters.Str("delta") is { Length: > 0 } delta)
+                {
+                    await _events.Writer.WriteAsync(new AssistantTextDelta(delta)).ConfigureAwait(false);
+                }
+
+                return;
+
+            case "item/reasoning/summaryTextDelta":
+            case "item/reasoning/textDelta":
+                if (parameters.Str("delta") is { Length: > 0 } thinking)
+                {
+                    await _events.Writer.WriteAsync(new AssistantThinkingDelta(thinking)).ConfigureAwait(false);
+                }
+
+                return;
+
+            case "item/started":
+            case "item/completed":
+                await HandleItemAsync(method == "item/completed", parameters).ConfigureAwait(false);
+                return;
+
+            case "turn/started":
+                _currentTurnId = parameters.Prop("turn")?.Str("id") ?? parameters.Str("turnId") ?? _currentTurnId;
+                return;
+
+            case "turn/completed":
+                await HandleTurnCompletedAsync(parameters).ConfigureAwait(false);
+                return;
+
+            case "thread/tokenUsage/updated":
+                if (parameters.Prop("usage") is { } usage)
+                {
+                    var snapshot = ReadUsage(usage);
+                    if (snapshot is { } known)
+                    {
+                        await _events.Writer.WriteAsync(new UsageUpdated(known)).ConfigureAwait(false);
+                    }
+                }
+
+                return;
+
+            case "account/rateLimits/updated":
+                if (parameters.Prop("rateLimits") is { } limitsUpdate)
+                {
+                    await PublishRateLimitsAsync(ParseRateLimits(limitsUpdate)).ConfigureAwait(false);
+                }
+
+                return;
+
+            case "turn/diff/updated":
+                // The workspace git panel refreshes on its own; the aggregated diff is redundant here.
+                return;
+
+            case "error":
+                var errorText = parameters.Str("message") ?? parameters.GetRawText();
+                await _events.Writer.WriteAsync(new AgentError(errorText)).ConfigureAwait(false);
+                return;
+
+            default:
+                // Unknown notifications are protocol drift: kept out of the transcript, but
+                // visible in the raw log this session writes when one is requested.
+                return;
+        }
+    }
+
+    /// <summary>Projects a thread item's start or completion onto tool-call and message events.</summary>
+    private async Task HandleItemAsync(bool completed, JsonElement parameters)
+    {
+        var item = parameters.Prop("item") ?? parameters;
+        var itemId = item.Str("id") ?? parameters.Str("itemId") ?? Guid.NewGuid().ToString("N");
+
+        switch (item.Str("type"))
+        {
+            case "agentMessage":
+                if (completed)
+                {
+                    await _events.Writer.WriteAsync(new AssistantMessageCompleted
+                    {
+                        MessageId = itemId,
+                        Model = _threadModel ?? _liveModel ?? "CLI",
+                        Text = item.Str("text") ?? "",
+                    }).ConfigureAwait(false);
+                }
+
+                return;
+
+            case "reasoning":
+                return; // summaries arrive as deltas; nothing to add on completion
+
+            case "commandExecution":
+                if (!completed)
+                {
+                    var command = item.Prop("command") is { ValueKind: JsonValueKind.Array } parts
+                        ? string.Join(' ', parts.EnumerateArray().Select(part => part.GetString() ?? ""))
+                        : item.Str("command") ?? "";
+                    var input = JsonSerializer.SerializeToElement(new { command, cwd = item.Str("cwd") }, WireJson);
+                    await _events.Writer.WriteAsync(new ToolCallStarted { ToolUseId = itemId, ToolName = "Bash", Input = input })
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    var output = item.Str("aggregatedOutput");
+                    var exitCode = item.TryGetProperty("exitCode", out var code) && code.TryGetInt32(out var parsed) ? parsed : 0;
+                    await _events.Writer.WriteAsync(new ToolCallCompleted
+                    {
+                        ToolUseId = itemId,
+                        IsError = exitCode != 0 || string.Equals(item.Str("status"), "failed", StringComparison.OrdinalIgnoreCase),
+                        ResultText = output,
+                    }).ConfigureAwait(false);
+                }
+
+                return;
+
+            case "fileChange":
+                if (!completed)
+                {
+                    var paths = item.Prop("changes") is { ValueKind: JsonValueKind.Object } changes
+                        ? changes.EnumerateObject().Select(property => property.Name).ToList()
+                        : [];
+                    var input = JsonSerializer.SerializeToElement(new { paths }, WireJson);
+                    await _events.Writer.WriteAsync(new ToolCallStarted { ToolUseId = itemId, ToolName = "Edit", Input = input })
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    await _events.Writer.WriteAsync(new ToolCallCompleted
+                    {
+                        ToolUseId = itemId,
+                        IsError = string.Equals(item.Str("status"), "failed", StringComparison.OrdinalIgnoreCase),
+                    }).ConfigureAwait(false);
+                }
+
+                return;
+
+            case "mcpToolCall":
+                if (!completed)
+                {
+                    var tool = item.Str("tool") ?? "";
+                    var server = item.Str("server") ?? "";
+                    var input = JsonSerializer.SerializeToElement(new { tool, server }, WireJson);
+                    await _events.Writer.WriteAsync(new ToolCallStarted { ToolUseId = itemId, ToolName = "mcp", Input = input })
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    await _events.Writer.WriteAsync(new ToolCallCompleted
+                    {
+                        ToolUseId = itemId,
+                        IsError = string.Equals(item.Str("status"), "failed", StringComparison.OrdinalIgnoreCase),
+                        ResultText = item.Str("result"),
+                    }).ConfigureAwait(false);
+                }
+
+                return;
+
+            case "userMessage":
+                if (completed)
+                {
+                    await _events.Writer.WriteAsync(new UserMessageRecorded(item.Str("text") ?? "")).ConfigureAwait(false);
+                }
+
+                return;
+
+            default:
+                if (!completed)
+                {
+                    await _events.Writer.WriteAsync(new CliMessageIgnored(item.Str("type") ?? "item", item.GetRawText()))
+                        .ConfigureAwait(false);
+                }
+
+                return;
+        }
+    }
+
+    private async Task HandleTurnCompletedAsync(JsonElement parameters)
+    {
+        var turn = parameters.Prop("turn") ?? parameters;
+        var status = turn.Str("status") ?? parameters.Str("status") ?? "completed";
+        var subtype = status switch
+        {
+            "completed" => "success",
+            "interrupted" => "interrupted",
+            _ => "error",
+        };
+
+        UsageSnapshot? usage = turn.Prop("usage") is { } rawUsage ? ReadUsage(rawUsage) : null;
+        await _events.Writer.WriteAsync(new TurnCompleted { Subtype = subtype, Usage = usage }).ConfigureAwait(false);
+        _currentTurnId = null;
+    }
+
+    /// <summary>Reads codex usage figures, tolerating snake_case and camelCase field names.</summary>
+    private static UsageSnapshot? ReadUsage(JsonElement usage)
+    {
+        long Field(params string[] names) => names
+            .Select(name => usage.Prop(name))
+            .FirstOrDefault(value => value is { ValueKind: JsonValueKind.Number }) is { } number
+            && number.TryGetInt64(out var parsed) ? parsed : 0;
+
+        var snapshot = new UsageSnapshot
+        {
+            InputTokens = (int)Field("input_tokens", "inputTokens", "preTokens"),
+            CacheReadInputTokens = (int)Field("cached_input_tokens", "cachedInputTokens", "cacheReadInputTokens"),
+            OutputTokens = (int)Field("output_tokens", "outputTokens"),
+        };
+        return snapshot.InputTokens == 0 && snapshot.OutputTokens == 0 ? null : snapshot;
+    }
+
+    /// <summary>
+    /// The latest account quota merged from <c>account/rateLimits/read</c> and the
+    /// rolling <c>account/rateLimits/updated</c> notifications, so a sparse update
+    /// never blanks a window the last read reported.
+    /// </summary>
+    private RateLimitSnapshot? _rateLimits;
+
+    /// <summary>
+    /// Fetches the subscription quota once after the handshake. BYOK endpoints and
+    /// older CLIs have no account quota behind this method; failing it just leaves
+    /// the status bar's usage indicator empty.
+    /// </summary>
+    private async Task ReadRateLimitsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var result = await SendRequestAsync("account/rateLimits/read", _ => { }, ct).ConfigureAwait(false);
+            if (result.Prop("rateLimits") is { } limits)
+            {
+                await PublishRateLimitsAsync(ParseRateLimits(limits)).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or OperationCanceledException)
+        {
+        }
+    }
+
+    /// <summary>Folds a sparse rate-limit update into the last full read before publishing.</summary>
+    private async Task PublishRateLimitsAsync(RateLimitSnapshot updated)
+    {
+        var previous = _rateLimits;
+        var merged = new RateLimitSnapshot
+        {
+            Status = updated.Status ?? previous?.Status,
+            FiveHourUtilization = updated.FiveHourUtilization ?? previous?.FiveHourUtilization,
+            FiveHourResetsAt = updated.FiveHourResetsAt ?? previous?.FiveHourResetsAt,
+            SevenDayUtilization = updated.SevenDayUtilization ?? previous?.SevenDayUtilization,
+            SevenDayResetsAt = updated.SevenDayResetsAt ?? previous?.SevenDayResetsAt,
+        };
+        _rateLimits = merged;
+        await _events.Writer.WriteAsync(new RateLimitUpdated(merged)).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Maps an app-server <c>RateLimitSnapshot</c> onto the normalised one. Codex names
+    /// its windows primary/secondary with the duration in minutes; the five-hour window
+    /// is anything at or under ten hours, the weekly one everything longer.
+    /// </summary>
+    internal static RateLimitSnapshot ParseRateLimits(JsonElement snapshot)
+    {
+        var limits = new RateLimitSnapshot();
+
+        void Apply(JsonElement window)
+        {
+            if (window.Prop("usedPercent") is not { ValueKind: JsonValueKind.Number } used
+                || !used.TryGetDouble(out var percent))
+            {
+                return;
+            }
+
+            var durationMins = window.Prop("windowDurationMins") is { ValueKind: JsonValueKind.Number } duration
+                && duration.TryGetInt64(out var minutes) ? minutes : 300;
+            DateTimeOffset? resetsAt = window.Prop("resetsAt") is { ValueKind: JsonValueKind.Number } resets
+                && resets.TryGetInt64(out var seconds) ? DateTimeOffset.FromUnixTimeSeconds(seconds) : null;
+
+            if (durationMins > 600)
+            {
+                limits = limits with { SevenDayUtilization = percent / 100.0, SevenDayResetsAt = resetsAt };
+            }
+            else
+            {
+                limits = limits with { FiveHourUtilization = percent / 100.0, FiveHourResetsAt = resetsAt };
+            }
+        }
+
+        if (snapshot.Prop("primary") is { } primary)
+        {
+            Apply(primary);
+        }
+
+        if (snapshot.Prop("secondary") is { } secondary)
+        {
+            Apply(secondary);
+        }
+
+        if (snapshot.Str("rateLimitReachedType") is { Length: > 0 } reached)
+        {
+            limits = limits with { Status = reached };
+        }
+
+        return limits;
+    }
+
+    private async Task ReadStderrAsync(Process process)
+    {
+        while (await process.StandardError.ReadLineAsync().ConfigureAwait(false) is { } line)
+        {
+            lock (_stderr)
+            {
+                _stderr.Add(line);
+                if (_stderr.Count > 200)
+                {
+                    _stderr.RemoveAt(0);
+                }
+            }
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_process is { } process)
+        {
+            // Kill the tree: the agent spawns its own shells and MCP servers.
+            ProcessUtil.TryKillTree(process);
+
+            await Task.WhenAll(_readLoop ?? Task.CompletedTask, _errorLoop ?? Task.CompletedTask)
+                .WaitAsync(TimeSpan.FromSeconds(5))
+                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
+            process.Dispose();
+            _process = null;
+        }
+
+        if (_rawLog is not null)
+        {
+            await _rawLog.DisposeAsync().ConfigureAwait(false);
+            _rawLog = null;
+        }
+
+        _stdinLock.Dispose();
+    }
+}

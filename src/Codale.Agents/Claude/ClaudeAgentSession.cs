@@ -665,46 +665,12 @@ public sealed class ClaudeAgentSession : IAgentSession
     }
 
     /// <summary>
-    /// The current Claude family by full id - the same ids the CLI reports in its init
-    /// frame, so the connected model matches its row. Sonnet 5.5 at medium effort is
-    /// what the CLI starts with; haiku has no effort picker. Claude has no stable
-    /// catalogue protocol, so this is the fallback when <c>list_models</c> is unavailable.
-    /// </summary>
-    public static readonly AgentModelInfo[] DocumentedModels =
-    [
-        new()
-        {
-            Id = "claude-sonnet-5-5", DisplayName = "Sonnet", Description = "Best for most tasks—balanced speed and capability",
-            IsDefault = true, DefaultEffort = "medium", SupportedEfforts = ["low", "medium", "high", "xhigh", "max"],
-        },
-        new()
-        {
-            Id = "claude-opus-5-5", DisplayName = "Opus", Description = "Most capable model—best for complex reasoning",
-            DefaultEffort = "medium", SupportedEfforts = ["low", "medium", "high", "xhigh", "max"],
-        },
-        new()
-        {
-            Id = "claude-fable-5-1", DisplayName = "Fable", Description = "Fast and efficient—good for simple tasks",
-            DefaultEffort = "medium", SupportedEfforts = ["low", "medium", "high", "xhigh", "max"],
-        },
-        new()
-        {
-            Id = "claude-haiku-5-5", DisplayName = "Haiku", Description = "Fastest responses—ideal for quick answers",
-        },
-    ];
-
-    /// <summary>
     /// A readable name for a Claude model id: the catalogue's name when it is listed,
     /// else "claude-opus-5-5[1m]" style ids spelled out ("Opus 5.5 · 1M"). Aliases
     /// ("opus") and anything unrecognised come back capitalised as they are.
     /// </summary>
     public static string FriendlyModelName(string id)
     {
-        if (DocumentedModels.FirstOrDefault(m => string.Equals(m.Id, id, StringComparison.OrdinalIgnoreCase)) is { } known)
-        {
-            return known.DisplayName;
-        }
-
         var suffix = "";
         var bare = id;
         if (bare.EndsWith("[1m]", StringComparison.OrdinalIgnoreCase))
@@ -747,18 +713,13 @@ public sealed class ClaudeAgentSession : IAgentSession
             var catalog = await SendControlRequestAsync("list_models", _ => { }, timeout.Token)
                 .ConfigureAwait(false);
 
-            var listed = ParseModelCatalog(catalog);
-            if (listed.Count > 0)
-            {
-                return listed;
-            }
+            return ParseModelCatalog(catalog);
         }
         catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or OperationCanceledException)
         {
-            // Older CLI without the subtype; the static list below is the answer.
+            // Older CLI without the subtype: no catalogue, so the picker stays on "CLI".
+            return [];
         }
-
-        return DocumentedModels;
     }
 
     /// <summary>

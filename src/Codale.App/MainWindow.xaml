@@ -120,17 +120,6 @@
                         ToolTipService.ToolTip="Browser and desktop tools for the agent">
                         <FontIcon FontSize="14" Glyph="&#xE774;" />
                     </Button>
-                    <Button
-                        x:Name="SessionButton"
-                        Width="40"
-                        Height="32"
-                        Padding="0"
-                        Background="Transparent"
-                        BorderBrush="Transparent"
-                        Click="OnTitleBarSessionClick"
-                        ToolTipService.ToolTip="Agent session panel">
-                        <FontIcon FontSize="14" Glyph="&#xE99A;" />
-                    </Button>
                 </StackPanel>
             </TitleBar.Content>
         </TitleBar>

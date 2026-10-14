@@ -218,14 +218,19 @@ public sealed partial class StatusViewModel : ObservableObject
     /// <summary>The status bar's usage button: Claude subscription windows, or context only under an override.</summary>
     public bool HasUsageMeter => HasUsage || HasContext;
 
+    /// <summary>The connected CLI's name ("Claude CLI" / "Codex CLI"); labels the usage button. Set when the session connects.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UsageMeterLabel))]
+    public partial string CliName { get; set; } = "Claude CLI";
+
     /// <summary>The button's fixed label: the CLI, or the override when one is active.</summary>
-    public string UsageMeterLabel => IsOverrideCli ? "Context" : "Claude CLI";
+    public string UsageMeterLabel => IsOverrideCli ? "Context" : CliName;
 
     /// <summary>Summary beside the label: the window percentages, or empty under an override.</summary>
     public string UsageMeterText => IsOverrideCli ? "" : UsageSummary;
 
-    /// <summary>The flyout's title: the subscription windows exist only without an override.</summary>
-    public string UsageFlyoutTitle => IsOverrideCli ? "Context" : "Usage limits";
+    /// <summary>The flyout's title: the subscription windows exist only for a Claude subscription.</summary>
+    public string UsageFlyoutTitle => HasUsage ? "Usage limits" : "Context";
 
     public string ContextText => ContextWindow > 0
         ? $"{Format(ContextTokens)} / {Format(ContextWindow)}"

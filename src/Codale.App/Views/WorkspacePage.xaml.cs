@@ -59,47 +59,22 @@ public sealed partial class WorkspacePage : Page
     /// <summary>The one tab a file click may replace; null once its file is edited.</summary>
     private EditorTabEntry? _previewTab;
 
+    private readonly PointerEventHandler _outsidePointerPressedHandler;
+
     public WorkspacePage()
     {
         InitializeComponent();
+        _outsidePointerPressedHandler = new PointerEventHandler(OnPointerPressedOutsideDrawer);
+        AddHandler(PointerPressedEvent, _outsidePointerPressedHandler, handledEventsToo: true);
         Loaded += (_, _) => MarkdownView.FileLinkClicked += OnMarkdownFileLink;
-        Unloaded += (_, _) => MarkdownView.FileLinkClicked -= OnMarkdownFileLink;
+        Unloaded += (_, _) =>
+        {
+            MarkdownView.FileLinkClicked -= OnMarkdownFileLink;
+            RemoveHandler(PointerPressedEvent, _outsidePointerPressedHandler);
+        };
     }
 
     public WorkspaceViewModel ViewModel { get; private set; } = null!;
-
-    public CliUpdateViewModel CliUpdate { get; } = new();
-
-    private CliDescriptor PanelCli => ViewModel.Panel.TerminalCli ?? CliLocator.ActiveCli;
-
-    /// <summary>
-    /// Updates the CLI in a terminal tab, so its output is visible and nothing changes
-    /// without a click. The version is then re-read every few seconds until the new one
-    /// shows, so the icon goes away by itself once the update has landed.
-    /// </summary>
-    private async void OnUpdateCliClick(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var cli = CliUpdate.Cli;
-            if (CliVersionCheck.UpdateCommand(cli) is not { } command)
-            {
-                return;
-            }
-
-            await RunInNewTerminalAsync(command);
-
-            for (var i = 0; i < 36 && CliUpdate.UpdateAvailable && CliUpdate.Cli == cli; i++)
-            {
-                await Task.Delay(TimeSpan.FromSeconds(5));
-                await CliUpdate.RefreshAsync(cli);
-            }
-        }
-        catch (Exception ex)
-        {
-            CrashLog.Write("WorkspacePage.OnUpdateCliClick", ex.Message, ex);
-        }
-    }
 
     protected override async void OnNavigatedTo(NavigationEventArgs e)
     {
@@ -114,10 +89,7 @@ public sealed partial class WorkspacePage : Page
         ViewModel.PropertyChanged += OnWorkspacePropertyChanged;
         ViewModel.AgentTerminalStarted += OnAgentTerminalStarted;
         ViewModel.ChatActivationRequested += OnChatActivationRequested;
-        ViewModel.Sessions.Sessions.CollectionChanged += OnHistoryInputsChanged;
-        ViewModel.Sessions.OpenSessions.CollectionChanged += OnHistoryInputsChanged;
-        WatchTodos(ViewModel.Panel);
-        WatchConversation(ViewModel.Panel);
+        ViewModel.HelperLoginRequired += OnChatLoginRequired;
         Bindings.Update();
 
         SetTerminalCwd(ViewModel.WorkingDirectory);
@@ -128,21 +100,20 @@ public sealed partial class WorkspacePage : Page
         {
             window.CommandsRequested += OnTitleBarCommandsRequested;
             window.McpToolsRequested += OnTitleBarMcpToolsRequested;
-            window.SessionPanelToggled += OnTitleBarSessionToggled;
             window.LeftPanelToggled += OnTitleBarLeftPanelToggled;
             window.SearchSubmitted += OnTitleBarSearchSubmitted;
             window.SearchTyping += OnTitleBarSearchTyping;
             window.ShortcutInvoked += OnShortcutInvoked;
 
-            // Sync the toggle and reserved width with the panel's default state.
-            SetSessionPanel(_sessionPanelOpen);
+            if (window.Content is UIElement root)
+            {
+                root.AddHandler(PointerPressedEvent, _outsidePointerPressedHandler, handledEventsToo: true);
+            }
         }
 
         // The Settings window writes app-level preferences; this page applies them
         // live to the tabs it owns. All windows share one UI thread.
         AppSettings.Changed += OnAppSettingsChanged;
-
-        _ = CliUpdate.RefreshAsync(PanelCli);
 
         // Everything except the CLI: no agent session starts until the user opens a
         // chat tab and asks for one. An exception escaping this async void would kill
@@ -168,12 +139,16 @@ public sealed partial class WorkspacePage : Page
         {
             window.CommandsRequested -= OnTitleBarCommandsRequested;
             window.McpToolsRequested -= OnTitleBarMcpToolsRequested;
-            window.SessionPanelToggled -= OnTitleBarSessionToggled;
             window.LeftPanelToggled -= OnTitleBarLeftPanelToggled;
             window.SearchSubmitted -= OnTitleBarSearchSubmitted;
             window.SearchTyping -= OnTitleBarSearchTyping;
             window.ShortcutInvoked -= OnShortcutInvoked;
             window.Activated -= OnWindowActivated;
+
+            if (window.Content is UIElement root)
+            {
+                root.RemoveHandler(PointerPressedEvent, _outsidePointerPressedHandler);
+            }
         }
 
         if (ViewModel is not null)
@@ -181,14 +156,12 @@ public sealed partial class WorkspacePage : Page
             ViewModel.PropertyChanged -= OnWorkspacePropertyChanged;
             ViewModel.AgentTerminalStarted -= OnAgentTerminalStarted;
             ViewModel.ChatActivationRequested -= OnChatActivationRequested;
-            ViewModel.Sessions.Sessions.CollectionChanged -= OnHistoryInputsChanged;
-            ViewModel.Sessions.OpenSessions.CollectionChanged -= OnHistoryInputsChanged;
+            ViewModel.HelperLoginRequired -= OnChatLoginRequired;
             if (_planWatchedChat is not null)
             {
                 _planWatchedChat.PlanReplaced -= OnPlanReplaced;
                 _planWatchedChat = null;
             }
-            UnwatchConversation();
 
             foreach (var entry in _chatTabs)
             {
@@ -394,7 +367,10 @@ public sealed partial class WorkspacePage : Page
         switch ((sender as FrameworkElement)?.Tag as string)
         {
             case "claude":
-                await OpenChatOrOfferInstallAsync();
+                await OpenChatOrOfferInstallAsync("claude");
+                break;
+            case "codex":
+                await OpenChatOrOfferInstallAsync("codex");
                 break;
             case "terminal":
                 OpenTerminalTab();
@@ -421,26 +397,32 @@ public sealed partial class WorkspacePage : Page
 
     private void RefreshCliLabels()
     {
-        var cli = CliLocator.ActiveCli;
-        var label = CliLocator.IsInstalled() ? $"{cli.DisplayName} session" : $"Install {cli.DisplayName}…";
-        ClaudeMenuItem.Text = label;
-        ClaudeEmptyLabel.Text = label;
+        ClaudeMenuItem.Text = CliLabel("claude");
+        CodexMenuItem.Text = CliLabel("codex");
+        ClaudeEmptyLabel.Text = CliLabel("claude");
+        CodexEmptyLabel.Text = CliLabel("codex");
     }
 
+    /// <summary>"Claude chat" when the CLI is on the PATH, "Install Claude…" when it is not.</summary>
+    private static string CliLabel(string cliId) =>
+        CliLocator.Find(cliId) is not null
+            ? $"{CliLocator.KnownClis.First(cli => cli.Id == cliId).DisplayName} chat"
+            : $"Install {CliLocator.KnownClis.First(cli => cli.Id == cliId).DisplayName}…";
+
     /// <summary>
-    /// Opens the chat when the active CLI exists; otherwise offers to install it,
-    /// running the installer in a new terminal tab so the user sees its output.
+    /// Opens the chat when the CLI exists; otherwise offers to install it, running the
+    /// installer in a new terminal tab so the user sees its output.
     /// </summary>
-    private async Task OpenChatOrOfferInstallAsync()
+    private async Task OpenChatOrOfferInstallAsync(string cliId)
     {
-        if (CliLocator.IsInstalled())
+        var cli = CliLocator.KnownClis.First(known => known.Id == cliId);
+        if (CliLocator.Find(cliId) is not null)
         {
-            await OpenChatTabAsync();
+            await OpenChatTabAsync(cliId);
             return;
         }
 
-        var cli = CliLocator.ActiveCli;
-        var command = CliLocator.InstallCommand;
+        var command = cli.InstallCommand;
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
@@ -448,15 +430,17 @@ public sealed partial class WorkspacePage : Page
             Content = new TextBlock
             {
                 TextWrapping = TextWrapping.Wrap,
-                Text = $"The '{CliLocator.Executable}' command isn't on this system's PATH. " +
-                       $"Install it now? This runs the following in a new terminal:\n\n{command}",
+                Text = command is { Length: > 0 }
+                    ? $"The '{cli.Executable}' command isn't on this system's PATH. " +
+                      $"Install it now? This runs the following in a new terminal:\n\n{command}"
+                    : $"The '{cli.Executable}' command isn't on this system's PATH. Install the {cli.DisplayName} CLI, then try again.",
             },
-            PrimaryButtonText = "Install",
+            PrimaryButtonText = command is { Length: > 0 } ? "Install" : "Close",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
         };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary || command is not { Length: > 0 })
         {
             return;
         }
@@ -482,7 +466,7 @@ public sealed partial class WorkspacePage : Page
     /// The CLI has no credentials. Its login is interactive (a browser OAuth flow),
     /// so it runs in a terminal tab; the chat works on the next message afterwards.
     /// </summary>
-    private void OnChatLoginRequired(object? sender, EventArgs e) =>
+    private void OnChatLoginRequired(object? sender, string? cliName) =>
         DispatcherQueue.TryEnqueue(async () =>
         {
             if (_loginPromptOpen)
@@ -490,18 +474,26 @@ public sealed partial class WorkspacePage : Page
                 return;
             }
 
+            var isCodex = string.Equals(cliName, "Codex", StringComparison.OrdinalIgnoreCase) ||
+                          (sender is ChatViewModel { SessionCli.Id: "codex" });
+            var targetCli = isCodex ? "Codex" : "Claude";
+            var command = isCodex ? "codex login" : "claude";
+            var description = isCodex
+                ? "Open a terminal to log in? It runs 'codex login' to authenticate with OpenAI."
+                : "Open a terminal to log in? It starts 'claude'; type /login there, finish " +
+                  "sign-in in your browser, then exit with /exit and resend your message here.";
+
             _loginPromptOpen = true;
             try
             {
                 var dialog = new ContentDialog
                 {
                     XamlRoot = XamlRoot,
-                    Title = "Claude CLI isn't logged in",
+                    Title = $"{targetCli} CLI isn't logged in",
                     Content = new TextBlock
                     {
                         TextWrapping = TextWrapping.Wrap,
-                        Text = "Open a terminal to log in? It starts 'claude'; type /login there, finish " +
-                               "sign-in in your browser, then exit with /exit and resend your message here.",
+                        Text = description,
                     },
                     PrimaryButtonText = "Open terminal",
                     CloseButtonText = "Cancel",
@@ -510,7 +502,7 @@ public sealed partial class WorkspacePage : Page
 
                 if (await dialog.ShowAsync() == ContentDialogResult.Primary)
                 {
-                    await RunInNewTerminalAsync("claude");
+                    await RunInNewTerminalAsync(command);
                 }
             }
             finally
@@ -523,11 +515,16 @@ public sealed partial class WorkspacePage : Page
     /// The + menu's chat entries: a new conversation in its own tab, so a running one
     /// is never replaced. The chat in front is reused only while it holds nothing yet.
     /// </summary>
-    private async Task OpenChatTabAsync()
+    private async Task OpenChatTabAsync(string cliId = "claude")
     {
         CrashLog.Trace("Chat tab open requested");
 
-        var chat = ViewModel.FreshChat();
+        var chat = ViewModel.FreshChat(cliId);
+
+        // The picked CLI names the session: it lands before the first connect, and a
+        // blank chat reused from another CLI's pick is (re)connected under this one.
+        chat.CliId = cliId;
+
         await ViewModel.ApplyDefaultsToEmptyChatAsync(chat);
         ShowChatTab(chat);
 
@@ -629,10 +626,13 @@ public sealed partial class WorkspacePage : Page
 
         if (entry is null)
         {
-            var tab = new ChatTab { ViewModel = chat };
+            var tab = new ChatTab { ViewModel = chat, Workspace = ViewModel };
             tab.ToolFileRequested += OnChatToolFileRequested;
             tab.PlanOpenRequested += OnChatPlanOpenRequested;
             tab.TaskPeekRequested += OnChatTaskPeekRequested;
+            tab.ArtifactRequested += (_, artifact) => ShowArtifact(artifact);
+            tab.UpdateCliRequested += (_, cmd) => _ = RunInNewTerminalAsync(cmd);
+            tab.RunningTaskPeekRequested += (_, task) => SetPeek(ReferenceEquals(PeekPane.Task, task) && PeekPane.Visibility == Visibility.Visible ? null : task);
             chat.LoginRequired += OnChatLoginRequired;
             chat.AttentionNeeded += OnChatAttentionNeeded;
             chat.PropertyChanged += OnChatPropertyChanged;
@@ -821,8 +821,12 @@ public sealed partial class WorkspacePage : Page
             // session's MCP servers (see TryOpenCliTab), so nothing is written for it here.
             terminal.LaunchRewriter ??= OnTerminalLaunchTyped;
 
-            var tab = new TerminalTab { ViewModel = terminal };
+            var tab = new TerminalTab { ViewModel = terminal, Workspace = ViewModel };
             tab.LinkActivated += OnTerminalLinkActivated;
+            tab.FileDiffRequested += (_, path) => OnChatToolFileRequested(tab, new ToolFileRequestEventArgs(path, isEdit: true));
+            tab.ArtifactRequested += (_, artifact) => ShowArtifact(artifact);
+            tab.UpdateCliRequested += (_, cmd) => _ = RunInNewTerminalAsync(cmd);
+            tab.TaskPeekRequested += (_, task) => SetPeek(ReferenceEquals(PeekPane.Task, task) && PeekPane.Visibility == Visibility.Visible ? null : task);
             var item = new TabViewItem { IsClosable = true, Header = BuildTerminalHeader(terminal) };
             item.Content = tab;
 
@@ -919,7 +923,7 @@ public sealed partial class WorkspacePage : Page
             ViewModel.InjectMcpForTerminalCli(session);
 
             var command = ViewModel.RewriteCliLaunch(promptLine, session) ?? cli.Executable + args;
-            CrashLog.Trace($"cli tab: launching {cli.Id} as '{command}', panel open = {_sessionPanelOpen}");
+            CrashLog.Trace($"cli tab: launching {cli.Id} as '{command}'");
             var terminal = ViewModel.RunCliTerminal(command, cli, PromptDirectory(promptLine) ?? ViewModel.ProjectPath, session);
             _ = ViewModel.BeginTerminalCliSessionAsync(session, terminal);
             terminal.Exited += (_, _) => DispatcherQueue.TryEnqueue(() => OnCliTerminalExited(terminal));
@@ -1480,15 +1484,6 @@ public sealed partial class WorkspacePage : Page
             File.Exists(absolute));
     }
 
-    /// <summary>A row in the panel's session changes: everything the agent did to that file.</summary>
-    private void OnSessionChangeClick(object sender, ItemClickEventArgs e)
-    {
-        if (e.ClickedItem is SessionFileChange change)
-        {
-            ShowAgentDiff(change.Path, change.CumulativeDiff());
-        }
-    }
-
     /// <summary>Clicking an explore or subagent entry in the chat opens its peek, as selecting it in the task list does.</summary>
     private void OnChatTaskPeekRequested(object? sender, ToolCallItem call)
     {
@@ -1504,15 +1499,6 @@ public sealed partial class WorkspacePage : Page
         var artifact = ViewModel.Chat.Artifacts.FirstOrDefault(a => a.ToolUseId == call.ToolUseId)
             ?? new SessionArtifact { Kind = SessionArtifactKind.Plan, ToolUseId = call.ToolUseId, Markdown = call.PlanText ?? "" };
         ShowArtifact(artifact);
-    }
-
-    /// <summary>A plan in the panel: a plan document opens in the editor, a chat plan in the plan tab.</summary>
-    private void OnArtifactClick(object sender, ItemClickEventArgs e)
-    {
-        if (e.ClickedItem is SessionArtifact artifact)
-        {
-            ShowArtifact(artifact);
-        }
     }
 
     private void ShowArtifact(SessionArtifact artifact)
@@ -2105,232 +2091,18 @@ public sealed partial class WorkspacePage : Page
         }
         else if (e.PropertyName == nameof(WorkspaceViewModel.Panel))
         {
-            // Each session has its own tasks and transcript: the peek, the todo watch and the
-            // History layout all follow the session the panel now shows.
+            // The peek belongs to a session's task list: reset when the active session changes.
             SetPeek(null);
-            WatchTodos(ViewModel.Panel);
-            WatchConversation(ViewModel.Panel);
-            _ = CliUpdate.RefreshAsync(PanelCli);
         }
     }
-
-    /// <summary>The chat whose conversation decides how much room History gets.</summary>
-    private ChatViewModel? _conversationWatched;
-
-    /// <summary>Whether that chat held a conversation at the last layout pass.</summary>
-    private bool _hadConversation;
-
-    /// <summary>The reader unfolded History beside a conversation; reset when the conversation state flips.</summary>
-    private bool _historyShowAll;
-
-    private bool _historyLayoutQueued;
-
-    private void WatchConversation(ChatViewModel chat)
-    {
-        UnwatchConversation();
-
-        _conversationWatched = chat;
-        _hadConversation = chat.HasConversation;
-        _historyShowAll = false;
-        chat.Items.CollectionChanged += OnHistoryInputsChanged;
-        chat.PropertyChanged += OnConversationPropertyChanged;
-        UpdateHistoryLayout();
-    }
-
-    private void UnwatchConversation()
-    {
-        if (_conversationWatched is not null)
-        {
-            _conversationWatched.Items.CollectionChanged -= OnHistoryInputsChanged;
-            _conversationWatched.PropertyChanged -= OnConversationPropertyChanged;
-            _conversationWatched = null;
-        }
-    }
-
-    private void OnConversationPropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName is nameof(ChatViewModel.IsBusy))
-        {
-            QueueHistoryLayout();
-        }
-    }
-
-    private void OnHistoryInputsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>
-        QueueHistoryLayout();
-
-    // A streaming turn changes the transcript many times a second: one pass per burst.
-    private void QueueHistoryLayout()
-    {
-        if (_historyLayoutQueued)
-        {
-            return;
-        }
-
-        _historyLayoutQueued = true;
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateHistoryLayout);
-    }
-
-    /// <summary>
-    /// Sizes History against the live sections. With no conversation it fills the panel
-    /// and lists every session; with one it folds to the sessions open in a tab and the
-    /// live sections take the room - unless the reader asked to see them all, when the
-    /// two share it.
-    /// </summary>
-    private void UpdateHistoryLayout()
-    {
-        _historyLayoutQueued = false;
-
-        if (RightPanel is null || ViewModel is null)
-        {
-            return;
-        }
-
-        var sessions = ViewModel.Sessions;
-        var conversation = ViewModel.Panel.HasConversation;
-
-        // A CLI in a terminal reports its tasks, changes and artifacts into the live sections, with no conversation here.
-        var live = conversation || ViewModel.Panel.IsTerminalSession;
-        if (conversation != _hadConversation)
-        {
-            _hadConversation = conversation;
-            _historyShowAll = false;
-        }
-
-        var folded = conversation && !_historyShowAll;
-        var expanded = HistorySection.IsChecked == true;
-
-        IEnumerable<SessionListItem> source = folded ? sessions.OpenSessions : sessions.Sessions;
-        if (!ReferenceEquals(HistoryList.ItemsSource, source))
-        {
-            HistoryList.ItemsSource = source;
-        }
-
-        var star = new GridLength(1, GridUnitType.Star);
-        LiveRow.Height = live ? star : GridLength.Auto;
-        // An empty chat folds the live row to nothing; hiding the viewer keeps the
-        // panel from showing a dead band between the controls and History.
-        LiveHost.Visibility = live ? Visibility.Visible : Visibility.Collapsed;
-        HistoryRow.Height = expanded && !folded ? star : GridLength.Auto;
-
-        HistoryShowAllButton.Visibility = conversation ? Visibility.Visible : Visibility.Collapsed;
-        HistoryShowAllButton.Content = _historyShowAll ? "Show less" : $"Show all ({sessions.Sessions.Count})";
-        HistoryNotListedText.Visibility = folded && expanded && sessions.OpenSessions.Count == 0
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-    }
-
-    private void OnHistorySectionClick(object sender, RoutedEventArgs e) => UpdateHistoryLayout();
 
     /// <summary>Git panel's History: a collapsed list must give its star row back, not leave a blank band.</summary>
     private void OnGitHistorySectionClick(object sender, RoutedEventArgs e) =>
         GitHistoryRow.Height = GitHistorySection.IsChecked == true ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
 
-    private void OnHistoryShowAllClick(object sender, RoutedEventArgs e)
-    {
-        _historyShowAll = !_historyShowAll;
-        HistorySection.IsChecked = true;
-        UpdateHistoryLayout();
-    }
-
-    /// <summary>The chat whose task list the panel is watching.</summary>
-    private ChatViewModel? _todoWatched;
-
-    /// <summary>
-    /// When the agent publishes a task list, the Todos section opens by itself - a
-    /// fresh set of goals is exactly what the reader wants to see, even if they had
-    /// folded the section while it was empty.
-    /// </summary>
-    private void WatchTodos(ChatViewModel chat)
-    {
-        if (_todoWatched is not null)
-        {
-            _todoWatched.Todos.CollectionChanged -= OnTodosCollectionChanged;
-        }
-
-        _todoWatched = chat;
-        _todoCountSeen = 0;
-        chat.Todos.CollectionChanged += OnTodosCollectionChanged;
-        OpenTodosOnFirstGoals();
-    }
-
-    /// <summary>The list size last settled on; only an empty-to-something change opens the section.</summary>
-    private int _todoCountSeen;
-
-    /// <summary>
-    /// Whether the session panel is showing. The panel tree is deferred (x:Load), so
-    /// this - not the element's Visibility - is the state of record until first open.
-    /// </summary>
-    private bool _sessionPanelOpen;
-
-    // Every update rebuilds the list (clear, then add), so the check waits for the
-    // rebuild to settle: a reader who folded a live list is not overruled on each tick.
-    private void OnTodosCollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, OpenTodosOnFirstGoals);
-
-    private void OpenTodosOnFirstGoals()
-    {
-        var count = _todoWatched?.Todos.Count ?? 0;
-
-        if (_todoCountSeen == 0 && count > 0)
-        {
-            if (RightPanel is null)
-            {
-                FindName("RightPanel");
-                UpdateHistoryLayout();
-            }
-
-            TodosSection.IsChecked = true;
-        }
-
-        _todoCountSeen = count;
-    }
-
-    /// <summary>
-    /// One place for the session panel's state: the panel floats over the centre
-    /// card, but the workspace reserves its width so nothing runs underneath it,
-    /// and the title-bar toggle reflects the state.
-    /// </summary>
-    private void SetSessionPanel(bool open)
-    {
-        var wasOpen = _sessionPanelOpen;
-
-        // The panel is over half the page's visual tree; it stays deferred until the
-        // chat needs it, so a workspace that never opens the chat never builds it.
-        if (open && RightPanel is null)
-        {
-            FindName("RightPanel");
-            UpdateHistoryLayout();
-        }
-
-        _sessionPanelOpen = open;
-        if (RightPanel is not null)
-        {
-            RightPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
-        }
-
-        // Panel width (450) + its right inset (6) + a small gap.
-        CentreContent.Margin = open ? new Thickness(0, 0, 464, 0) : default;
-
-        if (ViewModel is not null)
-        {
-            ViewModel.IsSessionPanelOpen = open;
-        }
-
-        // Appearing is also what populates it: the transcript scan runs now rather
-        // than at window load, so a project that never opens the chat never pays.
-        if (open && !wasOpen && ViewModel is not null)
-        {
-            _ = ViewModel.Sessions.RefreshCommand.ExecuteAsync(null);
-        }
-
-        App.Current.MainWindow?.SetSessionPanelOpen(open);
-    }
-
     /// <summary>
     /// The session panel belongs to an agent session, and follows the tab in front: a Claude chat tab shows
-    /// that chat's full panel, a terminal CLI's tab shows that CLI's own simple panel. With any other tab in
-    /// front the panel keeps the last session's while one is still running (and stays as the user left it),
-    /// and hides when none is. The title-bar button can still toggle it by hand.
+    /// that chat's full panel, a terminal CLI's tab shows that CLI's own simple panel.
     /// </summary>
     private void UpdateSessionPanelForActiveTab()
     {
@@ -2344,12 +2116,10 @@ public sealed partial class WorkspacePage : Page
         if (chatInFront is not null)
         {
             ViewModel.Panel = chatInFront.Chat;
-            SetSessionPanel(true);
         }
         else if (cliInFront is not null)
         {
             ViewModel.Panel = cliInFront;
-            SetSessionPanel(true);
         }
         else if (IsCliInSession())
         {
@@ -2358,13 +2128,6 @@ public sealed partial class WorkspacePage : Page
             {
                 ViewModel.Panel = ViewModel.Chat;
             }
-
-            // CentreContent.Margin automatically resizes the active terminal or editor tab.
-            SetSessionPanel(_sessionPanelOpen);
-        }
-        else
-        {
-            SetSessionPanel(false);
         }
 
         // The peek belongs to a session's task list: it goes when that session's tab does.
@@ -2403,26 +2166,7 @@ public sealed partial class WorkspacePage : Page
         PeekPane.Show(task);
     }
 
-    private void OnRunningTaskClick(object sender, ItemClickEventArgs e)
-    {
-        if (e.ClickedItem is not RunningTaskItem task)
-        {
-            return;
-        }
-
-        // Clicking the task already on show closes the peek again.
-        SetPeek(ReferenceEquals(PeekPane.Task, task) && PeekPane.Visibility == Visibility.Visible ? null : task);
-    }
-
     private void OnPeekCloseRequested(object? sender, EventArgs e) => SetPeek(null);
-
-    private async void OnStopTaskClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is FrameworkElement { Tag: RunningTaskItem task } && ViewModel is not null)
-        {
-            await ViewModel.Panel.StopTaskAsync(task);
-        }
-    }
 
     private async void OnPeekStopRequested(object? sender, RunningTaskItem task)
     {
@@ -2432,19 +2176,20 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
-    private async void OnTitleBarSessionToggled(object? sender, EventArgs e) => await ToggleSessionPanelAsync();
-
-    private async Task ToggleSessionPanelAsync()
+    private void ToggleActiveSessionPanel()
     {
-        // When chat is in front or a custom CLI is in session (or terminal in front),
-        // clicking the button toggles the panel on the right side and resizes adjacent content.
-        if (ChatTabInFront() is not null || IsCliInSession() || TerminalTabInFront() is not null)
+        if (ChatTabInFront() is { } chatEntry)
         {
-            SetSessionPanel(!_sessionPanelOpen);
-            return;
+            chatEntry.Tab.ToggleSessionPanel();
+            if (chatEntry.Tab.IsSessionPanelOpen)
+            {
+                chatEntry.Tab.FocusDraft();
+            }
         }
-
-        await BringChatToFrontAsync();
+        else if (TerminalTabInFront() is { } terminalEntry && terminalEntry.Tab.AgentSession is not null)
+        {
+            terminalEntry.Tab.ToggleSessionPanel();
+        }
     }
 
     /// <summary>
@@ -2459,7 +2204,7 @@ public sealed partial class WorkspacePage : Page
             return;
         }
 
-        await OpenChatOrOfferInstallAsync();
+        await OpenChatOrOfferInstallAsync(Codale.Agents.CliLocator.ActiveCli.Id);
     }
 
     private void OnTitleBarLeftPanelToggled(object? sender, EventArgs e) => ToggleLeftPanel();
@@ -2568,15 +2313,17 @@ public sealed partial class WorkspacePage : Page
         ChatTabInFront()?.Tab.FocusDraft();
     }
 
-    /// <summary>Toggles the session panel (bringing the chat up if it is not in front); an opened panel gets the prompt's focus.</summary>
+    /// <summary>Toggles the session panel for the active session tab; bringing the chat up if no session tab is in front.</summary>
     private async Task ToggleRightPanelAndChatAsync()
     {
-        await ToggleSessionPanelAsync();
-
-        if (_sessionPanelOpen)
+        if (ChatTabInFront() is not null || (TerminalTabInFront() is { } terminalEntry && terminalEntry.Tab.AgentSession is not null))
         {
-            ChatTabInFront()?.Tab.FocusDraft();
+            ToggleActiveSessionPanel();
+            return;
         }
+
+        await BringChatToFrontAsync();
+        ChatTabInFront()?.Tab.FocusDraft();
     }
 
     /// <summary>
@@ -2615,7 +2362,7 @@ public sealed partial class WorkspacePage : Page
 
     /// <summary>The mode chip's order; the flyout lists them the same way.</summary>
     private static readonly string[] ModeCycle =
-        [ChatViewModel.AutomaticMode, ChatViewModel.AskMode, "plan", "manual", "acceptEdits", "auto"];
+        [ChatViewModel.AutomaticMode, "manual", "plan", "auto"];
 
     private async Task CycleChatModeAsync()
     {
@@ -2633,7 +2380,9 @@ public sealed partial class WorkspacePage : Page
             var mode => mode,
         };
 
-        await chat.SetPermissionModeAsync(ModeCycle[(Array.IndexOf(ModeCycle, current) + 1) % ModeCycle.Length]);
+        var next = ModeCycle[(Array.IndexOf(ModeCycle, current) + 1) % ModeCycle.Length];
+        chat.RememberModeAsDefault(next);
+        await chat.SetPermissionModeAsync(next);
     }
 
     private void ShowGitPanel()
@@ -3162,320 +2911,6 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
-    private void OnCliEndpointFlyoutOpening(object sender, object e) =>
-        ViewModel.CliEndpoint.Reload();
-
-    private void OnOpenProviderSettingsClick(object sender, RoutedEventArgs e) =>
-        App.Current.MainWindow?.SetSettingsOpen(true);
-
-    private void OnSessionClick(object sender, ItemClickEventArgs e)
-    {
-        if (e.ClickedItem is SessionListItem session &&
-            ViewModel.Sessions.OpenCommand.CanExecute(session))
-        {
-            ViewModel.Sessions.OpenCommand.Execute(session);
-        }
-    }
-
-    private async void OnCopySessionHandoutClick(object sender, RoutedEventArgs e)
-    {
-        if ((sender as FrameworkElement)?.DataContext is not SessionListItem session)
-        {
-            return;
-        }
-
-        try
-        {
-            CopyText(await ViewModel.Sessions.BuildHandoutAsync(session));
-        }
-        catch (Exception ex)
-        {
-            await ShowTreeErrorAsync("Could not create handout", ex.Message);
-        }
-    }
-
-    private void OnCopySessionIdClick(object sender, RoutedEventArgs e)
-    {
-        if ((sender as FrameworkElement)?.DataContext is SessionListItem session)
-        {
-            CopyText(session.SessionId);
-        }
-    }
-
-    /// <summary>
-    /// Fork session: summarizes the session (on its own provider, cheaply), lets the user
-    /// read and edit the briefing, then starts a new session that carries it.
-    /// </summary>
-    private async void OnForkSessionClick(object sender, RoutedEventArgs e)
-    {
-        if ((sender as FrameworkElement)?.DataContext is not SessionListItem session)
-        {
-            return;
-        }
-
-        var ring = new ProgressRing { Width = 18, Height = 18, IsActive = true };
-        var status = new TextBlock
-        {
-            Text = "Summarizing the session…",
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-
-        var progress = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { ring, status } };
-        var summaryBox = new TextBox
-        {
-            AcceptsReturn = true,
-            TextWrapping = TextWrapping.Wrap,
-            MinHeight = 220,
-            MaxHeight = 360,
-            Header = "Briefing the new session starts with (editable)",
-            Visibility = Visibility.Collapsed,
-        };
-
-        ScrollViewer.SetVerticalScrollBarVisibility(summaryBox, ScrollBarVisibility.Auto);
-
-        var hint = new TextBlock
-        {
-            FontSize = 11,
-            TextWrapping = TextWrapping.Wrap,
-            Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
-            Text = "Written on a small model in a throwaway session, so the original is untouched. " +
-                   "The briefing goes out with your first message in the new session.",
-        };
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = $"Fork “{session.Title}”",
-            Content = new StackPanel { Width = 520, Spacing = 12, Children = { progress, summaryBox, hint } },
-            PrimaryButtonText = "Start forked session",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-            IsPrimaryButtonEnabled = false,
-        };
-
-        using var cts = new CancellationTokenSource();
-        dialog.Closing += (_, _) => cts.Cancel();
-
-        async Task SummarizeAsync()
-        {
-            try
-            {
-                var summary = await ViewModel.SummarizeSessionAsync(session, cts.Token);
-                summaryBox.Text = summary;
-                summaryBox.Visibility = Visibility.Visible;
-                progress.Visibility = Visibility.Collapsed;
-                dialog.IsPrimaryButtonEnabled = true;
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception ex)
-            {
-                ring.IsActive = false;
-                ring.Visibility = Visibility.Collapsed;
-                status.Text = $"Could not summarize: {ex.Message}";
-            }
-        }
-
-        dialog.Opened += (_, _) => _ = SummarizeAsync();
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary || string.IsNullOrWhiteSpace(summaryBox.Text))
-        {
-            return;
-        }
-
-        try
-        {
-            await ViewModel.ForkSessionAsync(session, summaryBox.Text.Trim());
-        }
-        catch (Exception ex)
-        {
-            await ShowTreeErrorAsync("Could not fork session", ex.Message);
-        }
-    }
-
-    private async void OnCompactSessionClick(object sender, RoutedEventArgs e)
-    {
-        if ((sender as FrameworkElement)?.DataContext is not SessionListItem session)
-        {
-            return;
-        }
-
-        try
-        {
-            await ViewModel.CompactSessionAsync(session.Summary);
-        }
-        catch (Exception ex)
-        {
-            await ShowTreeErrorAsync("Could not compact session", ex.Message);
-        }
-    }
-
-    private async void OnRetitleSessionClick(object sender, RoutedEventArgs e)
-    {
-        if ((sender as FrameworkElement)?.DataContext is not SessionListItem session)
-        {
-            return;
-        }
-
-        var input = new TextBox
-        {
-            Text = session.Title,
-            PlaceholderText = "Give this session a short name",
-            MaxLength = 80,
-            SelectionStart = 0,
-            SelectionLength = session.Title.Length,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
-
-        var generateIcon = new FontIcon { Glyph = "\uE945", FontSize = 14, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var generateRing = new ProgressRing { Width = 14, Height = 14, IsActive = true, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Visibility = Visibility.Collapsed };
-        var generate = new Button
-        {
-            Content = new Grid { Children = { generateIcon, generateRing } },
-            Width = 32,
-            Padding = new Thickness(0),
-            VerticalAlignment = VerticalAlignment.Stretch,
-        };
-        ToolTipService.SetToolTip(generate, "Auto-generate title");
-
-        var caption = new TextBlock
-        {
-            Text = "TITLE",
-            FontSize = 11,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            CharacterSpacing = 60,
-            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-        };
-
-        var fieldRow = new Grid { ColumnSpacing = 8 };
-        fieldRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        fieldRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        Grid.SetColumn(generate, 1);
-        fieldRow.Children.Add(input);
-        fieldRow.Children.Add(generate);
-
-        var hint = new TextBlock
-        {
-            FontSize = 11,
-            TextWrapping = TextWrapping.Wrap,
-            Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
-            Text = "Stored on this device. Leave it empty to go back to the automatic name.",
-        };
-
-        using var cts = new CancellationTokenSource();
-        generate.Click += async (_, _) =>
-        {
-            generate.IsEnabled = false;
-            generateIcon.Visibility = Visibility.Collapsed;
-            generateRing.Visibility = Visibility.Visible;
-
-            try
-            {
-                var suggestion = await ViewModel.SuggestTitleAsync(session, cts.Token);
-                if (suggestion is { Length: > 0 })
-                {
-                    input.Text = suggestion;
-                    input.SelectAll();
-                    input.Focus(FocusState.Programmatic);
-                }
-                else
-                {
-                    hint.Text = "This session has no prompt to name it from.";
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
-            finally
-            {
-                generateRing.Visibility = Visibility.Collapsed;
-                generateIcon.Visibility = Visibility.Visible;
-                generate.IsEnabled = true;
-            }
-        };
-
-        var panel = new StackPanel { Width = 380, Spacing = 10 };
-        panel.Children.Add(caption);
-        panel.Children.Add(fieldRow);
-        panel.Children.Add(hint);
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Content = panel,
-            PrimaryButtonText = "Save",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-        };
-
-        // No stock title header - the small caption carries the purpose - so the
-        // dialog padding is tightened to read as a compact form, not a page.
-        dialog.Resources["ContentDialogPadding"] = new Thickness(24, 18, 24, 18);
-
-        dialog.Opened += (_, _) => input.Focus(FocusState.Programmatic);
-        dialog.Closing += (_, _) => cts.Cancel();
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        try
-        {
-            await ViewModel.Sessions.RetitleAsync(session, input.Text);
-        }
-        catch (Exception ex)
-        {
-            await ShowTreeErrorAsync("Could not retitle session", ex.Message);
-        }
-    }
-
-    private async void OnDeleteSessionClick(object sender, RoutedEventArgs e)
-    {
-        if ((sender as FrameworkElement)?.DataContext is not SessionListItem session)
-        {
-            return;
-        }
-
-        if (session.IsOpen)
-        {
-            await ShowTreeErrorAsync("Session is open", "Close its tab before deleting it.");
-            return;
-        }
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = $"Delete \"{session.Title}\"?",
-            Content = "The conversation's transcript will be removed. This cannot be undone.",
-            PrimaryButtonText = "Delete",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close,
-        };
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        try
-        {
-            await ViewModel.Sessions.DeleteAsync(session);
-        }
-        catch (Exception ex)
-        {
-            await ShowTreeErrorAsync("Could not delete session", ex.Message);
-        }
-    }
-
-    private void OnInterruptedInfoBarClosed(InfoBar sender, InfoBarClosedEventArgs args) =>
-        sender.Visibility = Visibility.Collapsed;
-
-    private void OnReturnToLiveClick(object sender, RoutedEventArgs e) =>
-        ViewModel.ReturnToLiveSession();
-
     /// <summary>Picks a branch from the flyout; the flyout only closes once git accepts.</summary>
     private async void OnBranchClick(object sender, ItemClickEventArgs e)
     {
@@ -3627,245 +3062,6 @@ public sealed partial class WorkspacePage : Page
             }
         }
     }
-
-    /// <summary>Starts an isolated session. While isolated the card shows merge/discard instead.</summary>
-    private async void OnIsolatedSessionClick(object sender, RoutedEventArgs e) =>
-        await ViewModel.StartIsolatedSessionAsync();
-
-    /// <summary>Merges the isolated session's branch back into the project.</summary>
-    private async void OnMergeIsolatedClick(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel.Chat.IsBusy)
-        {
-            ViewModel.WorktreeError = "Wait for the current turn to finish before merging.";
-            return;
-        }
-
-        await ViewModel.LeaveIsolationAsync(merge: true);
-    }
-
-    /// <summary>Discards the isolated session's work, after confirming.</summary>
-    private async void OnDiscardIsolatedClick(object sender, RoutedEventArgs e)
-    {
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = "Discard the isolated session?",
-            Content = "The work done in the worktree is thrown away and this chat starts a fresh session in the project.",
-            PrimaryButtonText = "Discard",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close,
-        };
-
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
-        {
-            await ViewModel.LeaveIsolationAsync(merge: false);
-        }
-    }
-
-    /// <summary>
-    /// The model chip: one flyout, one tap. Default first - named, so it is clear what
-    /// "default" means - then the agent's catalogue (claude answers
-    /// list_models or falls back to its documented family). A pick applies immediately
-    /// and closes the flyout.
-    /// </summary>
-    private void OnModelChipClick(object sender, RoutedEventArgs e)
-    {
-        var chat = ViewModel.Chat;
-        var requested = chat.RequestedModel;
-        IReadOnlyList<AgentModelInfo> catalogue = chat.AvailableModels.Count > 0
-            ? chat.AvailableModels
-            : ClaudeAgentSession.DocumentedModels;
-
-        var panel = new StackPanel { Spacing = 2, MinWidth = 300 };
-        var flyout = PickerFlyout(panel);
-
-        panel.Children.Add(PickerTitle("Model"));
-
-        var defaultName = chat.DefaultModel is { } fallback ? chat.ModelName(fallback.Id) : null;
-        panel.Children.Add(PickOption(
-            OptionContent("\uE734", defaultName is null ? "Default" : $"Default · {defaultName}", $"Whatever {chat.ProviderName} starts with"),
-            requested is null, "model",
-            () => _ = ViewModel.ApplySessionConfigAsync(null, chat.RequestedEffort), flyout));
-
-        foreach (var model in catalogue)
-        {
-            var id = model.Id;
-            var name = chat.ModelName(id);
-            var detail = model.Description is { Length: > 0 } d ? d : id != name ? id : null;
-
-            panel.Children.Add(PickOption(
-                OptionContent("\uE99A", name, detail),
-                string.Equals(requested, id, StringComparison.OrdinalIgnoreCase),
-                "model",
-                () => _ = ViewModel.ApplySessionConfigAsync(id, chat.RequestedEffort),
-                flyout));
-        }
-
-        panel.Children.Add(PickerHint());
-
-        flyout.ShowAt((FrameworkElement)sender);
-    }
-
-    /// <summary>
-    /// The mode chip: how much the agent may do. Auto lets the helper model pick
-    /// per message, Ask explains and changes nothing, Planning researches and proposes,
-    /// Manual asks on every action, Accept edits auto-approves file writes, Full
-    /// runs without asking.
-    /// </summary>
-    private void OnModeChipClick(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.Chat.CanChangeMode)
-        {
-            return;
-        }
-
-        var panel = new StackPanel { Spacing = 2, MinWidth = 300 };
-        var flyout = PickerFlyout(panel);
-        var current = ViewModel.Chat.PermissionMode;
-
-        void Add(string mode, string glyph, string title, string detail, bool isCurrent) =>
-            panel.Children.Add(PickOption(OptionContent(glyph, title, detail), isCurrent, "mode",
-                () => _ = ViewModel.Chat.SetPermissionModeAsync(mode), flyout));
-
-        panel.Children.Add(PickerTitle("Mode"));
-        Add(ChatViewModel.AutomaticMode, "\uE82F", "Auto",
-            ViewModel.Chat.Router?.IsAvailable == true
-                ? "Picks the right mode per message"
-                : "Needs the Claude CLI to pick modes",
-            current == ChatViewModel.AutomaticMode);
-        Add(ChatViewModel.AskMode, "\uE8BD", "Ask", "Explains in detail, never edits files",
-            current == ChatViewModel.AskMode);
-        Add("plan", "\uE707", "Planning", "Researches first, proposes a plan to approve",
-            current == "plan");
-        Add("manual", "\uE7C9", "Manual", "Asks before every action",
-            current is "manual" or "default");
-        Add("acceptEdits", "\uE70F", "Accept edits", "Edits files freely, asks for the rest",
-            current == "acceptEdits");
-        Add("auto", "\uE945", "Full", "Works without asking",
-            current is "auto" or "dontAsk" or "bypassPermissions");
-        panel.Children.Add(PickerHint());
-
-        flyout.ShowAt((FrameworkElement)sender);
-    }
-
-    /// <summary>
-    /// The effort chip: the same single-tap flyout as the model chip. A model that
-    /// advertises its own efforts decides the list; otherwise Claude's documented vocabulary.
-    /// </summary>
-    private void OnEffortChipClick(object sender, RoutedEventArgs e)
-    {
-        var chat = ViewModel.Chat;
-        var requested = chat.RequestedEffort;
-        var efforts = chat.LiveEffortChoices
-            ?? ["low", "medium", "high", "xhigh", "max"];
-
-        var panel = new StackPanel { Spacing = 2, MinWidth = 260 };
-        var flyout = PickerFlyout(panel);
-
-        panel.Children.Add(PickerTitle("Effort"));
-        panel.Children.Add(PickOption(
-            OptionContent("\uE734", "CLI default", "What the CLI uses unless told otherwise"),
-            requested is null, "effort",
-            () => _ = ViewModel.ApplySessionConfigAsync(chat.RequestedModel, null), flyout));
-
-        foreach (var effort in efforts)
-        {
-            panel.Children.Add(PickOption(
-                OptionContent(EffortGlyph(effort), ChatViewModel.EffortName(effort), EffortDetail(effort)),
-                requested == effort, "effort",
-                () => _ = ViewModel.ApplySessionConfigAsync(chat.RequestedModel, effort), flyout));
-        }
-
-        panel.Children.Add(PickerHint());
-        flyout.ShowAt((FrameworkElement)sender);
-    }
-
-    /// <summary>A bar-chart ladder: more bars, more thinking.</summary>
-    private static string EffortGlyph(string effort) => effort switch
-    {
-        "minimal" => "\uE904",
-        "low" => "\uE905",
-        "medium" => "\uE906",
-        "high" => "\uE907",
-        _ => "\uE908",
-    };
-
-    private static string? EffortDetail(string effort) => effort switch
-    {
-        "minimal" => "Barely reasons, fastest replies",
-        "low" => "Quick replies for simple asks",
-        "medium" => "Balanced speed and depth",
-        "high" => "Thinks longer on hard problems",
-        "xhigh" => "Deep reasoning for tricky work",
-        "max" => "Longest thinking; restarts the session",
-        _ => null,
-    };
-
-    /// <summary>
-    /// A picker row's content: an icon, the choice's name, and a quieter line saying
-    /// what it does. Secondary text dims by opacity, which reads right in both themes.
-    /// </summary>
-    private static Grid OptionContent(string glyph, string title, string? detail)
-    {
-        var grid = new Grid { ColumnSpacing = 10 };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-        var icon = new FontIcon { Glyph = glyph, FontSize = 14, Opacity = 0.8, VerticalAlignment = VerticalAlignment.Center };
-        grid.Children.Add(icon);
-
-        var text = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
-        text.Children.Add(new TextBlock { Text = title, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        if (detail is { Length: > 0 })
-        {
-            text.Children.Add(new TextBlock { Text = detail, FontSize = 11, Opacity = 0.6, TextWrapping = TextWrapping.Wrap });
-        }
-
-        Grid.SetColumn(text, 1);
-        grid.Children.Add(text);
-        return grid;
-    }
-
-    /// <summary>A flyout in the shared popup style: floating card, rounded, hairline stroke.</summary>
-    private Flyout PickerFlyout(UIElement content) => new()
-    {
-        Content = content,
-        FlyoutPresenterStyle = (Style)Resources["PickerFlyout"],
-    };
-
-    /// <summary>The small quiet heading every picker popup shares.</summary>
-    private TextBlock PickerTitle(string text) =>
-        new() { Text = text, Style = (Style)Resources["PickerTitleText"] };
-
-    private TextBlock PickerHint() =>
-        new() { Text = "Applies without restarting the conversation.", Style = (Style)Resources["PickerHintText"] };
-
-    /// <summary>
-    /// One choice in a picker flyout: a full-width row with a trailing check, the
-    /// shared <c>PickerRow</c> style. Checking it applies and the flyout closes;
-    /// tapping the already-checked one simply dismisses. The Checked subscription
-    /// comes after IsChecked is set, so building the list never applies anything.
-    /// </summary>
-    private RadioButton PickOption(object content, bool isChecked, string group, Action apply, Flyout flyout)
-    {
-        var radio = new RadioButton
-        {
-            Style = (Style)Resources["PickerRow"],
-            GroupName = group,
-            Content = content,
-            IsChecked = isChecked,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
-
-        radio.Click += (_, _) => flyout.Hide();
-        radio.Checked += (_, _) => apply();
-        return radio;
-    }
-
-    /// <summary>New session in the project directory - no worktree, no branch, fresh transcript.</summary>
-    private void OnNewSessionClick(object sender, RoutedEventArgs e) =>
-        _ = ViewModel.StartNewChatSessionAsync();
 
     #region Status Bar Terminal Input and Slide-up Flyout
 
@@ -4465,6 +3661,81 @@ public sealed partial class WorkspacePage : Page
         _terminalDrawerAnimation?.Stop();
         _terminalDrawerAnimation = storyboard;
         storyboard.Begin();
+    }
+
+    private void OnPointerPressedOutsideDrawer(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isTerminalDrawerOpen)
+        {
+            return;
+        }
+
+        if (IsPointerInsideTerminalDrawer(e))
+        {
+            return;
+        }
+
+        CloseTerminalDrawer();
+    }
+
+    private bool IsPointerInsideTerminalDrawer(PointerRoutedEventArgs e)
+    {
+        if (e.OriginalSource is DependencyObject source)
+        {
+            if (IsDescendantOf(source, TerminalOutputDrawer))
+            {
+                return true;
+            }
+
+            if (IsDescendantOf(source, StatusBarToggleOutputButton))
+            {
+                return true;
+            }
+        }
+
+        try
+        {
+            var drawerPoint = e.GetCurrentPoint(TerminalOutputDrawer).Position;
+            if (drawerPoint.X >= 0 && drawerPoint.X <= TerminalOutputDrawer.ActualWidth &&
+                drawerPoint.Y >= 0 && drawerPoint.Y <= TerminalOutputDrawer.ActualHeight)
+            {
+                return true;
+            }
+
+            var togglePoint = e.GetCurrentPoint(StatusBarToggleOutputButton).Position;
+            if (togglePoint.X >= 0 && togglePoint.X <= StatusBarToggleOutputButton.ActualWidth &&
+                togglePoint.Y >= 0 && togglePoint.Y <= StatusBarToggleOutputButton.ActualHeight)
+            {
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
+    }
+
+    private static bool IsDescendantOf(DependencyObject node, DependencyObject root)
+    {
+        for (DependencyObject? current = node; current is not null;)
+        {
+            if (ReferenceEquals(current, root))
+            {
+                return true;
+            }
+
+            try
+            {
+                current = VisualTreeHelper.GetParent(current);
+            }
+            catch
+            {
+                break;
+            }
+        }
+
+        return false;
     }
 
     private void OnTerminalDrawerCloseClick(object sender, RoutedEventArgs e) => CloseTerminalDrawer();

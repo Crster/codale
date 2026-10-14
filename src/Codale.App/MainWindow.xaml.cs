@@ -119,8 +119,6 @@ public sealed partial class MainWindow : Window
     /// <summary>The commands flyout anchors here, at the button the click came from.</summary>
     public FrameworkElement CommandsButtonAnchor => CommandsButton;
 
-    /// <summary>The title-bar session button was clicked; the workspace page owns the panel.</summary>
-    public event EventHandler? SessionPanelToggled;
 
     /// <summary>The title-bar left-panel button was clicked; the workspace page owns the panel.</summary>
     public event EventHandler? LeftPanelToggled;
@@ -155,21 +153,6 @@ public sealed partial class MainWindow : Window
     private void OnTitleBarBrowserClick(object sender, RoutedEventArgs e) =>
         McpToolsRequested?.Invoke(this, EventArgs.Empty);
 
-    private void OnTitleBarSessionClick(object sender, RoutedEventArgs e) =>
-        SessionPanelToggled?.Invoke(this, EventArgs.Empty);
-
-    /// <summary>Shows the panel's open state on the title-bar toggle (filled = open).</summary>
-    public void SetSessionPanelOpen(bool open)
-    {
-        // A white wash only reads on dark; the light theme gets the same wash in black.
-        var light = RootGrid.ActualTheme == ElementTheme.Light;
-        SessionButton.Background = new SolidColorBrush(
-            Windows.UI.Color.FromArgb(
-                open ? (byte)0x18 : (byte)0x00,
-                light ? (byte)0x00 : (byte)0xFF,
-                light ? (byte)0x00 : (byte)0xFF,
-                light ? (byte)0x00 : (byte)0xFF));
-    }
 
     private void OnTitleBarLeftPanelClick(object sender, RoutedEventArgs e) =>
         LeftPanelToggled?.Invoke(this, EventArgs.Empty);

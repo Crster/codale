@@ -31,6 +31,12 @@ public sealed partial class TerminalTab : UserControl
         Terminal.Resized += (_, size) => _viewModel?.Resize((short)size.Cols, (short)size.Rows);
         Terminal.LinkActivated += (_, link) => LinkActivated?.Invoke(this, link);
 
+        SessionPanel.CollapseRequested += (_, _) => SetSessionPanelOpen(false);
+        SessionPanel.FileDiffRequested += (_, path) => FileDiffRequested?.Invoke(this, path);
+        SessionPanel.ArtifactRequested += (_, artifact) => ArtifactRequested?.Invoke(this, artifact);
+        SessionPanel.TaskPeekRequested += (_, task) => TaskPeekRequested?.Invoke(this, task);
+        SessionPanel.UpdateCliRequested += (_, cmd) => UpdateCliRequested?.Invoke(this, cmd);
+
         PointerPressed += (_, _) =>
         {
             if (Terminal.FocusState == FocusState.Unfocused)
@@ -51,6 +57,58 @@ public sealed partial class TerminalTab : UserControl
     /// <summary>A URL or file path in the output was Ctrl+clicked.</summary>
     public event EventHandler<LinkMatch>? LinkActivated;
 
+    /// <summary>True when this terminal tab hosts an agent CLI session.</summary>
+    public bool IsAgentCli => _viewModel?.AgentSession is not null;
+
+    /// <summary>The agent session if this terminal hosts an agent CLI session.</summary>
+    public ChatViewModel? AgentSession => _viewModel?.AgentSession;
+
+    /// <summary>Whether this tab's session panel is currently open.</summary>
+    public bool IsSessionPanelOpen => SessionPanel.Visibility == Visibility.Visible;
+
+    /// <summary>CLI update was requested from the session panel.</summary>
+    public event EventHandler<string>? UpdateCliRequested;
+
+    /// <summary>The parent workspace.</summary>
+    public WorkspaceViewModel? Workspace
+    {
+        get => SessionPanel.Workspace;
+        set => SessionPanel.Workspace = value;
+    }
+
+    /// <summary>A file change was clicked in the session panel, requesting diff view.</summary>
+    public event EventHandler<string>? FileDiffRequested;
+
+    /// <summary>An artifact was clicked in the session panel.</summary>
+    public event EventHandler<SessionArtifact>? ArtifactRequested;
+
+    /// <summary>A running task was clicked to peek at it.</summary>
+    public event EventHandler<RunningTaskItem>? TaskPeekRequested;
+
+    /// <summary>Toggles the session panel visibility for this terminal tab.</summary>
+    public void ToggleSessionPanel()
+    {
+        if (IsAgentCli)
+        {
+            SetSessionPanelOpen(SessionPanel.Visibility != Visibility.Visible);
+        }
+    }
+
+    public void SetSessionPanelOpen(bool open)
+    {
+        if (!IsAgentCli)
+        {
+            SessionPanel.Visibility = Visibility.Collapsed;
+            OpenPanelButton.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        SessionPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        OpenPanelButton.Visibility = open ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void OnOpenPanelClick(object sender, RoutedEventArgs e) => SetSessionPanelOpen(true);
+
     public TerminalViewModel ViewModel
     {
         get => _viewModel!;
@@ -58,6 +116,18 @@ public sealed partial class TerminalTab : UserControl
         {
             UnsubscribeFromViewModel();
             _viewModel = value;
+            if (_viewModel?.AgentSession is { } session)
+            {
+                SessionPanel.Session = session;
+                SessionPanel.Visibility = Visibility.Visible;
+                OpenPanelButton.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                SessionPanel.Session = null;
+                SessionPanel.Visibility = Visibility.Collapsed;
+                OpenPanelButton.Visibility = Visibility.Collapsed;
+            }
         }
     }
 

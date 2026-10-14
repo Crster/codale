@@ -22,6 +22,12 @@ public class CliLocatorTests
         var agy = CliLocator.KnownClis.First(c => c.Id == "agy");
         Assert.Equal("Antigravity", agy.DisplayName);
         Assert.Equal("agy", agy.Executable);
+
+        var codex = CliLocator.KnownClis.First(c => c.Id == "codex");
+        Assert.Equal("Codex", codex.DisplayName);
+        Assert.Equal("codex", codex.Executable);
+        Assert.Equal("npm i -g @openai/codex", codex.InstallCommand);
+        Assert.Equal("@openai/codex", CliVersionCheck.NpmPackage(codex));
     }
 
     [Fact]

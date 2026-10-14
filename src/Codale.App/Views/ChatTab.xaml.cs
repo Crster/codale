@@ -93,6 +93,36 @@ public sealed partial class ChatTab : UserControl
     /// <summary>The host opens a plan in its own tab, from the plan step's link.</summary>
     public event EventHandler<ToolCallItem>? PlanOpenRequested;
 
+    /// <summary>An artifact was clicked in the session panel.</summary>
+    public event EventHandler<SessionArtifact>? ArtifactRequested;
+
+    /// <summary>A running task was clicked to peek at it.</summary>
+    public event EventHandler<RunningTaskItem>? RunningTaskPeekRequested;
+
+    /// <summary>The parent workspace.</summary>
+    public WorkspaceViewModel? Workspace
+    {
+        get => SessionPanel.Workspace;
+        set => SessionPanel.Workspace = value;
+    }
+
+    /// <summary>Whether this tab's session panel is currently open.</summary>
+    public bool IsSessionPanelOpen => SessionPanel.Visibility == Visibility.Visible;
+
+    /// <summary>CLI update was requested from the session panel.</summary>
+    public event EventHandler<string>? UpdateCliRequested;
+
+    /// <summary>Toggles the session panel visibility for this chat tab.</summary>
+    public void ToggleSessionPanel() => SetSessionPanelOpen(SessionPanel.Visibility != Visibility.Visible);
+
+    public void SetSessionPanelOpen(bool open)
+    {
+        SessionPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        OpenPanelButton.Visibility = open ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void OnOpenPanelClick(object sender, RoutedEventArgs e) => SetSessionPanelOpen(true);
+
     /// <summary>Whether the transcript should ride the bottom. Only scroll events may
     /// change it: content growth is answered by following, so it must never count as
     /// "the reader moved away".</summary>
@@ -107,6 +137,12 @@ public sealed partial class ChatTab : UserControl
     public ChatTab()
     {
         InitializeComponent();
+
+        SessionPanel.CollapseRequested += (_, _) => SetSessionPanelOpen(false);
+        SessionPanel.FileDiffRequested += (_, path) => ToolFileRequested?.Invoke(this, new ToolFileRequestEventArgs(path, isEdit: true));
+        SessionPanel.ArtifactRequested += (_, artifact) => ArtifactRequested?.Invoke(this, artifact);
+        SessionPanel.TaskPeekRequested += (_, task) => RunningTaskPeekRequested?.Invoke(this, task);
+        SessionPanel.UpdateCliRequested += (_, cmd) => UpdateCliRequested?.Invoke(this, cmd);
 
         // The transcript reads in the chat font from Settings; FontFamily set here
         // inherits to every row that does not pin its own (the monospaced runs do).
@@ -184,6 +220,7 @@ public sealed partial class ChatTab : UserControl
 
             _viewModel = value;
             _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+            SessionPanel.Session = value;
             Bindings.Update();
             UpdateStopPulse();
         }

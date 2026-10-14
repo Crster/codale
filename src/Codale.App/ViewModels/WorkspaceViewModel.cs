@@ -34,7 +34,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// to the Claude CLI, or to a BYOK provider's API when Settings says so.
     /// </summary>
     private readonly HelperModel _helper = new(
-        () => AppSettings.HelperApiEndpoint is { } api ? new OpenAiEndpoint(api.BaseUrl, api.ApiKey, api.Model) : null);
+        () => AppSettings.HelperApiEndpoint is { } api ? new OpenAiEndpoint(api.BaseUrl, api.ApiKey, api.Model) : null,
+        () => AppSettings.HelperProvider);
+
+    /// <summary>Raised when a background task fails due to missing CLI authentication.</summary>
+    public event EventHandler<string?>? HelperLoginRequired;
 
     /// <summary>Automatic mode's message reader, shared by every chat in the window.</summary>
     private readonly MessageRouter _router;
@@ -47,6 +51,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         (_store, _databasePath, StorageWarning) = OpenStore();
 
         ExtraFolders = new WorkspaceFolders(_store, ProjectPath);
+        _helper.LoginRequired += cli => HelperLoginRequired?.Invoke(this, cli);
         Files = new FileTreeViewModel(ProjectPath, ExtraFolders);
         Git = new GitViewModel(ProjectPath, _helper);
         Search = new SearchViewModel(ProjectPath, _helper);
@@ -273,16 +278,18 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// </summary>
     public event EventHandler<ChatViewModel>? ChatActivationRequested;
 
-    /// <summary>A new conversation with its own status, wired to the workspace's refreshes.</summary>
-    public ChatViewModel CreateChat()
+    /// <summary>A new conversation with its own status, wired to the workspace's refreshes. Null <paramref name="cliId"/> keeps the default CLI.</summary>
+    public ChatViewModel CreateChat(string? cliId = null)
     {
-        var chat = new ChatViewModel(ProjectPath, new StatusViewModel(_customUsage), _endpoints, _mcp) { Router = _router, Helper = _helper, ExtraFolders = ExtraFolders, Terminals = new TerminalSource(this) };
+        var chat = new ChatViewModel(ProjectPath, new StatusViewModel(_customUsage), _endpoints, _mcp)
+        {
+            Router = _router, Helper = _helper, ExtraFolders = ExtraFolders, Terminals = new TerminalSource(this),
+            CliId = cliId is { Length: > 0 } ? cliId : Codale.Agents.CliLocator.ActiveCli.Id,
+        };
 
-        // App-level defaults from Settings. Resume and fork paths assign their own
-        // model/effort right after this, so they always win over the defaults.
-        chat.RequestedModel = AppSettings.DefaultModel is { Length: > 0 } model ? model : null;
-        chat.RequestedEffort = AppSettings.DefaultEffort is { Length: > 0 } effort ? effort : null;
-        chat.PermissionMode = AppSettings.DefaultChatMode;
+        // Model and effort come from the CLI's saved default pick (or its own default);
+        // the mode is the last one the user picked for this CLI.
+        chat.PermissionMode = AppSettings.DefaultModeFor(chat.CliId);
 
         chat.TurnFinished += OnTurnFinished;
         chat.FilesChanged += OnChatFilesChanged;
@@ -299,15 +306,21 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// A chat to start something new in: the one in front when it holds nothing yet,
     /// else a new one - opening a session never ends another that is still going.
     /// </summary>
-    public ChatViewModel FreshChat()
+    /// <summary>
+    /// A chat with nothing in it yet: the one in front when it holds nothing and runs the
+    /// wanted CLI, else the first blank unconnected one that does, else a new one.
+    /// </summary>
+    public ChatViewModel FreshChat(string? cliId = null)
     {
-        if (!Chat.HasConversation)
+        bool Wants(ChatViewModel chat) => cliId is null || string.Equals(chat.CliId, cliId, StringComparison.Ordinal);
+
+        if (!Chat.HasConversation && Wants(Chat))
         {
             return Chat;
         }
 
-        return Chats.FirstOrDefault(c => !c.HasConversation && !c.IsConnected)
-            ?? CreateChat();
+        return Chats.FirstOrDefault(c => !c.HasConversation && !c.IsConnected && Wants(c))
+            ?? CreateChat(cliId);
     }
 
     /// <summary>The chat's tab closed: its session ends, and the front moves to another chat.</summary>
@@ -774,9 +787,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
                 : Chats.FirstOrDefault(c => IsBlank(c) && !c.IsConnected) ?? CreateChat();
             await chat.DisposeSessionAsync();
             chat.ResetForNewSession();
-            chat.RequestedModel = AppSettings.DefaultModel is { Length: > 0 } model ? model : null;
-            chat.RequestedEffort = AppSettings.DefaultEffort is { Length: > 0 } effort ? effort : null;
-            chat.PermissionMode = AppSettings.DefaultChatMode;
+            chat.PermissionMode = AppSettings.DefaultModeFor(chat.CliId);
             chat.WorktreePath = path;
             ChatActivationRequested?.Invoke(this, chat);
 
@@ -960,35 +971,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     [ObservableProperty]
     public partial string? WorktreeError { get; set; }
 
-    /// <summary>
-    /// Applies a model/effort pick from the session card. Takes effect immediately:
-    /// the running session switches live when it can (set_model / apply_flag_settings),
-    /// and only restarts and resumes onto the same conversation when it cannot. With nothing connected the
-    /// values simply ride the next connect.
-    /// </summary>
-    public async Task ApplySessionConfigAsync(string? model, string? effort)
-    {
-        if (Chat.RequestedModel == model && Chat.RequestedEffort == effort)
-        {
-            return;
-        }
-
-        Chat.RequestedModel = model;
-        Chat.RequestedEffort = effort;
-
-        if (!Chat.IsConnected)
-        {
-            CrashLog.Trace($"Session config queued: model={model ?? "default"} effort={effort ?? "default"} (nothing running)");
-            return;
-        }
-
-        if (await Chat.TryApplyModelEffortLiveAsync(model, effort))
-        {
-            return;
-        }
-
-        await Chat.RestartWithCurrentConfigAsync();
-    }
 
     /// <summary>Where the agent on the panel is working: the project, or an isolated worktree.</summary>
     public string WorkingDirectory => Panel.WorktreePath ?? ProjectPath;
@@ -1022,9 +1004,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     }
 
     /// <summary>
-    /// A reused empty chat may still carry the last session's temporary picks (or defaults
-    /// from before Settings changed); a new chat starts from Settings. Picks made later in
-    /// the session override them again. A chat with a conversation is left alone.
+    /// A reused empty chat may still carry the last session's temporary picks; mode goes
+    /// back to Settings' default. Model and effort keep the CLI default for new sessions.
+    /// A chat with a conversation is left alone.
     /// </summary>
     public async Task ApplyDefaultsToEmptyChatAsync(ChatViewModel chat)
     {
@@ -1033,30 +1015,16 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             return;
         }
 
-        var model = AppSettings.DefaultModel is { Length: > 0 } m ? m : null;
-        var effort = AppSettings.DefaultEffort is { Length: > 0 } e ? e : null;
         if (chat.IsConnected)
         {
-            if (chat.RequestedModel != model || chat.RequestedEffort != effort)
-            {
-                chat.RequestedModel = model;
-                chat.RequestedEffort = effort;
-                if (!await chat.TryApplyModelEffortLiveAsync(model, effort))
-                {
-                    await chat.RestartWithCurrentConfigAsync();
-                }
-            }
-
-            if (AppSettings.DefaultChatMode is { Length: > 0 } mode)
+            if (AppSettings.DefaultModeFor(chat.CliId) is { Length: > 0 } mode)
             {
                 await chat.SetPermissionModeAsync(mode);
             }
         }
         else
         {
-            chat.RequestedModel = model;
-            chat.RequestedEffort = effort;
-            chat.PermissionMode = AppSettings.DefaultChatMode;
+            chat.PermissionMode = AppSettings.DefaultModeFor(chat.CliId);
         }
     }
 

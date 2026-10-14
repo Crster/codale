@@ -96,6 +96,33 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Extra folders granted to the agent next to the project; null grants none.</summary>
     public WorkspaceFolders? ExtraFolders { get; init; }
 
+    /// <summary>
+    /// The CLI this chat's panel session runs: "claude" (the default) or "codex",
+    /// picked by the button that opened the chat ("Claude chat" / "Codex chat").
+    /// Terminal-CLI chats are unaffected. Settable until the session connects.
+    /// </summary>
+    private string _cliId = Codale.Agents.CliLocator.ActiveCli.Id;
+
+    public string CliId
+    {
+        get => _cliId;
+        set
+        {
+            if (_cliId != value)
+            {
+                _cliId = value;
+                OnPropertyChanged(nameof(ProviderName));
+            }
+        }
+    }
+
+    /// <summary>The CLI descriptor behind <see cref="CliId"/>.</summary>
+    public Codale.Agents.CliDescriptor SessionCli =>
+        Codale.Agents.CliLocator.KnownClis.FirstOrDefault(cli => cli.Id == CliId) ?? Codale.Agents.CliLocator.ActiveCli;
+
+    /// <summary>True when this chat's panel session is a Codex CLI session.</summary>
+    private bool IsCodexSession => TerminalCli is null && SessionCli.Id == "codex";
+
     public ChatViewModel(string projectPath, StatusViewModel status, CliEndpointSettings? endpointSettings = null, McpServerSettings? mcpSettings = null)
     {
         _projectPath = projectPath;
@@ -103,6 +130,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _endpointSettings = endpointSettings;
         _mcpSettings = mcpSettings;
         RefreshCustomProviderName();
+
+        // A new chat starts where the user last left this CLI: the saved tier (resolved
+        // to model/effort), or the CLI's own default when nothing has been chosen yet.
+        (RequestedModel, RequestedEffort) = TierConfig(AppSettings.DefaultTierFor(CliId));
 
         _turnTimer = _dispatcher.CreateTimer();
         _turnTimer.Interval = TimeSpan.FromMilliseconds(1000);
@@ -135,9 +166,20 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public void RefreshCustomProviderName()
     {
-        _status.CustomProviderName =
-            AppSettings.HelperApiProvider?.Provider.Name.Trim() is { Length: > 0 } helperName ? helperName
-            : Codale.Agents.CliLocator.ActiveCli.DisplayName;
+        var helperName = AppSettings.HelperApiProvider?.Provider.Name.Trim();
+        if (helperName is { Length: > 0 })
+        {
+            _status.CustomProviderName = helperName;
+        }
+        else if (string.Equals(AppSettings.HelperProvider, "codex", StringComparison.OrdinalIgnoreCase))
+        {
+            _status.CustomProviderName = "Codex";
+        }
+        else
+        {
+            _status.CustomProviderName = Codale.Agents.CliLocator.ActiveCli.DisplayName;
+        }
+
         OnPropertyChanged(nameof(ProviderName));
         OnPropertyChanged(nameof(TabTitle));
     }
@@ -1040,6 +1082,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>The model, effort, mode and provider are locked while a turn is running or for a terminal CLI's session.</summary>
     public bool CanChangeMode => !IsBusy && !IsTerminalSession;
 
+    /// <summary>
+    /// True once a CLI-reported model catalogue is in hand. The model and effort pickers
+    /// stay disabled until then, so a click never shows the documented stand-in list
+    /// instead of the models this CLI can actually run.
+    /// </summary>
+    public bool HasModelCatalog { get; private set; }
+
+    /// <summary>The model and effort chips unlock when the session can take changes and the catalogue has landed.</summary>
+    public bool CanPickModel => CanChangeMode && HasModelCatalog;
+
     /// <summary>Running a turn without waiting on anyone: the tab's blue dot. Waiting shows amber instead.</summary>
     public bool IsBusyWorking => IsBusy && !IsWaitingForYou;
 
@@ -1178,8 +1230,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         AskMode => "Ask",
         AutomaticMode => "Auto",
         "" => "Default",
-        "plan" => "Planning",
-        "manual" or "default" => "Manual",
+        "plan" => "Plan",
+        "manual" or "default" => "Interactive",
         "acceptEdits" => "Accept edits",
         "auto" or "dontAsk" or "bypassPermissions" => "Full",
         _ => mode,
@@ -1236,7 +1288,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ModelDisplay))]
-    [NotifyPropertyChangedFor(nameof(LiveEffortChoices))]
+    [NotifyPropertyChangedFor(nameof(CurrentTier))]
     public partial string? RequestedModel { get; set; }
 
     /// <summary>
@@ -1244,24 +1296,20 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// accepts its own vocabulary, so connects clamp through the option records.
     /// </summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(EffortDisplay))]
+    [NotifyPropertyChangedFor(nameof(CurrentTier))]
     public partial string? RequestedEffort { get; set; }
 
     /// <summary>
-    /// The model chip: what the user asked for, else what the CLI reported it connected
-    /// with, else "Default" - the CLI's own pick is not guessed before it connects.
+    /// The model chip: the tier the user picked, else what the CLI reported it connected
+    /// with - the CLI's own pick is not guessed before it connects.
     /// </summary>
-    public string ModelDisplay => ModelName(
-        RequestedModel is { Length: > 0 } requested ? requested : ConnectedModel);
+    public string ModelDisplay => CurrentTier == "cli" && ConnectedModel is { } connected
+        ? ModelName(connected)
+        : TierTitle(CurrentTier);
 
     /// <summary>The model the running session reported, or null before it has.</summary>
     private string? ConnectedModel =>
         _status.Model is { Length: > 0 } model && model != StatusViewModel.NotConnected ? model : null;
-
-    /// <summary>The model the CLI picks when none is forced: the catalogue's own flag, else Claude's documented default.</summary>
-    public AgentModelInfo? DefaultModel =>
-        AvailableModels.FirstOrDefault(m => m.IsDefault)
-        ?? ClaudeAgentSession.DocumentedModels.FirstOrDefault(m => m.IsDefault);
 
     /// <summary>
     /// The model or effort to hand the CLI: the pick, else null so the CLI uses its own
@@ -1275,7 +1323,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         if (id is not { Length: > 0 })
         {
-            return "Default";
+            // "CLI": no pick saved, so the session uses whatever the CLI starts with.
+            return "CLI";
         }
 
         if (AvailableModels.FirstOrDefault(m => string.Equals(m.Id, id, StringComparison.OrdinalIgnoreCase))
@@ -1288,73 +1337,146 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             }
         }
 
-        return ClaudeAgentSession.FriendlyModelName(id);
+        return IsCodexSession
+            ? Codale.Agents.Codex.CodexAgentSession.FriendlyModelName(id)
+            : ClaudeAgentSession.FriendlyModelName(id);
     }
 
-    /// <summary>
-    /// The effort a session gets when none is forced: the model's advertised default,
-    /// else medium - what the CLI starts its current models at.
-    /// </summary>
-    public string DefaultEffort
-    {
-        get
-        {
-            var id = RequestedModel ?? ConnectedModel ?? DefaultModel?.Id;
-            var model = AvailableModels.FirstOrDefault(m => string.Equals(m.Id, id, StringComparison.OrdinalIgnoreCase))
-                ?? ClaudeAgentSession.DocumentedModels.FirstOrDefault(m => string.Equals(m.Id, id, StringComparison.OrdinalIgnoreCase));
-            return model?.DefaultEffort is { Length: > 0 } effort ? effort : "medium";
-        }
-    }
-
-    /// <summary>The effort chip: the request, or the effort the CLI will actually use.</summary>
-    public string EffortDisplay => RequestedEffort is { Length: > 0 } effort ? EffortName(effort) : "Default";
-
-    /// <summary>"xhigh" reads "Extra high"; the rest are capitalised.</summary>
-    public static string EffortName(string effort) => effort switch
-    {
-        "xhigh" => "Extra high",
-        { Length: > 0 } => char.ToUpperInvariant(effort[0]) + effort[1..],
-        _ => effort,
-    };
-
-    /// <summary>Everything the chips show that depends on the catalogue or the connected model.</summary>
-    private void NotifyModelDisplays()
-    {
-        OnPropertyChanged(nameof(ModelDisplay));
-        OnPropertyChanged(nameof(EffortDisplay));
-        OnPropertyChanged(nameof(DefaultModel));
-        OnPropertyChanged(nameof(DefaultEffort));
-        OnPropertyChanged(nameof(LiveEffortChoices));
-    }
-
-    partial void OnRequestedModelChanged(string? value) => NotifyModelDisplays();
+    /// <summary>Records the user's permission-mode pick as this CLI's new default.</summary>
+    public void RememberModeAsDefault(string mode) => AppSettings.SetDefaultMode(CliId, mode);
 
     /// <summary>Models the session reports, for the session card's picker.</summary>
     public IReadOnlyList<AgentModelInfo> AvailableModels { get; private set; } = [];
 
     /// <summary>
-    /// Effort choices for the effort menu: the picked or connected model's own
-    /// vocabulary when the CLI advertised one, else null and the caller falls back to
-    /// the documented list.
+    /// The model picker's tiers. Lite and Flash run the fast ("flash") model, Pro and
+    /// Plus the capable ("pro") one, each at its tier's effort; CLI hands the choice to
+    /// the CLI. Which model plays flash and pro comes from settings, guessed from the
+    /// catalogue when unset.
     /// </summary>
-    public IReadOnlyList<string>? LiveEffortChoices
+    public static readonly string[] ModelTiers = ["cli", "lite", "flash", "pro", "plus"];
+
+    public static string TierTitle(string tier) => tier switch
+    {
+        "lite" => "Lite",
+        "flash" => "Flash",
+        "pro" => "Pro",
+        "plus" => "Plus",
+        _ => "CLI",
+    };
+
+    /// <summary>The model id playing the fast tier for this CLI: the setting, else a guess from the catalogue.</summary>
+    public string? FlashModel => ModelForTier("flash");
+
+    /// <summary>The model id playing the capable tier for this CLI: the setting, else a guess from the catalogue.</summary>
+    public string? ProModel => ModelForTier("pro");
+
+    private string? ModelForTier(string tier)
+    {
+        if (AppSettings.TierModelFor(CliId, tier) is { Length: > 0 } configured)
+        {
+            return configured;
+        }
+
+        string[] fastHints = ["flash", "lite", "mini", "haiku", "luna", "small"];
+        string[] proHints = ["pro", "max", "opus", "ultra", "big"];
+        var hints = tier == "flash" ? fastHints : proHints;
+
+        string Name(AgentModelInfo model) => $"{model.Id} {model.DisplayName}";
+        var hinted = AvailableModels.FirstOrDefault(model => hints.Any(hint => Name(model).Contains(hint, StringComparison.OrdinalIgnoreCase)));
+        if (hinted is not null)
+        {
+            return hinted.Id;
+        }
+
+        // No name hints: flash stays on the CLI's own model; pro takes the catalogue's default.
+        return tier == "pro"
+            ? (AvailableModels.FirstOrDefault(m => m.IsDefault) ?? AvailableModels.FirstOrDefault())?.Id
+            : null;
+    }
+
+    /// <summary>The (model, effort) a tier hands the CLI. Null model keeps the CLI's own pick.</summary>
+    public (string? Model, string? Effort) TierConfig(string tier) => tier switch
+    {
+        "lite" => (FlashModel, "low"),
+        "flash" => (FlashModel, "medium"),
+        "pro" => (ProModel, "medium"),
+        "plus" => (ProModel, "high"),
+        _ => (null, null),
+    };
+
+    /// <summary>The tier matching the current model/effort pick, or "cli" when none does.</summary>
+    public string CurrentTier
     {
         get
         {
-            var match = AvailableModels.FirstOrDefault(m =>
-                string.Equals(m.Id, RequestedModel, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(m.Id, _status.Model, StringComparison.OrdinalIgnoreCase));
+            foreach (var tier in ModelTiers)
+            {
+                var (model, effort) = TierConfig(tier);
+                if (string.Equals(model, RequestedModel, StringComparison.OrdinalIgnoreCase) && effort == RequestedEffort)
+                {
+                    return tier;
+                }
+            }
 
-            return match?.SupportedEfforts is { Count: > 0 } efforts ? efforts : null;
+            return "cli";
         }
     }
 
     /// <summary>
-    /// The last catalogue the CLI reported. A new chat starts from it, so the picker
-    /// is populated the moment the tab appears instead of after the CLI has connected and
-    /// answered; the live answer then replaces it only if it differs.
+    /// Applies a tier pick: the model/effort it resolves to goes to the running session
+    /// live when it can, a restart when it cannot, and it becomes this CLI's new default.
     /// </summary>
-    private static IReadOnlyList<AgentModelInfo>? CachedModels;
+    public async Task ApplyTierAsync(string tier)
+    {
+        var (model, effort) = TierConfig(tier);
+        if (RequestedModel == model && RequestedEffort == effort)
+        {
+            return;
+        }
+
+        RequestedModel = model;
+        RequestedEffort = effort;
+        AppSettings.SetDefaultTier(CliId, tier);
+
+        if (!IsConnected)
+        {
+            CrashLog.Trace($"Session config queued: tier={tier} (nothing running)");
+            return;
+        }
+
+        if (await TryApplyModelEffortLiveAsync(model, effort))
+        {
+            return;
+        }
+
+        await RestartWithCurrentConfigAsync();
+    }
+
+    /// <summary>Everything the chips show that depends on the catalogue or the model/effort pick.</summary>
+    private void NotifyModelDisplays()
+    {
+        OnPropertyChanged(nameof(ModelDisplay));
+        OnPropertyChanged(nameof(CurrentTier));
+        OnPropertyChanged(nameof(FlashModel));
+        OnPropertyChanged(nameof(ProModel));
+    }
+
+    partial void OnRequestedModelChanged(string? value) => NotifyModelDisplays();
+
+    partial void OnRequestedEffortChanged(string? value) => OnPropertyChanged(nameof(ModelDisplay));
+
+    /// <summary>
+    /// The catalogues the CLIs reported, fetched once per CLI run and reused: a new chat
+    /// starts from its CLI's list, so the picker is populated the moment the tab appears
+    /// instead of after the CLI has connected and answered; the live answer then replaces
+    /// it only if it differs. Also feeds the settings page's tier-model pickers.
+    /// </summary>
+    private static readonly Dictionary<string, IReadOnlyList<AgentModelInfo>> CachedModels = new(StringComparer.Ordinal);
+
+    /// <summary>The catalogue <paramref name="cliId"/> reported this run, or null before its first chat connected.</summary>
+    public static IReadOnlyList<AgentModelInfo>? KnownCatalogue(string cliId) =>
+        CachedModels.TryGetValue(cliId, out var models) ? models : null;
 
     private static bool SameModels(IReadOnlyList<AgentModelInfo> a, IReadOnlyList<AgentModelInfo> b) =>
         a.Count == b.Count &&
@@ -1403,13 +1525,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             if (ConnectedModel is { } connected &&
                 !models.Any(m => string.Equals(m.Id, connected, StringComparison.OrdinalIgnoreCase)))
             {
-                var name = ClaudeAgentSession.FriendlyModelName(connected);
+                var name = ModelName(connected);
                 models = models.Append(new AgentModelInfo { Id = connected, DisplayName = name, Description = connected }).ToList();
             }
 
             if (!IsEndpointActive)
             {
-                CachedModels = models;
+                CachedModels[CliId] = models;
             }
 
             // A refresh that found nothing new must not re-fire the pickers.
@@ -1419,7 +1541,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             }
 
             AvailableModels = models;
+            HasModelCatalog = models.Count > 0;
             OnPropertyChanged(nameof(AvailableModels));
+            OnPropertyChanged(nameof(HasModelCatalog));
+            OnPropertyChanged(nameof(CanPickModel));
             NotifyModelDisplays();
             CrashLog.Trace($"Model list: {models.Count} available from {ProviderName}");
         }
@@ -1430,10 +1555,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>
-    /// The CLI answered that it has no credentials ("Not logged in · Please run
-    /// /login"). Logging in is interactive, so the page offers a terminal for it.
+    /// The CLI answered that it has no credentials ("Not logged in", "401 Unauthorized", etc.).
+    /// Logging in is interactive, so the page offers a terminal for it.
     /// </summary>
-    public event EventHandler? LoginRequired;
+    public event EventHandler<string?>? LoginRequired;
 
     /// <summary>
     /// The conversation needs the reader: a question or permission is open, or the turn
@@ -1450,13 +1575,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         if (text.Contains("Not logged in", StringComparison.OrdinalIgnoreCase) ||
-            text.Contains("Please run /login", StringComparison.OrdinalIgnoreCase))
+            text.Contains("Please run /login", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("codex login", StringComparison.OrdinalIgnoreCase) ||
+            (IsCodexSession && (text.Contains("401 Unauthorized", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("Missing bearer or basic authentication", StringComparison.OrdinalIgnoreCase))))
         {
-            LoginRequired?.Invoke(this, EventArgs.Empty);
+            LoginRequired?.Invoke(this, IsCodexSession ? "Codex" : ProviderName);
         }
     }
 
-    public string ProviderName => (TerminalCli ?? Codale.Agents.CliLocator.ActiveCli).DisplayName;
+    public string ProviderName => TerminalCli?.DisplayName ?? SessionCli.DisplayName;
 
     /// <summary>Provider-assigned id of the live session, once it has started.</summary>
     public string? SessionId => _session?.SessionId;
@@ -1544,39 +1672,46 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         // With a custom endpoint the catalogue's Anthropic ids mean nothing to the
         // gateway (it answers "issue with the selected model"): the picker offers the
-        // endpoint's own default / smart model and a session starts with the default.
-        IReadOnlyDictionary<string, string>? claudeEndpoint;
+        // endpoint's own default / pro model and a session starts with the default.
+        // Codex talks to the OpenAI-compatible base URL, Claude to the Anthropic one.
+        IReadOnlyDictionary<string, string>? endpointEnv;
         try
         {
-            claudeEndpoint = ClaudeEndpointEnvironment();
+            endpointEnv = IsCodexSession ? CodexEndpointEnvironment() : ClaudeEndpointEnvironment();
         }
         catch (InvalidOperationException ex)
         {
-            // The local bridge to the provider could not start: say so rather than fall back to the Claude login.
-            CrashLog.Error("chat", "Connect FAILED: no bridge", ex);
+            // The provider cannot serve this CLI (e.g. OpenAI-only for Claude): say so rather than fall back to a login.
+            CrashLog.Error("chat", "Connect FAILED: no endpoint", ex);
             Add(new NoticeItem { Text = $"Could not start {ProviderName}: {ex.Message}", Severity = NoticeSeverity.Error });
             return;
         }
 
         _connectedProvider = SelectedProviderName();
-        _status.IsCustomProvider = claudeEndpoint is not null;
+        _status.IsCustomProvider = endpointEnv is not null;
         RefreshCustomProviderName();
-        var endpointModels = claudeEndpoint is not null ? EndpointModels() : [];
+        var endpointModels = endpointEnv is not null ? EndpointModels() : [];
         if (endpointModels.Count > 0)
         {
             AvailableModels = endpointModels;
+            HasModelCatalog = endpointModels.Count > 0;
             OnPropertyChanged(nameof(AvailableModels));
+            OnPropertyChanged(nameof(HasModelCatalog));
+            OnPropertyChanged(nameof(CanPickModel));
             NotifyModelDisplays();
         }
 
-        else if (claudeEndpoint is null && AvailableModels.Count == 0 && CachedModels is { } cachedModels)
+        else if (endpointEnv is null && AvailableModels.Count == 0 && CachedModels.TryGetValue(CliId, out var cachedModels))
         {
             AvailableModels = cachedModels;
+            HasModelCatalog = cachedModels.Count > 0;
             OnPropertyChanged(nameof(AvailableModels));
+            OnPropertyChanged(nameof(HasModelCatalog));
+            OnPropertyChanged(nameof(CanPickModel));
             NotifyModelDisplays();
         }
 
-        var model = endpointModels.Count > 0 || claudeEndpoint is not null
+        var model = endpointModels.Count > 0 || endpointEnv is not null
             ? EndpointModelFor(RequestedModel, endpointModels)
             : LaunchValue(RequestedModel);
 
@@ -1588,7 +1723,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         // A custom endpoint's models are unknown to the effort tables, so they get only a pick.
-        var effort = ClaudeSessionOptions.ClampEffort(claudeEndpoint is not null ? RequestedEffort : LaunchValue(RequestedEffort));
+        var effort = IsCodexSession
+            ? Codale.Agents.Codex.CodexSessionOptions.ClampEffort(endpointEnv is not null ? RequestedEffort : LaunchValue(RequestedEffort))
+            : ClaudeSessionOptions.ClampEffort(endpointEnv is not null ? RequestedEffort : LaunchValue(RequestedEffort));
 
         CrashLog.Trace(
             $"Connect: provider={ProviderName} model={model ?? "default"} effort={effort ?? "default"} " +
@@ -1607,8 +1744,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             // shipped are the agent's background shells refused (there'd be no other way).
             string? shellGuard = null;
             var hooks = new ClaudeHookSettings { DenyRules = AppSettings.TokenSaverDenyRules };
-            var environment = claudeEndpoint is null ? new Dictionary<string, string>() : new Dictionary<string, string>(claudeEndpoint);
-            if (AppSettings.FindByok(EndpointName) is { IsAccount: true } account)
+            var environment = endpointEnv is null ? new Dictionary<string, string>() : new Dictionary<string, string>(endpointEnv);
+            if (!IsCodexSession && AppSettings.FindByok(EndpointName) is { IsAccount: true } account)
             {
                 environment["CLAUDE_CONFIG_DIR"] = account.ConfigDir;
             }
@@ -1644,41 +1781,56 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             _sessionMcpServers = mcpServers;
             _handoffOffered = false;
 
-            if (AppSettings.TokenSaverAutoCompactPercent is > 0 and var compactAt)
+            if (AppSettings.TokenSaverAutoCompactPercent is > 0 and var compactAt && !IsCodexSession)
             {
                 environment["CLAUDE_CODE_AUTOCOMPACT_PCT_OVERRIDE"] = compactAt.ToString(CultureInfo.InvariantCulture);
             }
 
-            if (claudeEndpoint is not null)
+            if (endpointEnv is not null)
             {
                 CrashLog.Trace($"Connect: endpoint override active for {ProviderName}");
             }
 
-            var activeCli = Codale.Agents.CliLocator.ActiveCli;
+            var activeCli = SessionCli;
             var cliExecutable = activeCli.ResolvedPath ?? activeCli.Executable;
+            _status.CliName = $"{activeCli.DisplayName} CLI";
 
-            IAgentSession session = starting = new ClaudeAgentSession(new ClaudeSessionOptions
-            {
-                WorkingDirectory = workingDirectory,
-                Executable = cliExecutable,
-                AdditionalDirectories = ExtraFolders?.Folders ?? [],
-                Model = model,
-                Effort = effort,
-                PermissionMode = permissionMode,
-                SystemPromptAppend = WithMcpDirective(AlwaysPlanDirective, mcpServers),
-                McpServers = mcpServers,
-                BackgroundShellGuardCommand = shellGuard,
-                Hooks = hooks,
-                DisallowedTools = shellGuard is not null ? McpServerSettings.NativeTodoTools : null,
-                Agents = AppSettings.TokenSaverCheapSubagents
-                    ? ClaudeSubagents.Build(model, tasksHost is not null && assist && AppSettings.TokenSaverExplore)
-                    : null,
-                PromptSuggestions = AppSettings.SuggestNextPrompt,
-                SessionId = ResumeSessionId is null ? Guid.NewGuid() : null,
-                ResumeSessionId = ResumeSessionId,
-                RawLogPath = CrashLog.NewRawLogPath($"{activeCli.Id}-{ResumeSessionId?[..8] ?? "new"}"),
-                Environment = environment.Count == 0 ? null : environment,
-            });
+            IAgentSession session = starting = IsCodexSession
+                ? new Codale.Agents.Codex.CodexAgentSession(new Codale.Agents.Codex.CodexSessionOptions
+                {
+                    WorkingDirectory = workingDirectory,
+                    Executable = cliExecutable,
+                    Model = model,
+                    Effort = effort,
+                    PermissionMode = permissionMode,
+                    McpServers = mcpServers,
+                    ResumeSessionId = ResumeSessionId,
+                    RawLogPath = CrashLog.NewRawLogPath($"{activeCli.Id}-{ResumeSessionId?[..8] ?? "new"}"),
+                    Environment = environment.Count == 0 ? null : environment,
+                    CustomProvider = _endpointSettings?.CodexProvider(EndpointName),
+                })
+                : new ClaudeAgentSession(new ClaudeSessionOptions
+                {
+                    WorkingDirectory = workingDirectory,
+                    Executable = cliExecutable,
+                    AdditionalDirectories = ExtraFolders?.Folders ?? [],
+                    Model = model,
+                    Effort = effort,
+                    PermissionMode = permissionMode,
+                    SystemPromptAppend = WithMcpDirective(AlwaysPlanDirective, mcpServers),
+                    McpServers = mcpServers,
+                    BackgroundShellGuardCommand = shellGuard,
+                    Hooks = hooks,
+                    DisallowedTools = shellGuard is not null ? McpServerSettings.NativeTodoTools : null,
+                    Agents = AppSettings.TokenSaverCheapSubagents
+                        ? ClaudeSubagents.Build(model, tasksHost is not null && assist && AppSettings.TokenSaverExplore)
+                        : null,
+                    PromptSuggestions = AppSettings.SuggestNextPrompt,
+                    SessionId = ResumeSessionId is null ? Guid.NewGuid() : null,
+                    ResumeSessionId = ResumeSessionId,
+                    RawLogPath = CrashLog.NewRawLogPath($"{activeCli.Id}-{ResumeSessionId?[..8] ?? "new"}"),
+                    Environment = environment.Count == 0 ? null : environment,
+                });
 
             _session = session;
 
@@ -1702,7 +1854,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             // Usage otherwise arrives only with a turn's rate_limit_event; a BYOK endpoint or
             // an inherited ANTHROPIC_* override has no Claude subscription behind it.
-            var overrideCli = claudeEndpoint is not null || EnvironmentOverridesEndpoint();
+            var overrideCli = endpointEnv is not null || EnvironmentOverridesEndpoint();
             _status.IsOverrideCli = overrideCli;
             if (!overrideCli)
             {
@@ -1714,7 +1866,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             // The CLI has no stored conversation for the id (the session died before its first
             // turn was saved, or ran under another provider): start a fresh one instead.
             var resumeLost = ResumeSessionId is not null &&
-                ex.Message.Contains("No conversation found with session ID", StringComparison.OrdinalIgnoreCase);
+                (ex.Message.Contains("No conversation found with session ID", StringComparison.OrdinalIgnoreCase) ||
+                 ex.Message.Contains("no rollout found", StringComparison.OrdinalIgnoreCase) ||
+                 ex.Message.Contains("thread not found", StringComparison.OrdinalIgnoreCase) ||
+                 (ex.Message.Contains("thread", StringComparison.OrdinalIgnoreCase) && ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase)));
 
             CrashLog.Error("chat", "Connect FAILED", ex);
             if (!resumeLost)
@@ -1879,11 +2034,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
          (_readGuardActive && denied.ToolName == "Read" && message.Contains("hook", StringComparison.OrdinalIgnoreCase)));
 
     /// <summary>True when this chat runs against the custom endpoint.</summary>
-    private bool IsEndpointActive => _endpointSettings?.IsActive(EndpointName) == true;
+    private bool IsEndpointActive => _endpointSettings?.IsActive(EndpointName, openAiCompatible: !IsCodexSession) == true;
 
     /// <summary>
     /// A saved pick such as "sonnet" or "claude-opus-5-5" means nothing to a custom provider:
-    /// opus / fable become its smart model, anything else not on its list its default model.
+    /// opus / fable become its pro model, anything else not on its list its default model.
     /// </summary>
     internal static string? EndpointModelFor(string? requested, IReadOnlyList<AgentModelInfo> endpointModels)
     {
@@ -1903,11 +2058,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         return (fallback ?? endpointModels.FirstOrDefault(m => m.IsDefault) ?? endpointModels[0]).Id;
     }
 
-    /// <summary>The endpoint's default and smart model as a catalogue; empty when it is off or has no names.</summary>
+    /// <summary>The endpoint's default and pro model as a catalogue; empty when it is off or has no names.</summary>
     private IReadOnlyList<AgentModelInfo> EndpointModels() => _endpointSettings?.Models(EndpointName) ?? [];
 
     /// <summary>The endpoint as Claude's spawn environment, or null when it is off.</summary>
     private IReadOnlyDictionary<string, string>? ClaudeEndpointEnvironment() => _endpointSettings?.ClaudeEnvironment(EndpointName);
+
+    private IReadOnlyDictionary<string, string>? CodexEndpointEnvironment() => _endpointSettings?.CodexEnvironment(EndpointName);
 
     /// <summary>
     /// True when the ambient environment points the CLI away from Anthropic - an
@@ -3824,7 +3981,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async Task RestartWithCurrentConfigAsync()
     {
-        var resumeId = SessionId;
+        var resumeId = Items.Any(i => i is UserMessageItem or TurnActivityItem) ? SessionId : null;
         CrashLog.Trace(
             $"Restart for config: model={RequestedModel ?? "default"} effort={RequestedEffort ?? "default"} " +
             $"resume={resumeId ?? "none"}");
@@ -3857,7 +4014,22 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(EndpointName));
         RefreshCustomProviderName();
 
-        if (!IsConnected || _session is null || _connecting || _connectedProvider == SelectedProviderName())
+        if (!IsConnected || _session is null || _connecting)
+        {
+            if (!IsConnected && !_connecting)
+            {
+                RequestedModel = null;
+                AvailableModels = [];
+                HasModelCatalog = false;
+                OnPropertyChanged(nameof(AvailableModels));
+                OnPropertyChanged(nameof(HasModelCatalog));
+                OnPropertyChanged(nameof(CanPickModel));
+                await ConnectAsync();
+            }
+            return;
+        }
+
+        if (_connectedProvider == SelectedProviderName())
         {
             return;
         }
@@ -3865,16 +4037,24 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // The old endpoint's model names mean nothing to the new one (and vice versa).
         RequestedModel = null;
         AvailableModels = [];
+        HasModelCatalog = false;
         OnPropertyChanged(nameof(AvailableModels));
+        OnPropertyChanged(nameof(HasModelCatalog));
+        OnPropertyChanged(nameof(CanPickModel));
 
         CrashLog.Trace($"Provider changed {(_connectedProvider is { Length: > 0 } ? _connectedProvider : "Default")} -> {(SelectedProviderName() is { Length: > 0 } n ? n : "Default")}; restarting session");
         await RestartWithCurrentConfigAsync();
 
         if (IsConnected)
         {
+            var defaultLogin = $"the {ProviderName} login";
+            var targetName = SelectedProviderName() is { Length: > 0 } now ? now : defaultLogin;
+            var text = Items.Any(i => i is UserMessageItem or TurnActivityItem)
+                ? $"Switched to {targetName}. The conversation continues."
+                : $"Switched to {targetName}.";
             Add(new NoticeItem
             {
-                Text = $"Switched to {(SelectedProviderName() is { Length: > 0 } now ? now : "the Claude login")}. The conversation continues.",
+                Text = text,
                 Severity = NoticeSeverity.Info,
             });
         }
@@ -4420,14 +4600,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (_session is { } session)
         {
             CrashLog.Trace($"Dispose session: session={session.SessionId ?? "unknown"}");
-            try
-            {
-                await session.DisposeAsync();
-            }
-            finally
-            {
-                _session = null;
-            }
+
+            // Detach first: the dying process's SessionEnded (and its stderr, e.g. a failed
+            // default-login connect) then reaches a pump that no longer owns it and is dropped.
+            _session = null;
+            await session.DisposeAsync();
         }
     }
 }

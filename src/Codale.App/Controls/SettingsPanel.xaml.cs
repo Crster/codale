@@ -2,6 +2,7 @@ using Codale.Agents.Claude;
 using Codale.Agents;
 using Codale.Agents.OpenAi;
 using Codale.App.Services;
+using Codale.App.ViewModels;
 using Codale.Core.Syntax;
 
 using Microsoft.UI.Xaml;
@@ -103,16 +104,11 @@ public sealed partial class SettingsPanel : UserControl
 
         DefaultChatModeBox.SelectedIndex = Math.Max(0, DefaultChatModeBox.Items.ToList().FindIndex(
             i => (i as ComboBoxItem)?.Tag as string == AppSettings.DefaultChatMode));
-        BuildDefaultModelItems();
-        DefaultEffortBox.SelectedIndex = AppSettings.DefaultEffort switch
-        {
-            "low" => 1,
-            "medium" => 2,
-            "high" => 3,
-            "xhigh" => 4,
-            "max" => 5,
-            _ => 0,
-        };
+
+        DefaultTierBox.SelectedIndex = Math.Max(0, DefaultTierBox.Items.ToList().FindIndex(
+            i => (i as ComboBoxItem)?.Tag as string == AppSettings.DefaultTierFor("claude")));
+
+        BuildTierModelRows();
 
         ChatFontSizeBox.Value = AppSettings.ChatFontSize;
         PopulateChatFontFamilies();
@@ -325,7 +321,7 @@ public sealed partial class SettingsPanel : UserControl
         RefreshHelperProviderBox();
     }
 
-    /// <summary>Rebuilds the background-task provider list: "First available", then each provider by name.</summary>
+    /// <summary>Rebuilds the background-task provider list: Claude, Codex, then each BYOK provider by name.</summary>
     private void RefreshHelperProviderBox()
     {
         var wasLoading = _loading;
@@ -334,18 +330,12 @@ public sealed partial class SettingsPanel : UserControl
         {
             var wanted = AppSettings.HelperProvider;
             HelperProviderBox.Items.Clear();
+            HelperProviderBox.IsEnabled = true;
+
+            HelperProviderBox.Items.Add("Claude");
+            HelperProviderBox.Items.Add("Codex");
+
             var named = _providers.Where(p => p.Name.Trim().Length > 0 && !p.IsAccount).ToList();
-
-            // No custom provider to call: background tasks run on the Claude CLI, so say so.
-            HelperProviderBox.IsEnabled = named.Count > 0;
-            if (named.Count == 0)
-            {
-                HelperProviderBox.Items.Add("Claude CLI");
-                HelperProviderBox.SelectedIndex = 0;
-                return;
-            }
-
-            HelperProviderBox.Items.Add("First available");
             foreach (var provider in named)
             {
                 HelperProviderBox.Items.Add(provider.Name.Trim());
@@ -360,6 +350,7 @@ public sealed partial class SettingsPanel : UserControl
         {
             _loading = wasLoading;
             RefreshTokenSaverHint();
+            RefreshCodexAuthStatus();
         }
     }
 
@@ -367,9 +358,85 @@ public sealed partial class SettingsPanel : UserControl
     {
         if (!_loading && HelperProviderBox.SelectedIndex >= 0)
         {
-            var name = HelperProviderBox.SelectedIndex == 0 ? "" : HelperProviderBox.SelectedItem as string ?? "";
+            var selected = HelperProviderBox.SelectedItem as string ?? "";
+            var name = string.Equals(selected, "Claude", StringComparison.OrdinalIgnoreCase) ? "" : selected;
             WriteSettings(() => AppSettings.HelperProvider = name);
             RefreshTokenSaverHint();
+            RefreshCodexAuthStatus();
+        }
+    }
+
+    private void RefreshCodexAuthStatus()
+    {
+        var isCodex = string.Equals(AppSettings.HelperProvider, "Codex", StringComparison.OrdinalIgnoreCase);
+        CodexAuthRow.Visibility = isCodex ? Visibility.Visible : Visibility.Collapsed;
+        if (!isCodex)
+        {
+            return;
+        }
+
+        CodexAuthStatusText.Text = "Checking login status...";
+        _ = Task.Run(async () =>
+        {
+            var loggedIn = false;
+            try
+            {
+                var codexPath = Codale.Agents.CliLocator.Find("codex");
+                if (codexPath is null)
+                {
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        CodexAuthStatusText.Text = "Codex CLI is not installed.";
+                        CodexSignInButton.IsEnabled = false;
+                    });
+                    return;
+                }
+
+                var startInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = codexPath,
+                    Arguments = "login status",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+
+                using var proc = System.Diagnostics.Process.Start(startInfo);
+                if (proc is not null)
+                {
+                    await proc.WaitForExitAsync();
+                    loggedIn = proc.ExitCode == 0;
+                }
+            }
+            catch
+            {
+                loggedIn = false;
+            }
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                CodexAuthStatusText.Text = loggedIn ? "Logged in to OpenAI Codex" : "Not logged in";
+                CodexSignInButton.IsEnabled = true;
+                CodexSignInButton.Content = loggedIn ? "Re-authenticate" : "Sign in";
+            });
+        });
+    }
+
+    private void OnCodexSignInClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var start = new System.Diagnostics.ProcessStartInfo("cmd.exe", "/k codex login")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = false,
+            };
+            System.Diagnostics.Process.Start(start);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Error("settings", "Codex sign-in failed to start", ex);
         }
     }
 
@@ -497,7 +564,8 @@ public sealed partial class SettingsPanel : UserControl
             return expander;
         }
 
-        Field("OpenAI-compatible base URL", "https://api.example.com/v1", provider.BaseUrl, v => provider.BaseUrl = v);
+        Field("OpenAI-compatible base URL", "https://api.example.com/v1 (used by Codex CLI)", provider.BaseUrl, v => provider.BaseUrl = v);
+        Field("Anthropic-compatible base URL", "https://api.example.com (used by Claude CLI; blank = OpenAI only)", provider.AnthropicBaseUrl, v => provider.AnthropicBaseUrl = v);
 
         var key = new PasswordBox { Header = "API key", Password = provider.ApiKey };
         key.PasswordChanged += (_, _) =>
@@ -545,8 +613,8 @@ public sealed partial class SettingsPanel : UserControl
             return box;
         }
 
-        ModelField("Lite model", "Select a model", provider.LiteModel, v => provider.LiteModel = v);
-        ModelField("Smart model", "Select a model (optional)", provider.SmartModel, v => provider.SmartModel = v);
+        ModelField("Flash model", "Select a model", provider.FlashModel, v => provider.FlashModel = v);
+        ModelField("Pro model", "Select a model (optional)", provider.ProModel, v => provider.ProModel = v);
 
         var remove = new Button { Content = "Remove provider", HorizontalAlignment = HorizontalAlignment.Right };
         remove.Click += (_, _) =>
@@ -568,39 +636,123 @@ public sealed partial class SettingsPanel : UserControl
 
     private static readonly System.Net.Http.HttpClient ModelHttp = new() { Timeout = TimeSpan.FromSeconds(10) };
 
+    /// <summary>Model ids from an OpenAI-style list: <c>data</c>, <c>models</c>, <c>data.data</c> or a bare array; items are strings or objects with id/model/name.</summary>
+    private static List<string> ReadModelIds(System.Text.Json.JsonElement root)
+    {
+        static System.Text.Json.JsonElement? FindArray(System.Text.Json.JsonElement e, int depth = 0)
+        {
+            if (e.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                return e;
+            }
+
+            if (e.ValueKind != System.Text.Json.JsonValueKind.Object || depth > 2)
+            {
+                return null;
+            }
+
+            foreach (var name in new[] { "data", "models", "result" })
+            {
+                if (e.TryGetProperty(name, out var inner) && FindArray(inner, depth + 1) is { } found)
+                {
+                    return found;
+                }
+            }
+
+            return null;
+        }
+
+        if (FindArray(root) is not { } array)
+        {
+            return [];
+        }
+
+        static string Id(System.Text.Json.JsonElement m)
+        {
+            if (m.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                return m.GetString() ?? "";
+            }
+
+            foreach (var key in new[] { "id", "slug", "model", "name" })
+            {
+                if (m.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                    m.TryGetProperty(key, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    return v.GetString() ?? "";
+                }
+            }
+
+            return "";
+        }
+
+        return array.EnumerateArray().Select(Id).Where(id => id.Length > 0).Distinct().Order().ToList();
+    }
+
+    /// <summary>Shows why the list could not load as a tooltip on the model boxes; null clears it.</summary>
+    private static void SetModelStatus(List<ComboBox> boxes, string? message)
+    {
+        foreach (var box in boxes)
+        {
+            ToolTipService.SetToolTip(box, message);
+        }
+    }
+
     /// <summary>Fills the model dropdowns from the endpoint's OpenAI-style GET /models; failures leave the current list.</summary>
     private static async Task LoadModelsAsync(ByokProvider provider, List<ComboBox> boxes)
     {
-        if (string.IsNullOrWhiteSpace(provider.BaseUrl))
+        var anthropicOnly = string.IsNullOrWhiteSpace(provider.BaseUrl);
+        if (anthropicOnly && string.IsNullOrWhiteSpace(provider.AnthropicBaseUrl))
         {
             return;
+        }
+
+        string url;
+        if (anthropicOnly)
+        {
+            var root = provider.AnthropicBaseUrl.Trim().TrimEnd('/');
+            url = root.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? root + "/models" : root + "/v1/models";
+        }
+        else
+        {
+            url = provider.BaseUrl.TrimEnd('/') + "/models";
         }
 
         List<string> ids;
         try
         {
-            using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, provider.BaseUrl.TrimEnd('/') + "/models");
+            using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, url);
             if (provider.ApiKey.Length > 0)
             {
                 request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", provider.ApiKey);
+                if (anthropicOnly)
+                {
+                    request.Headers.TryAddWithoutValidation("x-api-key", provider.ApiKey);
+                    request.Headers.TryAddWithoutValidation("anthropic-version", "2023-06-01");
+                }
             }
 
             using var response = await ModelHttp.SendAsync(request);
+            var body = await response.Content.ReadAsStringAsync();
             response.EnsureSuccessStatusCode();
-            using var doc = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            ids = doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == System.Text.Json.JsonValueKind.Array
-                ? data.EnumerateArray()
-                    .Select(m => m.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "")
-                    .Where(id => id.Length > 0)
-                    .Distinct()
-                    .Order()
-                    .ToList()
-                : [];
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            ids = ReadModelIds(doc.RootElement);
+            if (ids.Count == 0)
+            {
+                // Some gateways answer 200 with an error envelope ({"code":401,"msg":...}).
+                var detail = doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                    doc.RootElement.TryGetProperty("msg", out var msg) ? msg.GetString() : "no models in the response";
+                SetModelStatus(boxes, $"Could not list models: {detail}");
+                return;
+            }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            SetModelStatus(boxes, $"Could not list models: {ex.Message}");
             return;
         }
+
+        SetModelStatus(boxes, null);
 
         foreach (var box in boxes)
         {
@@ -771,33 +923,6 @@ public sealed partial class SettingsPanel : UserControl
         return TerminalFontFamilyBox.Items.Count - 1;
     }
 
-    /// <summary>
-    /// Fills the model picker: CLI default, then Claude's documented models. A stored
-    /// id the catalogue no longer lists stays selectable so the user can see and clear it.
-    /// </summary>
-    private void BuildDefaultModelItems()
-    {
-        DefaultModelBox.Items.Clear();
-        DefaultModelBox.Items.Add(new ComboBoxItem { Content = "CLI default", Tag = "" });
-        var index = AppSettings.DefaultModel.Length == 0 ? 0 : -1;
-        foreach (var model in ClaudeAgentSession.DocumentedModels)
-        {
-            DefaultModelBox.Items.Add(new ComboBoxItem { Content = model.DisplayName, Tag = model.Id });
-            if (string.Equals(AppSettings.DefaultModel, model.Id, StringComparison.OrdinalIgnoreCase))
-            {
-                index = DefaultModelBox.Items.Count - 1;
-            }
-        }
-
-        if (index < 0)
-        {
-            DefaultModelBox.Items.Add(new ComboBoxItem { Content = AppSettings.DefaultModel, Tag = AppSettings.DefaultModel });
-            index = DefaultModelBox.Items.Count - 1;
-        }
-
-        DefaultModelBox.SelectedIndex = index;
-    }
-
     private void OnEditorFontSizeChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
     {
         if (_loading || !double.IsFinite(sender.Value))
@@ -926,7 +1051,8 @@ public sealed partial class SettingsPanel : UserControl
     {
         // Settings has no file in front, so the dialog asks for the language and an optional sample.
         using var helper = new HelperModel(
-            () => AppSettings.HelperApiEndpoint is { } api ? new OpenAiEndpoint(api.BaseUrl, api.ApiKey, api.Model) : null);
+            () => AppSettings.HelperApiEndpoint is { } api ? new OpenAiEndpoint(api.BaseUrl, api.ApiKey, api.Model) : null,
+            () => AppSettings.HelperProvider);
         await SyntaxDialogs.ShowGenerateAsync(XamlRoot, helper, "", "", "");
     }
 
@@ -999,30 +1125,6 @@ public sealed partial class SettingsPanel : UserControl
         }
     }
 
-    private void OnDefaultModelChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (!_loading)
-        {
-            AppSettings.DefaultModel = (DefaultModelBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
-        }
-    }
-
-    private void OnDefaultEffortChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (!_loading)
-        {
-            AppSettings.DefaultEffort = DefaultEffortBox.SelectedIndex switch
-            {
-                1 => "low",
-                2 => "medium",
-                3 => "high",
-                4 => "xhigh",
-                5 => "max",
-                _ => "",
-            };
-        }
-    }
-
     private void OnChatFontSizeChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
     {
         if (_loading || !double.IsFinite(sender.Value))
@@ -1089,6 +1191,91 @@ public sealed partial class SettingsPanel : UserControl
         if (!_loading)
         {
             AppSettings.DefaultChatMode = (DefaultChatModeBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
+        }
+    }
+
+    private void OnDefaultTierChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        // The tier is remembered per CLI; the settings row sets the starting point for both.
+        var tier = (DefaultTierBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "cli";
+        AppSettings.SetDefaultTier("claude", tier);
+        AppSettings.SetDefaultTier("codex", tier);
+    }
+
+    /// <summary>
+    /// One row per CLI and tier: which model plays "flash" (fast) and "pro" (capable).
+    /// The choices are the models the CLI itself reported this run; before its first
+    /// chat has connected there is no list, so the row only offers the auto guess.
+    /// </summary>
+    private void BuildTierModelRows()
+    {
+        TierModelsPanel.Children.Clear();
+
+        foreach (var (cli, title) in new[] { ("claude", "Claude"), ("codex", "Codex") })
+        {
+            var catalogue = ChatViewModel.KnownCatalogue(cli);
+
+            foreach (var (tier, tierTitle) in new[] { ("flash", "Flash"), ("pro", "Pro") })
+            {
+                var row = new Grid { ColumnSpacing = 12 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var label = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2 };
+                label.Children.Add(new TextBlock { Text = $"{title} {tierTitle} model" });
+                label.Children.Add(new TextBlock
+                {
+                    Text = catalogue is null
+                        ? $"Open a {title} chat once to load its model list"
+                        : tier == "flash"
+                            ? "Runs the Lite and Flash tiers"
+                            : "Runs the Pro and Plus tiers",
+                    FontSize = 11,
+                    Opacity = 0.6,
+                    TextWrapping = TextWrapping.Wrap,
+                });
+                row.Children.Add(label);
+
+                var combo = new ComboBox { VerticalAlignment = VerticalAlignment.Center, MinWidth = 220 };
+                combo.Items.Add(new ComboBoxItem { Content = "Auto (pick from model names)", Tag = "" });
+                var configured = AppSettings.TierModelFor(cli, tier) ?? "";
+                var selected = 0;
+                if (catalogue is { Count: > 0 })
+                {
+                    foreach (var model in catalogue)
+                    {
+                        combo.Items.Add(new ComboBoxItem { Content = string.IsNullOrEmpty(model.DisplayName) ? model.Id : model.DisplayName, Tag = model.Id });
+                        if (string.Equals(model.Id, configured, StringComparison.OrdinalIgnoreCase))
+                        {
+                            selected = combo.Items.Count - 1;
+                        }
+                    }
+                }
+                else if (configured.Length > 0)
+                {
+                    combo.Items.Add(new ComboBoxItem { Content = configured, Tag = configured });
+                    selected = 1;
+                }
+
+                combo.SelectedIndex = selected;
+                var pickedTier = tier;
+                var pickedCli = cli;
+                combo.SelectionChanged += (sender, _) =>
+                {
+                    if (sender is ComboBox box && box.SelectedItem is ComboBoxItem item)
+                    {
+                        AppSettings.SetTierModel(pickedCli, pickedTier, item.Tag as string);
+                    }
+                };
+                Grid.SetColumn(combo, 1);
+                row.Children.Add(combo);
+                TierModelsPanel.Children.Add(row);
+            }
         }
     }
 

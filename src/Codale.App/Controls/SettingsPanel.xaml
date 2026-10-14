@@ -263,44 +263,38 @@
                     <TextBlock Style="{StaticResource GroupTitle}" Text="New chat defaults" />
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
-                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                <StackPanel VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="Default model" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="CLI default leaves it to the CLI; keep it there when a custom endpoint is active." />
-                                </StackPanel>
-                                <ComboBox x:Name="DefaultModelBox" Grid.Column="1" VerticalAlignment="Center" Width="220" SelectionChanged="OnDefaultModelChanged" />
-                            </Grid>
-                            <Rectangle Style="{StaticResource Divider}" />
-                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                <StackPanel VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="Default reasoning effort" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="How hard the agent thinks on new chats." />
-                                </StackPanel>
-                                <ComboBox x:Name="DefaultEffortBox" Grid.Column="1" VerticalAlignment="Center" Width="160" SelectionChanged="OnDefaultEffortChanged">
-                                    <ComboBoxItem Content="CLI default" />
-                                    <ComboBoxItem Content="Low" />
-                                    <ComboBoxItem Content="Medium" />
-                                    <ComboBoxItem Content="High" />
-                                    <ComboBoxItem Content="Extra high" />
-                                    <ComboBoxItem Content="Max" />
-                                </ComboBox>
-                            </Grid>
                             <Rectangle Style="{StaticResource Divider}" />
                             <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
                                 <StackPanel VerticalAlignment="Center" Spacing="2">
                                     <TextBlock Text="Default permission mode" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="Auto picks a mode per message; Ask explains and changes nothing; Full works without asking." TextWrapping="Wrap" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Auto picks a depth per message; Interactive asks before changes; Plan researches first; Full works without asking. Per-CLI picks in a session override this." TextWrapping="Wrap" />
                                 </StackPanel>
                                 <ComboBox x:Name="DefaultChatModeBox" Grid.Column="1" VerticalAlignment="Center" Width="190" SelectionChanged="OnDefaultChatModeChanged">
                                     <ComboBoxItem Content="Auto" Tag="automatic" />
-                                    <ComboBoxItem Content="Ask (explain only)" Tag="ask" />
-                                    <ComboBoxItem Content="Planning" Tag="plan" />
-                                    <ComboBoxItem Content="Manual" Tag="manual" />
-                                    <ComboBoxItem Content="Accept edits" Tag="acceptEdits" />
+                                    <ComboBoxItem Content="Interactive" Tag="manual" />
+                                    <ComboBoxItem Content="Plan" Tag="plan" />
                                     <ComboBoxItem Content="Full (no permission prompts)" Tag="auto" />
                                 </ComboBox>
                             </Grid>
+                            <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Default model tier" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Lite and Flash run the fast model, Pro and Plus the capable one, at the tier's effort. Applies to new chats." TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ComboBox x:Name="DefaultTierBox" Grid.Column="1" VerticalAlignment="Center" Width="190" SelectionChanged="OnDefaultTierChanged">
+                                    <ComboBoxItem Content="CLI (whatever it starts with)" Tag="cli" />
+                                    <ComboBoxItem Content="Lite" Tag="lite" />
+                                    <ComboBoxItem Content="Flash" Tag="flash" />
+                                    <ComboBoxItem Content="Pro" Tag="pro" />
+                                    <ComboBoxItem Content="Plus" Tag="plus" />
+                                </ComboBox>
+                            </Grid>
                         </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource GroupTitle}" Text="Model tiers" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel x:Name="TierModelsPanel" Spacing="4" />
                     </Border>
 
                     <TextBlock Style="{StaticResource GroupTitle}" Text="Background tasks" />
@@ -309,9 +303,16 @@
                             <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
                                 <StackPanel VerticalAlignment="Center" Spacing="2">
                                     <TextBlock Text="Background tasks" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="Writes commit messages, names sessions, reads Auto-mode messages and powers search. Calls one of your custom providers directly (no process to start, the fastest), separate from the provider picked in the status bar. Falls back to the Claude CLI until one with a key and model exists." TextWrapping="Wrap" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="Writes commit messages, names sessions, reads Auto-mode messages and powers search. Uses Claude, Codex, or calls one of your custom providers directly (no process to start, the fastest)." TextWrapping="Wrap" />
                                 </StackPanel>
                                 <ComboBox x:Name="HelperProviderBox" Grid.Column="1" VerticalAlignment="Center" Width="190" SelectionChanged="OnHelperProviderChanged" />
+                            </Grid>
+                            <Grid x:Name="CodexAuthRow" ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}" Visibility="Collapsed">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Codex login status" />
+                                    <TextBlock x:Name="CodexAuthStatusText" Style="{StaticResource Hint}" Text="Not checked" />
+                                </StackPanel>
+                                <Button x:Name="CodexSignInButton" Grid.Column="1" VerticalAlignment="Center" Content="Sign in" Click="OnCodexSignInClick" />
                             </Grid>
                         </StackPanel>
                     </Border>

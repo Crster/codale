@@ -44,6 +44,9 @@ public static class CliLocator
     /// <summary>The command that installs the Claude CLI, run in a terminal tab.</summary>
     public const string InstallCommand = "irm https://claude.ai/install.ps1 | iex";
 
+    /// <summary>The command that installs the OpenAI Codex CLI, run in a terminal tab.</summary>
+    public const string CodexInstallCommand = "npm i -g @openai/codex";
+
     /// <summary>Known common agentic coding CLIs.</summary>
     public static readonly IReadOnlyList<CliDescriptor> KnownClis = new List<CliDescriptor>
     {
@@ -53,7 +56,7 @@ public static class CliLocator
         new("copilot", "Copilot", "copilot", null, "GitHub Copilot CLI"),
         new("aider", "Aider", "aider", "pip install aider-chat", "Aider AI pair programmer CLI"),
         new("goose", "Goose", "goose", null, "Block Goose CLI"),
-        new("codex", "Codex", "codex", null, "OpenAI Codex CLI"),
+        new("codex", "Codex", "codex", CodexInstallCommand, "OpenAI Codex CLI"),
         new("cursor", "Cursor", "cursor", null, "Cursor CLI"),
         new("opencode", "OpenCode", "opencode", "npm i -g opencode-ai", "OpenCode CLI"),
         new("qwen", "Qwen", "qwen", "npm i -g @qwen-code/qwen-code", "Qwen Code CLI"),
@@ -187,7 +190,13 @@ public static class CliLocator
             }
 
             var native = Path.Combine(dir, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe");
-            return File.Exists(native) ? native : null;
+            if (File.Exists(native))
+            {
+                return native;
+            }
+
+            var codexNative = Path.Combine(dir, "node_modules", "@openai", "codex", "bin", "codex.exe");
+            return File.Exists(codexNative) ? codexNative : null;
         }
         catch (ArgumentException)
         {

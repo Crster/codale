@@ -23,7 +23,9 @@ namespace Codale.Agents;
 /// Each system prompt gets its own spare, so routing and a search's two steps can all be
 /// ready at once.
 /// </remarks>
-public sealed class HelperModel(Func<OpenAiEndpoint?>? api = null) : IHelperModel, IDisposable
+public sealed class HelperModel(
+    Func<OpenAiEndpoint?>? api = null,
+    Func<string?>? provider = null) : IHelperModel, IDisposable
 {
     /// <summary>The cheapest Claude model: these jobs are short and latency is what the user feels.</summary>
     internal const string ClaudeModel = "haiku";
@@ -56,11 +58,20 @@ public sealed class HelperModel(Func<OpenAiEndpoint?>? api = null) : IHelperMode
     /// <summary>Raised after each request the custom API endpoint answered, with what it reported spending.</summary>
     public event Action<UsageSnapshot>? ApiRequestServed;
 
+    /// <summary>Raised when a background job fails because the CLI is not logged in.</summary>
+    public event Action<string>? LoginRequired;
+
     private void OnApiRequestServed(UsageSnapshot usage) => ApiRequestServed?.Invoke(usage);
 
-    public bool IsAvailable => ApiEndpoint is not null || ClaudeInstalled;
+    private bool IsCodexSelected =>
+        string.Equals(provider?.Invoke()?.Trim(), "codex", StringComparison.OrdinalIgnoreCase);
+
+    public bool IsAvailable =>
+        ApiEndpoint is not null ||
+        (IsCodexSelected ? CodexInstalled : ClaudeInstalled);
 
     private static bool ClaudeInstalled => CliLocator.IsInstalled();
+    private static bool CodexInstalled => CliLocator.Find("codex") is not null;
 
     public Task<string> CompleteAsync(string systemPrompt, string prompt, CancellationToken ct = default) =>
         CompleteAsync(systemPrompt, prompt, OpenAiApiClient.MaxTokens, ct);
@@ -70,6 +81,16 @@ public sealed class HelperModel(Func<OpenAiEndpoint?>? api = null) : IHelperMode
         if (ApiEndpoint is { } endpoint)
         {
             return ModelOutput.Clean(await OpenAiApiClient.CompleteAsync(endpoint, systemPrompt, prompt, ct, maxTokens, OnApiRequestServed).ConfigureAwait(false));
+        }
+
+        if (IsCodexSelected)
+        {
+            if (!CodexInstalled)
+            {
+                throw new HelperModelException("The Codex CLI is not installed.");
+            }
+
+            return ModelOutput.Clean(await RunCodexAsync(systemPrompt, prompt, ct).ConfigureAwait(false));
         }
 
         if (!ClaudeInstalled)
@@ -90,6 +111,18 @@ public sealed class HelperModel(Func<OpenAiEndpoint?>? api = null) : IHelperMode
         if (ApiEndpoint is { } endpoint)
         {
             return await OpenAiApiClient.CallToolAsync(endpoint, systemPrompt, conversation, tools, ct, OnApiRequestServed).ConfigureAwait(false);
+        }
+
+        if (IsCodexSelected)
+        {
+            if (!CodexInstalled)
+            {
+                throw new HelperModelException("The Codex CLI is not installed.");
+            }
+
+            var codexFullPrompt = HelperToolCalls.BuildSystemPrompt(systemPrompt, tools);
+            var codexReply = await RunCodexAsync(codexFullPrompt, conversation, ct).ConfigureAwait(false);
+            return HelperToolCalls.Parse(codexReply, tools);
         }
 
         if (!ClaudeInstalled)
@@ -137,8 +170,8 @@ public sealed class HelperModel(Func<OpenAiEndpoint?>? api = null) : IHelperMode
     /// </summary>
     public void Prewarm(string systemPrompt, IReadOnlyList<ToolDefinition> tools)
     {
-        // An API call has no process to start: nothing to get ready.
-        if (ApiEndpoint is not null)
+        // An API call or Codex has no Claude process to prewarm.
+        if (ApiEndpoint is not null || IsCodexSelected)
         {
             return;
         }
@@ -376,6 +409,84 @@ public sealed class HelperModel(Func<OpenAiEndpoint?>? api = null) : IHelperMode
                 var detail = (await errors.ConfigureAwait(false)).Trim();
                 throw new HelperModelException(
                     $"The Claude CLI returned nothing usable (exit {process.ExitCode})" +
+                    (detail.Length > 0 ? $": {TextClip.Truncate(detail, 300)}" : "."));
+            }
+
+            return text;
+        }
+    }
+
+    private async Task<string> RunCodexAsync(string systemPrompt, string prompt, CancellationToken ct)
+    {
+        var executable = CliLocator.Find("codex");
+        if (executable is null)
+        {
+            throw new HelperModelException("The Codex CLI is not installed.");
+        }
+
+        var startInfo = BuildStartInfo(executable);
+        startInfo.ArgumentList.Add("exec");
+        startInfo.ArgumentList.Add("--ephemeral");
+        startInfo.ArgumentList.Add("--skip-git-repo-check");
+        startInfo.ArgumentList.Add("-s");
+        startInfo.ArgumentList.Add("read-only");
+        startInfo.ArgumentList.Add("-");
+
+        Process process;
+        try
+        {
+            process = Process.Start(startInfo)
+                ?? throw new HelperModelException("Could not start the Codex CLI.");
+        }
+        catch (Exception ex) when (ex is not HelperModelException)
+        {
+            throw new HelperModelException($"Could not start the Codex CLI: {ex.Message}", ex);
+        }
+
+        using (process)
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(CliTimeout);
+            await using var kill = timeout.Token.Register(() => ProcessUtil.TryKillTree(process));
+
+            var output = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
+            var errors = process.StandardError.ReadToEndAsync(CancellationToken.None);
+
+            var fullInput = string.IsNullOrWhiteSpace(systemPrompt)
+                ? prompt
+                : $"{systemPrompt}\n\n{prompt}";
+
+            try
+            {
+                await process.StandardInput.WriteAsync(fullInput).ConfigureAwait(false);
+                process.StandardInput.Close();
+            }
+            catch (IOException)
+            {
+                // The CLI exited before reading its input.
+            }
+
+            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            if (timeout.IsCancellationRequested)
+            {
+                throw new HelperModelException($"The Codex CLI did not answer within {CliTimeout.TotalSeconds:0} seconds.");
+            }
+
+            var text = await output.ConfigureAwait(false);
+            if (process.ExitCode != 0 || string.IsNullOrWhiteSpace(text))
+            {
+                var detail = (await errors.ConfigureAwait(false)).Trim();
+                if (detail.Contains("Not logged in", StringComparison.OrdinalIgnoreCase) ||
+                    detail.Contains("401 Unauthorized", StringComparison.OrdinalIgnoreCase) ||
+                    detail.Contains("Missing bearer or basic authentication", StringComparison.OrdinalIgnoreCase))
+                {
+                    LoginRequired?.Invoke("Codex");
+                    throw new HelperModelException("The Codex CLI is not logged in. Run 'codex login' to authenticate.");
+                }
+
+                throw new HelperModelException(
+                    $"The Codex CLI returned nothing usable (exit {process.ExitCode})" +
                     (detail.Length > 0 ? $": {TextClip.Truncate(detail, 300)}" : "."));
             }
 
