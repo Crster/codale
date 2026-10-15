@@ -255,8 +255,8 @@
 
     <Border
         Margin="0,8,8,8"
-        Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
-        BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+        Background="{ThemeResource ShellSidePanelBackgroundBrush}"
+        BorderBrush="{ThemeResource ShellSidePanelStrokeBrush}"
         BorderThickness="1"
         CornerRadius="12"
         Translation="0,0,24">

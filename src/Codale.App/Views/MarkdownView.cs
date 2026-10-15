@@ -317,7 +317,7 @@ public sealed class MarkdownView : StackPanel
 
     private ToolTip ChangeTip(PlanBlockChange change)
     {
-        var tertiary = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"];
+        var tertiary = ChatPaletteTheme.Brush("TextFillColorTertiaryBrush");
         var panel = new StackPanel { Spacing = 6, MaxWidth = 440 };
 
         void Add(string label, string text)
@@ -1059,7 +1059,7 @@ public sealed class MarkdownView : StackPanel
     /// where it does not - the fallbacks read on dark and light alike.</summary>
     private static Brush ThemeBrush(string key, byte r, byte g, byte b)
     {
-        if (Application.Current.Resources.TryGetValue(key, out var value) && value is Brush brush)
+        if (ChatPaletteTheme.TryGetBrush(key, out var brush))
         {
             return brush;
         }

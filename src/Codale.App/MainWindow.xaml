@@ -14,7 +14,7 @@
     </Window.SystemBackdrop>
 
     <!--  The theme comes from Settings (AppSettings.Theme); dark is the default look.  -->
-    <Grid x:Name="RootGrid" RequestedTheme="Dark">
+    <Grid x:Name="RootGrid" Background="{ThemeResource ShellBackdropTintBrush}" RequestedTheme="Dark">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />

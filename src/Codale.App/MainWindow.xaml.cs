@@ -281,7 +281,27 @@ public sealed partial class MainWindow : Window
             "Dark" => ElementTheme.Dark,
             _ => ElementTheme.Default,
         };
-        ChatPaletteTheme.Apply(RootGrid.ActualTheme == ElementTheme.Light);
+        var light = RootGrid.ActualTheme == ElementTheme.Light;
+        ChatPaletteTheme.Apply(light);
+
+        // The caption buttons are drawn by the system from the app's theme, not the grid's,
+        // so colour them for the resolved theme.
+        if (Microsoft.UI.Windowing.AppWindowTitleBar.IsCustomizationSupported())
+        {
+            var bar = AppWindow.TitleBar;
+            var fg = light ? Windows.UI.Color.FromArgb(255, 0x1E, 0x1E, 0x1E) : Windows.UI.Color.FromArgb(255, 255, 255, 255);
+            var inactive = light ? Windows.UI.Color.FromArgb(255, 0x80, 0x80, 0x80) : Windows.UI.Color.FromArgb(255, 0x9A, 0x9A, 0x9A);
+            var hover = light ? Windows.UI.Color.FromArgb(0x1A, 0, 0, 0) : Windows.UI.Color.FromArgb(0x1A, 255, 255, 255);
+            var pressed = light ? Windows.UI.Color.FromArgb(0x33, 0, 0, 0) : Windows.UI.Color.FromArgb(0x33, 255, 255, 255);
+            bar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
+            bar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+            bar.ButtonForegroundColor = fg;
+            bar.ButtonInactiveForegroundColor = inactive;
+            bar.ButtonHoverForegroundColor = fg;
+            bar.ButtonHoverBackgroundColor = hover;
+            bar.ButtonPressedForegroundColor = fg;
+            bar.ButtonPressedBackgroundColor = pressed;
+        }
     }
 
     private void OnSearchQuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args) =>

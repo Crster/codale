@@ -565,8 +565,9 @@ public sealed partial class GitStatusBrushConverter : IValueConverter
         GitChangeKind.Deleted => DeletedBrush,
         GitChangeKind.Conflicted => ConflictedBrush,
 
-        // null casts to a null Brush, which clears the local value and restores the default.
-        _ => null,
+        // Unchanged files use the palette's text colour, which follows the resolved theme;
+        // the inherited default stayed light-on-light in the Light theme.
+        _ => Palette.Get("TodoTextBrush"),
     };
 
     public object ConvertBack(object value, Type targetType, object parameter, string language) =>
@@ -639,7 +640,7 @@ public sealed partial class UsageToBrushConverter : IValueConverter
         var key = percent >= 90 ? "SystemFillColorCriticalBrush"
             : percent >= 75 ? "SystemFillColorCautionBrush"
             : "AccentFillColorDefaultBrush";
-        return Application.Current.Resources[key];
+        return ChatPaletteTheme.Resource(key);
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, string language) =>

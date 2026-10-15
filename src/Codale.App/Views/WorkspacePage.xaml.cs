@@ -665,7 +665,7 @@ public sealed partial class WorkspacePage : Page
         {
             icon.Foreground = chat.IsIsolated
                 ? new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0x3B, 0x82, 0xF6))
-                : (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"];
+                : ChatPaletteTheme.Brush("TextFillColorPrimaryBrush");
         }
     }
 
@@ -706,7 +706,7 @@ public sealed partial class WorkspacePage : Page
 
         // TabViewItem's template paints its whole container (icon, title, close button)
         // with Background, so a local value covers the tab edge to edge.
-        var warn = ((SolidColorBrush)Application.Current.Resources["StatusWarnBrush"]).Color;
+        var warn = ((SolidColorBrush)ChatPaletteTheme.Brush("StatusWarnBrush")).Color;
         var tint = new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, warn.R, warn.G, warn.B)) { Opacity = 0.45 };
         entry.Item.Background = tint;
 
@@ -743,7 +743,7 @@ public sealed partial class WorkspacePage : Page
             Width = 7,
             Height = 7,
             VerticalAlignment = VerticalAlignment.Center,
-            Fill = (Brush)Application.Current.Resources["StatusRunningBrush"],
+            Fill = ChatPaletteTheme.Brush("StatusRunningBrush"),
         };
         dot.SetBinding(VisibilityProperty, new Binding
         {
@@ -759,7 +759,7 @@ public sealed partial class WorkspacePage : Page
             Width = 7,
             Height = 7,
             VerticalAlignment = VerticalAlignment.Center,
-            Fill = (Brush)Application.Current.Resources["StatusWarnBrush"],
+            Fill = ChatPaletteTheme.Brush("StatusWarnBrush"),
         };
         waiting.SetBinding(VisibilityProperty, new Binding
         {
@@ -3384,7 +3384,7 @@ public sealed partial class WorkspacePage : Page
             TerminalDrawerSpinner.IsActive = false;
             TerminalDrawerSpinner.Visibility = Visibility.Collapsed;
             TerminalDrawerStatusIcon.Glyph = "\uE73E";
-            if (Application.Current.Resources.TryGetValue("SystemFillColorSuccessBrush", out var success) && success is Brush b)
+            if (ChatPaletteTheme.TryGetBrush("SystemFillColorSuccessBrush", out var b))
             {
                 TerminalDrawerStatusIcon.Foreground = b;
             }
@@ -3494,7 +3494,7 @@ public sealed partial class WorkspacePage : Page
                 if (exitCode == 0)
                 {
                     TerminalDrawerStatusIcon.Glyph = "\uE73E";
-                    if (Application.Current.Resources.TryGetValue("SystemFillColorSuccessBrush", out var s) && s is Brush sb)
+                    if (ChatPaletteTheme.TryGetBrush("SystemFillColorSuccessBrush", out var sb))
                     {
                         TerminalDrawerStatusIcon.Foreground = sb;
                     }
@@ -3503,7 +3503,7 @@ public sealed partial class WorkspacePage : Page
                 else
                 {
                     TerminalDrawerStatusIcon.Glyph = "\uE783";
-                    if (Application.Current.Resources.TryGetValue("SystemFillColorCriticalBrush", out var c) && c is Brush cb)
+                    if (ChatPaletteTheme.TryGetBrush("SystemFillColorCriticalBrush", out var cb))
                     {
                         TerminalDrawerStatusIcon.Foreground = cb;
                     }
@@ -3522,7 +3522,7 @@ public sealed partial class WorkspacePage : Page
             TerminalDrawerSpinner.IsActive = false;
             TerminalDrawerSpinner.Visibility = Visibility.Collapsed;
             TerminalDrawerStatusIcon.Glyph = "\uE711";
-            if (Application.Current.Resources.TryGetValue("SystemFillColorCautionBrush", out var caution) && caution is Brush caub)
+            if (ChatPaletteTheme.TryGetBrush("SystemFillColorCautionBrush", out var caub))
             {
                 TerminalDrawerStatusIcon.Foreground = caub;
             }
@@ -3535,7 +3535,7 @@ public sealed partial class WorkspacePage : Page
             TerminalDrawerSpinner.IsActive = false;
             TerminalDrawerSpinner.Visibility = Visibility.Collapsed;
             TerminalDrawerStatusIcon.Glyph = "\uE783";
-            if (Application.Current.Resources.TryGetValue("SystemFillColorCriticalBrush", out var crit) && crit is Brush critb)
+            if (ChatPaletteTheme.TryGetBrush("SystemFillColorCriticalBrush", out var critb))
             {
                 TerminalDrawerStatusIcon.Foreground = critb;
             }
@@ -3578,7 +3578,7 @@ public sealed partial class WorkspacePage : Page
         {
             SetTerminalCwd(targetPath);
             TerminalDrawerStatusIcon.Glyph = "\uE73E";
-            if (Application.Current.Resources.TryGetValue("SystemFillColorSuccessBrush", out var s) && s is Brush sb)
+            if (ChatPaletteTheme.TryGetBrush("SystemFillColorSuccessBrush", out var sb))
             {
                 TerminalDrawerStatusIcon.Foreground = sb;
             }
@@ -3588,7 +3588,7 @@ public sealed partial class WorkspacePage : Page
         else
         {
             TerminalDrawerStatusIcon.Glyph = "\uE783";
-            if (Application.Current.Resources.TryGetValue("SystemFillColorCriticalBrush", out var c) && c is Brush cb)
+            if (ChatPaletteTheme.TryGetBrush("SystemFillColorCriticalBrush", out var cb))
             {
                 TerminalDrawerStatusIcon.Foreground = cb;
             }

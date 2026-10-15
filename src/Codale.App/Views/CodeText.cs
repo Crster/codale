@@ -21,10 +21,10 @@ namespace Codale.App.Views;
 /// </summary>
 public static class CodeText
 {
-    private static readonly IReadOnlyDictionary<ShellTokenKind, Brush> Palette =
+    private static readonly IReadOnlyDictionary<ShellTokenKind, Brush> DarkPalette =
         new Dictionary<ShellTokenKind, Brush>
         {
-            // A One Dark-ish set, picked medium so it holds on the card in both themes.
+            // A One Dark-ish set for dark cards...
             [ShellTokenKind.Command] = Solid(0x61, 0xAF, 0xEF),
             [ShellTokenKind.Keyword] = Solid(0xC6, 0x78, 0xDD),
             [ShellTokenKind.String] = Solid(0x98, 0xC3, 0x79),
@@ -35,12 +35,28 @@ public static class CodeText
             [ShellTokenKind.Comment] = Solid(0x7F, 0x8C, 0x9B),
         };
 
+    private static readonly IReadOnlyDictionary<ShellTokenKind, Brush> LightPalette =
+        new Dictionary<ShellTokenKind, Brush>
+        {
+            // ...and its One Light counterpart, matching CodePalette.
+            [ShellTokenKind.Command] = Solid(0x30, 0x63, 0xD6),
+            [ShellTokenKind.Keyword] = Solid(0xA6, 0x26, 0xA4),
+            [ShellTokenKind.String] = Solid(0x3E, 0x8E, 0x3D),
+            [ShellTokenKind.Variable] = Solid(0xCA, 0x3E, 0x32),
+            [ShellTokenKind.Flag] = Solid(0x98, 0x68, 0x01),
+            [ShellTokenKind.Number] = Solid(0x98, 0x68, 0x01),
+            [ShellTokenKind.Operator] = Solid(0x01, 0x7C, 0xA8),
+            [ShellTokenKind.Comment] = Solid(0x6E, 0x77, 0x81),
+        };
+
+    private static IReadOnlyDictionary<ShellTokenKind, Brush> Palette => CodePalette.Light ? LightPalette : DarkPalette;
+
     private const string LanguagePrefix = "lang:";
 
     /// <summary>Longest block, in characters, the grammar will colour; past it the text stays plain so a huge paste cannot stall the UI.</summary>
     private const int MaxGrammarChars = 100_000;
 
-    private static readonly Dictionary<CodeTokenKind, Brush> GrammarBrushes = [];
+    private static readonly Dictionary<(CodeTokenKind Kind, bool Light), Brush> GrammarBrushes = [];
 
     /// <summary>The syntax value that colours a block with the grammar for <paramref name="languageId"/>.</summary>
     public static string ForLanguage(string languageId) => LanguagePrefix + languageId;
@@ -184,10 +200,11 @@ public static class CodeText
 
     private static Brush BrushFor(CodeTokenKind kind)
     {
-        if (!GrammarBrushes.TryGetValue(kind, out var brush))
+        var key = (kind, CodePalette.Light);
+        if (!GrammarBrushes.TryGetValue(key, out var brush))
         {
             brush = new SolidColorBrush(CodePalette.Get(kind));
-            GrammarBrushes[kind] = brush;
+            GrammarBrushes[key] = brush;
         }
 
         return brush;

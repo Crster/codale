@@ -536,11 +536,37 @@ public sealed partial class CodeEditor : UserControl
 
     private void RefreshThemeColors()
     {
+        // Application.Resources resolves the app-level theme, not this element's, so a
+        // Light override on the window would still hand back the dark (white) text.
+        // Look the key up in the matching theme dictionary instead.
         var resources = Application.Current.Resources;
-        Windows.UI.Color FromBrush(string key) => ((SolidColorBrush)resources[key]).Color;
+        var light = ActualTheme == ElementTheme.Light;
+        var themeKey = light ? "Light" : "Default";
+        Windows.UI.Color FromBrush(string key)
+        {
+            foreach (var merged in resources.MergedDictionaries)
+            {
+                if (merged.ThemeDictionaries.TryGetValue(themeKey, out var theme)
+                    && theme is ResourceDictionary dictionary
+                    && dictionary.TryGetValue(key, out var value)
+                    && value is SolidColorBrush brush)
+                {
+                    return brush.Color;
+                }
+            }
+
+            return ((SolidColorBrush)resources[key]).Color;
+        }
 
         _baseText = FromBrush("TextFillColorPrimaryBrush");
         _lineNumberText = FromBrush("TextFillColorTertiaryBrush");
+        if (light && _baseText.R > 0x80)
+        {
+            // The theme lookup missed; fall back to the Fluent light text values.
+            _baseText = Windows.UI.Color.FromArgb(0xE4, 0, 0, 0);
+            _lineNumberText = Windows.UI.Color.FromArgb(0x72, 0, 0, 0);
+        }
+
         _caretColor = _baseText;
 
         var accent = FromBrush("AccentFillColorDefaultBrush");
@@ -851,7 +877,7 @@ public sealed partial class CodeEditor : UserControl
                     var to = Math.Min(token.Start + token.Length, start + len);
                     if (to > from)
                     {
-                        layout.SetColor(from - start, to - from, CodePalette.Get(token.Kind));
+                        layout.SetColor(from - start, to - from, CodePalette.Get(token.Kind, ActualTheme == ElementTheme.Light));
                     }
                 }
             }

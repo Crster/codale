@@ -566,7 +566,7 @@ public sealed partial class HexViewer : UserControl
             {
                 Text = InspectorLabels[i],
                 FontSize = 12,
-                Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                Foreground = ChatPaletteTheme.Brush("TextFillColorSecondaryBrush"),
             };
             var value = new TextBlock
             {

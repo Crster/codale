@@ -54,7 +54,7 @@ public sealed partial class ArtifactTab : UserControl
     public ArtifactTab()
     {
         _statusPill.Child = _status;
-        _subtitle.Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"];
+        _subtitle.Foreground = ChatPaletteTheme.Brush("TextFillColorTertiaryBrush");
 
         var meta = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         meta.Children.Add(_statusPill);
@@ -63,18 +63,18 @@ public sealed partial class ArtifactTab : UserControl
         var page = new StackPanel { MaxWidth = 860, Spacing = 14, Padding = new Thickness(32, 24, 32, 40) };
         page.Children.Add(_title);
         page.Children.Add(meta);
-        _revisionNote.Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
+        _revisionNote.Foreground = ChatPaletteTheme.Brush("TextFillColorSecondaryBrush");
         page.Children.Add(_revisionNote);
         page.Children.Add(new Rectangle
         {
             Height = 1,
-            Fill = (Brush)Application.Current.Resources["TimelineRailBrush"],
+            Fill = ChatPaletteTheme.Brush("TimelineRailBrush"),
         });
         page.Children.Add(_image);
         page.Children.Add(_markdown);
 
-        _annotationBar.BorderBrush = (Brush)Application.Current.Resources["TimelineRailBrush"];
-        _annotationBar.Background = (Brush)Application.Current.Resources["LayerFillColorDefaultBrush"];
+        _annotationBar.BorderBrush = ChatPaletteTheme.Brush("TimelineRailBrush");
+        _annotationBar.Background = ChatPaletteTheme.Brush("LayerFillColorDefaultBrush");
         _annotationBar.SendRequested += (_, sent) =>
         {
             if (Artifact is { } plan)

@@ -66,28 +66,51 @@ public static class LegacySyntax
 }
 
 /// <summary>
-/// The colours tokens render in: a One Dark-ish set, picked medium so it holds on
-/// the editor in both themes - the same palette the chat tool cards use.
+/// The colours tokens render in: a One Dark-ish set on dark surfaces and its One Light
+/// counterpart on light ones (the dark hues - pale yellow, light green - wash out on white).
 /// </summary>
 public static class CodePalette
 {
-    public static Windows.UI.Color Get(CodeTokenKind kind) => kind switch
-    {
-        CodeTokenKind.Keyword => Windows.UI.Color.FromArgb(0xFF, 0xC6, 0x78, 0xDD),
-        CodeTokenKind.Type => Windows.UI.Color.FromArgb(0xFF, 0xE5, 0xC0, 0x7B),
-        CodeTokenKind.String => Windows.UI.Color.FromArgb(0xFF, 0x98, 0xC3, 0x79),
-        CodeTokenKind.Number => Windows.UI.Color.FromArgb(0xFF, 0xD1, 0x9A, 0x66),
-        CodeTokenKind.Comment => Windows.UI.Color.FromArgb(0xFF, 0x7F, 0x8C, 0x9B),
-        CodeTokenKind.Operator => Windows.UI.Color.FromArgb(0xFF, 0x56, 0xB6, 0xC2),
-        CodeTokenKind.Preprocessor => Windows.UI.Color.FromArgb(0xFF, 0xE0, 0x6C, 0x75),
-        CodeTokenKind.Tag => Windows.UI.Color.FromArgb(0xFF, 0xE0, 0x6C, 0x75),
-        CodeTokenKind.Attribute => Windows.UI.Color.FromArgb(0xFF, 0xD1, 0x9A, 0x66),
-        CodeTokenKind.Property => Windows.UI.Color.FromArgb(0xFF, 0x61, 0xAF, 0xEF),
-        CodeTokenKind.Constant => Windows.UI.Color.FromArgb(0xFF, 0xD1, 0x9A, 0x66),
-        CodeTokenKind.Variable => Windows.UI.Color.FromArgb(0xFF, 0xE0, 0x6C, 0x75),
-        CodeTokenKind.Heading => Windows.UI.Color.FromArgb(0xFF, 0x61, 0xAF, 0xEF),
-        _ => Windows.UI.Color.FromArgb(0, 0, 0, 0), // plain text keeps the theme foreground
-    };
+    /// <summary>The app's resolved theme; set by <see cref="ChatPaletteTheme"/>.</summary>
+    public static bool Light { get; set; }
+
+    public static Windows.UI.Color Get(CodeTokenKind kind) => Get(kind, Light);
+
+    public static Windows.UI.Color Get(CodeTokenKind kind, bool light) => light
+        ? kind switch
+        {
+            CodeTokenKind.Keyword => Windows.UI.Color.FromArgb(0xFF, 0xA6, 0x26, 0xA4),
+            CodeTokenKind.Type => Windows.UI.Color.FromArgb(0xFF, 0xB0, 0x6E, 0x00),
+            CodeTokenKind.String => Windows.UI.Color.FromArgb(0xFF, 0x3E, 0x8E, 0x3D),
+            CodeTokenKind.Number => Windows.UI.Color.FromArgb(0xFF, 0x98, 0x68, 0x01),
+            CodeTokenKind.Comment => Windows.UI.Color.FromArgb(0xFF, 0x6E, 0x77, 0x81),
+            CodeTokenKind.Operator => Windows.UI.Color.FromArgb(0xFF, 0x01, 0x7C, 0xA8),
+            CodeTokenKind.Preprocessor => Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x3E, 0x32),
+            CodeTokenKind.Tag => Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x3E, 0x32),
+            CodeTokenKind.Attribute => Windows.UI.Color.FromArgb(0xFF, 0x98, 0x68, 0x01),
+            CodeTokenKind.Property => Windows.UI.Color.FromArgb(0xFF, 0x30, 0x63, 0xD6),
+            CodeTokenKind.Constant => Windows.UI.Color.FromArgb(0xFF, 0x98, 0x68, 0x01),
+            CodeTokenKind.Variable => Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x3E, 0x32),
+            CodeTokenKind.Heading => Windows.UI.Color.FromArgb(0xFF, 0x30, 0x63, 0xD6),
+            _ => Windows.UI.Color.FromArgb(0, 0, 0, 0), // plain text keeps the theme foreground
+        }
+        : kind switch
+        {
+            CodeTokenKind.Keyword => Windows.UI.Color.FromArgb(0xFF, 0xC6, 0x78, 0xDD),
+            CodeTokenKind.Type => Windows.UI.Color.FromArgb(0xFF, 0xE5, 0xC0, 0x7B),
+            CodeTokenKind.String => Windows.UI.Color.FromArgb(0xFF, 0x98, 0xC3, 0x79),
+            CodeTokenKind.Number => Windows.UI.Color.FromArgb(0xFF, 0xD1, 0x9A, 0x66),
+            CodeTokenKind.Comment => Windows.UI.Color.FromArgb(0xFF, 0x7F, 0x8C, 0x9B),
+            CodeTokenKind.Operator => Windows.UI.Color.FromArgb(0xFF, 0x56, 0xB6, 0xC2),
+            CodeTokenKind.Preprocessor => Windows.UI.Color.FromArgb(0xFF, 0xE0, 0x6C, 0x75),
+            CodeTokenKind.Tag => Windows.UI.Color.FromArgb(0xFF, 0xE0, 0x6C, 0x75),
+            CodeTokenKind.Attribute => Windows.UI.Color.FromArgb(0xFF, 0xD1, 0x9A, 0x66),
+            CodeTokenKind.Property => Windows.UI.Color.FromArgb(0xFF, 0x61, 0xAF, 0xEF),
+            CodeTokenKind.Constant => Windows.UI.Color.FromArgb(0xFF, 0xD1, 0x9A, 0x66),
+            CodeTokenKind.Variable => Windows.UI.Color.FromArgb(0xFF, 0xE0, 0x6C, 0x75),
+            CodeTokenKind.Heading => Windows.UI.Color.FromArgb(0xFF, 0x61, 0xAF, 0xEF),
+            _ => Windows.UI.Color.FromArgb(0, 0, 0, 0), // plain text keeps the theme foreground
+        };
 }
 
 /// <summary>

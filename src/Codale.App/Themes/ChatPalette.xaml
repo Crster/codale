@@ -75,6 +75,9 @@
     <SolidColorBrush x:Key="MdHeading3Brush" Color="#6EDDC8" />
     <SolidColorBrush x:Key="MdCodeBrush" Color="#F2C078" />
     <SolidColorBrush x:Key="MdBulletBrush" Color="#8B97F8" />
+    <SolidColorBrush x:Key="MdChangeAddedBrush" Color="#6EDDC8" />
+    <SolidColorBrush x:Key="MdChangeEditedBrush" Color="#F2C030" />
+    <SolidColorBrush x:Key="MdChangeDroppedBrush" Color="#E07A7A" />
 
     <!--  Asking the reader something: indigo for questions, amber for permission.  -->
     <SolidColorBrush x:Key="AskSurfaceBrush" Color="#14818CF8" />

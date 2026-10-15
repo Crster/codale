@@ -591,7 +591,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         var hint = new TextBlock
         {
             FontSize = 11,
-            Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
+            Foreground = ChatPaletteTheme.Brush("TextFillColorTertiaryBrush"),
             Margin = new Thickness(0, 4, 0, 0),
             TextWrapping = TextWrapping.Wrap,
         };

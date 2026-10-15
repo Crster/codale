@@ -260,7 +260,7 @@ internal sealed class PlanAnnotator
                 FontSize = 12,
                 MaxWidth = 320,
                 TextWrapping = TextWrapping.Wrap,
-                Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
+                Foreground = ChatPaletteTheme.Brush("TextFillColorTertiaryBrush"),
             });
         }
 
@@ -306,7 +306,7 @@ public sealed partial class PlanAnnotationBar : Grid
             Text = "Annotations",
             FontSize = 12,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            Foreground = ChatPaletteTheme.Brush("TextFillColorSecondaryBrush"),
         });
         bar.Children.Add(_list);
         bar.Children.Add(actions);
@@ -379,7 +379,7 @@ public sealed partial class PlanAnnotationBar : Grid
                     Text = "“" + (entry.Quote.Length > 100 ? entry.Quote[..100] + "…" : entry.Quote) + "”",
                     FontSize = 11,
                     TextWrapping = TextWrapping.Wrap,
-                    Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
+                    Foreground = ChatPaletteTheme.Brush("TextFillColorTertiaryBrush"),
                 });
             }
 

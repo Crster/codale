@@ -892,7 +892,7 @@ public sealed partial class EditorTab
     /// <summary>The parts of a log row that change once a later step arrives.</summary>
     private sealed record LogRowParts(AskLogKind Kind, UIElement Connector, TextBlock Body);
 
-    private static Brush Resource(string key) => (Brush)Application.Current.Resources[key];
+    private static Brush Resource(string key) => ChatPaletteTheme.Brush(key);
 
     /// <summary>
     /// One step on the timeline: a marker on the rail (a dot, or an icon for searches and

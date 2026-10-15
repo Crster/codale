@@ -10,6 +10,40 @@
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
                 <ResourceDictionary Source="ms-appx:///Themes/ChatPalette.xaml" />
             </ResourceDictionary.MergedDictionaries>
+            <!--
+                Shell surfaces. Dark keeps the Fluent layers over Mica; in Light those
+                layers are all near-white, so the backdrop gets a cool grey tint and the
+                panels step down from it, leaving the white cards inside them to stand out.
+            -->
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Default">
+                    <SolidColorBrush x:Key="ShellBackdropTintBrush" Color="Transparent" />
+                    <StaticResource x:Key="ShellCentreBackgroundBrush" ResourceKey="LayerFillColorDefaultBrush" />
+                    <StaticResource x:Key="ShellCentreStrokeBrush" ResourceKey="CardStrokeColorDefaultBrush" />
+                    <StaticResource x:Key="ShellSidePanelBackgroundBrush" ResourceKey="AcrylicInAppFillColorDefaultBrush" />
+                    <StaticResource x:Key="ShellSidePanelStrokeBrush" ResourceKey="SurfaceStrokeColorDefaultBrush" />
+                    <StaticResource x:Key="ShellStatusBarBackgroundBrush" ResourceKey="LayerFillColorDefaultBrush" />
+                    <StaticResource x:Key="ShellStatusBarStrokeBrush" ResourceKey="CardStrokeColorDefaultBrush" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="ShellBackdropTintBrush" Color="#1A3C4A5C" />
+                    <SolidColorBrush x:Key="ShellCentreBackgroundBrush" Color="#F5F6F8" />
+                    <SolidColorBrush x:Key="ShellCentreStrokeBrush" Color="#D6DAE0" />
+                    <SolidColorBrush x:Key="ShellSidePanelBackgroundBrush" Color="#ECEEF2" />
+                    <SolidColorBrush x:Key="ShellSidePanelStrokeBrush" Color="#D0D5DC" />
+                    <SolidColorBrush x:Key="ShellStatusBarBackgroundBrush" Color="#E6E9EE" />
+                    <SolidColorBrush x:Key="ShellStatusBarStrokeBrush" Color="#D0D5DC" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <SolidColorBrush x:Key="ShellBackdropTintBrush" Color="Transparent" />
+                    <StaticResource x:Key="ShellCentreBackgroundBrush" ResourceKey="SystemColorWindowColorBrush" />
+                    <StaticResource x:Key="ShellCentreStrokeBrush" ResourceKey="SystemColorWindowTextColorBrush" />
+                    <StaticResource x:Key="ShellSidePanelBackgroundBrush" ResourceKey="SystemColorWindowColorBrush" />
+                    <StaticResource x:Key="ShellSidePanelStrokeBrush" ResourceKey="SystemColorWindowTextColorBrush" />
+                    <StaticResource x:Key="ShellStatusBarBackgroundBrush" ResourceKey="SystemColorWindowColorBrush" />
+                    <StaticResource x:Key="ShellStatusBarStrokeBrush" ResourceKey="SystemColorWindowTextColorBrush" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
             <!-- Small corner radius everywhere (Fluent defaults are 4 and 8). -->
             <CornerRadius x:Key="ControlCornerRadius">2</CornerRadius>
             <CornerRadius x:Key="OverlayCornerRadius">4</CornerRadius>

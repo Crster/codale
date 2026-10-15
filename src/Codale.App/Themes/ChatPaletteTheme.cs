@@ -20,9 +20,73 @@ public static class ChatPaletteTheme
 {
     private static bool _isLight;
 
+    /// <summary>True while the resolved app theme is Light.</summary>
+    public static bool IsLight => _isLight;
+
+    /// <summary>
+    /// A resource for code that cannot use ThemeResource. Application.Resources[key] hands
+    /// back the app-level theme's half of the Fluent theme dictionaries (dark, white text)
+    /// even when a window is overridden to Light, so look in the matching half first.
+    /// </summary>
+    public static object Resource(string key)
+    {
+        var resources = Application.Current.Resources;
+        var themeKey = _isLight ? "Light" : "Default";
+        if (FindThemed(resources, themeKey, key) is { } themed)
+        {
+            return themed;
+        }
+
+        return resources[key];
+    }
+
+    /// <summary><see cref="Resource"/> for brushes.</summary>
+    public static Brush Brush(string key) => (Brush)Resource(key);
+
+    /// <summary><see cref="Resource"/> that reports a missing key instead of throwing.</summary>
+    public static bool TryGetBrush(string key, out Brush brush)
+    {
+        try
+        {
+            if (Resource(key) is Brush found)
+            {
+                brush = found;
+                return true;
+            }
+        }
+        catch (Exception)
+        {
+            // Not defined anywhere; the caller falls back.
+        }
+
+        brush = null!;
+        return false;
+    }
+
+    private static object? FindThemed(ResourceDictionary dictionary, string themeKey, string key)
+    {
+        if (dictionary.ThemeDictionaries.TryGetValue(themeKey, out var theme)
+            && theme is ResourceDictionary themed
+            && themed.TryGetValue(key, out var value))
+        {
+            return value;
+        }
+
+        foreach (var merged in dictionary.MergedDictionaries)
+        {
+            if (FindThemed(merged, themeKey, key) is { } found)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>Re-colours the palette brushes for the given resolved theme. Cheap; safe to call repeatedly.</summary>
     public static void Apply(bool light)
     {
+        Controls.CodePalette.Light = light;
         if (_isLight == light)
         {
             return;
@@ -114,6 +178,9 @@ public static class ChatPaletteTheme
         ["MdHeading3Brush"] = C("#6EDDC8"),
         ["MdCodeBrush"] = C("#F2C078"),
         ["MdBulletBrush"] = C("#8B97F8"),
+        ["MdChangeAddedBrush"] = C("#6EDDC8"),
+        ["MdChangeEditedBrush"] = C("#F2C030"),
+        ["MdChangeDroppedBrush"] = C("#E07A7A"),
         ["AskSurfaceBrush"] = C("#14818CF8"),
         ["AskStrokeBrush"] = C("#59818CF8"),
         ["OptionSelectedBrush"] = C("#29818CF8"),
@@ -178,6 +245,9 @@ public static class ChatPaletteTheme
         ["MdHeading3Brush"] = C("#0F766E"),
         ["MdCodeBrush"] = C("#B45309"),
         ["MdBulletBrush"] = C("#4F46E5"),
+        ["MdChangeAddedBrush"] = C("#0F766E"),
+        ["MdChangeEditedBrush"] = C("#B45309"),
+        ["MdChangeDroppedBrush"] = C("#DC2626"),
         ["AskSurfaceBrush"] = C("#14818CF8"),
         ["AskStrokeBrush"] = C("#59818CF8"),
         ["OptionSelectedBrush"] = C("#29818CF8"),

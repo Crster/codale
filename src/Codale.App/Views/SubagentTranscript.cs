@@ -80,7 +80,7 @@ public sealed class SubagentTranscript : StackPanel
         }
     }
 
-    private static Brush Themed(string key) => (Brush)Application.Current.Resources[key];
+    private static Brush Themed(string key) => ChatPaletteTheme.Brush(key);
 
     private static UIElement PromptCard(string prompt) => new Border
     {
