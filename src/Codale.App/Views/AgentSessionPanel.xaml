@@ -788,7 +788,7 @@
                                 IsItemClickEnabled="True"
                                 ItemClick="OnRunningTaskClick"
                                 ItemContainerStyle="{StaticResource PanelItem}"
-                                ItemsSource="{x:Bind Session.RunningTasks, Mode=OneWay}"
+                                ItemsSource="{x:Bind Session.SortedTasks, Mode=OneWay}"
                                 SelectionMode="None"
                                 Visibility="{x:Bind RunningTasksSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
                                 <ListView.ItemTemplate>
@@ -838,6 +838,10 @@
                                                     FontSize="10"
                                                     Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                                     Text="{x:Bind StatusLabel, Mode=OneWay}" />
+                                                <TextBlock
+                                                    FontSize="10"
+                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                    Text="{x:Bind Elapsed, Mode=OneWay}" />
                                             </StackPanel>
                                         </Grid>
                                     </DataTemplate>

@@ -63,6 +63,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     private readonly DateTime _openedAtUtc = DateTime.UtcNow.AddMinutes(-1);
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _timer;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _elapsedTimer;
     private ChatViewModel? _session;
     private WorkspaceViewModel? _workspace;
     private ICliHistoryReader? _reader;
@@ -77,6 +78,15 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
         _timer = DispatcherQueue.CreateTimer();
         _timer.Interval = ProbeInterval;
         _timer.Tick += (_, _) => OnTick();
+        _elapsedTimer = DispatcherQueue.CreateTimer();
+        _elapsedTimer.Interval = TimeSpan.FromSeconds(1);
+        _elapsedTimer.Tick += (_, _) =>
+        {
+            foreach (var task in Session?.RunningTasks.Where(t => t.IsRunning).ToList() ?? [])
+            {
+                task.RefreshElapsed();
+            }
+        };
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
     }
@@ -237,12 +247,14 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
         WatchHistory();
         _ticks = UsageEveryTicks;
         _timer.Start();
+        _elapsedTimer.Start();
         OnTick();
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         _timer.Stop();
+        _elapsedTimer.Stop();
         StopWatchingHistory();
         if (Session is { } session)
         {

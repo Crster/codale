@@ -287,6 +287,40 @@ public sealed partial class RunningTaskItem : ObservableObject
 
     public static string PromptHeader(string prompt) => $"[prompt]\n{prompt.Trim()}\n";
 
+    partial void OnStatusChanged(RunningTaskStatus value)
+    {
+        if (value == RunningTaskStatus.Running)
+        {
+            _endedAt = null;
+        }
+        else
+        {
+            _endedAt ??= DateTimeOffset.Now;
+        }
+
+        RefreshElapsed();
+    }
+
+    private DateTimeOffset? _endedAt;
+
+    /// <summary>How long the task has run (frozen once it ended), as 1m 05s.</summary>
+    public string Elapsed
+    {
+        get
+        {
+            var span = (_endedAt ?? DateTimeOffset.Now) - StartedAt;
+            if (span < TimeSpan.Zero)
+            {
+                span = TimeSpan.Zero;
+            }
+
+            return span.TotalHours >= 1 ? $"{(int)span.TotalHours}h {span.Minutes:00}m" : span.TotalMinutes >= 1 ? $"{span.Minutes}m {span.Seconds:00}s" : $"{span.Seconds}s";
+        }
+    }
+
+    /// <summary>Called by the panels' tick so a running task's elapsed time moves.</summary>
+    public void RefreshElapsed() => OnPropertyChanged(nameof(Elapsed));
+
     public bool IsShell => Kind == RunningTaskKind.Shell;
 
     public bool IsRunning => Status == RunningTaskStatus.Running;

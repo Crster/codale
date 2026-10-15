@@ -270,6 +270,34 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Background shells and subagents this conversation started, oldest first.</summary>
     public ObservableCollection<RunningTaskItem> RunningTasks { get; } = [];
 
+    /// <summary>The same tasks for the session panels: running ones first, newest first within each group.</summary>
+    public ObservableCollection<RunningTaskItem> SortedTasks { get; } = [];
+
+    private void ResortTasks()
+    {
+        var wanted = RunningTasks.OrderByDescending(t => t.IsRunning).ThenByDescending(t => t.StartedAt).ToList();
+        for (var i = SortedTasks.Count - 1; i >= 0; i--)
+        {
+            if (!wanted.Contains(SortedTasks[i]))
+            {
+                SortedTasks.RemoveAt(i);
+            }
+        }
+
+        for (var i = 0; i < wanted.Count; i++)
+        {
+            var at = SortedTasks.IndexOf(wanted[i]);
+            if (at < 0)
+            {
+                SortedTasks.Insert(i, wanted[i]);
+            }
+            else if (at != i)
+            {
+                SortedTasks.Move(at, i);
+            }
+        }
+    }
+
     private readonly Dictionary<string, RunningTaskItem> _tasksByToolUse = [];
 
     // Commands Codale itself runs for the agent (codale-tasks). One host per chat, kept
@@ -467,6 +495,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             if (e.PropertyName is nameof(RunningTaskItem.Status) or nameof(RunningTaskItem.IsRunning))
             {
+                ResortTasks();
                 NotifySubagents();
                 RefreshTaskStatusLine(task);
             }
@@ -554,6 +583,29 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    /// <summary>Claude streams a background task's output to a tasks folder under %TEMP%/claude; its events never name the file.</summary>
+    private static string? FindClaudeTaskOutput(string taskId)
+    {
+        try
+        {
+            var root = Path.Combine(Path.GetTempPath(), "claude");
+            if (taskId.Length == 0 || taskId.IndexOfAny(['/', '\\', '.']) >= 0 || !Directory.Exists(root))
+            {
+                return null;
+            }
+
+            return Directory.EnumerateFiles(root, taskId + ".output", SearchOption.AllDirectories)
+                .Where(f => Path.GetFileName(Path.GetDirectoryName(f)) == "tasks")
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .FirstOrDefault();
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Debug("tasks", $"task output lookup failed: {ex.Message}");
+            return null;
+        }
+    }
+
     /// <summary>The CLI's own id for a background task lets it be stopped, and its notification is what ends it.</summary>
     private void ApplyBackgroundTask(BackgroundTaskChanged changed)
     {
@@ -583,6 +635,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         task.RuntimeId = changed.TaskId;
         task.LaunchedInBackground = true;
+        task.OutputPath ??= FindClaudeTaskOutput(changed.TaskId);
         if (changed.Prompt is { Length: > 0 } prompt && task.Header.Length == 0)
         {
             task.Header = RunningTaskItem.PromptHeader(prompt);
@@ -902,6 +955,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         _tasksByToolUse[task.ToolUseId] = task;
         RunningTasks.Add(task);
+        ResortTasks();
         WatchTask(task);
         NotifySubagents();
     }
@@ -909,7 +963,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Whatever was still running has lost its process: mark it ended.</summary>
     private void EndAllTasks()
     {
-        foreach (var t in RunningTasks.Where(t => t.IsRunning))
+        // A hosted task's process is Codale's own and outlives the CLI session; SyncHostedTasks ends it.
+        foreach (var t in RunningTasks.Where(t => t.IsRunning && t.Hosted is null))
         {
             t.Status = RunningTaskStatus.Ended;
         }
@@ -922,6 +977,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         foreach (var task in RunningTasks.Where(t => t.Hosted is null || !t.IsRunning).ToList())
         {
             RunningTasks.Remove(task);
+            ResortTasks();
             _tasksByToolUse.Remove(task.ToolUseId);
             if (ReferenceEquals(_liveTask, task))
             {

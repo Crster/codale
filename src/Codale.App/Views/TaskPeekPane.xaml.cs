@@ -51,6 +51,15 @@ public sealed partial class TaskPeekPane : UserControl
             Transcript.Changed += OnTranscriptChanged;
         }
 
+        if (task.Hosted is { } hosted)
+        {
+            // Rebuild from the process's own buffer so the pane never depends on the 250 ms copy having run.
+            var (text, next) = hosted.Read(0);
+            task.Output = "";
+            task.AppendOutput(text);
+            task.HostOffset = next;
+        }
+
         Refresh(stickToEnd: true);
         StartTailing();
     }

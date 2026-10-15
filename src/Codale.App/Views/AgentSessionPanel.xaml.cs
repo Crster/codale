@@ -121,7 +121,6 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     // Events raised to parent container
     public event EventHandler<string>? FileDiffRequested;
     public event EventHandler<SessionArtifact>? ArtifactRequested;
-    public event EventHandler<RunningTaskItem>? TaskPeekRequested;
     public event EventHandler<string>? UpdateCliRequested;
     public event EventHandler? MergeIsolatedRequested;
     public event EventHandler? DiscardIsolatedRequested;
@@ -162,14 +161,32 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         }
     }
 
+    public event EventHandler<RunningTaskItem>? TaskPeekRequested;
+
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _elapsedTimer;
+
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        _elapsedTimer ??= DispatcherQueue.CreateTimer();
+        _elapsedTimer.Interval = TimeSpan.FromSeconds(1);
+        _elapsedTimer.Tick -= OnElapsedTick;
+        _elapsedTimer.Tick += OnElapsedTick;
+        _elapsedTimer.Start();
         _ = CliUpdate.RefreshAsync(PanelCli);
         UpdateHistoryLayout();
     }
 
+    private void OnElapsedTick(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args)
+    {
+        foreach (var task in _session?.RunningTasks.Where(t => t.IsRunning).ToList() ?? [])
+        {
+            task.RefreshElapsed();
+        }
+    }
+
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        _elapsedTimer?.Stop();
         if (_session is not null)
         {
             _session.PropertyChanged -= OnSessionPropertyChanged;
