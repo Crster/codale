@@ -362,7 +362,7 @@ public sealed class ClaudeStreamParser
                 yield return new AssistantThinkingDelta(t) { ParentToolUseId = parent };
                 break;
 
-            // signature_delta and input_json_delta carry no user-visible text.
+                // signature_delta and input_json_delta carry no user-visible text.
         }
     }
 

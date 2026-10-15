@@ -359,9 +359,6 @@ public static class AppSettings
 
     private const string ProvidersKey = "byok.providers";
 
-    /// <summary>Dropped on load: the agent choice died with the other CLIs.</summary>
-    private const string LegacyAgentKey = "chat.defaultAgent";
-
     private static readonly JsonSerializerOptions ProviderJson = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -370,8 +367,12 @@ public static class AppSettings
 
     private static ByokProvider Clone(ByokProvider p, string? apiKey = null) => new()
     {
-        Name = p.Name, BaseUrl = p.BaseUrl, AnthropicBaseUrl = p.AnthropicBaseUrl, ApiKey = apiKey ?? p.ApiKey,
-        FlashModel = p.FlashModel, ProModel = p.ProModel,
+        Name = p.Name,
+        BaseUrl = p.BaseUrl,
+        AnthropicBaseUrl = p.AnthropicBaseUrl,
+        ApiKey = apiKey ?? p.ApiKey,
+        FlashModel = p.FlashModel,
+        ProModel = p.ProModel,
         ModelContextWindows = p.ModelContextWindows is not null
             ? new(p.ModelContextWindows, StringComparer.OrdinalIgnoreCase)
             : new(StringComparer.OrdinalIgnoreCase),
@@ -541,7 +542,6 @@ public static class AppSettings
     private static readonly object FileLock = new();
     private static SortedDictionary<string, string>? _values;
     private static string _lastWritten = "";
-    private static bool _droppedLegacyKey;
     private static DispatcherQueue? _uiQueue;
     private static FileSystemWatcher? _watcher;
 
@@ -556,12 +556,6 @@ public static class AppSettings
                     _uiQueue ??= DispatcherQueue.GetForCurrentThread();
 
                     _values = LoadFile() ?? SeedFromDatabase();
-                    if (_droppedLegacyKey)
-                    {
-                        _droppedLegacyKey = false;
-                        Persist(_values);
-                    }
-
                     StartWatching();
                 }
 
@@ -587,11 +581,6 @@ public static class AppSettings
                 new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
             foreach (var property in doc.RootElement.EnumerateObject())
             {
-                if (property.Name == LegacyAgentKey)
-                {
-                    _droppedLegacyKey = true;
-                    continue;
-                }
 
                 switch (property.Value.ValueKind)
                 {
@@ -753,7 +742,6 @@ public static class AppSettings
                 return;
             }
 
-            _droppedLegacyKey = false;
             _values = fresh;
             Cache.Clear();
         }

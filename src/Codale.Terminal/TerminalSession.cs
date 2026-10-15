@@ -209,7 +209,7 @@ public sealed class TerminalSession : IDisposable
     }
 
     /// <summary>Queues input for the shell; returns immediately, writes land in call order.</summary>
-    public Task WriteAsync(string text, CancellationToken ct = default)
+    public Task WriteAsync(string text)
     {
         _input.Writer.TryWrite(text);
         return Task.CompletedTask;

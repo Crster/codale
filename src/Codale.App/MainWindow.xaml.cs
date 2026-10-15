@@ -236,7 +236,7 @@ public sealed partial class MainWindow : Window
     /// <summary>A configured keyboard shortcut was pressed; the open workspace runs it.</summary>
     public event EventHandler<ShortcutEventArgs>? ShortcutInvoked;
 
-    private void OnRootPreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    private void OnRootPreviewKeyDown(object _, KeyRoutedEventArgs e)
     {
         if (KeyboardShortcuts.IsRecording || ShortcutInvoked is null ||
             KeyChord.FromKeyPress(e.Key, usableOnly: true) is not { IsUsable: true } chord ||
@@ -257,7 +257,7 @@ public sealed partial class MainWindow : Window
         e.Handled = args.Handled;
     }
 
-    private void OnRootKeyDown(object sender, KeyRoutedEventArgs e)
+    private void OnRootKeyDown(object _, KeyRoutedEventArgs e)
     {
         if (e.Key == Windows.System.VirtualKey.Escape && _settingsOpen)
         {

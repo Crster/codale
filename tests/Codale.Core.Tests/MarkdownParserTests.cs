@@ -356,4 +356,3 @@ public sealed class MarkdownParserTests
         Assert.Contains("d [e](", rendered);
     }
 }
-

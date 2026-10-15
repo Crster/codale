@@ -635,35 +635,35 @@ public static class MarkdownParser
                     break;
 
                 case '`':
-                {
-                    var run = RunOf(text, i, '`');
-
-                    if (FindRun(text, i + run, '`', run) is { } close)
                     {
-                        var span = text[(i + run)..close];
-                        Flush();
-                        inlines.Add(new MarkdownInline.CodeSpan(NormaliseCodeSpan(span)));
-                        i = close + run;
-                    }
-                    else
-                    {
-                        literal.Append(text.Substring(i, run));
-                        i += run;
-                    }
+                        var run = RunOf(text, i, '`');
 
-                    break;
-                }
+                        if (FindRun(text, i + run, '`', run) is { } close)
+                        {
+                            var span = text[(i + run)..close];
+                            Flush();
+                            inlines.Add(new MarkdownInline.CodeSpan(NormaliseCodeSpan(span)));
+                            i = close + run;
+                        }
+                        else
+                        {
+                            literal.Append(text.Substring(i, run));
+                            i += run;
+                        }
+
+                        break;
+                    }
 
                 case '*' or '_' when EmphasisClose(text, i, c, out var strong, out var close):
-                {
-                    var opener = strong ? 2 : 1;
-                    Flush();
-                    inlines.Add(new MarkdownInline.Emphasis(
-                        ParseInlines(text[(i + opener)..close], depth + 1),
-                        strong));
-                    i = close + opener;
-                    break;
-                }
+                    {
+                        var opener = strong ? 2 : 1;
+                        Flush();
+                        inlines.Add(new MarkdownInline.Emphasis(
+                            ParseInlines(text[(i + opener)..close], depth + 1),
+                            strong));
+                        i = close + opener;
+                        break;
+                    }
 
                 case '~' when i + 1 < text.Length && text[i + 1] == '~'
                     && FindRun(text, i + 2, '~', 2) is { } strikeClose:

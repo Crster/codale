@@ -251,7 +251,8 @@ public sealed class McpServerTests
                 Interlocked.Decrement(ref running);
                 return [McpContent.FromText("ok")];
             }),
-        ]) { MaxConcurrentCalls = 1 };
+        ])
+        { MaxConcurrentCalls = 1 };
         var input = new StringReader(string.Join("\n", Enumerable.Range(1, 4).Select(i =>
             """{"jsonrpc":"2.0","id":""" + i + ""","method":"tools/call","params":{"name":"work"}}""")) + "\n");
         var output = new StringWriter();

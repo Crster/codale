@@ -220,11 +220,11 @@ public sealed partial class SearchViewModel : ObservableObject
 
             var count = final.Files.Count;
             Status = (count switch
-                     {
-                         0 => "Nothing found",
-                         1 => "1 file",
-                         _ => $"{count} files",
-                     }) +
+            {
+                0 => "Nothing found",
+                1 => "1 file",
+                _ => $"{count} files",
+            }) +
                      $" · {clock.Elapsed.TotalSeconds:0.0}s" +
                      (model is null && !keywordOnly ? " · keyword search, no Claude CLI found" : "");
         }
@@ -324,7 +324,7 @@ public sealed partial class SearchViewModel : ObservableObject
     public ISearchModel? CreateFileModel() => _helper.IsAvailable ? new HelperSearchModel(_helper) : null;
 
     /// <summary>Task-shaped <see cref="CreateFileModel"/> for the editor's search hook, which takes a cancellable async factory.</summary>
-    public Task<ISearchModel?> ConnectModelAsync(CancellationToken ct) => Task.FromResult(CreateFileModel());
+    public Task<ISearchModel?> ConnectModelAsync(CancellationToken _) => Task.FromResult(CreateFileModel());
 
     private async Task CancelInFlightAsync()
     {

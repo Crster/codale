@@ -886,54 +886,54 @@ public sealed partial class SearchAgentLoop
         switch (call.Tool)
         {
             case "grep":
-            {
-                var pattern = call.GetString("pattern") ?? "";
-                var glob = call.GetString("glob");
-
-                string? error = null;
-                var results = GrepIndex(pattern, glob, 30, ct) ?? await CollectAsync(new SearchQuery
                 {
-                    Text = pattern,
-                    IsRegex = true,
-                    Glob = glob,
-                    MaxResults = 30,
-                }, ct, message => error = message).ConfigureAwait(false);
+                    var pattern = call.GetString("pattern") ?? "";
+                    var glob = call.GetString("glob");
 
-                // The model has to hear that its pattern was rejected, or it reads
-                // "0 matches" and concludes the code is not there.
-                return ($"grep \"{pattern}\"{(glob is null ? "" : $" in {glob}")}",
-                        results,
-                        error is not null
-                            ? $"grep \"{pattern}\" failed: {error}"
-                            : $"grep \"{pattern}\" returned {results.Count} matches:\n{Summarise(results)}");
-            }
+                    string? error = null;
+                    var results = GrepIndex(pattern, glob, 30, ct) ?? await CollectAsync(new SearchQuery
+                    {
+                        Text = pattern,
+                        IsRegex = true,
+                        Glob = glob,
+                        MaxResults = 30,
+                    }, ct, message => error = message).ConfigureAwait(false);
+
+                    // The model has to hear that its pattern was rejected, or it reads
+                    // "0 matches" and concludes the code is not there.
+                    return ($"grep \"{pattern}\"{(glob is null ? "" : $" in {glob}")}",
+                            results,
+                            error is not null
+                                ? $"grep \"{pattern}\" failed: {error}"
+                                : $"grep \"{pattern}\" returned {results.Count} matches:\n{Summarise(results)}");
+                }
 
             case "find_files":
-            {
-                var glob = call.GetString("glob") ?? "*";
-                var files = _snapshot?.FindFiles(glob) ?? await FindFilesAsync(glob, ct).ConfigureAwait(false);
+                {
+                    var glob = call.GetString("glob") ?? "*";
+                    var files = _snapshot?.FindFiles(glob) ?? await FindFilesAsync(glob, ct).ConfigureAwait(false);
 
-                return ($"find_files {glob}",
-                        [],
-                        $"find_files {glob} returned {files.Count} paths:\n{string.Join("\n", files.Take(50))}");
-            }
+                    return ($"find_files {glob}",
+                            [],
+                            $"find_files {glob} returned {files.Count} paths:\n{string.Join("\n", files.Take(50))}");
+                }
 
             case "read_file":
-            {
-                var path = call.GetString("path") ?? "";
-                var start = call.GetInt("start") ?? 1;
-                var end = call.GetInt("end") ?? start + 60;
+                {
+                    var path = call.GetString("path") ?? "";
+                    var start = call.GetInt("start") ?? 1;
+                    var end = call.GetInt("end") ?? start + 60;
 
-                var text = ReadLines(path, start, end);
-                return ($"read {path}:{start}-{end}", [], text);
-            }
+                    var text = ReadLines(path, start, end);
+                    return ($"read {path}:{start}-{end}", [], text);
+                }
 
             case "symbol" when _snapshot is not null:
-            {
-                var name = (call.GetString("name") ?? "").Trim();
-                var (results, text) = DescribeSymbol(_snapshot, name);
-                return ($"symbol {name}", results, text);
-            }
+                {
+                    var name = (call.GetString("name") ?? "").Trim();
+                    var (results, text) = DescribeSymbol(_snapshot, name);
+                    return ($"symbol {name}", results, text);
+                }
 
             default:
                 return ($"unknown tool {call.Tool}", [], $"There is no tool called {call.Tool}.");

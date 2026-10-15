@@ -60,56 +60,56 @@ public sealed class InlineReasoningSplitter
             switch (_state)
             {
                 case State.Start:
-                {
-                    var trimmed = text.TrimStart();
-                    if (trimmed.StartsWith(Open, StringComparison.OrdinalIgnoreCase))
                     {
-                        _pending.Clear().Append(trimmed[Open.Length..]);
-                        _state = State.Thinking;
-                        _thought = true;
+                        var trimmed = text.TrimStart();
+                        if (trimmed.StartsWith(Open, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _pending.Clear().Append(trimmed[Open.Length..]);
+                            _state = State.Thinking;
+                            _thought = true;
+                            continue;
+                        }
+
+                        // Blank so far, or the first letters of "<think>": wait for more.
+                        if (!final && Open.StartsWith(trimmed, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return;
+                        }
+
+                        // The blank lines between a reasoning block and the answer are not the answer.
+                        if (_thought)
+                        {
+                            _pending.Clear().Append(trimmed);
+                        }
+
+                        _state = State.Answer;
                         continue;
                     }
 
-                    // Blank so far, or the first letters of "<think>": wait for more.
-                    if (!final && Open.StartsWith(trimmed, StringComparison.OrdinalIgnoreCase))
+                case State.Thinking:
                     {
+                        var close = text.IndexOf(Close, StringComparison.OrdinalIgnoreCase);
+                        if (close >= 0)
+                        {
+                            Emit(output, thinking: true, text[..close]);
+                            _pending.Clear().Append(text[(close + Close.Length)..]);
+                            _state = State.Start;
+                            continue;
+                        }
+
+                        var keep = final ? 0 : PartialTag(text, Close);
+                        Emit(output, thinking: true, text[..^keep]);
+                        _pending.Clear().Append(text[^keep..]);
                         return;
                     }
 
-                    // The blank lines between a reasoning block and the answer are not the answer.
-                    if (_thought)
-                    {
-                        _pending.Clear().Append(trimmed);
-                    }
-
-                    _state = State.Answer;
-                    continue;
-                }
-
-                case State.Thinking:
-                {
-                    var close = text.IndexOf(Close, StringComparison.OrdinalIgnoreCase);
-                    if (close >= 0)
-                    {
-                        Emit(output, thinking: true, text[..close]);
-                        _pending.Clear().Append(text[(close + Close.Length)..]);
-                        _state = State.Start;
-                        continue;
-                    }
-
-                    var keep = final ? 0 : PartialTag(text, Close);
-                    Emit(output, thinking: true, text[..^keep]);
-                    _pending.Clear().Append(text[^keep..]);
-                    return;
-                }
-
                 default:
-                {
-                    var keep = final ? 0 : PartialToken(text);
-                    Emit(output, thinking: false, ModelOutput.StripTemplateTokens(text[..^keep]));
-                    _pending.Clear().Append(text[^keep..]);
-                    return;
-                }
+                    {
+                        var keep = final ? 0 : PartialToken(text);
+                        Emit(output, thinking: false, ModelOutput.StripTemplateTokens(text[..^keep]));
+                        _pending.Clear().Append(text[^keep..]);
+                        return;
+                    }
             }
         }
     }

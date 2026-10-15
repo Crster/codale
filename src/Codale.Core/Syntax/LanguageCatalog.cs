@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+
 using TextMateSharp.Grammars;
 
 namespace Codale.Core.Syntax;

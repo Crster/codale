@@ -93,7 +93,7 @@ public sealed record GitBranchInfo
         : (Ahead, Behind) switch
         {
             (0, 0) => "up to date",
-            (> 0, 0) => $"{Ahead} ahead",
+            ( > 0, 0) => $"{Ahead} ahead",
             (0, > 0) => $"{Behind} behind",
             var (a, b) => $"{a} ahead, {b} behind",
         };

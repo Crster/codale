@@ -10,11 +10,11 @@ public sealed class GitStatusMapTests
         string path,
         GitChangeKind index = GitChangeKind.Unmodified,
         GitChangeKind workTree = GitChangeKind.Unmodified) => new()
-    {
-        Path = path,
-        Index = index,
-        WorkTree = workTree,
-    };
+        {
+            Path = path,
+            Index = index,
+            WorkTree = workTree,
+        };
 
     [Fact]
     public void An_entrys_own_change_is_reported()

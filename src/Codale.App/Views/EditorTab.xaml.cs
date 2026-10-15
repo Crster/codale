@@ -1,5 +1,5 @@
-using Codale.App.Services;
 using Codale.App.Controls;
+using Codale.App.Services;
 using Codale.App.ViewModels;
 using Codale.Search;
 
@@ -68,7 +68,7 @@ public sealed partial class EditorTab : UserControl
 
         BuildContextMenu();
         FileEditor.SelectionChanged += OnEditorSelectionChanged;
-        FileEditor.TextChanged += OnEditorTextChanged;
+        FileEditor.TextChanged += _ => OnEditorTextChanged();
         FileEditor.ZoomChanged += (_, _) => OnZoomChanged();
 
         // Save lives on the control now that the toolbar button is gone; the
@@ -766,7 +766,7 @@ public sealed partial class EditorTab : UserControl
         }
     }
 
-    private void OnOpenExternallyClick(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    private void OpenExternally()
     {
         if (ViewModel.FilePath is not { } path)
         {
@@ -821,7 +821,7 @@ public sealed partial class EditorTab : UserControl
             sender.HasSelection ? sender.SelectedTextLength : 0);
     }
 
-    private void OnEditorTextChanged(CodeEditor sender)
+    private void OnEditorTextChanged()
     {
         if (!_loadingText)
         {

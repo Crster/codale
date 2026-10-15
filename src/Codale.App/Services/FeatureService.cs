@@ -1,8 +1,8 @@
 using Codale.Agents.History;
 using Codale.Core.Features;
 using Codale.Core.Helper;
-using Codale.Search;
 using Codale.Core.Projects;
+using Codale.Search;
 using Codale.Storage;
 
 namespace Codale.App.Services;

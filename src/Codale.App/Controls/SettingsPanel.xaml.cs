@@ -1,5 +1,5 @@
-using Codale.Agents.Claude;
 using Codale.Agents;
+using Codale.Agents.Claude;
 using Codale.Agents.OpenAi;
 using Codale.App.Services;
 using Codale.App.ViewModels;

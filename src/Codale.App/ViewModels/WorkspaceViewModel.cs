@@ -1,9 +1,9 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 
-using Codale.Agents.History;
 using Codale.Agents;
 using Codale.Agents.Claude;
+using Codale.Agents.History;
 using Codale.Agents.OpenAi;
 using Codale.App.Services;
 using Codale.Commands;
@@ -281,7 +281,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     {
         var chat = new ChatViewModel(ProjectPath, new StatusViewModel(_customUsage), _endpoints, _mcp)
         {
-            Router = _router, Helper = _helper, Features = Features, ExtraFolders = ExtraFolders, Terminals = new TerminalSource(this),
+            Router = _router,
+            Helper = _helper,
+            Features = Features,
+            ExtraFolders = ExtraFolders,
+            Terminals = new TerminalSource(this),
             CliId = cliId is { Length: > 0 } ? cliId : Codale.Agents.CliLocator.ActiveCli.Id,
         };
 
@@ -1406,7 +1410,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             chat.SessionStateChanged -= OnSessionStateChanged;
             chat.TodosChanged -= OnTodosChanged;
             chat.NewTopicRequested -= OnNewTopicRequested;
-                chat.PropertyChanged -= OnChatPropertyChanged;
+            chat.PropertyChanged -= OnChatPropertyChanged;
         }
 
         // Every session is told to go at once:

@@ -201,7 +201,7 @@ public sealed class MarkdownView : StackPanel
                     break;
 
                 case MarkdownBlock.Paragraph paragraph:
-                    AddWithImages(into, paragraph.Content, size, content => Prose(content, size, (0, 0, 0, 2)));
+                    AddWithImages(into, paragraph.Content, content => Prose(content, size, (0, 0, 0, 2)));
                     break;
 
                 case MarkdownBlock.ListItem item:
@@ -625,93 +625,93 @@ public sealed class MarkdownView : StackPanel
             switch (inline)
             {
                 case MarkdownInline.Text text:
-                {
-                    var decorations = strike ? Windows.UI.Text.TextDecorations.Strikethrough : Windows.UI.Text.TextDecorations.None;
-                    var at = 0;
-
-                    // Bare URLs and paths the agent wrote outside backticks are clickable too.
-                    foreach (var match in linkify ? LinkFinder.Find(text.Value) : [])
                     {
-                        if (match.Index > at)
+                        var decorations = strike ? Windows.UI.Text.TextDecorations.Strikethrough : Windows.UI.Text.TextDecorations.None;
+                        var at = 0;
+
+                        // Bare URLs and paths the agent wrote outside backticks are clickable too.
+                        foreach (var match in linkify ? LinkFinder.Find(text.Value) : [])
                         {
-                            into.Add(new Run { Text = text.Value[at..match.Index], TextDecorations = decorations });
+                            if (match.Index > at)
+                            {
+                                into.Add(new Run { Text = text.Value[at..match.Index], TextDecorations = decorations });
+                            }
+
+                            into.Add(MakeLink(match, match.Text, null));
+                            at = match.Index + match.Length;
                         }
 
-                        into.Add(MakeLink(match, match.Text, null));
-                        at = match.Index + match.Length;
-                    }
+                        if (at < text.Value.Length)
+                        {
+                            into.Add(new Run { Text = text.Value[at..], TextDecorations = decorations });
+                        }
 
-                    if (at < text.Value.Length)
-                    {
-                        into.Add(new Run { Text = text.Value[at..], TextDecorations = decorations });
+                        break;
                     }
-
-                    break;
-                }
 
                 case MarkdownInline.Emphasis emphasis:
-                {
-                    var span = new Span();
-                    if (emphasis.Strong)
                     {
-                        span.FontWeight = FontWeights.Bold;
-                        span.Foreground = ThemeBrush("MdStrongBrush", 0xFF, 0xFF, 0xFF);
-                    }
-                    else
-                    {
-                        span.FontStyle = Windows.UI.Text.FontStyle.Italic;
-                    }
+                        var span = new Span();
+                        if (emphasis.Strong)
+                        {
+                            span.FontWeight = FontWeights.Bold;
+                            span.Foreground = ThemeBrush("MdStrongBrush", 0xFF, 0xFF, 0xFF);
+                        }
+                        else
+                        {
+                            span.FontStyle = Windows.UI.Text.FontStyle.Italic;
+                        }
 
-                    FillInlines(span.Inlines, emphasis.Content, size, strike, linkify);
-                    into.Add(span);
-                    break;
-                }
+                        FillInlines(span.Inlines, emphasis.Content, size, strike, linkify);
+                        into.Add(span);
+                        break;
+                    }
 
                 case MarkdownInline.Strike struck:
                     FillInlines(into, struck.Content, size, strike: true, linkify);
                     break;
 
                 case MarkdownInline.CodeSpan code:
-                {
-                    var run = new Run
                     {
-                        Text = code.Value,
-                        FontFamily = CodeFont,
-                        FontSize = size - 0.5,
-                        TextDecorations = strike ? Windows.UI.Text.TextDecorations.Strikethrough : Windows.UI.Text.TextDecorations.None,
-                    };
+                        var run = new Run
+                        {
+                            Text = code.Value,
+                            FontFamily = CodeFont,
+                            FontSize = size - 0.5,
+                            TextDecorations = strike ? Windows.UI.Text.TextDecorations.Strikethrough : Windows.UI.Text.TextDecorations.None,
+                        };
 
-                    // `src/Foo.cs:42` is how agents name a place; make it a way there.
-                    if (linkify && LinkFinder.AsFileReference(code.Value) is { } reference)
-                    {
-                        into.Add(MakeLink(reference, null, run));
-                    }
-                    else
-                    {
-                        run.Foreground = ThemeBrush("MdCodeBrush", 0xF2, 0xC0, 0x78);
-                        into.Add(run);
-                    }
+                        // `src/Foo.cs:42` is how agents name a place; make it a way there.
+                        if (linkify && LinkFinder.AsFileReference(code.Value) is { } reference)
+                        {
+                            into.Add(MakeLink(reference, null, run));
+                        }
+                        else
+                        {
+                            run.Foreground = ThemeBrush("MdCodeBrush", 0xF2, 0xC0, 0x78);
+                            into.Add(run);
+                        }
 
-                    break;
-                }
+                        break;
+                    }
 
                 case MarkdownInline.Link link:
-                {
-                    var hyperlink = new Hyperlink();
-                    FillInlines(hyperlink.Inlines, link.Content, size, strike, linkify: false);
-
-                    if (Uri.TryCreate(link.Url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
                     {
-                        hyperlink.NavigateUri = uri;
-                    }
-                    else if (FileTarget(link.Url) is { } target)
-                    {
-                        hyperlink.Click += (_, _) => FileLinkClicked?.Invoke(this, target);
-                    }
+                        var hyperlink = new Hyperlink();
+                        FillInlines(hyperlink.Inlines, link.Content, size, strike, linkify: false);
 
-                    into.Add(hyperlink);
-                    break;
-                }
+                        if (Uri.TryCreate(link.Url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
+                        {
+                            hyperlink.NavigateUri = uri;
+                        }
+                        else if (FileTarget(link.Url) is { } target)
+                        {
+                            hyperlink.Click += (_, _) => FileLinkClicked?.Invoke(this, target);
+                        }
+
+                        into.Add(hyperlink);
+                        break;
+                    }
 
                 case MarkdownInline.Image image:
                     // A table cell, list row or heading cannot host the Image control; the
@@ -727,7 +727,7 @@ public sealed class MarkdownView : StackPanel
     /// so a paragraph that mixes words and pictures splits at every picture. One that must
     /// not load (a remote URL) falls back into the prose as linked alt text instead.
     /// </summary>
-    private void AddWithImages(UIElementCollection into, IReadOnlyList<MarkdownInline> content, double size, Func<IReadOnlyList<MarkdownInline>, TextBlock> prose)
+    private void AddWithImages(UIElementCollection into, IReadOnlyList<MarkdownInline> content, Func<IReadOnlyList<MarkdownInline>, TextBlock> prose)
     {
         var pending = new List<MarkdownInline>();
 

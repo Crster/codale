@@ -497,7 +497,7 @@ public sealed class GitRepository
     /// name so the panel never leaves it unclear where a file comes from.
     /// </summary>
     private static List<GitFileStatus> DisambiguateNames(List<GitFileStatus> changes) =>
-        changes.Select(c => c.FileName.Length > 0 && c.Directory is { } dir ?c with { PathHint = dir + "/" } : c).ToList();
+        changes.Select(c => c.FileName.Length > 0 && c.Directory is { } dir ? c with { PathHint = dir + "/" } : c).ToList();
 
     /// <summary>
     /// Pulls the "! &lt;path&gt;" records out of a porcelain v2 status run that was asked

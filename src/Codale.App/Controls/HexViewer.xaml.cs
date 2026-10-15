@@ -230,7 +230,7 @@ public sealed partial class HexViewer : UserControl
         }
 
         Focus(FocusState.Pointer);
-        var offset = row.Offset + ByteInRow(e.GetCurrentPoint(cell).Position.X, ascii, row);
+        var offset = row.Offset + ByteInRow(e.GetCurrentPoint(cell).Position.X, ascii);
 
         if (IsKeyDown(VirtualKey.Shift) && HasSelection)
         {
@@ -258,7 +258,7 @@ public sealed partial class HexViewer : UserControl
         var position = e.GetCurrentPoint((FrameworkElement)sender).Position;
         var rowDelta = (long)Math.Floor(position.Y / RowHeight);
         var rowOffset = start.Offset + rowDelta * _perRow;
-        var column = ByteInRow(position.X, ascii, start);
+        var column = ByteInRow(position.X, ascii);
         var offset = Math.Clamp(rowOffset + column, 0, _source.Length - 1);
 
         if (offset != _caret)
@@ -268,7 +268,7 @@ public sealed partial class HexViewer : UserControl
     }
 
     /// <summary>The byte column under an x coordinate inside the hex or text cell.</summary>
-    private int ByteInRow(double x, bool ascii, HexRow row)
+    private int ByteInRow(double x, bool ascii)
     {
         var column = (int)Math.Floor(Math.Max(0, x) / HexLayout.CharWidth);
         return ascii

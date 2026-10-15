@@ -380,8 +380,7 @@ public static class CommandCatalog
 
         if (trimmed.Contains('"') && !(trimmed.StartsWith('"') && trimmed.EndsWith('"') && trimmed.Count(c => c == '"') == 2))
         {
-            var escaped = OperatingSystem.IsWindows() ? trimmed.Replace("'", "''") : trimmed.Replace("'", @"'\''");
-            return $"'{escaped}'";
+            return $"'{trimmed.Replace("'", "''")}'";
         }
 
         return trimmed.Contains(' ') && !trimmed.StartsWith('"') ? $"\"{trimmed}\"" : trimmed;

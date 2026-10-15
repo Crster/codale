@@ -925,5 +925,28 @@ public sealed class BrowserSession : IAsyncDisposable
         await CloseBrowserAsync(saveState: true);
         _playwright?.Dispose();
         _playwright = null;
+        CleanupDownloads();
+    }
+
+    private static void CleanupDownloads()
+    {
+        try
+        {
+            if (Directory.Exists(DownloadDirectory))
+            {
+                var cutoff = DateTime.UtcNow.AddHours(-24);
+                foreach (var file in Directory.EnumerateFiles(DownloadDirectory))
+                {
+                    if (File.GetLastWriteTimeUtc(file) < cutoff)
+                    {
+                        try { File.Delete(file); } catch { }
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Best effort cleanup.
+        }
     }
 }

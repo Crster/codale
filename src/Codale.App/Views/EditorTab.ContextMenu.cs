@@ -91,7 +91,7 @@ public sealed partial class EditorTab
         _askItem = Item("Edit here…", () => _ = AskClaudeAsync(), null, "\uE9CE");
         _checkItem = Item("Check Issues", () => _ = CheckIssuesAsync(), null, "");
         _referencesItem = Item("Find References", FindReferences, null, "");
-        _previewItem = Item("Preview", TogglePreview, null,"");
+        _previewItem = Item("Preview", TogglePreview, null, "");
 
         var menu = new MenuFlyout();
         foreach (var item in new MenuFlyoutItemBase[]
@@ -252,7 +252,7 @@ public sealed partial class EditorTab
                 break;
 
             case PreviewTarget.Browser:
-                OnOpenExternallyClick(this, new RoutedEventArgs());
+                OpenExternally();
                 break;
         }
     }
@@ -1088,4 +1088,3 @@ public sealed partial class EditorTab
         return line;
     }
 }
-

@@ -821,18 +821,18 @@ public sealed partial class ChatTab : UserControl
     /// <summary>Puts the caret at the end of the prompt box; waits for the tab to load when it was only just shown.</summary>
     public void FocusDraft()
     {
-        void Focus()
+        static void Focus(TextBox box)
         {
-            if (DraftBox.IsEnabled && DraftBox.Focus(FocusState.Programmatic))
+            if (box.IsEnabled && box.Focus(FocusState.Programmatic))
             {
-                DraftBox.SelectionStart = DraftBox.Text.Length;
-                DraftBox.SelectionLength = 0;
+                box.SelectionStart = box.Text.Length;
+                box.SelectionLength = 0;
             }
         }
 
         if (IsLoaded)
         {
-            Focus();
+            Focus(DraftBox);
             return;
         }
 
@@ -840,7 +840,7 @@ public sealed partial class ChatTab : UserControl
         onLoaded = (_, _) =>
         {
             Loaded -= onLoaded;
-            DispatcherQueue.TryEnqueue(Focus);
+            DispatcherQueue.TryEnqueue(() => Focus(DraftBox));
         };
         Loaded += onLoaded;
     }

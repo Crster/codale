@@ -244,9 +244,7 @@ public static class TaskTools
         }
 
         var dir = Path.GetFullPath(Path.Combine(runDirectory, command.WorkingDirectory));
-        return OperatingSystem.IsWindows()
-            ? $"Set-Location -LiteralPath '{dir.Replace("'", "''")}'; {command.Command}"
-            : $"cd '{dir.Replace("'", "'\\''")}' && {command.Command}";
+        return $"Set-Location -LiteralPath '{dir.Replace("'", "''")}'; {command.Command}";
     }
 
     private static IReadOnlyList<McpTool> Core(ITaskService tasks) =>

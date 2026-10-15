@@ -44,7 +44,7 @@ public sealed class FileChangeParsingTests
         Assert.Equal("a\nold\nb\n", change.OriginalContent);
         var hunk = Assert.Single(change.Patch!);
         Assert.Equal(1, hunk.OldStart);
-        Assert.Equal([" a","-old", "+new", " b"], hunk.Lines);
+        Assert.Equal([" a", "-old", "+new", " b"], hunk.Lines);
     }
 
     [Fact]

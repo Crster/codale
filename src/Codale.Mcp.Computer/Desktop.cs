@@ -19,11 +19,30 @@ internal sealed class Desktop
 
     private static readonly Dictionary<string, ushort> NamedKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["enter"] = 0x0D, ["return"] = 0x0D, ["tab"] = 0x09, ["escape"] = 0x1B, ["esc"] = 0x1B,
-        ["backspace"] = 0x08, ["delete"] = 0x2E, ["del"] = 0x2E, ["space"] = 0x20,
-        ["up"] = 0x26, ["down"] = 0x28, ["left"] = 0x25, ["right"] = 0x27,
-        ["home"] = 0x24, ["end"] = 0x23, ["pageup"] = 0x21, ["pagedown"] = 0x22, ["insert"] = 0x2D,
-        ["ctrl"] = 0x11, ["control"] = 0x11, ["shift"] = 0x10, ["alt"] = 0x12, ["win"] = 0x5B, ["meta"] = 0x5B,
+        ["enter"] = 0x0D,
+        ["return"] = 0x0D,
+        ["tab"] = 0x09,
+        ["escape"] = 0x1B,
+        ["esc"] = 0x1B,
+        ["backspace"] = 0x08,
+        ["delete"] = 0x2E,
+        ["del"] = 0x2E,
+        ["space"] = 0x20,
+        ["up"] = 0x26,
+        ["down"] = 0x28,
+        ["left"] = 0x25,
+        ["right"] = 0x27,
+        ["home"] = 0x24,
+        ["end"] = 0x23,
+        ["pageup"] = 0x21,
+        ["pagedown"] = 0x22,
+        ["insert"] = 0x2D,
+        ["ctrl"] = 0x11,
+        ["control"] = 0x11,
+        ["shift"] = 0x10,
+        ["alt"] = 0x12,
+        ["win"] = 0x5B,
+        ["meta"] = 0x5B,
     };
 
     private static readonly HashSet<ushort> ExtendedKeys = [0x26, 0x28, 0x25, 0x27, 0x24, 0x23, 0x21, 0x22, 0x2D, 0x2E, 0x5B];
@@ -237,12 +256,19 @@ internal sealed class Desktop
     public IReadOnlyList<(nint Hwnd, string Title, string Process)> Windows()
     {
         var found = new List<(nint, string, string)>();
+        var nameCache = new Dictionary<uint, string>();
         Native.EnumWindows((hwnd, _) =>
         {
             if (Native.IsWindowVisible(hwnd) && Native.WindowTitle(hwnd) is { Length: > 0 } title)
             {
                 Native.GetWindowThreadProcessId(hwnd, out var pid);
-                found.Add((hwnd, title, ProcessNameOf(pid) ?? "?"));
+                if (!nameCache.TryGetValue(pid, out var name))
+                {
+                    name = ProcessNameOf(pid) ?? "?";
+                    nameCache[pid] = name;
+                }
+
+                found.Add((hwnd, title, name));
             }
 
             return true;
