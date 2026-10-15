@@ -949,7 +949,7 @@ public sealed partial class WorkspacePage : Page
             var terminal = ViewModel.RunCliTerminal(command, cli, PromptDirectory(promptLine) ?? ViewModel.ProjectPath, session);
             _ = ViewModel.BeginTerminalCliSessionAsync(session, terminal);
             terminal.Exited += (_, _) => DispatcherQueue.TryEnqueue(() => OnCliTerminalExited(terminal));
-            WatchCliForAttention(cli, terminal);
+            WatchCliForTaskCompletion(cli, session, terminal);
             AddTerminalTab(terminal);
 
             // A plain shell that only existed to launch the CLI is not left behind; closed after the
@@ -979,62 +979,35 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
-    /// <summary>How long a CLI's terminal must stay silent after the user's last message before it counts as waiting.</summary>
-    private static readonly TimeSpan CliIdleAfter = TimeSpan.FromSeconds(6);
-
-    private static readonly System.Text.RegularExpressions.Regex CliConfirmation = new(
-        @"(?i)(\(y/n\)|\[y/n\]|\by/n\b|do you want to|would you like to|allow (this|once|always)|approve|permission|press enter to (confirm|continue)|^\s*[>❯]?\s*1\.\s*yes)",
-        System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Multiline);
-
     /// <summary>
-    /// A CLI in a terminal tab gets the attention a chat gets. Its tool stream cannot be read, so the
-    /// terminal itself is watched: once the user has sent it a message and its output then goes quiet,
-    /// it is either waiting on a confirmation (the tail reads like a prompt) or finished. Nothing is
-    /// said while Codale is the window in front.
+    /// Notifies the user when the CLI in a terminal tab reports that its tasks are complete via todos_set.
+    /// Nothing is said while Codale is the window in front.
     /// </summary>
-    private void WatchCliForAttention(CliDescriptor cli, TerminalViewModel terminal)
+    private void WatchCliForTaskCompletion(CliDescriptor cli, ChatViewModel session, TerminalViewModel terminal)
     {
-        var armed = false;
-        var idle = DispatcherQueue.CreateTimer();
-        idle.Interval = CliIdleAfter;
-        idle.IsRepeating = false;
-        idle.Tick += (_, _) =>
+        var wasComplete = false;
+        void OnTodosChanged(object? sender, IReadOnlyList<TodoItem> todos)
         {
-            if (!armed)
+            if (todos.Count == 0)
             {
                 return;
             }
 
-            armed = false;
-            var tail = terminal.Transcript.Read(null, 1200).Text;
-            var lines = tail.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-            var ask = CliConfirmation.Match(tail);
-            if (ask.Success)
+            var isComplete = todos.All(t => t.IsDone);
+            if (isComplete && !wasComplete)
             {
-                var line = lines.LastOrDefault(l => CliConfirmation.IsMatch(l)) ?? ask.Value;
-                NotifyAttention($"{cli.DisplayName} needs your confirmation", line.Length > 140 ? line[..140] : line);
+                wasComplete = true;
+                var summary = todos.Count == 1 ? todos[0].Content : $"{todos.Count} tasks completed";
+                NotifyAttention($"{cli.DisplayName} finished", summary);
             }
-            else
+            else if (!isComplete)
             {
-                NotifyAttention($"{cli.DisplayName} finished", "Waiting for your next message");
+                wasComplete = false;
             }
-        };
+        }
 
-        terminal.InputSubmitted += (_, _) =>
-        {
-            armed = true;
-            idle.Stop();
-            idle.Start();
-        };
-        terminal.OutputReceived += (_, _) =>
-        {
-            if (armed)
-            {
-                idle.Stop();
-                idle.Start();
-            }
-        };
-        terminal.Exited += (_, _) => idle.Stop();
+        session.TodosChanged += OnTodosChanged;
+        terminal.Exited += (_, _) => session.TodosChanged -= OnTodosChanged;
     }
 
     /// <summary>Flashes the taskbar and raises a Windows notification, unless Codale is already in front.</summary>

@@ -65,6 +65,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         _endpoints = new CliEndpointSettings();
         _mcp = new McpServerSettings(_store, ProjectPath);
         _mcp.TerminalServersProvider = () => Panel is { IsTerminalSession: true } session ? session.ServersForTerminalCli() : _mcp.Servers();
+        _mcp.SyncWorkspaceMcpConfig();
         McpTools = new McpToolsViewModel(_mcp);
         CliEndpoint = new CliEndpointViewModel();
         _router = new MessageRouter(_helper);
@@ -236,8 +237,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     public McpToolsViewModel McpTools { get; }
 
     /// <summary>
-    /// Writes the session's Codale MCP servers into the workspace config (Antigravity reads it at startup), and
-    /// takes back what earlier builds wrote. A shared file: the CLI launched last wins, so it is written per launch.
+    /// Writes the session's Codale MCP servers into the global Codale app local data config (shared across all workspaces).
     /// </summary>
     public void InjectMcpForTerminalCli(ChatViewModel session) =>
         _mcp.SyncWorkspaceMcpConfig(servers: session.ServersForTerminalCli());

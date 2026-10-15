@@ -32,7 +32,7 @@ public sealed class McpServerSettings
     }
 
     /// <summary>
-    /// The servers to write into the shared workspace config (Antigravity's <c>.agents/</c>) when no launch is
+    /// The servers to write into the global Codale config (%LOCALAPPDATA%\Codale) when no launch is
     /// at hand, supplied by the workspace so they include the tasks server of the terminal session on the panel.
     /// A launch itself passes its own session's servers (see <see cref="RewriteCliLaunch"/>). Unset, the servers started now are used.
     /// </summary>
@@ -156,45 +156,64 @@ public sealed class McpServerSettings
     }
 
     /// <summary>
-    /// Readies the project for an agent CLI started in a terminal. Antigravity has no launch flag or
-    /// environment variable for MCP servers, so it gets them (and a rules file) in its project folder,
-    /// <c>.agents/</c>; every other CLI gets them on its command line instead (see <see cref="RewriteCliLaunch"/>).
-    /// Also takes back the per-CLI project files earlier builds wrote.
+    /// Injects Codale's global MCP configuration and rules into the app's local data folder
+    /// (<c>%LOCALAPPDATA%\Codale</c>) so they are available across all workspaces without dirtying
+    /// any project repository.
     /// </summary>
     public void SyncWorkspaceMcpConfig(string? targetDirectory = null, IReadOnlyList<McpServerSpec>? servers = null)
     {
-        var root = targetDirectory ?? _projectPath;
         servers = ForTerminal(servers ?? TerminalServers());
 
         try
         {
-            var configPath = Path.Combine(root, ".agents", "mcp_config.json");
-            if (McpServerSpec.ToClaudeConfig(servers) is { } json)
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-                File.WriteAllText(configPath, json);
-            }
-            else if (File.Exists(configPath))
-            {
-                File.Delete(configPath);
-            }
-
-            WriteAgyRules(Path.Combine(root, ".agents", "rules", "codale.md"), servers);
+            WriteGlobalMcpConfig(servers);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            CrashLog.Trace($"Failed to sync workspace MCP config: {ex.Message}");
+            CrashLog.Trace($"Failed to sync MCP config: {ex.Message}");
         }
+    }
 
-        // Written by earlier builds; only Codale's own entries and sections are removed.
-        MergeServers(Path.Combine(root, ".gemini", "settings.json"), [], McpFileFormat.Gemini);
-        MergeServers(Path.Combine(root, ".qwen", "settings.json"), [], McpFileFormat.Gemini);
-        MergeServers(Path.Combine(root, "opencode.json"), [], McpFileFormat.OpenCode);
-        MergeServers(Path.Combine(root, ".mcp.json"), [], McpFileFormat.Standard);
-        RemoveContextSection(Path.Combine(root, "GEMINI.md"));
-        RemoveContextSection(Path.Combine(root, "QWEN.md"));
-        DeleteIfEmpty(Path.Combine(root, ".gemini"));
-        DeleteIfEmpty(Path.Combine(root, ".qwen"));
+    /// <summary>
+    /// Injects the global MCP configuration into the local app folder (<c>%LOCALAPPDATA%\Codale</c>).
+    /// </summary>
+    public static void WriteGlobalMcpConfig(IReadOnlyList<McpServerSpec> servers)
+    {
+        var targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            CodaleDataRoot(),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale"),
+        };
+
+        foreach (var dir in targets)
+        {
+            try
+            {
+                var json = McpServerSpec.ToClaudeConfig(servers);
+                var rootConfig = Path.Combine(dir, "mcp_config.json");
+                var agentsConfig = Path.Combine(dir, ".agents", "mcp_config.json");
+
+                if (json is { Length: > 0 })
+                {
+                    Directory.CreateDirectory(dir);
+                    File.WriteAllText(rootConfig, json);
+
+                    Directory.CreateDirectory(Path.GetDirectoryName(agentsConfig)!);
+                    File.WriteAllText(agentsConfig, json);
+                }
+                else
+                {
+                    if (File.Exists(rootConfig)) File.Delete(rootConfig);
+                    if (File.Exists(agentsConfig)) File.Delete(agentsConfig);
+                }
+
+                WriteAgyRules(Path.Combine(dir, ".agents", "rules", "codale.md"), servers);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                CrashLog.Trace($"Failed to write global MCP config to {dir}: {ex.Message}");
+            }
+        }
     }
 
     /// <summary>
@@ -246,56 +265,7 @@ public sealed class McpServerSettings
         File.WriteAllText(path, "---\ntrigger: always_on\n---\n\n# Codale\n\n" + string.Join("\n\n", parts) + "\n");
     }
 
-    private const string ContextStart = "<!-- codale:start";
-    private const string ContextEnd = "<!-- codale:end -->";
 
-    /// <summary>Takes Codale's marked section out of a CLI's context file, deleting the file when nothing else is left.</summary>
-    private static void RemoveContextSection(string path)
-    {
-        try
-        {
-            if (!File.Exists(path))
-            {
-                return;
-            }
-
-            var text = File.ReadAllText(path);
-            var start = text.IndexOf(ContextStart, StringComparison.Ordinal);
-            var end = start < 0 ? -1 : text.IndexOf(ContextEnd, start, StringComparison.Ordinal);
-            if (end < 0)
-            {
-                return;
-            }
-
-            var rest = (text[..start].TrimEnd() + "\n\n" + text[(end + ContextEnd.Length)..].TrimStart()).Trim();
-            if (rest.Length == 0)
-            {
-                File.Delete(path);
-            }
-            else
-            {
-                File.WriteAllText(path, rest + "\n");
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            CrashLog.Trace($"Failed to clean {path}: {ex.Message}");
-        }
-    }
-
-    private static void DeleteIfEmpty(string directory)
-    {
-        try
-        {
-            if (Directory.Exists(directory) && !Directory.EnumerateFileSystemEntries(directory).Any())
-            {
-                Directory.Delete(directory);
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
 
     /// <summary>Arguments that run a CLI's housekeeping (setup, updates, its own MCP management) rather than a session.</summary>
     private static readonly HashSet<string> NonSessionArgs = new(StringComparer.OrdinalIgnoreCase)
@@ -321,13 +291,14 @@ public sealed class McpServerSettings
     /// For a line typed at a shell prompt that starts an agent CLI session, the command to run instead:
     /// the same launch with Codale's servers attached the way that CLI takes them at startup, so nothing
     /// is written into the project. Null to run the line as typed (other commands, housekeeping
-    /// subcommands, pipes, and Antigravity, which reads <c>.agents/mcp_config.json</c>).
+    /// subcommands and pipes).
     /// </summary>
     /// <remarks>
     /// Claude: <c>--mcp-config</c>. Copilot: <c>--additional-mcp-config</c>. Codex: <c>-c mcp_servers.*</c> overrides.
     /// Gemini CLI and Qwen Code: a system settings file named by <c>GEMINI_CLI_SYSTEM_SETTINGS_PATH</c> /
     /// <c>QWEN_CODE_SYSTEM_SETTINGS_PATH</c>, built on the machine's own system settings so none are lost.
     /// OpenCode: a config file named by <c>OPENCODE_CONFIG</c>, merged with the user's and project's.
+    /// Antigravity: <c>--add-dir</c> pointing to Codale's global app local folder.
     /// </remarks>
     public string? RewriteCliLaunch(string promptLine, IReadOnlyList<McpServerSpec> sessionServers, string key)
     {
@@ -362,6 +333,7 @@ public sealed class McpServerSettings
                     StageSettings("qwen", key, servers, Path.Combine(programData, "qwen-code", "settings.json"), "QWEN_CODE_SYSTEM_SETTINGS_PATH"),
                     "qwen" + tail),
                 "opencode" => WithEnv(powershell, "OPENCODE_CONFIG", StageOpenCode(key, servers), "opencode" + tail),
+                "agy" => $"agy --add-dir {Quote(powershell, CodaleDataRoot())}{tail}",
                 _ => null,
             };
         }
@@ -737,10 +709,10 @@ public sealed class McpServerSettings
     }
 
     /// <summary>
-    /// A physical folder other processes see at the same path. A packaged app's
-    /// %LOCALAPPDATA% is virtualised, so it is not that; the package's local cache is.
+    /// The global Codale data directory in the user's local application data folder:
+    /// <c>%LOCALAPPDATA%\Codale</c>.
     /// </summary>
-    private static string StagingRoot()
+    public static string CodaleDataRoot()
     {
         string root;
         try
@@ -752,8 +724,14 @@ public sealed class McpServerSettings
             root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         }
 
-        return Path.Combine(root, "Codale", "mcp");
+        return Path.Combine(root, "Codale");
     }
+
+    /// <summary>
+    /// A physical folder other processes see at the same path. A packaged app's
+    /// %LOCALAPPDATA% is virtualised, so it is not that; the package's local cache is.
+    /// </summary>
+    private static string StagingRoot() => Path.Combine(CodaleDataRoot(), "mcp");
 
     private static void CopyDirectory(string from, string to)
     {

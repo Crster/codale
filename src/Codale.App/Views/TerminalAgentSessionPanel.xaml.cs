@@ -7,19 +7,31 @@ using Codale.Agents.Codex;
 using Codale.Agents.History;
 using Codale.App.ViewModels;
 
+using CommunityToolkit.Mvvm.ComponentModel;
+
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
 namespace Codale.App.Views;
 
 /// <summary>One bar in the panel's vitals: a label, what it reads, and how full it is.</summary>
-public sealed class UsageMeter(string label, string summary, double percent)
+public sealed partial class UsageMeter : ObservableObject
 {
-    public string Label { get; set; } = label;
+    [ObservableProperty]
+    public partial string Label { get; set; }
 
-    public string Summary { get; set; } = summary;
+    [ObservableProperty]
+    public partial string Summary { get; set; }
 
-    public double Percent { get; set; } = percent;
+    [ObservableProperty]
+    public partial double Percent { get; set; }
+
+    public UsageMeter(string label, string summary, double percent)
+    {
+        Label = label;
+        Summary = summary;
+        Percent = percent;
+    }
 }
 
 /// <summary>One stored conversation of the panel's CLI, shown in the History view.</summary>
@@ -189,6 +201,16 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
         {
             DispatcherQueue.TryEnqueue(RaiseLive);
         }
+        else if (e.PropertyName is nameof(StatusViewModel.ContextTokens)
+            or nameof(StatusViewModel.ContextWindow)
+            or nameof(StatusViewModel.FiveHourUtilization)
+            or nameof(StatusViewModel.SevenDayUtilization)
+            or nameof(StatusViewModel.FiveHourResetsAt)
+            or nameof(StatusViewModel.SevenDayResetsAt)
+            or nameof(StatusViewModel.SessionTokens))
+        {
+            DispatcherQueue.TryEnqueue(RefreshVitals);
+        }
     }
 
     /// <summary>
@@ -297,26 +319,106 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     private void RefreshVitals()
     {
-        Vitals.Clear();
-        if (Session?.Status is { } status)
+        if (Session?.Status is not { } status)
         {
-            if (status.HasContext && status.HasContextWindow)
+            if (Vitals.Count > 0)
             {
-                Vitals.Add(new UsageMeter("CONTEXT", status.ContextSummary, status.ContextPercent));
+                Vitals.Clear();
+                Raise(nameof(HasVitals));
             }
 
-            if (status.HasFiveHour)
-            {
-                Vitals.Add(new UsageMeter("USAGE", status.FiveHourSummary, status.FiveHourPercent));
-            }
+            return;
+        }
 
-            if (status.HasSevenDay)
+        var desired = new List<(string Label, string Summary, double Percent)>();
+
+        if (status.HasContext && status.HasContextWindow)
+        {
+            desired.Add(("CONTEXT", status.ContextSummary, status.ContextPercent));
+        }
+
+        // Only show one usage bar: the rate limit quota closest to exhaustion (least remaining quota).
+        (string Summary, double Percent)? usage = null;
+        if (status.HasFiveHour && status.HasSevenDay)
+        {
+            usage = status.SevenDayPercent > status.FiveHourPercent
+                ? (status.SevenDaySummary, status.SevenDayPercent)
+                : (status.FiveHourSummary, status.FiveHourPercent);
+        }
+        else if (status.HasFiveHour)
+        {
+            usage = (status.FiveHourSummary, status.FiveHourPercent);
+        }
+        else if (status.HasSevenDay)
+        {
+            usage = (status.SevenDaySummary, status.SevenDayPercent);
+        }
+        else if (status.HasTokenUsage)
+        {
+            usage = (status.TokenUsageSummary, status.TokenUsagePercent);
+        }
+
+        if (usage is not null)
+        {
+            desired.Add(("USAGE", usage.Value.Summary, usage.Value.Percent));
+        }
+
+        var hadVitals = HasVitals;
+
+        // Remove any meters not matching a desired label, or duplicate labels.
+        var seenLabels = new HashSet<string>();
+        for (var i = Vitals.Count - 1; i >= 0; i--)
+        {
+            var label = Vitals[i].Label;
+            if (!desired.Any(d => d.Label == label) || !seenLabels.Add(label))
             {
-                Vitals.Add(new UsageMeter("USAGE", status.SevenDaySummary, status.SevenDayPercent));
+                Vitals.RemoveAt(i);
             }
         }
 
-        Raise(nameof(HasVitals));
+        // Add or update desired meters in order without recreating existing elements,
+        // avoiding repeated visual reset animations on every tick.
+        for (var i = 0; i < desired.Count; i++)
+        {
+            var (label, summary, percent) = desired[i];
+            var existingIndex = -1;
+            for (var j = 0; j < Vitals.Count; j++)
+            {
+                if (Vitals[j].Label == label)
+                {
+                    existingIndex = j;
+                    break;
+                }
+            }
+
+            if (existingIndex >= 0)
+            {
+                var meter = Vitals[existingIndex];
+                if (meter.Summary != summary)
+                {
+                    meter.Summary = summary;
+                }
+
+                if (Math.Abs(meter.Percent - percent) > 0.001)
+                {
+                    meter.Percent = percent;
+                }
+
+                if (existingIndex != i)
+                {
+                    Vitals.Move(existingIndex, i);
+                }
+            }
+            else
+            {
+                Vitals.Insert(Math.Min(i, Vitals.Count), new UsageMeter(label, summary, percent));
+            }
+        }
+
+        if (HasVitals != hadVitals)
+        {
+            Raise(nameof(HasVitals));
+        }
     }
 
     #endregion
