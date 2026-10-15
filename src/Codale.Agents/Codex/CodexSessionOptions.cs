@@ -35,23 +35,19 @@ public sealed record CodexSessionOptions
 
     /// <summary>
     /// Codale's permission mode in codex's own vocabulary: an approval policy plus a
-    /// sandbox policy, applied per turn. Manual asks before anything untrusted; plan
-    /// reads only; acceptEdits writes files itself but asks before commands; auto,
-    /// dontAsk and bypass run without asking and without the sandbox.
+    /// sandbox policy, applied per turn. Manual asks before anything untrusted with
+    /// workspace write access; plan reads only; acceptEdits and auto operate in
+    /// workspaceWrite asking on request; dontAsk and bypassPermissions run without
+    /// asking with dangerFullAccess.
     /// </summary>
-    /// <remarks>
-    /// Auto and dontAsk cannot use workspaceWrite: codex always keeps <c>.git</c> read-only
-    /// inside it (no config or permission profile lifts that on the Windows sandbox), and
-    /// with "never" it cannot ask to escalate - so even <c>git commit</c> fails.
-    /// </remarks>
     public static (string ApprovalPolicy, string SandboxType) PermissionPolicy(string? mode) => ClampPermissionMode(mode ?? "") switch
     {
-        "manual" => ("untrusted", "readOnly"),
+        "manual" => ("untrusted", "workspaceWrite"),
         "plan" => ("on-request", "readOnly"),
         "acceptEdits" => ("on-request", "workspaceWrite"),
         "bypassPermissions" => ("never", "dangerFullAccess"),
         "dontAsk" => ("never", "dangerFullAccess"),
-        _ => ("never", "dangerFullAccess"), // auto
+        _ => ("on-request", "workspaceWrite"), // auto
     };
 
     /// <summary>

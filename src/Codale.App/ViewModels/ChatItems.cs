@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
@@ -823,20 +823,37 @@ public sealed partial class ApprovalRequestItem : ObservableObject
 
         foreach (var entry in array.EnumerateArray())
         {
-            if (entry.ValueKind != JsonValueKind.Object ||
-                entry.TryGetProperty("question", out var text) is false ||
-                text.ValueKind != JsonValueKind.String)
+            if (entry.ValueKind != JsonValueKind.Object)
             {
                 continue;
             }
 
+            var text = (entry.TryGetProperty("question", out var q) && q.ValueKind == JsonValueKind.String ? q.GetString() : null)
+                ?? (entry.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null)
+                ?? (entry.TryGetProperty("prompt", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null)
+                ?? "";
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            var id = entry.TryGetProperty("id", out var idProp) && idProp.ValueKind == JsonValueKind.String
+                ? idProp.GetString()
+                : null;
+
+            var multiSelect = (entry.TryGetProperty("multiSelect", out var multi) && multi.ValueKind == JsonValueKind.True) ||
+                              (entry.TryGetProperty("multiple", out var m) && m.ValueKind == JsonValueKind.True) ||
+                              (entry.TryGetProperty("allowMultiple", out var am) && am.ValueKind == JsonValueKind.True);
+
             var question = new ApprovalQuestion
             {
-                Text = text.GetString() ?? "",
+                Id = id,
+                Text = text,
                 Header = entry.TryGetProperty("header", out var header) && header.ValueKind == JsonValueKind.String
                     ? header.GetString()
                     : null,
-                MultiSelect = entry.TryGetProperty("multiSelect", out var multi) && multi.ValueKind == JsonValueKind.True,
+                MultiSelect = multiSelect,
                 Options = [.. ParseOptions(entry)],
             };
 
@@ -875,6 +892,13 @@ public sealed partial class ApprovalRequestItem : ObservableObject
                         : null,
                 };
             }
+            else if (option.ValueKind == JsonValueKind.String && option.GetString() is { Length: > 0 } str)
+            {
+                yield return new ApprovalQuestionOption
+                {
+                    Label = str,
+                };
+            }
         }
     }
 }
@@ -886,6 +910,8 @@ public sealed record QuestionDot(bool IsCurrent);
 public sealed partial class ApprovalQuestion : ScaledObservable
 {
     // Question cards are transcript content, so they ride the chat font scale too.
+    public string? Id { get; init; }
+
     public required string Text { get; init; }
 
     /// <summary>The CLI's short chip label for the question, e.g. "Auth method".</summary>

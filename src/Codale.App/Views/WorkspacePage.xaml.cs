@@ -87,7 +87,6 @@ public sealed partial class WorkspacePage : Page
 
         ViewModel = workspace;
         ViewModel.PropertyChanged += OnWorkspacePropertyChanged;
-        ViewModel.AgentTerminalStarted += OnAgentTerminalStarted;
         ViewModel.ChatActivationRequested += OnChatActivationRequested;
         ViewModel.HelperLoginRequired += OnChatLoginRequired;
         Bindings.Update();
@@ -154,7 +153,6 @@ public sealed partial class WorkspacePage : Page
         if (ViewModel is not null)
         {
             ViewModel.PropertyChanged -= OnWorkspacePropertyChanged;
-            ViewModel.AgentTerminalStarted -= OnAgentTerminalStarted;
             ViewModel.ChatActivationRequested -= OnChatActivationRequested;
             ViewModel.HelperLoginRequired -= OnChatLoginRequired;
             if (_planWatchedChat is not null)
@@ -1114,32 +1112,6 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>
-    /// Handles a terminal started on behalf of the agent. If the terminal is already displayed
-    /// in a tab (e.g. an existing live dev server reused), it is brought to the front.
-    /// Otherwise, any previous agent terminal tabs are closed and the new terminal is placed
-    /// into the tab strip (reusing the existing tab position if one was closed).
-    /// </summary>
-    private void OnAgentTerminalStarted(TerminalViewModel terminal)
-    {
-        if (_terminalTabs.FirstOrDefault(t => ReferenceEquals(t.Terminal, terminal)) is { } existing)
-        {
-            CentreTabs.SelectedItem = existing.Item;
-            return;
-        }
-
-        var oldAgentTabs = _terminalTabs.Where(t => t.Terminal.IsAgentTerminal || ViewModel.IsAgentTerminal(t.Terminal)).ToList();
-        var targetIndex = -1;
-        if (oldAgentTabs.Count > 0)
-        {
-            targetIndex = CentreTabs.TabItems.IndexOf(oldAgentTabs[0].Item);
-            foreach (var oldTab in oldAgentTabs)
-            {
-                CloseTerminalTab(oldTab);
-            }
-        }
-
-        AddTerminalTab(terminal, targetIndex);
-    }
 
     /// <summary>
     /// Tab chrome for a terminal: the terminal glyph, tinted by state (working, idle,
@@ -1509,13 +1481,20 @@ public sealed partial class WorkspacePage : Page
             File.Exists(absolute));
     }
 
-    /// <summary>Clicking an explore or subagent entry in the chat opens its peek, as selecting it in the task list does.</summary>
+    /// <summary>Clicking an explore, subagent, or start_task entry in the chat opens its peek, as selecting it in the task list does.</summary>
     private void OnChatTaskPeekRequested(object? sender, ToolCallItem call)
     {
-        if (sender is ChatTab { ViewModel: { } chat } &&
-            chat.RunningTasks.FirstOrDefault(t => t.ToolUseId == call.ToolUseId) is { } task)
+        if (sender is ChatTab { ViewModel: { } chat })
         {
-            SetPeek(task);
+            var task = chat.RunningTasks.FirstOrDefault(t => t.ToolUseId == call.ToolUseId)
+                ?? (call.ToolName.Contains("start_task", StringComparison.OrdinalIgnoreCase)
+                    ? chat.RunningTasks.LastOrDefault(t => t.Hosted is not null)
+                    : null);
+
+            if (task is not null)
+            {
+                SetPeek(task);
+            }
         }
     }
 

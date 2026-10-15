@@ -386,75 +386,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         return terminal;
     }
 
-    /// <summary>Raised on the UI thread for a command tab the agent started; the page shows it as a tab.</summary>
-    public event Action<TerminalViewModel>? AgentTerminalStarted;
-
     /// <summary>Command tabs the agent started, so list_tasks and stop_task can tell them from the user's.</summary>
     private readonly HashSet<string> _agentTerminalIds = [];
-
-    private Task<TerminalViewModel?> OpenAgentTerminalAsync(string command, string? name)
-    {
-        if (_uiContext is null || AgentTerminalStarted is null)
-        {
-            return Task.FromResult<TerminalViewModel?>(null);
-        }
-
-        var opened = new TaskCompletionSource<TerminalViewModel?>();
-        _uiContext.Post(_ =>
-        {
-            try
-            {
-                // A live terminal for the same command is reused rather than starting a second copy
-                // (e.g. two dev servers fighting over the same port), so the caller surfaces that tab.
-                TerminalViewModel? live;
-                var trimmedCommand = command.Trim();
-                var trimmedName = string.IsNullOrWhiteSpace(name) ? null : name.Trim();
-                lock (_terminals)
-                {
-                    live = _terminals.FirstOrDefault(t =>
-                        t.IsCommandTerminal &&
-                        t.IsRunning &&
-                        t.Activity == TerminalActivity.Busy &&
-                        (string.Equals(t.CommandText?.Trim(), trimmedCommand, StringComparison.Ordinal) ||
-                         (trimmedName is not null && string.Equals(t.CommandName?.Trim(), trimmedName, StringComparison.OrdinalIgnoreCase))));
-                }
-
-                if (live is not null)
-                {
-                    lock (_terminals)
-                    {
-                        live.IsAgentTerminal = true;
-                        _agentTerminalIds.Add(live.Id);
-                    }
-
-                    AgentTerminalStarted?.Invoke(live);
-                    opened.SetResult(live);
-                    return;
-                }
-
-                // Built on the UI thread: the terminal posts its state changes back to where it was made.
-                var terminal = new TerminalViewModel(ProjectPath, command, name)
-                {
-                    IsAgentTerminal = true,
-                };
-                terminal.PropertyChanged += OnCommandTerminalPropertyChanged;
-                lock (_terminals)
-                {
-                    _terminals.Add(terminal);
-                    _agentTerminalIds.Add(terminal.Id);
-                }
-
-                UpdateRunningCommandCount();
-                AgentTerminalStarted?.Invoke(terminal);
-                opened.SetResult(terminal);
-            }
-            catch (Exception ex)
-            {
-                opened.SetException(ex);
-            }
-        }, null);
-        return opened.Task;
-    }
 
     public bool IsAgentTerminal(TerminalViewModel terminal)
     {
@@ -467,22 +400,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>The open terminals as the agent's terminal tools read them; safe to call off the UI thread.</summary>
     private sealed class TerminalSource(WorkspaceViewModel workspace) : ITerminalSource
     {
-        public async Task<TaskSnapshot?> StartAsync(string command, string? name, int waitSeconds, CancellationToken ct)
-        {
-            if (await workspace.OpenAgentTerminalAsync(command, name).ConfigureAwait(false) is not { } terminal)
-            {
-                return null;
-            }
-
-            // Early output (a port number, a compile error) is what the agent needs next.
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(Math.Clamp(waitSeconds, 0, 60));
-            while (terminal.Activity == TerminalActivity.Busy && DateTime.UtcNow < deadline)
-            {
-                await Task.Delay(100, ct).ConfigureAwait(false);
-            }
-
-            return Started(terminal, null, 8000);
-        }
+        public Task<TaskSnapshot?> StartAsync(string command, string? name, int waitSeconds, CancellationToken ct) =>
+            Task.FromResult<TaskSnapshot?>(null);
 
         public async Task<TaskSnapshot?> StopAsync(string id, CancellationToken ct)
         {

@@ -56,7 +56,7 @@ public sealed class CodexAgentSession : IAgentSession
     /// <summary>The model codex reported for the thread; null until it says, so the CLI default is never guessed.</summary>
     private string? _threadModel;
 
-    private sealed record PendingApproval(string ThreadId, string ToolName, JsonElement Input);
+    private sealed record PendingApproval(string ThreadId, string Method, string ToolName, JsonElement Input);
 
     public CodexAgentSession(CodexSessionOptions options)
     {
@@ -309,15 +309,111 @@ public sealed class CodexAgentSession : IAgentSession
 
     public async Task RespondToApprovalAsync(string requestId, ApprovalDecision decision, CancellationToken ct = default)
     {
-        if (!int.TryParse(requestId, out var id) || !_pendingApprovals.Remove(id, out _))
+        if (!int.TryParse(requestId, out var id) || !_pendingApprovals.Remove(id, out var pending))
         {
             return;
         }
 
-        var result = decision.Behavior == ApprovalBehavior.Allow
-            ? new { decision = "accept" }
+        if (pending.Method.Contains("requestUserInput", StringComparison.Ordinal) || pending.ToolName == "AskUserQuestion")
+        {
+            var response = BuildRequestUserInputResult(pending.Input, decision);
+            await WriteResponseAsync(id, response, ct).ConfigureAwait(false);
+            return;
+        }
+
+        if (pending.Method.Contains("permissions", StringComparison.Ordinal))
+        {
+            if (decision.Behavior == ApprovalBehavior.Allow)
+            {
+                var permissions = pending.Input.Prop("requestedPermissions") ?? pending.Input.Prop("permissions");
+                var result = new { permissions = (object?)permissions ?? new { }, scope = "turn" };
+                await WriteResponseAsync(id, result, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                await WriteErrorResponseAsync(id, -32000, decision.Message ?? "Denied by the user.", ct).ConfigureAwait(false);
+            }
+            return;
+        }
+
+        var approvalResult = decision.Behavior == ApprovalBehavior.Allow
+            ? (object)new { decision = "accept" }
             : new { decision = "decline" };
-        await WriteResponseAsync(id, result, ct).ConfigureAwait(false);
+        await WriteResponseAsync(id, approvalResult, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Builds the result payload for an <c>item/tool/requestUserInput</c> server request matching
+    /// Codex app-server's <c>ToolRequestUserInputResponse</c> schema: <c>{ answers: { [id]: { answers: [string] } } }</c>.
+    /// </summary>
+    internal static object BuildRequestUserInputResult(JsonElement originalInput, ApprovalDecision decision)
+    {
+        if (decision.Behavior != ApprovalBehavior.Allow ||
+            decision.UpdatedInput is not { ValueKind: JsonValueKind.Object } updatedInput ||
+            updatedInput.Prop("answers") is not { ValueKind: JsonValueKind.Object } userAnswers)
+        {
+            return new { answers = new Dictionary<string, object>() };
+        }
+
+        var codexAnswers = new Dictionary<string, object>();
+        var questionsArray = originalInput.Prop("questions");
+
+        if (questionsArray is { ValueKind: JsonValueKind.Array } array)
+        {
+            foreach (var q in array.EnumerateArray())
+            {
+                var id = q.Str("id") ?? q.Str("question") ?? "";
+                var text = q.Str("question") ?? q.Str("title") ?? id;
+
+                // Answers may be keyed by question ID or question text
+                var answerElement = userAnswers.Prop(id) ?? userAnswers.Prop(text);
+                if (answerElement is { } answer)
+                {
+                    var list = new List<string>();
+                    if (answer.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in answer.EnumerateArray())
+                        {
+                            if (item.GetString() is { } s)
+                            {
+                                list.Add(s);
+                            }
+                        }
+                    }
+                    else if (answer.ValueKind == JsonValueKind.String && answer.GetString() is { } single)
+                    {
+                        list.Add(single);
+                    }
+
+                    codexAnswers[id] = new { answers = list };
+                }
+            }
+        }
+        else
+        {
+            foreach (var prop in userAnswers.EnumerateObject())
+            {
+                var list = new List<string>();
+                if (prop.Value.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in prop.Value.EnumerateArray())
+                    {
+                        if (item.GetString() is { } s)
+                        {
+                            list.Add(s);
+                        }
+                    }
+                }
+                else if (prop.Value.ValueKind == JsonValueKind.String && prop.Value.GetString() is { } single)
+                {
+                    list.Add(single);
+                }
+
+                codexAnswers[prop.Name] = new { answers = list };
+            }
+        }
+
+        return new { answers = codexAnswers };
     }
 
     /// <summary>
@@ -487,6 +583,10 @@ public sealed class CodexAgentSession : IAgentSession
     private Task WriteResponseAsync(int id, object result, CancellationToken ct) =>
         WriteMessageAsync(new { jsonrpc = "2.0", id, result }, ct);
 
+    /// <summary>Answers a server-initiated request with a JSON-RPC error.</summary>
+    private Task WriteErrorResponseAsync(int id, int code, string message, CancellationToken ct) =>
+        WriteMessageAsync(new { jsonrpc = "2.0", id, error = new { code, message } }, ct);
+
     private async Task ReadLoopAsync(Process process)
     {
         try
@@ -580,25 +680,24 @@ public sealed class CodexAgentSession : IAgentSession
     }
 
     /// <summary>
-    /// A server-initiated request. Approval requests become <see cref="ApprovalRequested"/>;
-    /// anything else is declined so the server never blocks on us.
+    /// A server-initiated request. Approvals and input requests become <see cref="ApprovalRequested"/>;
+    /// anything else is declined with a JSON-RPC error so the server never blocks on us.
     /// </summary>
     private async Task HandleServerRequestAsync(JsonElement id, string method, JsonElement message)
     {
-        if (!method.Contains("requestApproval", StringComparison.Ordinal) ||
-            message.Prop("params") is not { } parameters)
+        if (message.Prop("params") is not { } parameters || !IsSupportedServerRequest(method))
         {
-            await WriteResponseAsync(id.GetInt32(), new { error = $"Codale does not support the '{method}' server request." }, CancellationToken.None)
+            await WriteErrorResponseAsync(id.GetInt32(), -32601, $"Codale does not support the '{method}' server request.", CancellationToken.None)
                 .ConfigureAwait(false);
             return;
         }
 
         var threadId = parameters.Str("threadId") ?? _threadId ?? "";
         var item = parameters.Prop("item");
-        var (toolName, input) = DescribeApproval(parameters, item);
+        var (toolName, input) = DescribeApproval(method, parameters, item);
 
         var approvalId = id.GetInt32();
-        _pendingApprovals[approvalId] = new PendingApproval(threadId, toolName, input);
+        _pendingApprovals[approvalId] = new PendingApproval(threadId, method, toolName, input);
         await _events.Writer.WriteAsync(new ApprovalRequested
         {
             RequestId = approvalId.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -610,14 +709,36 @@ public sealed class CodexAgentSession : IAgentSession
         }).ConfigureAwait(false);
     }
 
+    private static bool IsSupportedServerRequest(string method) =>
+        method.Contains("requestApproval", StringComparison.Ordinal) ||
+        method.Contains("requestUserInput", StringComparison.Ordinal) ||
+        method is "execCommandApproval" or "applyPatchApproval" or "mcpServer/elicitation/request";
+
     /// <summary>
-    /// The tool call an approval is about: the command for exec approvals, the paths for
-    /// patch approvals, tolerating the params carrying the fields directly or under "item".
+    /// The tool call an approval or input request is about: AskUserQuestion for user prompts,
+    /// mcp__{server}__{tool} for MCP tools, Bash for exec, Edit for patch/fileChange, and Permissions.
     /// </summary>
-    private static (string ToolName, JsonElement Input) DescribeApproval(JsonElement parameters, JsonElement? item)
+    private static (string ToolName, JsonElement Input) DescribeApproval(string method, JsonElement parameters, JsonElement? item)
     {
+        if (method.Contains("requestUserInput", StringComparison.Ordinal) || parameters.Prop("questions") is not null)
+        {
+            return ("AskUserQuestion", parameters);
+        }
+
         var source = item ?? parameters;
         var type = source.Str("type") ?? "commandExecution";
+
+        if (string.Equals(type, "mcpToolCall", StringComparison.OrdinalIgnoreCase) ||
+            source.Str("server") is { Length: > 0 } || parameters.Str("server") is { Length: > 0 })
+        {
+            var server = source.Str("server") ?? parameters.Str("server") ?? "";
+            var tool = source.Str("tool") ?? parameters.Str("tool") ?? "";
+            var arguments = source.Prop("arguments") ?? parameters.Prop("arguments");
+            var input = arguments is { ValueKind: JsonValueKind.Object } args
+                ? args
+                : JsonSerializer.SerializeToElement(new { server, tool }, WireJson);
+            return ($"mcp__{server}__{tool}", input);
+        }
 
         var command = source.Prop("command") ?? parameters.Prop("command");
         if (command is { ValueKind: JsonValueKind.Array or JsonValueKind.String })
@@ -635,10 +756,16 @@ public sealed class CodexAgentSession : IAgentSession
             return ("Bash", JsonSerializer.SerializeToElement(input, WireJson));
         }
 
-        if (source.Prop("changes") is { ValueKind: JsonValueKind.Object } changes)
+        var changes = source.Prop("changes") ?? source.Prop("fileChanges") ?? parameters.Prop("fileChanges");
+        if (changes is { ValueKind: JsonValueKind.Object } changesObj)
         {
-            var paths = changes.EnumerateObject().Select(property => property.Name).ToList();
+            var paths = changesObj.EnumerateObject().Select(property => property.Name).ToList();
             return ("Edit", JsonSerializer.SerializeToElement(new { paths }, WireJson));
+        }
+
+        if (method.Contains("permissions", StringComparison.Ordinal))
+        {
+            return ("Permissions", parameters);
         }
 
         return (type, JsonSerializer.SerializeToElement(new { type }, WireJson));

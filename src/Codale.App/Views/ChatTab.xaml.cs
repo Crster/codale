@@ -402,8 +402,8 @@ public sealed partial class ChatTab : UserControl
         {
             call.ToggleExpanded();
 
-            // A subagent is also a task in the session panel: show its peek.
-            if (BackgroundTaskDetector.IsSubagentTool(call.ToolName))
+            // A subagent or started task in the session panel: show its peek.
+            if (BackgroundTaskDetector.IsSubagentTool(call.ToolName) || call.ToolName.Contains("start_task", StringComparison.OrdinalIgnoreCase))
             {
                 TaskPeekRequested?.Invoke(this, call);
             }

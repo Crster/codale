@@ -57,13 +57,9 @@ public sealed class LocalTaskService(HostedTaskManager manager, ITerminalSource?
 
     public async Task<TaskSnapshot> StartAsync(string command, string? name, int waitSeconds, CancellationToken ct)
     {
-        // The agent's commands run in a terminal tab the user can watch and type into;
-        // the headless manager is only the fallback when there is no window to hold a tab.
-        if (terminals is not null && await terminals.StartAsync(command, name, waitSeconds, ct).ConfigureAwait(false) is { } started)
-        {
-            return started;
-        }
-
+        // Agent tasks run via HostedTaskManager in the background so they appear
+        // in the session panel's task list where the user can peek and stop them,
+        // without opening a separate terminal tab.
         var task = manager.Start(command, name);
 
         // Early output (a port number, a compile error) is what the agent needs next.
@@ -83,7 +79,7 @@ public sealed class LocalTaskService(HostedTaskManager manager, ITerminalSource?
 
     public Task<IReadOnlyList<TaskSnapshot>> ListAsync(CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<TaskSnapshot>>(
-            [.. manager.List().Select(t => Snapshot(t, null, 0)), .. terminals?.ListStarted() ?? []]);
+            [.. manager.List().Select(t => Snapshot(t, null, 0))]);
 
     public async Task<TaskSnapshot> StopAsync(string id, CancellationToken ct)
     {

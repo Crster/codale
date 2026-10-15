@@ -379,6 +379,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         };
         AddTask(item);
 
+        if (_toolCalls.Values.LastOrDefault(c => c.ToolName.Contains("start_task", StringComparison.OrdinalIgnoreCase)) is { } activeCall)
+        {
+            _tasksByToolUse[activeCall.ToolUseId] = item;
+        }
+
+        hosted.Finished += _ => _dispatcher.TryEnqueue(SyncHostedTasks);
+
         if (_hostedTimer is null)
         {
             // Copy new output across in small batches: a chatty server would otherwise
@@ -392,6 +399,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             _hostedTimer.Start();
         }
+
+        SyncHostedTasks();
     }
 
     private void SyncHostedTasks()
@@ -528,7 +537,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 Prompt = prompt.Trim(),
             });
         }
-        else if (BackgroundTaskDetector.IsBackgroundShell(started.ToolName, started.Input))
+        else if (BackgroundTaskDetector.IsBackgroundLaunch(started.ToolName, started.Input))
         {
             AddTask(new RunningTaskItem
             {
@@ -548,9 +557,28 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>The CLI's own id for a background task lets it be stopped, and its notification is what ends it.</summary>
     private void ApplyBackgroundTask(BackgroundTaskChanged changed)
     {
-        if (changed.ToolUseId is not { } toolUseId || !_tasksByToolUse.TryGetValue(toolUseId, out var task))
+        RunningTaskItem? task = null;
+        if (changed.ToolUseId is { Length: > 0 } toolUseId && _tasksByToolUse.TryGetValue(toolUseId, out var byTool))
         {
-            return;
+            task = byTool;
+        }
+
+        task ??= RunningTasks.FirstOrDefault(t => t.RuntimeId == changed.TaskId);
+
+        if (task is null)
+        {
+            task = new RunningTaskItem
+            {
+                ToolUseId = changed.ToolUseId ?? $"task:{changed.TaskId}",
+                Kind = RunningTaskKind.Shell,
+                Title = string.IsNullOrWhiteSpace(changed.Prompt) ? $"Task {changed.TaskId}" : changed.Prompt.Trim(),
+                StartedAt = DateTimeOffset.Now,
+                Header = string.IsNullOrWhiteSpace(changed.Prompt) ? "" : RunningTaskItem.PromptHeader(changed.Prompt),
+                Prompt = changed.Prompt?.Trim() ?? "",
+                RuntimeId = changed.TaskId,
+                LaunchedInBackground = true,
+            };
+            AddTask(task);
         }
 
         task.RuntimeId = changed.TaskId;
@@ -2907,12 +2935,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        // A CLI without the "auto" classifier runs Auto in "default" and asks about every
-        // edit; Auto means edits go through, so the host answers yes for those.
-        if (IsAutomaticMode && _cliReportedMode == "default" &&
+        // In acceptEdits mode, or Auto mode when a CLI runs in "default", file edits go
+        // through without asking.
+        if ((PermissionMode == "acceptEdits" || (IsAutomaticMode && _cliReportedMode == "default")) &&
             approval.ToolName is "Edit" or "Write" or "MultiEdit" or "NotebookEdit")
         {
-            CrashLog.Trace($"Auto mode: allowed {approval.ToolName} unasked");
+            CrashLog.Trace($"{ModeDisplay(PermissionMode)} mode: allowed {approval.ToolName} unasked");
 
             if (_session is { } editing)
             {
@@ -3138,7 +3166,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             if (selected.Count > 0)
             {
-                answers[question.Text] = question.MultiSelect ? selected : selected[0];
+                var val = question.MultiSelect ? selected : (object)selected[0];
+                answers[question.Text] = val;
+                if (question.Id is { Length: > 0 } id && id != question.Text)
+                {
+                    answers[id] = val;
+                }
             }
         }
 
