@@ -437,8 +437,31 @@
                                             Spacing="8">
                                             <FontIcon
                                                 FontSize="13"
-                                                Glyph="{x:Bind IsDirectory, Converter={StaticResource NodeGlyph}}"
-                                                Opacity="0.7" />
+                                                Foreground="{x:Bind views:FileIcons.Brush(IsDirectory, Name)}"
+                                                Glyph="&#xE8B7;"
+                                                Visibility="{x:Bind views:FileIcons.FolderVisibility(IsDirectory)}" />
+                                            <!--  Document badge: coloured page with a folded corner, extension inside  -->
+                                            <Grid
+                                                Width="14"
+                                                Height="16"
+                                                Visibility="{x:Bind views:FileIcons.FileVisibility(IsDirectory)}">
+                                                <Viewbox Stretch="Fill">
+                                                    <Grid Width="18" Height="22">
+                                                        <Path
+                                                            Data="M0,2 Q0,0 2,0 L11,0 L18,7 L18,20 Q18,22 16,22 L2,22 Q0,22 0,20 Z"
+                                                            Fill="{x:Bind views:FileIcons.Brush(IsDirectory, Name)}" />
+                                                        <Path Data="M11,0 L18,7 L13,7 Q11,7 11,5 Z" Fill="#66FFFFFF" />
+                                                    </Grid>
+                                                </Viewbox>
+                                                <TextBlock
+                                                    Margin="0,5,0,0"
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center"
+                                                    FontSize="{x:Bind views:FileIcons.LabelSize(IsDirectory, Name)}"
+                                                    FontWeight="Bold"
+                                                    Foreground="White"
+                                                    Text="{x:Bind views:FileIcons.Label(IsDirectory, Name)}" />
+                                            </Grid>
                                             <!--  The converter answers null for clean nodes so the
                                                   theme's own foreground stands; it must never
                                                   answer UnsetValue - the compiled binding casts

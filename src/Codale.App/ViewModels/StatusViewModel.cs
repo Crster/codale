@@ -51,6 +51,7 @@ public sealed partial class StatusViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasUsage))]
     [NotifyPropertyChangedFor(nameof(HasClaudeUsage))]
     [NotifyPropertyChangedFor(nameof(HasFiveHour))]
+    [NotifyPropertyChangedFor(nameof(ShowEmptyUsage))]
     [NotifyPropertyChangedFor(nameof(HasUsageMeter))]
     [NotifyPropertyChangedFor(nameof(FiveHourPercent))]
     [NotifyPropertyChangedFor(nameof(FiveHourText))]
@@ -64,6 +65,7 @@ public sealed partial class StatusViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasUsage))]
     [NotifyPropertyChangedFor(nameof(HasClaudeUsage))]
     [NotifyPropertyChangedFor(nameof(HasLongWindowOnly))]
+    [NotifyPropertyChangedFor(nameof(ShowEmptyUsage))]
     [NotifyPropertyChangedFor(nameof(HasUsageMeter))]
     [NotifyPropertyChangedFor(nameof(UsageMeterText))]
     [NotifyPropertyChangedFor(nameof(SevenDayPercent))]
@@ -90,6 +92,7 @@ public sealed partial class StatusViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(TokensText))]
     [NotifyPropertyChangedFor(nameof(HasSessionTokens))]
     [NotifyPropertyChangedFor(nameof(HasTokenUsage))]
+    [NotifyPropertyChangedFor(nameof(ShowEmptyUsage))]
     [NotifyPropertyChangedFor(nameof(TokenUsagePercent))]
     [NotifyPropertyChangedFor(nameof(TokenUsageSummary))]
     public partial long SessionTokens { get; set; }
@@ -106,6 +109,9 @@ public sealed partial class StatusViewModel : ObservableObject
 
     /// <summary>The usage bar replaces the subscription windows while an override is active.</summary>
     public bool HasTokenUsage => IsOverrideCli && SessionTokens > 0;
+
+    /// <summary>Nothing has reported yet: the panel shows a zeroed usage bar rather than none.</summary>
+    public bool ShowEmptyUsage => !HasFiveHour && !HasLongWindowOnly && !HasTokenUsage;
 
     /// <summary>0-100: the session's tokens as a share of <see cref="TokenUsageBudget"/>.</summary>
     public double TokenUsagePercent => Math.Clamp(SessionTokens * 100.0 / TokenUsageBudget, 0, 100);
@@ -129,6 +135,7 @@ public sealed partial class StatusViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(UsageMeterLabel))]
     [NotifyPropertyChangedFor(nameof(UsageMeterText))]
     [NotifyPropertyChangedFor(nameof(HasTokenUsage))]
+    [NotifyPropertyChangedFor(nameof(ShowEmptyUsage))]
     public partial bool IsOverrideCli { get; set; }
 
     partial void OnIsOverrideCliChanged(bool value)
@@ -256,7 +263,7 @@ public sealed partial class StatusViewModel : ObservableObject
 
     /// <summary>"45k / 200k · 22%" for the session panel's context bar; a dash before the session reports anything.</summary>
     public string ContextSummary => !HasContext
-        ? "-"
+        ? "0 · 0%"
         : HasContextWindow ? $"{ContextText} · {ContextPercentText}" : ContextText;
 
     public bool HasContextWindow => ContextWindow > 0;

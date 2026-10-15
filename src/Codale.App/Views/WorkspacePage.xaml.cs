@@ -1438,7 +1438,8 @@ public sealed partial class WorkspacePage : Page
                 current: 0,
                 moveCaret: true,
                 column: column,
-                endColumn: endColumn);
+                endColumn: endColumn,
+                bands: true);
         }
     }
 
@@ -1711,7 +1712,9 @@ public sealed partial class WorkspacePage : Page
             count == 1 ? $"1 match · {ViewModel.Search.Query}" : $"{count} matches · {ViewModel.Search.Query}",
             reveal: true,
             current: request.Current,
-            moveCaret: true);
+            moveCaret: true,
+            bands: true,
+            query: request.Terms);
     }
 
     /// <summary>Creates an editor tab with its own view model and registers it.</summary>
@@ -2429,6 +2432,12 @@ public sealed partial class WorkspacePage : Page
         if (ViewModel.Search.RunCommand.CanExecute(null))
         {
             ViewModel.Search.RunCommand.Execute(null);
+
+            // The query lives in the Search tab now; the box is free for the next search.
+            if (sender is MainWindow window && !string.IsNullOrWhiteSpace(query))
+            {
+                window.ClearSearchText();
+            }
         }
     }
 

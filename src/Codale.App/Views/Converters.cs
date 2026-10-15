@@ -645,3 +645,78 @@ public sealed partial class UsageToBrushConverter : IValueConverter
     public object ConvertBack(object value, Type targetType, object parameter, string language) =>
         throw new NotSupportedException();
 }
+
+/// <summary>Icon glyph and colour for a file-tree node, keyed on the file's extension.</summary>
+public static class FileIcons
+{
+    private static readonly Dictionary<string, Windows.UI.Color> Colors = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [".cs"] = Rgb(0x68, 0x21, 0x7A), [".csx"] = Rgb(0x68, 0x21, 0x7A),
+        [".xaml"] = Rgb(0x00, 0x9F, 0xFF), [".axaml"] = Rgb(0x00, 0x9F, 0xFF),
+        [".csproj"] = Rgb(0x9B, 0x4F, 0xC8), [".sln"] = Rgb(0x9B, 0x4F, 0xC8), [".slnx"] = Rgb(0x9B, 0x4F, 0xC8),
+        [".props"] = Rgb(0x9B, 0x4F, 0xC8), [".targets"] = Rgb(0x9B, 0x4F, 0xC8),
+        [".json"] = Rgb(0xF5, 0xC5, 0x18), [".jsonc"] = Rgb(0xF5, 0xC5, 0x18),
+        [".js"] = Rgb(0xF1, 0xDD, 0x35), [".mjs"] = Rgb(0xF1, 0xDD, 0x35),
+        [".ts"] = Rgb(0x31, 0x78, 0xC6), [".tsx"] = Rgb(0x31, 0x78, 0xC6),
+        [".html"] = Rgb(0xE4, 0x4D, 0x26), [".htm"] = Rgb(0xE4, 0x4D, 0x26),
+        [".css"] = Rgb(0x56, 0x4C, 0xE0), [".scss"] = Rgb(0xCD, 0x67, 0x99),
+        [".md"] = Rgb(0x42, 0xA5, 0xF5), [".txt"] = Rgb(0x9E, 0x9E, 0x9E),
+        [".py"] = Rgb(0x37, 0x76, 0xAB), [".rs"] = Rgb(0xDE, 0xA5, 0x84),
+        [".go"] = Rgb(0x00, 0xAD, 0xD8), [".java"] = Rgb(0xE7, 0x6F, 0x00),
+        [".ps1"] = Rgb(0x30, 0x6F, 0xC8), [".psm1"] = Rgb(0x30, 0x6F, 0xC8),
+        [".sh"] = Rgb(0x4E, 0xAA, 0x25), [".bat"] = Rgb(0x4E, 0xAA, 0x25), [".cmd"] = Rgb(0x4E, 0xAA, 0x25),
+        [".xml"] = Rgb(0xE3, 0x8C, 0x00), [".yml"] = Rgb(0xCB, 0x17, 0x1E), [".yaml"] = Rgb(0xCB, 0x17, 0x1E),
+        [".toml"] = Rgb(0x9C, 0x4A, 0x1A), [".sql"] = Rgb(0xDA, 0xD8, 0xD8),
+        [".png"] = Rgb(0x26, 0xA6, 0x9A), [".jpg"] = Rgb(0x26, 0xA6, 0x9A), [".jpeg"] = Rgb(0x26, 0xA6, 0x9A),
+        [".gif"] = Rgb(0x26, 0xA6, 0x9A), [".svg"] = Rgb(0xFF, 0xB1, 0x3B), [".ico"] = Rgb(0x26, 0xA6, 0x9A),
+        [".editorconfig"] = Rgb(0xA0, 0xA0, 0xA0), [".gitignore"] = Rgb(0xF1, 0x50, 0x2F),
+        [".gitattributes"] = Rgb(0xF1, 0x50, 0x2F), [".lock"] = Rgb(0x9E, 0x9E, 0x9E),
+    };
+
+    private static readonly Windows.UI.Color Folder = Rgb(0xE8, 0xB3, 0x4A);
+    private static readonly Windows.UI.Color Default = Rgb(0x8A, 0x9B, 0xB0);
+
+    private static Windows.UI.Color Rgb(byte r, byte g, byte b) => Windows.UI.Color.FromArgb(255, r, g, b);
+
+    public static string Glyph(bool isDirectory) => isDirectory ? "\uE8B7" : "\uE7C3";
+
+    /// <summary>Extension shown inside the file icon: ".cs" gives "CS", ".gitignore" gives "GIT".</summary>
+    public static string Label(bool isDirectory, string name)
+    {
+        if (isDirectory)
+        {
+            return "";
+        }
+
+        var ext = Path.GetExtension(name).TrimStart('.');
+        if (ext.Length == 0)
+        {
+            ext = name.TrimStart('.');
+        }
+
+        return ext.Length > 4 ? ext[..4].ToUpperInvariant() : ext.ToUpperInvariant();
+    }
+
+    public static double LabelSize(bool isDirectory, string name) => Label(isDirectory, name).Length > 3 ? 6 : 7.5;
+
+    public static Visibility FileVisibility(bool isDirectory) => isDirectory ? Visibility.Collapsed : Visibility.Visible;
+
+    public static Visibility FolderVisibility(bool isDirectory) => isDirectory ? Visibility.Visible : Visibility.Collapsed;
+
+    public static Brush Brush(bool isDirectory, string name)
+    {
+        if (isDirectory)
+        {
+            return new SolidColorBrush(Folder);
+        }
+
+        // Dotfiles like .gitignore have no Path extension, so match the whole name too.
+        var ext = Path.GetExtension(name);
+        if (Colors.TryGetValue(ext, out var c) || Colors.TryGetValue(name, out c))
+        {
+            return new SolidColorBrush(c);
+        }
+
+        return new SolidColorBrush(Default);
+    }
+}

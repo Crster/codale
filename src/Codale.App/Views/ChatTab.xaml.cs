@@ -885,6 +885,10 @@ public sealed partial class ChatTab : UserControl
         }
     }
 
+    /// <summary>Where pasted text and images are written: <c>%TEMP%\codale\paste</c>, created on demand.</summary>
+    private static string PasteDirectory() =>
+        Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codale", "paste")).FullName;
+
     private async void OnAttachClick(object sender, RoutedEventArgs e)
     {
         var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
@@ -991,7 +995,7 @@ public sealed partial class ChatTab : UserControl
                 return;
             }
 
-            var path = Path.Combine(Path.GetTempPath(), $"codale-paste-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..6]}.txt");
+            var path = Path.Combine(PasteDirectory(), $"{Guid.NewGuid().ToString("N")[..6]}.txt");
             await File.WriteAllTextAsync(path, text);
             InsertAtCaret("@" + (path.Contains(' ') ? $"\"{path}\"" : path) + " ");
         }
@@ -1101,8 +1105,8 @@ public sealed partial class ChatTab : UserControl
 
             using var _ = clipboard;
 
-            var name = $"codale-clipboard-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..6]}.png";
-            var tempFolder = await Windows.Storage.StorageFolder.GetFolderFromPathAsync(Path.GetTempPath());
+            var name = $"{Guid.NewGuid().ToString("N")[..6]}.png";
+            var tempFolder = await Windows.Storage.StorageFolder.GetFolderFromPathAsync(PasteDirectory());
             var file = await tempFolder.CreateFileAsync(
                 name, Windows.Storage.CreationCollisionOption.ReplaceExisting);
             using var target = await file.OpenAsync(Windows.Storage.FileAccessMode.ReadWrite);

@@ -143,6 +143,15 @@ public sealed partial class EditorTab : UserControl
     private string _focusQuery = "";
     private IReadOnlyList<string> _focusLines = [];
 
+    private bool _bands;
+    private string _bandQuery = "";
+    private IReadOnlyList<string>? _bandLines;
+
+    private IReadOnlyList<string> BandLines() =>
+        _bandLines ??= FileEditor.GetText().Split('\n').Select(l => l.TrimEnd('\r')).ToList();
+
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush BandBrush =
+        new(Windows.UI.Color.FromArgb(0x30, 0xE5, 0xB2, 0x3C));
     private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush WordBrush =
         new(Windows.UI.Color.FromArgb(0x90, 0xE5, 0xB2, 0x3C));
     private (double Scroll, double LineHeight, double Width, double Height, int Current) _drawn;
@@ -162,8 +171,19 @@ public sealed partial class EditorTab : UserControl
         int current = 0,
         bool moveCaret = false,
         int column = 0,
-        int endColumn = 0)
+        int endColumn = 0,
+        bool bands = false,
+        string query = "")
     {
+        // Global search is research: its results band the matching lines. In-file search marks only the keyword.
+        _bands = bands;
+        _bandQuery = query;
+        _bandLines = null;
+        if (bands)
+        {
+            _focusQuery = "";
+        }
+
         if (_previewing)
         {
             _previewing = false;
@@ -315,6 +335,41 @@ public sealed partial class EditorTab : UserControl
     /// same scroll arithmetic the zoom re-anchor uses; bands span the text width, so
     /// horizontal scrolling never moves them.
     /// </summary>
+    /// <summary>
+    /// Marks the search's own terms (newline separated) the way the search preview does:
+    /// longest first, no overlaps, short words only at a word start.
+    /// </summary>
+    private static List<(int Line, int Col, int Length)> TermOccurrences(
+        string terms, IReadOnlyList<string> lines, int firstLine, int lastLine)
+    {
+        var hits = new List<(int Line, int Col, int Length)>();
+        lastLine = Math.Min(lastLine, lines.Count - 1);
+
+        foreach (var term in terms.Split('\n', StringSplitOptions.RemoveEmptyEntries).OrderByDescending(t => t.Length))
+        {
+            var wordStart = term.Length <= 5 && char.IsLetterOrDigit(term[0]);
+            for (var n = Math.Max(0, firstLine); n <= lastLine; n++)
+            {
+                var line = lines[n];
+                var index = 0;
+                while ((index = line.IndexOf(term, index, StringComparison.OrdinalIgnoreCase)) >= 0)
+                {
+                    var at = index;
+                    var overlaps = hits.Any(h => h.Line == n && at < h.Col + h.Length && h.Col < at + term.Length);
+                    var midWord = wordStart && at > 0 && (char.IsLetterOrDigit(line[at - 1]) || line[at - 1] == '_');
+                    if (!overlaps && !midWord)
+                    {
+                        hits.Add((n, at, term.Length));
+                    }
+
+                    index += term.Length;
+                }
+            }
+        }
+
+        return hits;
+    }
+
     private void RenderHighlights(bool force)
     {
         var lineHeight = FileEditor.ActualLineHeight;
@@ -352,6 +407,61 @@ public sealed partial class EditorTab : UserControl
 
             if (top + height < 0 || top > HighlightLayer.ActualHeight)
             {
+                continue;
+            }
+
+            if (_bands)
+            {
+                // Same look as the search preview: a band on each matching line with the
+                // keyword marked. Without a query (path clicks) the whole span is banded.
+                var hits = _bandQuery.Length > 0
+                    ? TermOccurrences(_bandQuery, BandLines(), firstLine, lastLine)
+                    : [];
+
+                if (hits.Count == 0)
+                {
+                    var band = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = width, Height = Math.Max(0, height), Fill = BandBrush };
+                    Canvas.SetTop(band, top);
+                    HighlightLayer.Children.Add(band);
+                    continue;
+                }
+
+                foreach (var lineNo in hits.Select(h => h.Item1).Distinct())
+                {
+                    var lineTop = FileEditor.VisualRowOfPosition(lineNo, 0) * lineHeight - offset;
+                    var lineHeightPx = FileEditor.VisualRowsOf(lineNo) * lineHeight;
+                    if (lineTop + lineHeightPx < 0 || lineTop > HighlightLayer.ActualHeight)
+                    {
+                        continue;
+                    }
+
+                    var band = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = width, Height = lineHeightPx, Fill = BandBrush };
+                    Canvas.SetTop(band, lineTop);
+                    HighlightLayer.Children.Add(band);
+                }
+
+                foreach (var (line, col, length) in hits)
+                {
+                    var start = FileEditor.PositionBounds(line, col);
+                    if (start.Y + start.Height < 0 || start.Y > HighlightLayer.ActualHeight)
+                    {
+                        continue;
+                    }
+
+                    var end = FileEditor.PositionBounds(line, col + length);
+                    var mark = new Microsoft.UI.Xaml.Shapes.Rectangle
+                    {
+                        Width = end.Y == start.Y ? end.X - start.X : Math.Max(0, HighlightLayer.ActualWidth - start.X - 14),
+                        Height = start.Height,
+                        Fill = WordBrush,
+                        RadiusX = 2,
+                        RadiusY = 2,
+                    };
+                    Canvas.SetLeft(mark, start.X);
+                    Canvas.SetTop(mark, start.Y);
+                    HighlightLayer.Children.Add(mark);
+                }
+
                 continue;
             }
 

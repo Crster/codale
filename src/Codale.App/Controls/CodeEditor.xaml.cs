@@ -603,7 +603,9 @@ public sealed partial class CodeEditor : UserControl
             LineSpacingBaseline = (float)Math.Round(_lineHeight * 0.8),
         };
 
-        using var measure = new CanvasTextLayout(Canvas, new string('M', 100), _textFormat, 65536f, (float)_lineHeight * 2);
+        // The shared device, not the control: a search result can reach here from SizeChanged
+        // before the control's first CreateResources, when the control has no device yet.
+        using var measure = new CanvasTextLayout(CanvasDevice.GetSharedDevice(), new string('M', 100), _textFormat, 65536f, (float)_lineHeight * 2);
 
         // LayoutBounds is advance-based; DrawBounds is ink-only and under-measures, which
         // drifts the selection and caret further from the glyphs the longer the line is.

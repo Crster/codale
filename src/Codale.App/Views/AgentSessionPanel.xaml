@@ -408,8 +408,8 @@
                             <!--  Model, effort and mode  -->
                             <Grid ColumnSpacing="6" Visibility="{x:Bind ShowSessionPickers, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="7*" />
-                                        <ColumnDefinition Width="3*" />
+                                        <ColumnDefinition Width="4*" />
+                                        <ColumnDefinition Width="6*" />
                                     </Grid.ColumnDefinitions>
 
                                 <Button
@@ -638,6 +638,26 @@
                                             Foreground="{x:Bind Workspace.Status.SevenDayPercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}"
                                             Maximum="100"
                                             Value="{x:Bind Workspace.Status.SevenDayPercent, Mode=OneWay}" />
+                                    </StackPanel>
+                                    <StackPanel Spacing="4" Visibility="{x:Bind Workspace.Status.ShowEmptyUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Style="{StaticResource SessionControlCaption}" Text="USAGE" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                HorizontalAlignment="Right"
+                                                FontSize="11"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Text="0%" />
+                                        </Grid>
+                                        <ProgressBar
+                                            MinHeight="6"
+                                            CornerRadius="3"
+                                            Maximum="100"
+                                            Value="0" />
                                     </StackPanel>
                                     <!--  A BYOK endpoint has no readable quota: session tokens against a fixed budget  -->
                                     <StackPanel Spacing="4" Visibility="{x:Bind Workspace.Status.HasTokenUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">

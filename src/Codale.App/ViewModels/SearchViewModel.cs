@@ -35,7 +35,7 @@ public sealed class SearchRangeItem
 }
 
 /// <summary>A result the editor should open, with the spans it should highlight - current one first.</summary>
-public sealed record SearchOpenRequest(string FilePath, IReadOnlyList<LineSpan> Spans, int Current = 0);
+public sealed record SearchOpenRequest(string FilePath, IReadOnlyList<LineSpan> Spans, int Current = 0, string Terms = "");
 
 /// <summary>One discovered file: its path and the slices that matched.</summary>
 public sealed class SearchFileItem
@@ -69,7 +69,7 @@ public sealed class SearchFileItem
             }
         }
 
-        return new(FilePath, Ranges.Select(r => r.Span).ToList(), current);
+        return new(FilePath, Ranges.Select(r => r.Span).ToList(), current, Terms);
     }
 
     /// <summary>True when <paramref name="file"/> would build the very item this is.</summary>
