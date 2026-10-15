@@ -1177,7 +1177,7 @@ public sealed partial class ChatTab : UserControl
             return;
         }
 
-        ImageLightbox.Show(XamlRoot, name, path);
+        ImageLightbox.Show(XamlRoot, path);
     }
 
     private async Task ShowPreviewDialogAsync(string title, UIElement content)

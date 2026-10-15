@@ -1534,6 +1534,13 @@ public sealed partial class WorkspacePage : Page
             // would run an .exe, .bat or .ps1 on a click.
             if (artifact.SourcePath is { } output && File.Exists(output))
             {
+                // Images peek in place, the same preview as pasted images in the chat.
+                if (Path.GetExtension(output).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".gif" or ".bmp" or ".webp")
+                {
+                    ImageLightbox.Show(XamlRoot, output);
+                    return;
+                }
+
                 try
                 {
                     Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{output}\"") { UseShellExecute = true });
@@ -3175,20 +3182,64 @@ public sealed partial class WorkspacePage : Page
                 }
             }
 
+            var roots = new List<string> { projectRoot };
             foreach (var extra in ViewModel.ExtraFolders.Folders)
             {
                 var extraPath = extra;
-                var extraItem = new MenuFlyoutItem
+                roots.Add(extraPath);
+                CwdMenuFlyout.Items.Add(CwdItem($"Workspace: {Path.GetFileName(extraPath)}", extraPath, "\uE8B7"));
+            }
+
+            // Directories the project's commands declare, other than the roots themselves.
+            var commandDirs = new List<string>();
+            foreach (var command in ViewModel.DiscoverCommands())
+            {
+                if (string.IsNullOrWhiteSpace(command.WorkingDirectory))
                 {
-                    Text = $"Folder: {Path.GetFileName(extraPath)}",
-                    Icon = new FontIcon { Glyph = "\uE8B7" },
-                };
-                ToolTipService.SetToolTip(extraItem, extraPath);
-                extraItem.Click += (_, _) => SetTerminalCwd(extraPath);
-                CwdMenuFlyout.Items.Add(extraItem);
+                    continue;
+                }
+
+                string dir;
+                try
+                {
+                    dir = Path.GetFullPath(Path.Combine(projectRoot, command.WorkingDirectory));
+                }
+                catch (ArgumentException)
+                {
+                    continue;
+                }
+
+                if (Directory.Exists(dir)
+                    && !roots.Contains(dir, StringComparer.OrdinalIgnoreCase)
+                    && !commandDirs.Contains(dir, StringComparer.OrdinalIgnoreCase))
+                {
+                    commandDirs.Add(dir);
+                    CwdMenuFlyout.Items.Add(CwdItem($"Command: {Path.GetRelativePath(projectRoot, dir).Replace('\\', '/')}", dir, ""));
+                }
+            }
+
+            var recent = ViewModel.ExtraFolders.RecentCwds
+                .Where(r => !roots.Contains(r, StringComparer.OrdinalIgnoreCase))
+                .ToList();
+            if (recent.Count > 0)
+            {
+                CwdMenuFlyout.Items.Add(new MenuFlyoutSeparator());
+                foreach (var path in recent)
+                {
+                    CwdMenuFlyout.Items.Add(CwdItem(Path.GetFileName(path.TrimEnd('\\', '/')) is { Length: > 0 } n ? n : path, path, "\uE81C"));
+                }
             }
         }
     }
+
+    private MenuFlyoutItem CwdItem(string text, string path, string glyph)
+    {
+        var item = new MenuFlyoutItem { Text = text, Icon = new FontIcon { Glyph = glyph } };
+        ToolTipService.SetToolTip(item, path);
+        item.Click += (_, _) => SetTerminalCwd(path);
+        return item;
+    }
+
 
     private async Task PickCustomFolderAsync()
     {
@@ -3208,6 +3259,7 @@ public sealed partial class WorkspacePage : Page
             if (await picker.PickSingleFolderAsync() is { } folder)
             {
                 SetTerminalCwd(folder.Path);
+                ViewModel?.ExtraFolders.AddRecentCwd(folder.Path);
             }
         }
         catch (Exception ex)

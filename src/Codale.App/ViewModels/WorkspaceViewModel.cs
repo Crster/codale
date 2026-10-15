@@ -641,7 +641,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
                 {
                   "commands": [
                     { "name": "build", "command": "dotnet build" },
-                    { "name": "run", "command": "dotnet run" }
+                    { "name": "run", "command": "dotnet run", "cwd": "src/MyApp" }
                   ]
                 }
                 """);
