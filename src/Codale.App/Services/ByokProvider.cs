@@ -31,6 +31,6 @@ public sealed class ByokProvider
     /// <summary>Context windows discovered from each model's metadata, in tokens.</summary>
     public Dictionary<string, int> ModelContextWindows { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Fallback context size in tokens for models whose endpoint publishes no metadata.</summary>
-    public int ContextWindow { get; set; }
+    /// <summary>Context size in tokens assumed for models whose endpoint publishes no metadata.</summary>
+    public const int DefaultContextWindow = 200000;
 }

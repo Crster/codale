@@ -560,11 +560,6 @@ public sealed partial class SettingsPanel : UserControl
 
         ModelField("Flash model", "Select a model", provider.FlashModel, v => provider.FlashModel = v);
         ModelField("Pro model", "Select a model (optional)", provider.ProModel, v => provider.ProModel = v);
-        Field(
-            "Context window (tokens)",
-            "Fallback when the model list has no context size",
-            provider.ContextWindow > 0 ? provider.ContextWindow.ToString() : "",
-            v => provider.ContextWindow = int.TryParse(v, out var size) && size > 0 ? size : 0);
 
         var remove = new Button { Content = "Remove provider", HorizontalAlignment = HorizontalAlignment.Right };
         remove.Click += (_, _) =>

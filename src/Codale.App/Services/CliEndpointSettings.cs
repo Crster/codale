@@ -138,18 +138,19 @@ public sealed class CliEndpointSettings
             WireApi: "responses");
     }
 
-    /// <summary>A model's published context size, falling back to the provider-wide setting.</summary>
+    /// <summary>A model's published context size, falling back to <see cref="ByokProvider.DefaultContextWindow"/>.</summary>
     public int? ContextWindowFor(string providerName, string? model)
     {
         var active = AppSettings.FindByok(providerName);
-        if (active is null || Clean(model) is not { Length: > 0 } id)
+        if (active is null)
         {
-            return active?.ContextWindow is > 0 ? active.ContextWindow : null;
+            return null;
         }
 
-        return active.ModelContextWindows is not null &&
+        return Clean(model) is { Length: > 0 } id &&
+            active.ModelContextWindows is not null &&
             active.ModelContextWindows.TryGetValue(id, out var window) && window > 0
             ? window
-            : active.ContextWindow is > 0 ? active.ContextWindow : null;
+            : ByokProvider.DefaultContextWindow;
     }
 }

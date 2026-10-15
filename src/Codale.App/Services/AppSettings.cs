@@ -376,7 +376,6 @@ public static class AppSettings
         ModelContextWindows = p.ModelContextWindows is not null
             ? new(p.ModelContextWindows, StringComparer.OrdinalIgnoreCase)
             : new(StringComparer.OrdinalIgnoreCase),
-        ContextWindow = p.ContextWindow,
     };
 
     /// <summary>Serialises providers for the file (<paramref name="protect"/>: keys DPAPI-wrapped) or, unprotected, for change comparison.</summary>
