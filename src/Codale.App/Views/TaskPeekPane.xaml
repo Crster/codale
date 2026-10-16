@@ -96,7 +96,6 @@
                 Margin="12,8,8,4"
                 FontFamily="Cascadia Mono, Consolas"
                 FontSize="13"
-                Foreground="#CCCCCC"
                 IsTextSelectionEnabled="True"
                 TextWrapping="NoWrap" />
         </ScrollViewer>

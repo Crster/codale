@@ -298,6 +298,14 @@ public sealed partial class ChatTab : UserControl
         }
     }
 
+    private void OnHandoffBriefToggleClick(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).Tag is HandoffBriefItem brief)
+        {
+            brief.IsExpanded = !brief.IsExpanded;
+        }
+    }
+
     private async void OnBriefingBackClick(object sender, RoutedEventArgs e)
     {
         if (((FrameworkElement)sender).Tag is FeatureBriefingItem { BackAction: { } back })

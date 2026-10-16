@@ -29,13 +29,10 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>Sessions this window has already tried to title, so each is attempted once.</summary>
 
     /// <summary>
-    /// Background jobs (titles, commit messages, routing, search) answered by one-shot calls
-    /// to the Claude CLI, or to a BYOK provider's API when Settings says so.
+    /// Background jobs (titles, commit messages, routing, search, feature handoffs) answered by
+    /// one-shot calls to a CLI, or to a BYOK provider's API when Settings says so.
     /// </summary>
-    private readonly HelperModel _helper = new(
-        () => AppSettings.HelperApiEndpoint is { } api ? new OpenAiEndpoint(api.BaseUrl, api.ApiKey, api.Model) : null,
-        () => AppSettings.HelperProvider,
-        () => AppSettings.TierModelFor("codex", "flash") ?? HelperModel.DefaultCodexModel);
+    private readonly HelperModel _helper = BackgroundHelper.Create();
 
     /// <summary>Raised when a background task fails due to missing CLI authentication.</summary>
     public event EventHandler<string?>? HelperLoginRequired;

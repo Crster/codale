@@ -1573,6 +1573,73 @@ public sealed partial class FeatureBriefingItem : ChatItem
     public bool HasBack => BackText is not null && BackAction is not null;
 }
 
+/// <summary>
+/// The background model's pass over a feature's history before the first message goes out:
+/// while it runs, the stage it is at; after, folded to what it saved, it opens to the brief the
+/// session started from and the files the pass explored.
+/// </summary>
+public sealed partial class HandoffBriefItem : ChatItem
+{
+    public override TranscriptBlock Block => TranscriptBlock.Notice;
+
+    protected override Thickness NaturalMargin => new(0, 4, 40, 4);
+
+    public required string FeatureName { get; init; }
+
+    /// <summary>"Pre-processed history" for a fresh session's brief; "Caught up on other chats" for a running one's catch-up.</summary>
+    public string Heading { get; init; } = "Pre-processed history";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsDone))]
+    public partial bool IsRunning { get; set; } = true;
+
+    public bool IsDone => !IsRunning;
+
+    [ObservableProperty]
+    public partial string Stage { get; set; } = "Reading history…";
+
+    /// <summary>What the session was handed: the brief, or the trimmed plain seed when no brief was written.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanExpand))]
+    public partial string Brief { get; set; } = "";
+
+    /// <summary>The explored files, one "path:lines - why" per line.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasFiles))]
+    public partial string FilesText { get; set; } = "";
+
+    public bool HasFiles => FilesText.Length > 0;
+
+    public bool CanExpand => Brief.Length > 0;
+
+    /// <summary>"31.2k chars of history → 4.1k" once done.</summary>
+    [ObservableProperty]
+    public partial string SavingsText { get; set; } = "";
+
+    [ObservableProperty]
+    public partial bool IsExpanded { get; set; }
+
+    public void Finish(FeatureBriefResult result)
+    {
+        Brief = result.IsFallback ? result.Seed : result.Brief;
+        FilesText = string.Join("\n", result.Files.Take(12).Select(f =>
+            f.Path + (f.Ranges.Count > 0 ? $":{f.Ranges[0].Start}-{f.Ranges[0].End}" : "") + (f.Reason.Length > 0 ? $" - {f.Reason}" : "")));
+        SavingsText = (result.IsFallback ? "Plain handoff · " : "") + $"{Size(result.FullChars)} of history → {Size(result.Seed.Length)}";
+        IsRunning = false;
+    }
+
+    public void FinishCatchUp(FeatureCatchUpResult result)
+    {
+        Brief = result.Note;
+        SavingsText = result.IsCondensed
+            ? $"{Size(result.FullChars)} of their work → {Size(result.Note.Length)}"
+            : $"{Size(result.Note.Length)} of their work";
+        IsRunning = false;
+    }
+
+    private static string Size(int chars) => chars >= 1000 ? $"{chars / 1000.0:0.#}k chars" : $"{chars} chars";
+}
+
 public enum NoticeSeverity
 {
     Info,

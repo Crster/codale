@@ -68,10 +68,11 @@ public sealed partial class ChatViewModel
                 return await SwitchFeatureAsync(target, created: false);
 
             case FeatureAction.Create when decision.NewNames is { Count: > 0 } names:
+                // Another chat may have started the same topic a moment ago: that feature is joined, not doubled.
                 var created = names
-                    .Select(name => features.Create(name, FeatureRouting.DescribeFrom(text)))
+                    .Select(name => features.FindOrCreate(name, FeatureRouting.DescribeFrom(text)))
                     .ToList();
-                return await SwitchFeatureAsync(created[0], created: true);
+                return await SwitchFeatureAsync(created[0].Feature, created: created[0].Created);
 
             default:
                 // No model verdict (none installed, a slow or unparsable reply) and no feature yet: check
@@ -84,12 +85,16 @@ public sealed partial class ChatViewModel
                         return await SwitchFeatureAsync(matches[0], created: false);
                     }
 
-                    if (features.Create(
-                            FeatureRouting.CleanNames(null, text, seed: false)[0], FeatureRouting.DescribeFrom(text)) is { } started)
+                    var (started, isNew) = features.FindOrCreate(
+                        FeatureRouting.CleanNames(null, text, seed: false)[0], FeatureRouting.DescribeFrom(text));
+                    if (!isNew)
                     {
-                        SetFeature(started, seed: false);
-                        Title = started.Name;
+                        // Another chat just started this topic: join it with its briefing like any existing feature.
+                        return await SwitchFeatureAsync(started, created: false);
                     }
+
+                    SetFeature(started, seed: false);
+                    Title = started.Name;
                 }
 
                 _recording = FeatureId is not null;
@@ -130,10 +135,9 @@ public sealed partial class ChatViewModel
 
         SetFeature(feature, seed: true);
         Title = feature.Name;
-        if (_featureLog?.LatestTodoUpdate() is { } todos)
-        {
-            ApplyTodos(todos.Input);
-        }
+        // The previous task list belongs to a finished prompt: showing it as current leaves
+        // unfinished steps hanging and hides the list the agent makes for the new one.
+        ShowTodos([]);
 
         if (hadConversation)
         {
@@ -145,7 +149,7 @@ public sealed partial class ChatViewModel
         }
 
         // A chat that never spoke keeps its transcript, so the briefing of the feature it left goes.
-        foreach (var stale in Items.OfType<FeatureBriefingItem>().ToList())
+        foreach (var stale in Items.Where(i => i is FeatureBriefingItem or HandoffBriefItem).ToList())
         {
             Items.Remove(stale);
             Reflow();
@@ -216,16 +220,19 @@ public sealed partial class ChatViewModel
     {
         FeatureId = feature.Id;
         FeatureName = feature.Name;
-        _featureLog = Features!.LogOf(feature.Id);
+        _featureLog = Features!.LogOf(feature.Id, _chatId);
+        _logSeen = _featureLog.Position;
         _recording = true;
         _attachLogged = false;
         _seedFeatureId = seed ? feature.Id : null;
         _skipBuffer.Clear();
         _skipPrompt = null;
+        PublishFeatureActivity(busy: false);
     }
 
     private void ClearFeature()
     {
+        Features?.ClearChatActivity(_chatId);
         FeatureId = null;
         FeatureName = "";
         _featureLog = null;
@@ -234,6 +241,38 @@ public sealed partial class ChatViewModel
         _seedFeatureId = null;
         _skipBuffer.Clear();
         _skipPrompt = null;
+    }
+
+    /// <summary>This chat's id in feature logs and in the list of chats open on a feature.</summary>
+    private readonly string _chatId = Guid.NewGuid().ToString("N")[..12];
+
+    /// <summary>Where this chat last caught up with its feature's log: other chats' records past it are news.</summary>
+    private LogPosition _logSeen;
+
+    /// <summary>What this chat last asked on its feature, for the other chats' notes.</summary>
+    private string? _featureRequest;
+
+    /// <summary>Tells the other chats on this feature that this one is here, and whether it is mid-turn.</summary>
+    private void PublishFeatureActivity(bool busy)
+    {
+        if (FeatureId is { } id && Features is { } features)
+        {
+            features.SetChatActivity(new FeatureChat(_chatId, id, Title ?? FeatureName, busy, _featureRequest));
+        }
+    }
+
+    /// <summary>
+    /// The turn is over: its end goes into the feature's log, so readers can tell finished work from
+    /// work under way, and the other chats stop seeing this one as busy.
+    /// </summary>
+    private void EndFeatureTurn(string outcome)
+    {
+        if (SmartHistory && _recording && _featureLog is { } log)
+        {
+            log.EndTurn(outcome);
+        }
+
+        PublishFeatureActivity(busy: false);
     }
 
     /// <summary>The user's turn: appended to the feature's log when it is project work, else held back in case it turns into some.</summary>
@@ -249,6 +288,8 @@ public sealed partial class ChatViewModel
             AttachLog(log);
             log.AppendUser(text);
             Features!.RecordProgress(id, log, text);
+            _featureRequest = text;
+            PublishFeatureActivity(busy: true);
             return;
         }
 
@@ -264,8 +305,9 @@ public sealed partial class ChatViewModel
             return;
         }
 
-        if (e is TurnCompleted)
+        if (e is TurnCompleted done)
         {
+            EndFeatureTurn(done.Subtype);
             if (_recording && FeatureId is { } id)
             {
                 Features!.Summarize(id);
@@ -296,12 +338,19 @@ public sealed partial class ChatViewModel
     {
         var features = Features!;
         var feature = FeatureId is { } id ? features.Get(id) : null;
-        feature ??= features.Create(FeatureRouting.CleanNames(null, prompt, seed: false)[0], FeatureRouting.DescribeFrom(prompt));
+        feature ??= features.FindOrCreate(FeatureRouting.CleanNames(null, prompt, seed: false)[0], FeatureRouting.DescribeFrom(prompt)).Feature;
+
+        if (FeatureId != feature.Id)
+        {
+            _logSeen = features.LogOf(feature.Id).Position;
+        }
 
         FeatureId = feature.Id;
         FeatureName = feature.Name;
-        _featureLog = features.LogOf(feature.Id);
+        _featureLog = features.LogOf(feature.Id, _chatId);
         _recording = true;
+        _featureRequest = prompt;
+        PublishFeatureActivity(busy: true);
 
         AttachLog(_featureLog);
         _featureLog.AppendUser(prompt);
@@ -333,20 +382,127 @@ public sealed partial class ChatViewModel
         }
     }
 
+    /// <summary>The pre-brief in progress, which Stop cancels; null while none runs.</summary>
+    private CancellationTokenSource? _briefing;
+
     /// <summary>
-    /// The feature's briefing for a session's first message, once: its summary, the progress
-    /// since, and the earlier code that bears on the message. Null for a feature with no history yet.
+    /// The feature's briefing for a session's first message, once. With the background-task
+    /// model it is a brief written for this message - the history read and the code explored by
+    /// the cheap model, shown as its own transcript section - so the chat model starts from a few
+    /// thousand characters rather than the raw log. Without one it is the summary, the progress
+    /// since and the earlier code that bears on the message. Null for a feature with no history yet.
     /// </summary>
-    private string? TakeFeatureSeed(string text)
+    /// <exception cref="OperationCanceledException">Stopped while the brief was being written; the seed stays due.</exception>
+    private async Task<string?> TakeFeatureSeedAsync(string text)
     {
         if (_seedFeatureId is not { } id || Features?.Get(id) is not { } feature)
         {
             return null;
         }
 
-        _seedFeatureId = null;
-        return feature.Summary.Length > 0 || feature.LogBytes > 0 || Features.FileCount(id) > 0
-            ? Features.BuildSeed(feature, text)
-            : null;
+        // The seed covers the log as it stands now: other chats' work after this point is news for the next catch-up.
+        var seen = _featureLog?.Position ?? _logSeen;
+        var others = Features.OtherChatsOn(id, _chatId);
+        if (feature.Summary.Length == 0 && feature.LogBytes == 0 && Features.FileCount(id) == 0 && others.Count == 0)
+        {
+            _seedFeatureId = null;
+            _logSeen = seen;
+            return null;
+        }
+
+        if (Helper?.IsAvailable != true)
+        {
+            _seedFeatureId = null;
+            _logSeen = seen;
+            return Features.BuildSeed(feature, text, chatId: _chatId);
+        }
+
+        var item = new HandoffBriefItem { FeatureName = feature.Name };
+        Add(item);
+
+        using var cts = new CancellationTokenSource();
+        _briefing = cts;
+        try
+        {
+            var stage = new Progress<string>(s => item.Stage = s);
+            var result = await Task.Run(() => Features.PrepareBriefAsync(feature, text, _chatId, stage, cts.Token), cts.Token);
+            _seedFeatureId = null;
+            _logSeen = seen;
+            item.Finish(result);
+            CrashLog.Trace($"Feature brief for {id}: {result.FullChars} chars of history handed off as {result.Seed.Length} (fallback={result.IsFallback})");
+            return result.Seed;
+        }
+        catch (OperationCanceledException)
+        {
+            Items.Remove(item);
+            Reflow();
+            throw;
+        }
+        finally
+        {
+            _briefing = null;
+        }
+    }
+
+    /// <summary>
+    /// For a chat already in a session on its feature: what other chats did on it since this chat's
+    /// last message, as a note its next message carries - so it neither undoes nor redoes their work.
+    /// Null when nothing happened elsewhere, which is the usual case and costs one read of the log tail.
+    /// </summary>
+    /// <exception cref="OperationCanceledException">Stopped while the catch-up was being written; nothing is marked seen.</exception>
+    private async Task<string?> TakeCatchUpAsync(string text)
+    {
+        if (!SmartHistory || !_recording || _seedFeatureId is not null || FeatureId is not { } id || _featureLog is not { } log)
+        {
+            return null;
+        }
+
+        var seen = log.Position;
+        var since = _logSeen;
+        if (!FeatureCatchUp.HasWork(log.ReadSince(since, excludeChat: _chatId).Entries))
+        {
+            _logSeen = seen;
+            return null;
+        }
+
+        var item = new HandoffBriefItem { FeatureName = FeatureName, Heading = "Caught up on other chats", Stage = "Reading other chats' work…" };
+        Add(item);
+
+        using var cts = new CancellationTokenSource();
+        _briefing = cts;
+        try
+        {
+            var result = await Task.Run(() => Features!.CatchUpAsync(id, _chatId, since, text, cts.Token), cts.Token);
+            _logSeen = seen;
+            if (result is null)
+            {
+                Items.Remove(item);
+                Reflow();
+                return null;
+            }
+
+            item.FinishCatchUp(result);
+            CrashLog.Trace($"Feature catch-up for {id}: {result.FullChars} chars of other chats' work handed over as {result.Note.Length}");
+            return result.Note;
+        }
+        catch (OperationCanceledException)
+        {
+            Items.Remove(item);
+            Reflow();
+            throw;
+        }
+        finally
+        {
+            _briefing = null;
+        }
+    }
+
+    /// <summary>The session goes mid-turn (the tab closes, a restart): no turn end will come, so one is written for it.</summary>
+    private void AbandonFeatureTurn()
+    {
+        if (IsBusy)
+        {
+            EndFeatureTurn("stopped");
+        }
     }
 }

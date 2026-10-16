@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 
+using Codale.Agents.Claude;
 using Codale.Storage;
 
 using Microsoft.UI.Dispatching;
@@ -230,8 +231,8 @@ public static class AppSettings
 
     /// <summary>
     /// The endpoint background jobs call, or null to use a CLI: Settings picks Claude or
-    /// Codex, or the picked provider lacks a base URL, key and model. The provider's everyday
-    /// model is used - these jobs are short and latency is what the user feels.
+    /// Codex, or the picked provider lacks a base URL, key and flash model. Only the flash model
+    /// is used - these jobs are short, and latency and cost are what the user feels.
     /// </summary>
     public static (string BaseUrl, string ApiKey, string Model)? HelperApiEndpoint =>
         HelperApiProvider is { } found ? found.Endpoint : null;
@@ -258,7 +259,7 @@ public static class AppSettings
 
     /// <summary>
     /// The BYOK provider background jobs call: only the one named by <see cref="HelperProvider"/>,
-    /// and only when it has a base URL, key and model. Null otherwise - Claude or Codex was
+    /// and only when it has a base URL, key and flash model. Null otherwise - Claude or Codex was
     /// picked, or the provider is incomplete - and jobs run on the CLI. Never picks a provider
     /// on its own, and never follows the agent provider picked in the status bar.
     /// </summary>
@@ -274,7 +275,8 @@ public static class AppSettings
 
             foreach (var provider in ByokProviders.Where(p => string.Equals(p.Name.Trim(), wanted, StringComparison.OrdinalIgnoreCase)))
             {
-                var model = string.IsNullOrWhiteSpace(provider.FlashModel) ? provider.ProModel : provider.FlashModel;
+                // Background jobs only ever run the flash model: a provider with only a pro model is not set up for them.
+                var model = provider.FlashModel;
                 if (!string.IsNullOrWhiteSpace(provider.BaseUrl) && !string.IsNullOrWhiteSpace(provider.ApiKey) && !string.IsNullOrWhiteSpace(model))
                 {
                     return (provider, (provider.BaseUrl.Trim(), provider.ApiKey.Trim(), model.Trim()));
@@ -349,6 +351,24 @@ public static class AppSettings
         ReadDefault(cli, "mode") is { } saved && IsChatMode(saved) ? saved : DefaultChatMode;
 
     public static void SetDefaultMode(string cli, string? value) => WriteDefault(cli, "mode", IsChatMode(value) ? value : "");
+
+    private static string ClaudeWindowKey(string model) => $"claude.contextWindow.{ClaudeContextProbe.ModelKey(model)}";
+
+    /// <summary>
+    /// The context window last seen for a Claude model, or null. A terminal CLI's transcript
+    /// never says (its 1M pick is logged under the bare id), so the terminal panel measures
+    /// against what a chat's CLI reported, or what an earlier session proved by passing 200K.
+    /// </summary>
+    public static int? ClaudeContextWindowFor(string model) =>
+        Get(ClaudeWindowKey(model), () => Read(ClaudeWindowKey(model), 0, ParseInt)) is var window and > 0 ? window : null;
+
+    public static void RememberClaudeContextWindow(string model, int window)
+    {
+        if (model.Length > 0 && window > 0)
+        {
+            Set(ClaudeWindowKey(model), window, FormatInt);
+        }
+    }
 
     /// <summary>Seconds between the git panel's working-tree checks.</summary>
     public static int GitPollSeconds

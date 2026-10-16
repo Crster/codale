@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 
+using Codale.Agents.Codex;
 using Codale.Agents.OpenAi;
 using Codale.Core.Agents;
 using Codale.Core.Helper;
@@ -9,6 +10,16 @@ using Codale.Core.Processes;
 using Codale.Core.Text;
 
 namespace Codale.Agents;
+
+/// <summary>
+/// A BYOK provider the Claude or Codex CLI is pointed at instead of its own login: background
+/// runs then use the provider's flash model, reached with the same environment (and, for Codex,
+/// the same custom-provider config) its chat sessions get.
+/// </summary>
+public sealed record HelperCliEndpoint(
+    string Model,
+    IReadOnlyDictionary<string, string> Environment,
+    CodexCustomProvider? CodexProvider = null);
 
 /// <summary>
 /// Answers <see cref="IHelperModel"/> requests with a one-shot run of the Claude CLI
@@ -26,13 +37,15 @@ namespace Codale.Agents;
 public sealed class HelperModel(
     Func<OpenAiEndpoint?>? api = null,
     Func<string?>? provider = null,
-    Func<string?>? codexModel = null) : IHelperModel, IDisposable
+    Func<string?>? codexModel = null,
+    Func<HelperCliEndpoint?>? claudeEndpoint = null,
+    Func<HelperCliEndpoint?>? codexEndpoint = null) : IHelperModel, IDisposable
 {
     /// <summary>The cheapest Claude model: these jobs are short and latency is what the user feels.</summary>
     public const string ClaudeModel = "haiku";
 
-    /// <summary>The fast Codex model: helper jobs are short and latency is what the user feels.</summary>
-    public const string DefaultCodexModel = "gpt-5.6-terra";
+    /// <summary>The cheapest Codex model: helper jobs are short and latency is what the user feels.</summary>
+    public const string DefaultCodexModel = "gpt-5.6-luna";
 
     /// <summary>A warm CLI nobody has asked for in this long is let go.</summary>
     private static readonly TimeSpan SpareIdleLimit = TimeSpan.FromMinutes(2);
@@ -45,7 +58,7 @@ public sealed class HelperModel(
 
     private readonly Lock _spareLock = new();
 
-    /// <summary>Waiting CLIs by the system prompt they were started with, and when each was last wanted.</summary>
+    /// <summary>Waiting CLIs by <see cref="SpareKey"/> (model, endpoint and system prompt), and when each was last wanted.</summary>
     private readonly Dictionary<string, (WarmProcess Process, DateTime Wanted)> _spares = new(StringComparer.Ordinal);
 
     /// <summary>When a start was last tried for each prompt, so a burst of keystrokes tries once.</summary>
@@ -58,6 +71,21 @@ public sealed class HelperModel(
 
     /// <summary>The API endpoint background jobs use instead of a CLI, or null to use the CLI.</summary>
     private OpenAiEndpoint? ApiEndpoint => api?.Invoke();
+
+    /// <summary>The BYOK provider the Claude CLI is pointed at, or null for its own login (and <see cref="ClaudeModel"/>).</summary>
+    private HelperCliEndpoint? ClaudeEndpoint => claudeEndpoint?.Invoke();
+
+    /// <summary>The BYOK provider the Codex CLI is pointed at, or null for its own login.</summary>
+    private HelperCliEndpoint? CodexEndpoint => codexEndpoint?.Invoke();
+
+    /// <summary>
+    /// What a spare is filed under: the same prompt for another model or endpoint is another
+    /// process, so a spare started on the login is never handed a request meant for a provider.
+    /// </summary>
+    internal static string SpareKey(string fullPrompt, HelperCliEndpoint? endpoint) =>
+        endpoint is null
+            ? fullPrompt
+            : $"{endpoint.Model}\n{endpoint.Environment.GetValueOrDefault("ANTHROPIC_BASE_URL")}\n{fullPrompt}";
 
     /// <summary>Raised after each background request a provider answered (API endpoint or CLI), with what it reported spending.</summary>
     public event Action<UsageSnapshot>? ApiRequestServed;
@@ -135,7 +163,7 @@ public sealed class HelperModel(
         }
 
         var fullPrompt = HelperToolCalls.BuildSystemPrompt(systemPrompt, tools);
-        if (TakeSpare(fullPrompt) is { } spare)
+        if (TakeSpare(SpareKey(fullPrompt, ClaudeEndpoint)) is { } spare)
         {
             try
             {
@@ -181,6 +209,8 @@ public sealed class HelperModel(
         }
 
         var fullPrompt = HelperToolCalls.BuildSystemPrompt(systemPrompt, tools);
+        var endpoint = ClaudeEndpoint;
+        var key = SpareKey(fullPrompt, endpoint);
         lock (_spareLock)
         {
             if (_disposed)
@@ -190,21 +220,21 @@ public sealed class HelperModel(
 
             _spareSweep ??= new Timer(_ => DropIdleSpares(), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
 
-            if (_spares.TryGetValue(fullPrompt, out var spare) && spare.Process.IsAlive)
+            if (_spares.TryGetValue(key, out var spare) && spare.Process.IsAlive)
             {
-                _spares[fullPrompt] = spare with { Wanted = DateTime.UtcNow };
+                _spares[key] = spare with { Wanted = DateTime.UtcNow };
                 return;
             }
 
             // Keystrokes arrive faster than a start can land, and without Claude every
             // attempt is a PATH scan that ends in nothing: one try per prompt per window.
             var now = DateTime.UtcNow;
-            if (_attempts.TryGetValue(fullPrompt, out var last) && now - last < PrewarmRetry)
+            if (_attempts.TryGetValue(key, out var last) && now - last < PrewarmRetry)
             {
                 return;
             }
 
-            _attempts[fullPrompt] = now;
+            _attempts[key] = now;
         }
 
         // Checking for the CLI scans PATH and a process start is not free either:
@@ -223,7 +253,7 @@ public sealed class HelperModel(
                     return;
                 }
 
-                if (_spares.TryGetValue(fullPrompt, out var existing))
+                if (_spares.TryGetValue(key, out var existing))
                 {
                     if (existing.Process.IsAlive)
                     {
@@ -231,7 +261,7 @@ public sealed class HelperModel(
                     }
 
                     existing.Process.Dispose();
-                    _spares.Remove(fullPrompt);
+                    _spares.Remove(key);
                 }
 
                 // Room for a new prompt goes to whatever was wanted longest ago.
@@ -242,20 +272,20 @@ public sealed class HelperModel(
                     _spares.Remove(oldest.Key);
                 }
 
-                if (WarmProcess.TryStart(fullPrompt) is { } started)
+                if (WarmProcess.TryStart(fullPrompt, endpoint) is { } started)
                 {
-                    _spares[fullPrompt] = (started, DateTime.UtcNow);
+                    _spares[key] = (started, DateTime.UtcNow);
                 }
             }
         });
     }
 
-    /// <summary>The waiting CLI when one was started for this prompt; it answers one request only.</summary>
-    private WarmProcess? TakeSpare(string systemPrompt)
+    /// <summary>The waiting CLI when one was started under this <see cref="SpareKey"/>; it answers one request only.</summary>
+    private WarmProcess? TakeSpare(string key)
     {
         lock (_spareLock)
         {
-            if (!_spares.Remove(systemPrompt, out var spare))
+            if (!_spares.Remove(key, out var spare))
             {
                 return null;
             }
@@ -299,10 +329,10 @@ public sealed class HelperModel(
     }
 
     /// <summary>The CLI arguments for a one-shot run; the prompt travels on stdin, not here.</summary>
-    internal static IReadOnlyList<string> BuildArguments(string systemPrompt) =>
+    internal static IReadOnlyList<string> BuildArguments(string systemPrompt, string model = ClaudeModel) =>
     [
         "-p",
-        "--model", ClaudeModel,
+        "--model", model,
         "--tools", "",
         "--strict-mcp-config",
         "--no-session-persistence",
@@ -316,10 +346,10 @@ public sealed class HelperModel(
     /// stdin, which the CLI waits to read in full before it starts up, this finishes
     /// starting before the request arrives - which is what makes a spare worth keeping.
     /// </summary>
-    internal static IReadOnlyList<string> BuildStreamArguments(string systemPrompt) =>
+    internal static IReadOnlyList<string> BuildStreamArguments(string systemPrompt, string model = ClaudeModel) =>
     [
         "-p",
-        "--model", ClaudeModel,
+        "--model", model,
         "--tools", "",
         "--strict-mcp-config",
         "--no-session-persistence",
@@ -330,8 +360,8 @@ public sealed class HelperModel(
         "--system-prompt", systemPrompt,
     ];
 
-    /// <summary>The process settings every helper run shares, its arguments aside.</summary>
-    internal static ProcessStartInfo BuildStartInfo(string executable)
+    /// <summary>The process settings every helper run shares, its arguments aside; <paramref name="endpoint"/> adds a BYOK provider's environment.</summary>
+    internal static ProcessStartInfo BuildStartInfo(string executable, HelperCliEndpoint? endpoint = null)
     {
         var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
         var startInfo = new ProcessStartInfo
@@ -352,6 +382,13 @@ public sealed class HelperModel(
         // in what came back: these jobs are one-liners.
         startInfo.Environment["MAX_THINKING_TOKENS"] = "0";
         startInfo.Environment[CodaleAccount.ClaudeVariable] = CodaleAccount.ClaudeHome;
+        if (endpoint is not null)
+        {
+            foreach (var (name, value) in endpoint.Environment)
+            {
+                startInfo.Environment[name] = value;
+            }
+        }
 
         return startInfo;
     }
@@ -364,8 +401,9 @@ public sealed class HelperModel(
             throw new HelperModelException("The Claude CLI is not installed.");
         }
 
-        var startInfo = BuildStartInfo(executable);
-        foreach (var arg in BuildArguments(systemPrompt))
+        var endpoint = ClaudeEndpoint;
+        var startInfo = BuildStartInfo(executable, endpoint);
+        foreach (var arg in BuildArguments(systemPrompt, endpoint?.Model ?? ClaudeModel))
         {
             startInfo.ArgumentList.Add(arg);
         }
@@ -490,14 +528,24 @@ public sealed class HelperModel(
             throw new HelperModelException("The Codex CLI is not installed.");
         }
 
-        var startInfo = BuildStartInfo(executable);
+        var endpoint = CodexEndpoint;
+        var startInfo = BuildStartInfo(executable, endpoint);
         startInfo.ArgumentList.Add("exec");
         startInfo.ArgumentList.Add("--ephemeral");
         startInfo.ArgumentList.Add("--skip-git-repo-check");
         startInfo.ArgumentList.Add("-s");
         startInfo.ArgumentList.Add("read-only");
 
-        var chosenModel = codexModel?.Invoke()?.Trim();
+        if (endpoint?.CodexProvider is { } provider)
+        {
+            foreach (var arg in CodexSessionOptions.ProviderArguments(provider))
+            {
+                startInfo.ArgumentList.Add(arg);
+            }
+        }
+
+        // A BYOK provider serves only its own models: the login's tier pick and default are not among them.
+        var chosenModel = endpoint?.Model ?? codexModel?.Invoke()?.Trim();
         if (string.IsNullOrWhiteSpace(chosenModel))
         {
             chosenModel = DefaultCodexModel;
@@ -675,15 +723,15 @@ public sealed class HelperModel(
             }
         }
 
-        public static WarmProcess? TryStart(string systemPrompt)
+        public static WarmProcess? TryStart(string systemPrompt, HelperCliEndpoint? endpoint)
         {
             if (CliLocator.Find(CliLocator.Executable) is not { } executable)
             {
                 return null;
             }
 
-            var startInfo = BuildStartInfo(executable);
-            foreach (var arg in BuildStreamArguments(systemPrompt))
+            var startInfo = BuildStartInfo(executable, endpoint);
+            foreach (var arg in BuildStreamArguments(systemPrompt, endpoint?.Model ?? ClaudeModel))
             {
                 startInfo.ArgumentList.Add(arg);
             }

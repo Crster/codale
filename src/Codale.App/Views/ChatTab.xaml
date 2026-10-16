@@ -1307,11 +1307,104 @@
             </StackPanel>
         </DataTemplate>
 
+        <!--  The background model's pass over the feature's history before the first message:
+              its stage while it runs, then a folded row that opens to the brief and the files.  -->
+        <DataTemplate x:Key="HandoffBriefTemplate" x:DataType="vm:HandoffBriefItem">
+            <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="2">
+                <Button
+                    Padding="0,3,10,3"
+                    Click="OnHandoffBriefToggleClick"
+                    IsEnabled="{x:Bind CanExpand, Mode=OneWay}"
+                    Style="{StaticResource ToolToggle}"
+                    Tag="{x:Bind}"
+                    ToolTipService.ToolTip="Show or hide the handoff the background model wrote for this message">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Border
+                            Width="20"
+                            Height="20"
+                            Margin="1,0,1,0"
+                            VerticalAlignment="Center"
+                            Background="{StaticResource KindPlanTintBrush}"
+                            CornerRadius="10">
+                            <Grid>
+                                <ProgressRing
+                                    Width="14"
+                                    Height="14"
+                                    IsActive="{x:Bind IsRunning, Mode=OneWay}" />
+                                <FontIcon
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    FontSize="{x:Bind S10, Mode=OneWay}"
+                                    Foreground="{StaticResource KindPlanBrush}"
+                                    Glyph="&#xE9D5;"
+                                    Visibility="{x:Bind IsDone, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                            </Grid>
+                        </Border>
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind S12, Mode=OneWay}"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind Heading}" />
+                        <TextBlock
+                            MaxWidth="420"
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind S12, Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Text="{x:Bind Stage, Mode=OneWay}"
+                            TextTrimming="CharacterEllipsis"
+                            Visibility="{x:Bind IsRunning, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                        <TextBlock
+                            MaxWidth="420"
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind S12, Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Text="{x:Bind SavingsText, Mode=OneWay}"
+                            TextTrimming="CharacterEllipsis"
+                            Visibility="{x:Bind IsDone, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                        <FontIcon
+                            FontSize="{x:Bind S8, Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Glyph="{x:Bind IsExpanded, Mode=OneWay, Converter={StaticResource ChevronGlyph}}"
+                            Visibility="{x:Bind CanExpand, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                    </StackPanel>
+                </Button>
+                <Grid Visibility="{x:Bind IsExpanded, Mode=OneWay}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="22" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Rectangle Width="1" Fill="{StaticResource TimelineRailBrush}" />
+                    <StackPanel
+                        Grid.Column="1"
+                        Margin="6,2,0,4"
+                        Spacing="6">
+                        <views:MarkdownView BaseFontSize="{x:Bind S13, Mode=OneWay}" Markdown="{x:Bind Brief, Mode=OneWay}" />
+                        <TextBlock
+                            FontSize="{x:Bind S12, Mode=OneWay}"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="Files explored"
+                            Visibility="{x:Bind HasFiles, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                        <TextBlock
+                            FontFamily="Cascadia Mono, Consolas"
+                            FontSize="{x:Bind S12, Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            IsTextSelectionEnabled="True"
+                            Text="{x:Bind FilesText, Mode=OneWay}"
+                            TextWrapping="Wrap"
+                            Visibility="{x:Bind HasFiles, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+        </DataTemplate>
+
         <views:ChatItemTemplateSelector
             x:Key="ChatTemplateSelector"
             ActivityTemplate="{StaticResource ActivityTemplate}"
             AssistantTemplate="{StaticResource AssistantTemplate}"
             BriefingTemplate="{StaticResource BriefingTemplate}"
+            HandoffBriefTemplate="{StaticResource HandoffBriefTemplate}"
             NoticeTemplate="{StaticResource NoticeTemplate}"
             ToolTemplate="{StaticResource ToolTemplate}"
             UserTemplate="{StaticResource UserTemplate}" />

@@ -5,6 +5,7 @@ using Codale.Agents;
 using Codale.Agents.Claude;
 using Codale.Agents.Codex;
 using Codale.Agents.History;
+using Codale.App.Services;
 using Codale.App.ViewModels;
 
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -300,11 +301,19 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
             }
             else
             {
-                var tokens = await Task.Run(() => ClaudeContextProbe.ReadTokens(source, since));
-                if (tokens is { } used)
+                if (await Task.Run(() => ClaudeContextProbe.Read(source, since)) is { } reading)
                 {
-                    session.Status.ContextTokens = used;
-                    session.Status.ContextWindow = ClaudeContextProbe.WindowFor(used);
+                    var known = reading.Model is { Length: > 0 } model ? AppSettings.ClaudeContextWindowFor(model) : null;
+                    var window = ClaudeContextProbe.WindowFor(reading.Tokens, known);
+                    session.Status.ContextTokens = reading.Tokens;
+                    session.Status.ContextWindow = window;
+
+                    // A session past 200K proves the model's window, so the next session (or
+                    // this one after a compact) does not fall back to 200K.
+                    if (reading.Model is { Length: > 0 } seen && window > (known ?? 200_000))
+                    {
+                        AppSettings.RememberClaudeContextWindow(seen, window);
+                    }
                 }
 
                 if (_ticks++ >= UsageEveryTicks)

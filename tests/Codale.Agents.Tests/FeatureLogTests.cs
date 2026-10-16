@@ -123,6 +123,58 @@ public sealed class FeatureLogTests : IDisposable
     }
 
     [Fact]
+    public void Each_record_names_the_chat_that_wrote_it_and_a_chat_can_leave_its_own_out()
+    {
+        var a = new FeatureLog(_directory, "chat-a");
+        var b = new FeatureLog(_directory, "chat-b");
+        a.AppendUser("add retries");
+        b.AppendUser("rename the key");
+        b.Append(new AssistantMessageCompleted { MessageId = "m", Model = "m", Text = "renamed" });
+        b.EndTurn("success");
+
+        var (all, turns) = new FeatureLog(_directory).ReadSince(0);
+        var others = a.ReadSince(0, excludeChat: "chat-a").Entries;
+
+        Assert.Equal(2, turns);
+        Assert.Equal(["chat-a", "chat-b", "chat-b", "chat-b"], all.Select(e => e.Chat ?? "").ToArray());
+        Assert.Equal(HandoffRole.TurnEnd, all[^1].Role);
+        Assert.DoesNotContain(others, e => e.Chat == "chat-a");
+        Assert.Equal("rename the key", others[0].Text);
+    }
+
+    [Fact]
+    public void Archiving_up_to_an_offset_carries_later_lines_into_the_new_log()
+    {
+        var log = new FeatureLog(_directory, "a");
+        log.AppendUser("summarised");
+        var offset = log.Length;
+        new FeatureLog(_directory, "b").AppendUser("written while the summary was made");
+
+        log.ArchiveUpTo(offset);
+
+        Assert.Equal(["written while the summary was made"], log.ReadSince(0).Entries.Select(e => e.Text));
+        Assert.Equal(offset, new FileInfo(Path.Combine(_directory, "log.1.jsonl")).Length);
+        Assert.Equal(
+            ["summarised", "written while the summary was made"],
+            log.ReadTail(10, out _).OfType<UserMessageRecorded>().Select(u => u.Text));
+    }
+
+    [Fact]
+    public void A_position_survives_archiving()
+    {
+        var log = new FeatureLog(_directory, "a");
+        log.AppendUser("old");
+        var seen = log.Position;
+        new FeatureLog(_directory, "b").AppendUser("after the position");
+        log.Archive();
+        new FeatureLog(_directory, "b").AppendUser("after the archive");
+
+        var since = log.ReadSince(seen, excludeChat: "a").Entries.Select(e => e.Text);
+
+        Assert.Equal(["after the position", "after the archive"], since);
+    }
+
+    [Fact]
     public void An_unwritten_feature_has_an_empty_log()
     {
         var log = new FeatureLog(_directory);

@@ -21,7 +21,9 @@ public static class FeatureContext
         FeatureInfo feature,
         IReadOnlyList<HandoffEntry> progressSinceSummary,
         IReadOnlyList<string> files,
-        IReadOnlyList<FileHit> relevantCode)
+        IReadOnlyList<FileHit> relevantCode,
+        int maxProgressChars = SessionHandoff.MaxChars,
+        IReadOnlySet<string>? runningChats = null)
     {
         var text = new StringBuilder();
         text.AppendLine($"# Feature: {feature.Name}");
@@ -41,7 +43,7 @@ public static class FeatureContext
         {
             text.AppendLine();
             text.AppendLine("## Progress since that summary");
-            text.AppendLine(SessionHandoff.Condense(progressSinceSummary));
+            text.AppendLine(SessionHandoff.Condense(progressSinceSummary, maxProgressChars, runningChats));
         }
 
         if (files.Count > 0)

@@ -88,6 +88,22 @@ public sealed record CodexSessionOptions
     /// </summary>
     public string? RawLogPath { get; init; }
 
+    /// <summary>The <c>-c</c> overrides that point Codex at a custom provider; shared with one-shot <c>codex exec</c> runs.</summary>
+    internal static IReadOnlyList<string> ProviderArguments(CodexCustomProvider provider)
+    {
+        static string Literal(string value) => $"'{value}'";
+        const string id = "custom";
+        return
+        [
+            "-c", $"model_provider={Literal(id)}",
+            "-c", $"model_providers.{id}.name={Literal(provider.Name)}",
+            "-c", $"model_providers.{id}.base_url={Literal(provider.BaseUrl)}",
+            "-c", $"model_providers.{id}.env_key={Literal(provider.EnvKey)}",
+            "-c", $"model_providers.{id}.wire_api={Literal(provider.WireApi)}",
+            "-c", $"model_providers.{id}.supports_websockets={(provider.SupportsWebsockets ? "true" : "false")}",
+        ];
+    }
+
     /// <summary>Builds the <c>codex app-server</c> argument list. Exposed for the tests that pin it.</summary>
     internal IReadOnlyList<string> BuildArguments()
     {
@@ -96,20 +112,7 @@ public sealed record CodexSessionOptions
 
         if (CustomProvider is { } provider)
         {
-            static string Literal(string value) => $"'{value}'";
-            const string id = "custom";
-            args.Add("-c");
-            args.Add($"model_provider={Literal(id)}");
-            args.Add("-c");
-            args.Add($"model_providers.{id}.name={Literal(provider.Name)}");
-            args.Add("-c");
-            args.Add($"model_providers.{id}.base_url={Literal(provider.BaseUrl)}");
-            args.Add("-c");
-            args.Add($"model_providers.{id}.env_key={Literal(provider.EnvKey)}");
-            args.Add("-c");
-            args.Add($"model_providers.{id}.wire_api={Literal(provider.WireApi)}");
-            args.Add("-c");
-            args.Add($"model_providers.{id}.supports_websockets={(provider.SupportsWebsockets ? "true" : "false")}");
+            args.AddRange(ProviderArguments(provider));
         }
 
         if (Model is { Length: > 0 } model)

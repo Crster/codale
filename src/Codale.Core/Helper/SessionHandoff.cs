@@ -4,14 +4,29 @@ using Codale.Core.Text;
 
 namespace Codale.Core.Helper;
 
-/// <summary>One line of a conversation as the handoff writer sees it.</summary>
-public sealed record HandoffEntry(HandoffRole Role, string Text);
+/// <summary>One line of a conversation as the handoff writer sees it, and the chat that wrote it (null when unknown).</summary>
+public sealed record HandoffEntry(HandoffRole Role, string Text, string? Chat = null);
 
 public enum HandoffRole
 {
     User,
     Assistant,
     Tool,
+
+    /// <summary>A chat's turn ended; <see cref="HandoffEntry.Text"/> says how. Marks the turns before it as finished.</summary>
+    TurnEnd,
+}
+
+/// <summary>Where one chat's work on a feature stands, as the history shows it.</summary>
+public enum ConversationState
+{
+    Finished,
+
+    /// <summary>The chat is open and its turn has not ended: what it did so far is work in progress.</summary>
+    Running,
+
+    /// <summary>The chat's last turn never ended (stopped, crashed or closed mid-turn): it may be half done.</summary>
+    Interrupted,
 }
 
 /// <summary>
@@ -43,25 +58,102 @@ public static class SessionHandoff
         PromptRules.ResultOnly;
 
     /// <summary>
-    /// The conversation as plain text under <see cref="MaxChars"/>: every entry clipped, and
-    /// when it is still too long, the opening request kept with the most recent turns.
+    /// The conversation as plain text under <paramref name="maxChars"/> (<see cref="MaxChars"/> by
+    /// default): every entry clipped, and when it is still too long, the opening request kept
+    /// with the most recent turns.
     /// </summary>
-    public static string Condense(IReadOnlyList<HandoffEntry> entries)
+    /// <remarks>
+    /// History several chats wrote at once is split back into one block per chat, each headed by
+    /// where it stands (<see cref="StateOf"/>), so the reader never takes one chat's reply for the
+    /// answer to another's request, or work still under way for work done. A single finished
+    /// conversation reads as before, without a heading.
+    /// </remarks>
+    /// <param name="runningChats">Chats open right now with a turn in flight.</param>
+    public static string Condense(IReadOnlyList<HandoffEntry> entries, int maxChars = MaxChars, IReadOnlySet<string>? runningChats = null)
+    {
+        var groups = entries
+            .GroupBy(e => e.Chat ?? "")
+            .Select(g => (Chat: g.Key.Length == 0 ? null : g.Key, Entries: g.ToList()))
+            .Where(g => g.Entries.Any(e => e.Role != HandoffRole.TurnEnd))
+            .ToList();
+
+        var states = groups.Select(g => StateOf(g.Entries, g.Chat, runningChats)).ToList();
+        if (groups.Count <= 1 && states.All(s => s == ConversationState.Finished))
+        {
+            return CondenseOne(entries, maxChars);
+        }
+
+        // Each chat gets the share of the budget its history takes, but never so little it is only a heading.
+        var sizes = groups.Select(g => g.Entries.Sum(e => Math.Min(e.Text.Length, EntryChars) + 8)).ToList();
+        var total = Math.Max(1, sizes.Sum());
+        var text = new StringBuilder();
+        for (var i = 0; i < groups.Count; i++)
+        {
+            var share = Math.Max(4_000, (int)((long)(maxChars - 120 * groups.Count) * sizes[i] / total));
+            text.AppendLine($"### Conversation {i + 1} ({Describe(states[i])})");
+            text.AppendLine(CondenseOne(groups[i].Entries, share));
+        }
+
+        return text.ToString().TrimEnd();
+    }
+
+    /// <summary>
+    /// Where a chat's history stands: running while the chat has a turn in flight; interrupted when
+    /// its last request has no turn end after it; finished otherwise - including history written
+    /// before turn ends were recorded, which has none at all.
+    /// </summary>
+    public static ConversationState StateOf(IReadOnlyList<HandoffEntry> entries, string? chat, IReadOnlySet<string>? runningChats)
+    {
+        if (chat is not null && runningChats?.Contains(chat) == true)
+        {
+            return ConversationState.Running;
+        }
+
+        if (chat is null)
+        {
+            return ConversationState.Finished;
+        }
+
+        var lastUser = -1;
+        var lastEnd = -1;
+        for (var i = 0; i < entries.Count; i++)
+        {
+            if (entries[i].Role == HandoffRole.User)
+            {
+                lastUser = i;
+            }
+            else if (entries[i].Role == HandoffRole.TurnEnd)
+            {
+                lastEnd = i;
+            }
+        }
+
+        return lastUser > lastEnd ? ConversationState.Interrupted : ConversationState.Finished;
+    }
+
+    private static string Describe(ConversationState state) => state switch
+    {
+        ConversationState.Running => "still running in an open chat: its last turn is in progress, not done",
+        ConversationState.Interrupted => "its last turn never finished: that work may be half done",
+        _ => "finished",
+    };
+
+    private static string CondenseOne(IReadOnlyList<HandoffEntry> entries, int maxChars)
     {
         var lines = entries
-            .Where(e => !string.IsNullOrWhiteSpace(e.Text))
+            .Where(e => e.Role != HandoffRole.TurnEnd && !string.IsNullOrWhiteSpace(e.Text))
             .Select(e => $"{Label(e.Role)}: {Clip(e.Text.Trim())}")
             .ToList();
 
         var total = lines.Sum(l => l.Length + 1);
-        if (total <= MaxChars)
+        if (total <= maxChars)
         {
             return string.Join('\n', lines);
         }
 
         // The first user message says what the work is; the end says where it stands.
         var head = lines.Take(2).ToList();
-        var budget = MaxChars - head.Sum(l => l.Length + 1) - 64;
+        var budget = maxChars - head.Sum(l => l.Length + 1) - 64;
         var tail = new List<string>();
         for (var i = lines.Count - 1; i >= head.Count && budget > 0; i--)
         {

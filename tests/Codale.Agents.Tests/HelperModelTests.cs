@@ -20,6 +20,47 @@ public sealed class HelperModelTests
     }
 
     [Fact]
+    public void Claude_runs_haiku_on_its_login_and_the_providers_flash_model_behind_a_byok_override()
+    {
+        var endpoint = new HelperCliEndpoint("glm-flash", new Dictionary<string, string> { ["ANTHROPIC_BASE_URL"] = "https://byok.example/anthropic" });
+
+        var login = HelperModel.BuildArguments("x").ToList();
+        var byok = HelperModel.BuildStreamArguments("x", endpoint.Model).ToList();
+
+        Assert.Equal(HelperModel.ClaudeModel, login[login.IndexOf("--model") + 1]);
+        Assert.Equal("haiku", HelperModel.ClaudeModel);
+        Assert.Equal("glm-flash", byok[byok.IndexOf("--model") + 1]);
+        Assert.Equal("https://byok.example/anthropic", HelperModel.BuildStartInfo("claude", endpoint).Environment["ANTHROPIC_BASE_URL"]);
+    }
+
+    [Fact]
+    public void Codex_background_jobs_default_to_luna()
+    {
+        Assert.Equal("gpt-5.6-luna", HelperModel.DefaultCodexModel);
+    }
+
+    [Fact]
+    public void A_spare_for_the_login_is_never_one_for_a_byok_model()
+    {
+        var endpoint = new HelperCliEndpoint("glm-flash", new Dictionary<string, string> { ["ANTHROPIC_BASE_URL"] = "https://byok.example" });
+
+        Assert.Equal("prompt", HelperModel.SpareKey("prompt", null));
+        Assert.NotEqual(HelperModel.SpareKey("prompt", null), HelperModel.SpareKey("prompt", endpoint));
+        Assert.NotEqual(
+            HelperModel.SpareKey("prompt", endpoint),
+            HelperModel.SpareKey("prompt", endpoint with { Model = "glm-pro" }));
+    }
+
+    [Fact]
+    public void Codex_provider_arguments_match_the_chat_sessions()
+    {
+        var provider = new Codex.CodexCustomProvider("My Gateway", "https://api.example.com/v1");
+        var session = string.Join(' ', new Codex.CodexSessionOptions { WorkingDirectory = ".", CustomProvider = provider }.BuildArguments());
+
+        Assert.Contains(string.Join(' ', Codex.CodexSessionOptions.ProviderArguments(provider)), session);
+    }
+
+    [Fact]
     public void A_warm_claude_reads_its_request_as_stream_json()
     {
         var args = HelperModel.BuildStreamArguments("Be brief.").ToList();

@@ -914,10 +914,7 @@ public sealed partial class SettingsPanel : UserControl
     private async void OnSyntaxGenerateClick(object sender, RoutedEventArgs e)
     {
         // Settings has no file in front, so the dialog asks for the language and an optional sample.
-        using var helper = new HelperModel(
-            () => AppSettings.HelperApiEndpoint is { } api ? new OpenAiEndpoint(api.BaseUrl, api.ApiKey, api.Model) : null,
-            () => AppSettings.HelperProvider,
-            () => AppSettings.TierModelFor("codex", "flash") ?? HelperModel.DefaultCodexModel);
+        using var helper = BackgroundHelper.Create();
         await SyntaxDialogs.ShowGenerateAsync(XamlRoot, helper, "", "", "");
     }
 

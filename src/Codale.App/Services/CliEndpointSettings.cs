@@ -1,3 +1,4 @@
+using Codale.Agents;
 using Codale.Core.Agents;
 
 namespace Codale.App.Services;
@@ -136,6 +137,36 @@ public sealed class CliEndpointSettings
             BaseUrl: baseUrl.TrimEnd('/'),
             EnvKey: "OPENAI_API_KEY",
             WireApi: "responses");
+    }
+
+    /// <summary>
+    /// Where background jobs run through <paramref name="cli"/> ("claude" or "codex") go when that
+    /// CLI is set to a BYOK provider: the provider's flash model over the endpoint its chats use.
+    /// Null - the CLI's own login and cheap model - when the CLI has no provider, the provider
+    /// names no flash model, or it has no endpoint that CLI can reach.
+    /// </summary>
+    public HelperCliEndpoint? HelperEndpoint(string cli)
+    {
+        var name = AppSettings.CliProviderFor(cli);
+        if (name.Length == 0 || Clean(AppSettings.FindByok(name)?.FlashModel) is not { Length: > 0 } flash)
+        {
+            return null;
+        }
+
+        if (cli == "codex")
+        {
+            return CodexEnvironment(name) is { } env ? new HelperCliEndpoint(flash, env, CodexProvider(name)) : null;
+        }
+
+        try
+        {
+            return ClaudeEnvironment(name) is { } env ? new HelperCliEndpoint(flash, env) : null;
+        }
+        catch (InvalidOperationException)
+        {
+            // An OpenAI-only provider cannot serve Claude: background jobs stay on the login.
+            return null;
+        }
     }
 
     /// <summary>A model's published context size, falling back to <see cref="ByokProvider.DefaultContextWindow"/>.</summary>

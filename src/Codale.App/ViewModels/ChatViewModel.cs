@@ -617,15 +617,24 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         task ??= RunningTasks.FirstOrDefault(t => t.RuntimeId == changed.TaskId);
 
+        // A shell the CLI moved to the background by itself (a long build) was launched by an
+        // ordinary tool call; that call carries the command the peek pane should show.
+        var command = changed.ToolUseId is { } launchId
+            && _toolCalls.TryGetValue(launchId, out var launch)
+            && BackgroundTaskDetector.IsShellTool(launch.ToolName)
+            && !string.IsNullOrWhiteSpace(launch.Command)
+            ? launch.Command.Trim() : null;
+
         if (task is null)
         {
             task = new RunningTaskItem
             {
                 ToolUseId = changed.ToolUseId ?? $"task:{changed.TaskId}",
                 Kind = RunningTaskKind.Shell,
-                Title = string.IsNullOrWhiteSpace(changed.Prompt) ? $"Task {changed.TaskId}" : changed.Prompt.Trim(),
+                Title = command ?? (string.IsNullOrWhiteSpace(changed.Prompt) ? $"Task {changed.TaskId}" : changed.Prompt.Trim()),
                 StartedAt = DateTimeOffset.Now,
-                Header = string.IsNullOrWhiteSpace(changed.Prompt) ? "" : RunningTaskItem.PromptHeader(changed.Prompt),
+                Header = command is not null ? RunningTaskItem.CommandHeader(command)
+                    : string.IsNullOrWhiteSpace(changed.Prompt) ? "" : RunningTaskItem.PromptHeader(changed.Prompt),
                 Prompt = changed.Prompt?.Trim() ?? "",
                 RuntimeId = changed.TaskId,
                 LaunchedInBackground = true,
@@ -636,7 +645,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         task.RuntimeId = changed.TaskId;
         task.LaunchedInBackground = true;
         task.OutputPath ??= FindClaudeTaskOutput(changed.TaskId);
-        if (changed.Prompt is { Length: > 0 } prompt && task.Header.Length == 0)
+        if (task.Header.Length == 0 && command is not null)
+        {
+            task.Header = RunningTaskItem.CommandHeader(command);
+        }
+        else if (changed.Prompt is { Length: > 0 } prompt && task.Header.Length == 0)
         {
             task.Header = RunningTaskItem.PromptHeader(prompt);
             task.Prompt = prompt.Trim();
@@ -838,7 +851,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 };
                 if (task.IsShell)
                 {
-                    task.Header = RunningTaskItem.CommandHeader(task.Title);
+                    var launched = info.ToolCallId is { } callId
+                        && _toolCalls.TryGetValue(callId, out var launch)
+                        && BackgroundTaskDetector.IsShellTool(launch.ToolName)
+                        && !string.IsNullOrWhiteSpace(launch.Command)
+                        ? launch.Command : task.Title;
+                    task.Header = RunningTaskItem.CommandHeader(launched);
                 }
 
                 AddTask(task);
@@ -2301,6 +2319,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 RestoreAfterPlanTurn();
                 _status.Apply(turn);
 
+                // The terminal panel cannot read the window from a transcript; it borrows this one.
+                if (!IsCodexSession && turn.ContextWindow is int turnWindow && _status.Model is { Length: > 0 } turnModel && turnModel != StatusViewModel.NotConnected)
+                {
+                    AppSettings.RememberClaudeContextWindow(turnModel, turnWindow);
+                }
+
                 // The context window reading comes from the last assistant message, not
                 // from the result: the result's usage sums every request of the turn
                 // (inputs re-counted, cache reads included), so taking it directly made
@@ -2348,6 +2372,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             case SessionEnded ended:
+                AbandonFeatureTurn();
                 IsBusy = false;
                 IsConnected = false;
                 AbandonPendingApprovals();
@@ -3299,7 +3324,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         var text = Draft.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
         var attachments = Attachments.Select(a => a.ToTurnAttachment()).ToList();
 
-        if ((text.Length == 0 && attachments.Count == 0) || _session is null || !IsConnected || IsRouting)
+        if ((text.Length == 0 && attachments.Count == 0) || _session is null || !IsConnected || IsRouting || _briefing is not null)
         {
             return;
         }
@@ -3443,13 +3468,41 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        var composerAttachments = Attachments.ToList();
         Draft = "";
         NextPromptSuggestion = null;
         Attachments.Clear();
         ComposerNotice = null;
         IsBusy = true;
         _lastUserPrompt = text;
-        Add(new UserMessageItem { Text = text, Attachments = attachments, SentAsPlan = planOnly });
+        var sent = new UserMessageItem { Text = text, Attachments = attachments, SentAsPlan = planOnly };
+        Add(sent);
+
+        // The feature's briefing rides on the first real message; a slash command is the
+        // CLI's own syntax and would not survive a prefix. Writing it can take the background
+        // model a while, and is shown as its own section under the prompt.
+        string? seed;
+        try
+        {
+            // A session already under way gets, instead, what other chats on its feature did meanwhile.
+            seed = text.StartsWith('/') ? null : await TakeFeatureSeedAsync(text) ?? await TakeCatchUpAsync(text);
+        }
+        catch (OperationCanceledException)
+        {
+            // Stopped before anything went out: the message goes back to the composer.
+            Items.Remove(sent);
+            Reflow();
+            IsBusy = false;
+            RestoreAfterPlanTurn();
+            Draft = text;
+            foreach (var attachment in composerAttachments)
+            {
+                Attachments.Add(attachment);
+            }
+
+            return;
+        }
+
         RecordUserTurn(text);
 
         // The first prompt names the tab - its gist, not a copy - until something better
@@ -3462,15 +3515,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            // The feature's briefing rides on the first real message; a slash command is the
-            // CLI's own syntax and would not survive a prefix.
-            var seed = text.StartsWith('/') ? null : TakeFeatureSeed(text);
             var context = seed is { Length: > 0 } ? SessionBriefing.ContextBlock(seed) : null;
 
             await session.SendAsync(new UserTurn(text) { Attachments = attachments, PlanOnly = planOnly, AskOnly = askOnly, ContextPrefix = context });
         }
         catch (Exception ex)
         {
+            EndFeatureTurn("not sent");
             IsBusy = false;
             RestoreAfterPlanTurn();
             EndTurn(TurnOutcome.NotSent);
@@ -3918,6 +3969,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        // The background model is still writing the feature's brief: nothing reached the CLI yet.
+        if (_briefing is { } briefing)
+        {
+            await briefing.CancelAsync();
+            return;
+        }
+
         // Stopping the main agent cascades: every subagent still running goes with it.
         var running = RunningTasks
             .Where(t => t.Kind == RunningTaskKind.Subagent && t.Hosted is null && t.IsRunning)
@@ -4190,13 +4248,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
+        StopTaskHost();
+
+        // The session goes first, so a turn cut off by the close is marked as ended before the summary reads the log.
+        await DisposeSessionAsync();
+        Features?.ClearChatActivity(_chatId);
         if (SmartHistory && _recording && FeatureId is { } featureId)
         {
             Features!.Summarize(featureId, force: true);
         }
-
-        StopTaskHost();
-        await DisposeSessionAsync();
     }
 
     /// <summary>
@@ -4216,6 +4276,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // closed here, or the busy pulses and the stop button animate forever.
         if (IsBusy)
         {
+            AbandonFeatureTurn();
             IsBusy = false;
             EndTurn(TurnOutcome.Stopped);
         }
