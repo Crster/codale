@@ -22,7 +22,8 @@ public static class McpInstructions
         "For a dev server, watcher or any command that keeps running, use start_task (read_task follows its output, stop_task ends it) " +
         "instead of a background shell, so the user sees the task in Codale; quick commands still run in your own shell. " +
         "list_commands, add_command and run_command use the project's saved run commands; list_terminals and read_terminal read the " +
-        "user's terminal tabs. Use artifact_add for a deliverable that is not project source (a report, document, image or data file).";
+        "user's terminal tabs. To view static files (a built site, an HTML report) in a browser, serve_folder hosts any folder on " +
+        "localhost instead of an http server started with start_task. Use artifact_add for a deliverable that is not project source (a report, document, image or data file).";
 
     public const string Browser =
         "You can drive a real Chromium browser with these tools (Codale's own automation browser, not the user's). After you change " +

@@ -1,5 +1,6 @@
 using System.Text.Json;
 
+using Codale.Core.Serving;
 using Codale.Core.Tasks;
 using Codale.Mcp.Tasks;
 
@@ -34,6 +35,51 @@ public sealed class TaskToolsTests
 
         public Task<TaskSnapshot> ReadTerminalAsync(string id, long? since, int? tailChars, CancellationToken ct) =>
             Task.FromResult(new TaskSnapshot(id, "build", "npm run build", "exited", 1, "error TS2322\n", 13));
+
+        public string? LastServedFolder;
+        public bool LastSpa;
+
+        public Task<ServedFolder> ServeFolderAsync(string folder, int? port, bool spa, CancellationToken ct)
+        {
+            LastServedFolder = folder;
+            LastSpa = spa;
+            return Task.FromResult(new ServedFolder("s1", folder, $"http://localhost:{port ?? 5500}/", port ?? 5500, "agent", DateTimeOffset.Now));
+        }
+
+        public Task<IReadOnlyList<ServedFolder>> ListServedAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<ServedFolder>>([]);
+
+        public Task<ServedFolder> StopServingAsync(string id, CancellationToken ct) =>
+            id == "s1"
+                ? Task.FromResult(new ServedFolder("s1", @"C:\site", "http://localhost:5500/", 5500, "agent", DateTimeOffset.Now))
+                : throw new TaskServiceException($"No served folder '{id}'.");
+    }
+
+    [Fact]
+    public async Task Serve_folder_resolves_a_relative_path_against_the_project()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codale-proj");
+        var fake = new FakeTasks();
+        var result = await Call(Server(fake, root), "serve_folder", """{"path":"dist","spa":true}""");
+
+        Assert.Equal(Path.Combine(root, "dist"), fake.LastServedFolder);
+        Assert.True(fake.LastSpa);
+        Assert.Contains("http://localhost:5500/", Text(result));
+        Assert.Contains("id s1", Text(result));
+    }
+
+    [Fact]
+    public async Task Serve_folder_without_a_project_needs_an_absolute_path()
+    {
+        var result = await Call(Server(new FakeTasks()), "serve_folder", """{"path":"dist"}""");
+        Assert.True(result.GetProperty("isError").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Stop_serving_reports_an_unknown_id_as_a_tool_error()
+    {
+        var server = Server(new FakeTasks());
+        Assert.Contains("no longer serves", Text(await Call(server, "stop_serving", """{"id":"s1"}""")));
+        Assert.True((await Call(server, "stop_serving", """{"id":"s9"}""")).GetProperty("isError").GetBoolean());
     }
 
     private static McpServer Server(FakeTasks fake, string? projectRoot = null) =>

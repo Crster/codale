@@ -311,6 +311,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>The workspace's terminal tabs, readable by the agent's terminal tools; null for a chat without a workspace.</summary>
     public ITerminalSource? Terminals { get; init; }
 
+    /// <summary>The workspace's localhost folder servers, reached by the agent's serve_folder tool.</summary>
+    public Codale.Core.Serving.FolderServerHost? FolderServers { get; init; }
+
     private string? _lastUserPrompt;
 
     /// <summary>The most recent user prompt in this chat.</summary>
@@ -330,7 +333,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             _taskManager = new HostedTaskManager(workingDirectory);
             _taskManagerDir = workingDirectory;
             _taskManager.TaskStarted += task => _dispatcher.TryEnqueue(() => OnHostedTaskStarted(task));
-            _taskPipe = new TaskPipeServer(new LocalTaskService(_taskManager, Terminals));
+            _taskPipe = new TaskPipeServer(new LocalTaskService(_taskManager, Terminals, FolderServers));
 
             // An agent CLI in a terminal reports its task list and artifacts here (see ServersForTerminalCli).
             _taskPipe.PanelPublished = (kind, input) => _dispatcher.TryEnqueue(() =>
@@ -537,6 +540,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         if (_tasksByToolUse.TryGetValue(started.ParentToolUseId ?? "", out var parent))
         {
+            // Streamed and read back from the transcript alike: log each call once.
+            if (parent.HasCall(started.ToolUseId))
+            {
+                return;
+            }
+
             // A subagent's own tool calls are its visible activity.
             parent.AppendOutput($"\n> {item.Verb} {item.Target}".TrimEnd() + "\n");
             parent.AddCall(started.ToolUseId, item.Kind, $"{item.Verb} {item.Target}");
@@ -644,7 +653,17 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         task.RuntimeId = changed.TaskId;
         task.LaunchedInBackground = true;
-        task.OutputPath ??= FindClaudeTaskOutput(changed.TaskId);
+
+        // A subagent's .output file stays empty; its transcript is what shows its work.
+        if (task.IsShell)
+        {
+            task.OutputPath ??= FindClaudeTaskOutput(changed.TaskId);
+        }
+        else
+        {
+            WatchSubagentTranscripts();
+        }
+
         if (task.Header.Length == 0 && command is not null)
         {
             task.Header = RunningTaskItem.CommandHeader(command);
@@ -687,7 +706,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             if (!task.IsShell && !completed.IsError
                 && (task.LaunchedInBackground || completed.ResultText?.StartsWith("Async agent launched", StringComparison.Ordinal) == true))
             {
+                // The receipt names the agent: enough to stop it and read its transcript
+                // even if the CLI's task_started event never arrives.
                 task.LaunchedInBackground = true;
+                task.RuntimeId ??= BackgroundTaskDetector.ParseAgentId(completed.ResultText);
+                if (task.RuntimeId is not null && !IsCodexSession)
+                {
+                    WatchSubagentTranscripts();
+                }
+
                 return;
             }
 
@@ -722,6 +749,135 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             && completed.ResultText is { Length: > 0 } text)
         {
             shell.AppendOutput(text + "\n");
+        }
+    }
+
+    /// <summary>A subagent's prose or reasoning, into its log once however many ways it arrives.</summary>
+    private static void LogSubagentWords(RunningTaskItem subagent, string? words, bool isThinking)
+    {
+        if (string.IsNullOrWhiteSpace(words) || !subagent.MarkTextSeen((isThinking ? "[thinking] " : "") + words))
+        {
+            return;
+        }
+
+        if (isThinking)
+        {
+            subagent.AppendOutput($"\n[thinking] {words.Trim()}\n");
+        }
+        else
+        {
+            subagent.AppendOutput($"\n{words.Trim()}\n");
+            subagent.AddText(words);
+        }
+    }
+
+    private DispatcherQueueTimer? _transcriptTimer;
+
+    /// <summary>
+    /// Claude's background subagents stream nothing to the parent session: their tool calls
+    /// and words are read back from their transcripts, once a second, while any of them runs.
+    /// </summary>
+    private void WatchSubagentTranscripts()
+    {
+        if (IsCodexSession)
+        {
+            return;
+        }
+
+        if (_transcriptTimer is null)
+        {
+            _transcriptTimer = _dispatcher.CreateTimer();
+            _transcriptTimer.Interval = TimeSpan.FromSeconds(1);
+            _transcriptTimer.Tick += (_, _) => FeedSubagentTranscripts();
+        }
+
+        if (!_transcriptTimer.IsRunning)
+        {
+            _transcriptTimer.Start();
+        }
+    }
+
+    private void FeedSubagentTranscripts()
+    {
+        var pending = RunningTasks
+            .Where(t => t is { Kind: RunningTaskKind.Subagent, LaunchedInBackground: true, RuntimeId: not null, TranscriptDrained: false })
+            .ToList();
+
+        if (pending.Count == 0 || _session?.SessionId is not { Length: > 0 } sessionId)
+        {
+            _transcriptTimer?.Stop();
+            return;
+        }
+
+        foreach (var task in pending)
+        {
+            // Sampled before the read: a task that ended gets one last full read, then rests.
+            var ended = !task.IsRunning;
+            task.TranscriptPath ??= SubagentTranscript.Find(CodaleAccount.ClaudeHome, sessionId, task.RuntimeId!);
+            if (task.TranscriptPath is { } path)
+            {
+                foreach (var line in ReadNewTranscriptLines(task, path))
+                {
+                    foreach (var step in SubagentTranscript.Parse(line))
+                    {
+                        ApplySubagentStep(task, step);
+                    }
+                }
+            }
+
+            task.TranscriptDrained = ended;
+        }
+    }
+
+    /// <summary>Complete lines appended since the last read; a half-written last line waits for the next.</summary>
+    private static List<string> ReadNewTranscriptLines(RunningTaskItem task, string path)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            if (stream.Length <= task.TranscriptOffset)
+            {
+                return [];
+            }
+
+            stream.Seek(task.TranscriptOffset, SeekOrigin.Begin);
+            using var reader = new StreamReader(stream, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: false);
+            var text = task.TranscriptRemainder + reader.ReadToEnd();
+            task.TranscriptOffset = stream.Length;
+
+            var cut = text.LastIndexOf('\n');
+            task.TranscriptRemainder = cut < 0 ? text : text[(cut + 1)..];
+            return cut < 0 ? [] : [.. text[..cut].Split('\n', StringSplitOptions.RemoveEmptyEntries)];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            CrashLog.Debug("tasks", $"subagent transcript read failed: {ex.Message}");
+            return [];
+        }
+    }
+
+    private void ApplySubagentStep(RunningTaskItem task, SubagentStep step)
+    {
+        switch (step)
+        {
+            case SubagentToolUse use:
+                var started = new ToolCallStarted
+                {
+                    ToolUseId = use.Id,
+                    ToolName = use.Name,
+                    Input = use.Input,
+                    ParentToolUseId = task.ToolUseId,
+                };
+                TrackTaskStart(started, CreateToolCall(use.Id, use.Name, use.Input));
+                break;
+
+            case SubagentToolResult result when _subagentCalls.ContainsKey(result.Id):
+                TrackTaskCompleted(new ToolCallCompleted { ToolUseId = result.Id, ResultText = result.Text, IsError = result.IsError });
+                break;
+
+            case SubagentText words:
+                LogSubagentWords(task, words.Text, words.IsThinking);
+                break;
         }
     }
 
@@ -2110,17 +2266,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 if (done.ParentToolUseId is { } owner && _tasksByToolUse.TryGetValue(owner, out var subagent))
                 {
                     // A subagent's own words belong in its log, not in the main transcript.
-                    if (done.Thinking is { Length: > 0 } thought)
-                    {
-                        subagent.AppendOutput($"\n[thinking] {thought.Trim()}\n");
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(done.Text))
-                    {
-                        subagent.AppendOutput($"\n{done.Text.Trim()}\n");
-                        subagent.AddText(done.Text);
-                    }
-
+                    LogSubagentWords(subagent, done.Thinking, isThinking: true);
+                    LogSubagentWords(subagent, done.Text, isThinking: false);
                     break;
                 }
 

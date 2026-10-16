@@ -5,6 +5,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
+using Codale.Core.Serving;
+
 namespace Codale.Core.Tasks;
 
 /// <summary>What the agent sees of one task.</summary>
@@ -40,11 +42,32 @@ public interface ITaskService
 
     /// <summary>What a terminal tab printed, read-only; the same offset scheme as <see cref="ReadAsync"/>.</summary>
     Task<TaskSnapshot> ReadTerminalAsync(string id, long? since, int? tailChars, CancellationToken ct);
+
+    /// <summary>Serves a folder on localhost (or returns the server already serving it).</summary>
+    Task<ServedFolder> ServeFolderAsync(string folder, int? port, bool spa, CancellationToken ct);
+
+    Task<IReadOnlyList<ServedFolder>> ListServedAsync(CancellationToken ct);
+
+    /// <summary>Stops a served folder by id, folder path or URL.</summary>
+    Task<ServedFolder> StopServingAsync(string id, CancellationToken ct);
 }
 
 /// <summary><see cref="ITaskService"/> straight over the manager that owns the processes.</summary>
-public sealed class LocalTaskService(HostedTaskManager manager, ITerminalSource? terminals = null) : ITaskService
+public sealed class LocalTaskService(
+    HostedTaskManager manager, ITerminalSource? terminals = null, FolderServerHost? servers = null) : ITaskService
 {
+    private FolderServerHost Servers =>
+        servers ?? throw new TaskServiceException("Folder serving is not available here.");
+
+    public Task<ServedFolder> ServeFolderAsync(string folder, int? port, bool spa, CancellationToken ct) =>
+        Task.FromResult(Servers.Serve(folder, port, spa, startedBy: "agent"));
+
+    public Task<IReadOnlyList<ServedFolder>> ListServedAsync(CancellationToken ct) =>
+        Task.FromResult(servers?.List() ?? []);
+
+    public Task<ServedFolder> StopServingAsync(string id, CancellationToken ct) =>
+        Task.FromResult(Servers.Stop(id));
+
     public Task<IReadOnlyList<TaskSnapshot>> ListTerminalsAsync(CancellationToken ct) =>
         Task.FromResult(terminals?.List() ?? []);
 
@@ -270,6 +293,26 @@ public sealed class TaskPipeServer : IDisposable
                         request["tailChars"]?.GetValue<int>(),
                         ct).ConfigureAwait(false));
 
+                case "serve":
+                    return Ok(await _service.ServeFolderAsync(
+                        request["folder"]?.GetValue<string>() ?? throw new TaskServiceException("folder is required."),
+                        request["port"]?.GetValue<int>(),
+                        request["spa"]?.GetValue<bool>() ?? false,
+                        ct).ConfigureAwait(false));
+
+                case "served":
+                    var served = await _service.ListServedAsync(ct).ConfigureAwait(false);
+                    return new JsonObject
+                    {
+                        ["ok"] = true,
+                        ["served"] = new JsonArray([.. served.Select(s => (JsonNode)Json(s))]),
+                    };
+
+                case "unserve":
+                    return Ok(await _service.StopServingAsync(
+                        request["id"]?.GetValue<string>() ?? throw new TaskServiceException("id is required."),
+                        ct).ConfigureAwait(false));
+
                 case "panel":
                     var kind = request["kind"]?.GetValue<string>() ?? throw new TaskServiceException("kind is required.");
                     var input = request["input"] ?? throw new TaskServiceException("input is required.");
@@ -314,6 +357,23 @@ public sealed class TaskPipeServer : IDisposable
     private static JsonObject Ok(TaskSnapshot t)
     {
         var o = Json(t);
+        o["ok"] = true;
+        return o;
+    }
+
+    internal static JsonObject Json(ServedFolder s) => new()
+    {
+        ["id"] = s.Id,
+        ["folder"] = s.Folder,
+        ["url"] = s.Url,
+        ["port"] = s.Port,
+        ["startedBy"] = s.StartedBy,
+        ["startedAt"] = s.StartedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+    };
+
+    private static JsonObject Ok(ServedFolder s)
+    {
+        var o = Json(s);
         o["ok"] = true;
         return o;
     }
@@ -372,6 +432,26 @@ public sealed class TaskPipeClient(string pipeName, string token) : ITaskService
 
     public Task<TaskSnapshot> ReadTerminalAsync(string id, long? since, int? tailChars, CancellationToken ct) =>
         CallOneAsync(new JsonObject { ["op"] = "terminal", ["id"] = id, ["since"] = since, ["tailChars"] = tailChars }, ct);
+
+    public async Task<ServedFolder> ServeFolderAsync(string folder, int? port, bool spa, CancellationToken ct) =>
+        ParseServed(await CallAsync(new JsonObject { ["op"] = "serve", ["folder"] = folder, ["port"] = port, ["spa"] = spa }, ct).ConfigureAwait(false));
+
+    public async Task<IReadOnlyList<ServedFolder>> ListServedAsync(CancellationToken ct)
+    {
+        var response = await CallAsync(new JsonObject { ["op"] = "served" }, ct).ConfigureAwait(false);
+        return [.. response["served"]!.AsArray().Select(n => ParseServed(n!.AsObject()))];
+    }
+
+    public async Task<ServedFolder> StopServingAsync(string id, CancellationToken ct) =>
+        ParseServed(await CallAsync(new JsonObject { ["op"] = "unserve", ["id"] = id }, ct).ConfigureAwait(false));
+
+    private static ServedFolder ParseServed(JsonObject o) => new(
+        o["id"]!.GetValue<string>(),
+        o["folder"]!.GetValue<string>(),
+        o["url"]!.GetValue<string>(),
+        o["port"]!.GetValue<int>(),
+        o["startedBy"]?.GetValue<string>() ?? "",
+        DateTimeOffset.TryParse(o["startedAt"]?.GetValue<string>(), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var at) ? at : default);
 
     private async Task<TaskSnapshot> CallOneAsync(JsonObject request, CancellationToken ct) =>
         Parse(await CallAsync(request, ct).ConfigureAwait(false));

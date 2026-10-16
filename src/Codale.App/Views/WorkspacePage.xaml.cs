@@ -1878,6 +1878,67 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
+    private void OnServeProjectSplitClick(SplitButton sender, SplitButtonClickEventArgs e) => ServeProjectFolder();
+
+    private void OnServeProjectFolderClick(object sender, RoutedEventArgs e) => ServeProjectFolder();
+
+    private void ServeProjectFolder()
+    {
+        if (ViewModel is { } vm)
+        {
+            vm.McpTools.ServeFolder(vm.McpTools.ProjectPath);
+        }
+    }
+
+    private async void OnServeOtherFolderClick(object sender, RoutedEventArgs e)
+    {
+        // The picker would light-dismiss the flyout anyway; close it so it does not flicker back.
+        FlyoutBase.GetAttachedFlyout(McpToolsHost)?.Hide();
+        try
+        {
+            var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
+            picker.FileTypeFilter.Add("*");
+
+            if (App.Current.MainWindowHandle is { } hwnd)
+            {
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+            }
+
+            if (await picker.PickSingleFolderAsync() is { } folder)
+            {
+                ViewModel?.McpTools.ServeFolder(folder.Path);
+            }
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("ServeFolder", ex.Message, ex);
+        }
+    }
+
+    private void OnOpenServedClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is ServedFolderItem item)
+        {
+            McpToolsViewModel.OpenUrl(item.Url);
+        }
+    }
+
+    private void OnCopyServedClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is ServedFolderItem item)
+        {
+            McpToolsViewModel.CopyUrl(item.Url);
+        }
+    }
+
+    private void OnStopServedClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is ServedFolderItem item)
+        {
+            ViewModel?.McpTools.StopServing(item.Id);
+        }
+    }
+
     private void OnTitleBarCommandsRequested(object? sender, EventArgs e)
     {
         if (sender is MainWindow window)

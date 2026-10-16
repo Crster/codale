@@ -37,8 +37,11 @@ public sealed class CodexSubagentTests
         await session.HandleNotificationAsync("item/completed", Json("""{"threadId":"sub-1","item":{"type":"agentMessage","id":"m1","text":"hi"}}"""));
         await session.HandleNotificationAsync("thread/tokenUsage/updated", Json("""{"threadId":"sub-1","usage":{}}"""));
 
+        // Its words reach the host only as the subagent's own (its task log), never as the main reply.
         var events = Drain(session);
-        Assert.DoesNotContain(events, e => e is AssistantTextDelta or AssistantMessageCompleted or UsageUpdated);
+        Assert.DoesNotContain(events, e => e is AssistantTextDelta or UsageUpdated);
+        Assert.DoesNotContain(events, e => e is AssistantMessageCompleted { ParentToolUseId: null });
+        Assert.Equal("sub-1", Assert.Single(events.OfType<AssistantMessageCompleted>()).ParentToolUseId);
     }
 
     [Fact]
@@ -51,15 +54,33 @@ public sealed class CodexSubagentTests
         await session.HandleNotificationAsync("turn/completed", Json("""{"threadId":"sub-1","turn":{"status":"completed"}}"""));
 
         var events = Drain(session);
-        var started = Assert.Single(events.OfType<ToolCallStarted>());
+        var started = Assert.Single(events.OfType<ToolCallStarted>(), e => e.ParentToolUseId is null);
         Assert.Equal("Agent", started.ToolName);
         Assert.Equal("sub-1", started.ToolUseId);
         Assert.True(BackgroundTaskDetector.IsSubagentTool(started.ToolName));
         Assert.Equal("Scout", started.Input.GetProperty("description").GetString());
 
+        // Its command is its own activity, nested under the Agent call.
+        var command = Assert.Single(events.OfType<ToolCallStarted>(), e => e.ParentToolUseId is not null);
+        Assert.Equal(("c1", "sub-1"), (command.ToolUseId, command.ParentToolUseId));
+
+        // Listed as a background task keyed by the thread, so it can be stopped; ended before its call closes.
+        var task = events.OfType<BackgroundTaskChanged>().ToList();
+        Assert.Equal([null, "completed"], task.Select(t => t.Status));
+        Assert.All(task, t => Assert.Equal(("sub-1", "sub-1"), (t.TaskId, t.ToolUseId)));
+        Assert.True(events.IndexOf(task[^1]) < events.FindIndex(e => e is ToolCallCompleted));
+
         var done = Assert.Single(events.OfType<ToolCallCompleted>());
         Assert.Equal("sub-1", done.ToolUseId);
         Assert.False(done.IsError);
+    }
+
+    [Fact]
+    public async Task Stopping_a_subagent_is_refused_for_an_unknown_thread()
+    {
+        var session = Session();
+
+        Assert.False(await session.CancelTaskAsync("nobody"));
     }
 
     [Fact]

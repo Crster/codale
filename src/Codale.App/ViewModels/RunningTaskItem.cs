@@ -177,6 +177,25 @@ public sealed partial class RunningTaskItem : ObservableObject
 
     public string? LastRuntimeText { get; set; }
 
+    /// <summary>A background subagent's own transcript, read back while it runs (it streams nothing to stdout).</summary>
+    public string? TranscriptPath { get; set; }
+
+    /// <summary>How far <see cref="TranscriptPath"/> has been read, and a trailing half-written line kept for the next read.</summary>
+    public long TranscriptOffset { get; set; }
+
+    public string TranscriptRemainder { get; set; } = "";
+
+    /// <summary>Set once the transcript was read after the task ended: nothing more will land in it.</summary>
+    public bool TranscriptDrained { get; set; }
+
+    // Texts already in the log: the same words can arrive streamed and from the transcript.
+    private readonly HashSet<string> _seenTexts = [];
+
+    /// <summary>True the first time a text is offered; false when the log already shows it.</summary>
+    public bool MarkTextSeen(string text) => _seenTexts.Add(text.Trim());
+
+    public bool HasCall(string toolUseId) => Entries.Any(e => e.Calls.Any(c => c.ToolUseId == toolUseId));
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanStop))]
     public partial bool IsStopping { get; set; }

@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 
 using Codale.Commands;
+using Codale.Core.Serving;
 using Codale.Core.Tasks;
 
 namespace Codale.Mcp.Tasks;
@@ -24,6 +25,7 @@ public static class TaskTools
         ITaskService tasks, string? projectRoot = null, string? runDirectory = null) =>
     [
         .. Core(tasks),
+        .. ServeTools(tasks, runDirectory ?? projectRoot),
         .. string.IsNullOrWhiteSpace(projectRoot) ? [] : CommandTools(tasks, projectRoot, runDirectory ?? projectRoot),
         .. Panel(tasks),
     ];
@@ -336,6 +338,69 @@ public static class TaskTools
             McpTool.Schema([("id", "string", "The task id returned by start_task or run_command (list_tasks shows them).")], "id"),
             async (a, ct) => Format(await Call(() => tasks.StopAsync(a.RequiredString("id"), ct)))),
     ];
+
+    /// <summary>A localhost static server for any folder, so built output can be looked at in a browser.</summary>
+    private static IReadOnlyList<McpTool> ServeTools(ITaskService tasks, string? baseDirectory) =>
+    [
+        new McpTool(
+            "serve_folder",
+            "Serve a folder as a static website on http://localhost:PORT/ so it can be opened in a browser: a built site (dist, build, " +
+            "out), an HTML report, a coverage or docs folder, a page you generated. Codale hosts it (no command or task needed); the user " +
+            "sees it in the Agent tools menu and it stays up until stop_serving or Codale closes. Serving the same folder again returns the " +
+            "same URL. Folders show index.html, otherwise a file listing. Use this instead of starting an http server with start_task; " +
+            "for a project with its own dev server (npm run dev) use start_task.",
+            McpTool.Schema(
+                [
+                    ("path", "string", "The folder to serve: absolute, or relative to the project directory, e.g. \"dist\"."),
+                    ("port", "integer", "Optional fixed port; by default a free one is picked."),
+                    ("spa", "boolean", "Answer unknown extensionless paths with index.html, for a single-page app with client-side routes (default false)."),
+                ],
+                "path"),
+            async (a, ct) =>
+            {
+                var folder = ResolveFolder(a.RequiredString("path"), baseDirectory);
+                var served = await Call(() => tasks.ServeFolderAsync(folder, a.Int("port"), a.Bool("spa") ?? false, ct));
+                return await McpTool.Text(
+                    $"Serving {served.Folder} at {served.Url} (id {served.Id}). It stays up until stop_serving or Codale closes.");
+            }),
+
+        new McpTool(
+            "list_served",
+            "List the folders Codale is serving on localhost, with id, URL and folder, whether you or the user started them.",
+            McpTool.Schema(),
+            async (_, ct) =>
+            {
+                var all = await Call(() => tasks.ListServedAsync(ct));
+                return await McpTool.Text(all.Count == 0
+                    ? "No folders are being served."
+                    : string.Join('\n', all.Select(Describe)));
+            }),
+
+        new McpTool(
+            "stop_serving",
+            "Stop serving a folder started with serve_folder (or by the user), freeing its port.",
+            McpTool.Schema([("id", "string", "The id from serve_folder or list_served (a URL or folder path works too).")], "id"),
+            async (a, ct) =>
+            {
+                var stopped = await Call(() => tasks.StopServingAsync(a.RequiredString("id"), ct));
+                return await McpTool.Text($"Stopped {stopped.Id}: {stopped.Url} no longer serves {stopped.Folder}.");
+            }),
+    ];
+
+    private static string Describe(ServedFolder s) => $"{s.Id}  {s.Url}  {s.Folder}  (started by {s.StartedBy})";
+
+    private static string ResolveFolder(string path, string? baseDirectory)
+    {
+        var expanded = Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'));
+        if (Path.IsPathFullyQualified(expanded))
+        {
+            return expanded;
+        }
+
+        return string.IsNullOrWhiteSpace(baseDirectory)
+            ? throw new McpToolException("Pass an absolute folder path; there is no project directory to resolve a relative one against.")
+            : Path.GetFullPath(Path.Combine(baseDirectory, expanded));
+    }
 
     private static async Task<T> Call<T>(Func<Task<T>> call)
     {

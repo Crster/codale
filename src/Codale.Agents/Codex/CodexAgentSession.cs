@@ -869,10 +869,14 @@ public sealed class CodexAgentSession : IAgentSession
         return _threadId is { Length: > 0 } main && id is { Length: > 0 } && id != main ? id : null;
     }
 
+    /// <summary>The turn each subagent thread is running, so a stop can interrupt it.</summary>
+    private readonly Dictionary<string, string> _subagentTurns = [];
+
     /// <summary>
-    /// A subagent runs on its own thread. Its work stays out of the transcript; the session
-    /// panel only needs to know it exists and when its turn ended, so it surfaces as one
-    /// <c>Agent</c> tool call, the shape the panel already lists subagents by.
+    /// A subagent runs on its own thread. Its work stays out of the transcript: it surfaces
+    /// as one <c>Agent</c> tool call, the shape the panel already lists subagents by, plus a
+    /// background task keyed by the thread id - so it stays listed and stoppable after the
+    /// main turn ends - and its items are reported as that call's nested activity.
     /// </summary>
     private async Task ReportSubagentThreadAsync(string method, string threadId, JsonElement parameters)
     {
@@ -884,22 +888,85 @@ public sealed class CodexAgentSession : IAgentSession
                 new { description = string.IsNullOrWhiteSpace(title) ? $"Subagent {_subagentThreads.Count}" : title.Trim() }, WireJson);
             await _events.Writer.WriteAsync(new ToolCallStarted { ToolUseId = threadId, ToolName = "Agent", Input = input })
                 .ConfigureAwait(false);
+            await _events.Writer.WriteAsync(new BackgroundTaskChanged(threadId, threadId, null)).ConfigureAwait(false);
         }
 
-        if (method == "turn/completed")
+        switch (method)
         {
-            var turn = parameters.Prop("turn") ?? parameters;
-            var status = turn.Str("status") ?? "completed";
-            await _events.Writer.WriteAsync(new ToolCallCompleted
-            {
-                ToolUseId = threadId,
-                IsError = status is not ("completed" or "interrupted"),
-            }).ConfigureAwait(false);
+            case "turn/started":
+                if ((parameters.Prop("turn")?.Str("id") ?? parameters.Str("turnId")) is { Length: > 0 } turnId)
+                {
+                    _subagentTurns[threadId] = turnId;
+                }
+
+                // Sent another message after it finished: it is working again.
+                await _events.Writer.WriteAsync(new BackgroundTaskChanged(threadId, threadId, null)).ConfigureAwait(false);
+                break;
+
+            case "item/started":
+            case "item/completed":
+                await HandleItemAsync(method == "item/completed", parameters, parent: threadId).ConfigureAwait(false);
+                break;
+
+            case "turn/completed":
+                _subagentTurns.Remove(threadId);
+                var turn = parameters.Prop("turn") ?? parameters;
+                var status = turn.Str("status") ?? "completed";
+
+                // The task's status first: the host keeps a background task running until told it ended.
+                await _events.Writer.WriteAsync(new BackgroundTaskChanged(threadId, threadId, status switch
+                {
+                    "completed" => "completed",
+                    "interrupted" => "stopped",
+                    _ => "failed",
+                })).ConfigureAwait(false);
+                await _events.Writer.WriteAsync(new ToolCallCompleted
+                {
+                    ToolUseId = threadId,
+                    IsError = status is not ("completed" or "interrupted"),
+                }).ConfigureAwait(false);
+                break;
         }
     }
 
+    /// <summary>Stops a subagent thread's running turn; false for an id that is no subagent of this session.</summary>
+    public async Task<bool> CancelTaskAsync(string taskId, CancellationToken ct = default)
+    {
+        if (!_subagentThreads.Contains(taskId))
+        {
+            return false;
+        }
+
+        var parameters = new Dictionary<string, object?> { ["threadId"] = taskId };
+        if (_subagentTurns.TryGetValue(taskId, out var turnId))
+        {
+            parameters["turnId"] = turnId;
+        }
+
+        try
+        {
+            await SendRequestAsync("turn/interrupt", request => CopyParams(request, parameters), ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Writes an item's event; for a subagent thread's item it is marked as the subagent's
+    /// (its tool calls and words go to its task log, never the main transcript).
+    /// </summary>
+    private ValueTask EmitAsync(string? parent, AgentEvent e) => _events.Writer.WriteAsync(parent is null ? e : e switch
+    {
+        ToolCallStarted started => started with { ParentToolUseId = parent },
+        AssistantMessageCompleted message => message with { ParentToolUseId = parent },
+        _ => e,
+    });
+
     /// <summary>Projects a thread item's start or completion onto tool-call and message events.</summary>
-    private async Task HandleItemAsync(bool completed, JsonElement parameters)
+    private async Task HandleItemAsync(bool completed, JsonElement parameters, string? parent = null)
     {
         var item = parameters.Prop("item") ?? parameters;
         var itemId = item.Str("id") ?? parameters.Str("itemId") ?? Guid.NewGuid().ToString("N");
@@ -909,7 +976,7 @@ public sealed class CodexAgentSession : IAgentSession
             case "agentMessage":
                 if (completed)
                 {
-                    await _events.Writer.WriteAsync(new AssistantMessageCompleted
+                    await EmitAsync(parent, new AssistantMessageCompleted
                     {
                         MessageId = itemId,
                         Model = _threadModel ?? _liveModel ?? "CLI",
@@ -929,7 +996,7 @@ public sealed class CodexAgentSession : IAgentSession
                         ? string.Join(' ', parts.EnumerateArray().Select(part => part.GetString() ?? ""))
                         : item.Str("command") ?? "";
                     var input = JsonSerializer.SerializeToElement(new { command, cwd = item.Str("cwd") }, WireJson);
-                    await _events.Writer.WriteAsync(new ToolCallStarted { ToolUseId = itemId, ToolName = "Bash", Input = input })
+                    await EmitAsync(parent, new ToolCallStarted { ToolUseId = itemId, ToolName = "Bash", Input = input })
                         .ConfigureAwait(false);
                 }
                 else
@@ -939,7 +1006,7 @@ public sealed class CodexAgentSession : IAgentSession
                     var exitCode = item.Int("exitCode") ?? 0;
                     var status = item.Str("status");
                     var declined = string.Equals(status, "declined", StringComparison.OrdinalIgnoreCase);
-                    await _events.Writer.WriteAsync(new ToolCallCompleted
+                    await EmitAsync(parent, new ToolCallCompleted
                     {
                         ToolUseId = itemId,
                         IsError = declined || exitCode != 0 || string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase),
@@ -956,12 +1023,12 @@ public sealed class CodexAgentSession : IAgentSession
                         ? changes.EnumerateObject().Select(property => property.Name).ToList()
                         : [];
                     var input = JsonSerializer.SerializeToElement(new { paths }, WireJson);
-                    await _events.Writer.WriteAsync(new ToolCallStarted { ToolUseId = itemId, ToolName = "Edit", Input = input })
+                    await EmitAsync(parent, new ToolCallStarted { ToolUseId = itemId, ToolName = "Edit", Input = input })
                         .ConfigureAwait(false);
                 }
                 else
                 {
-                    await _events.Writer.WriteAsync(new ToolCallCompleted
+                    await EmitAsync(parent, new ToolCallCompleted
                     {
                         ToolUseId = itemId,
                         IsError = string.Equals(item.Str("status"), "failed", StringComparison.OrdinalIgnoreCase),
@@ -983,12 +1050,12 @@ public sealed class CodexAgentSession : IAgentSession
                     var input = arguments is { ValueKind: JsonValueKind.Object } given
                         ? given
                         : JsonSerializer.SerializeToElement(new { tool, server }, WireJson);
-                    await _events.Writer.WriteAsync(new ToolCallStarted { ToolUseId = itemId, ToolName = $"mcp__{server}__{tool}", Input = input })
+                    await EmitAsync(parent, new ToolCallStarted { ToolUseId = itemId, ToolName = $"mcp__{server}__{tool}", Input = input })
                         .ConfigureAwait(false);
                 }
                 else
                 {
-                    await _events.Writer.WriteAsync(new ToolCallCompleted
+                    await EmitAsync(parent, new ToolCallCompleted
                     {
                         ToolUseId = itemId,
                         IsError = string.Equals(item.Str("status"), "failed", StringComparison.OrdinalIgnoreCase),
@@ -999,7 +1066,8 @@ public sealed class CodexAgentSession : IAgentSession
                 return;
 
             case "userMessage":
-                if (completed)
+                // A subagent's "user message" is the brief its parent wrote, not the reader's prompt.
+                if (completed && parent is null)
                 {
                     await _events.Writer.WriteAsync(new UserMessageRecorded(item.Str("text") ?? "")).ConfigureAwait(false);
                 }
@@ -1009,7 +1077,7 @@ public sealed class CodexAgentSession : IAgentSession
             default:
                 if (!completed)
                 {
-                    await _events.Writer.WriteAsync(new CliMessageIgnored(item.Str("type") ?? "item", item.GetRawText()))
+                    await EmitAsync(parent, new CliMessageIgnored(item.Str("type") ?? "item", item.GetRawText()))
                         .ConfigureAwait(false);
                 }
 

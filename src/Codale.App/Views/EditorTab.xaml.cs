@@ -6,7 +6,6 @@ using Codale.Search;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Controls;
 
-using Windows.Storage.Pickers;
 
 namespace Codale.App.Views;
 
@@ -894,13 +893,19 @@ public sealed partial class EditorTab : UserControl
 
         if (ViewModel.FilePath is null)
         {
-            var picker = new FileSavePicker { SuggestedFileName = ViewModel.FileName ?? "Untitled" };
-            picker.FileTypeChoices.Add("Any file", [".txt"]);
-
-            // A packaged picker needs to be told which window owns it.
-            if (App.Current.MainWindowHandle is { } hwnd)
+            // The App SDK picker, unlike the WinRT one, can open in an arbitrary folder,
+            // so an untitled buffer starts out in the workspace it was created from.
+            var windowId = App.Current.MainWindowHandle is { } hwnd
+                ? Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd)
+                : default;
+            var picker = new Microsoft.Windows.Storage.Pickers.FileSavePicker(windowId)
             {
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+                SuggestedFileName = ViewModel.FileName ?? "Untitled",
+            };
+            picker.FileTypeChoices.Add("Any file", [".txt"]);
+            if (!string.IsNullOrEmpty(ProjectRoot) && Directory.Exists(ProjectRoot))
+            {
+                picker.SuggestedFolder = ProjectRoot;
             }
 
             if (await picker.PickSaveFileAsync() is not { } file)

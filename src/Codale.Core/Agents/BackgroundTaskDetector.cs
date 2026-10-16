@@ -79,12 +79,19 @@ public static partial class BackgroundTaskDetector
             path.Success ? path.Groups[1].Value.Trim().TrimEnd('.', '"', '\'') : null);
     }
 
+    /// <summary>The agent id an "Async agent launched" receipt names ("agentId: ac210eafb8b6f802b"), if any.</summary>
+    public static string? ParseAgentId(string? resultText) =>
+        resultText is not null && AgentIdPattern().Match(resultText) is { Success: true } match ? match.Groups[1].Value : null;
+
     /// <summary>Strips ANSI escape sequences so a dev server's colours don't render as noise.</summary>
     public static string StripAnsi(string text) => AnsiPattern().Replace(text, "");
 
     // "with ID: bx7k2m."
     [GeneratedRegex(@"(?:\bshell)?\bID:?\s+([A-Za-z0-9_\-]+)", RegexOptions.IgnoreCase)]
     private static partial Regex IdPattern();
+
+    [GeneratedRegex(@"\bagentId:\s*([A-Za-z0-9_\-]+)")]
+    private static partial Regex AgentIdPattern();
 
     [GeneratedRegex(@"(?:written to|output file|output is at|saved to):?\s+(.+?)\s*$", RegexOptions.IgnoreCase | RegexOptions.Multiline)]
     private static partial Regex PathPattern();

@@ -10,6 +10,7 @@ using Codale.Commands;
 using Codale.Core.Agents;
 using Codale.Core.Helper;
 using Codale.Core.Projects;
+using Codale.Core.Serving;
 using Codale.Core.Tasks;
 using Codale.Git;
 using Codale.Storage;
@@ -63,7 +64,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         _mcp = new McpServerSettings(_store, ProjectPath);
         _mcp.TerminalServersProvider = () => Panel is { IsTerminalSession: true } session ? session.ServersForTerminalCli() : _mcp.Servers();
         _mcp.SyncWorkspaceMcpConfig();
-        McpTools = new McpToolsViewModel(_mcp);
+        McpTools = new McpToolsViewModel(_mcp, FolderServers, ProjectPath);
         CliEndpoint = new CliEndpointViewModel();
         _router = new MessageRouter(_helper);
         CliEndpoint.PropertyChanged += (_, e) =>
@@ -179,7 +180,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// </summary>
     public ChatViewModel CreateTerminalSession(Codale.Agents.CliDescriptor cli)
     {
-        var session = new ChatViewModel(ProjectPath, new StatusViewModel(_customUsage), _endpoints, _mcp) { Router = _router, Helper = _helper, ExtraFolders = ExtraFolders, Terminals = new TerminalSource(this), TerminalCli = cli };
+        var session = new ChatViewModel(ProjectPath, new StatusViewModel(_customUsage), _endpoints, _mcp) { Router = _router, Helper = _helper, ExtraFolders = ExtraFolders, Terminals = new TerminalSource(this), FolderServers = FolderServers, TerminalCli = cli };
         TerminalSessions.Add(session);
         return session;
     }
@@ -233,6 +234,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>The built-in browser and desktop-control servers, editable from the status bar flyout.</summary>
     public McpToolsViewModel McpTools { get; }
 
+    /// <summary>Folders served on localhost from the Agent tools flyout or an agent's serve_folder; they live as long as this window.</summary>
+    public FolderServerHost FolderServers { get; } = new();
+
     /// <summary>
     /// Writes the session's Codale MCP servers into the global Codale app local data config (shared across all workspaces).
     /// </summary>
@@ -283,6 +287,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             Features = Features,
             ExtraFolders = ExtraFolders,
             Terminals = new TerminalSource(this),
+            FolderServers = FolderServers,
             CliId = cliId is { Length: > 0 } ? cliId : Codale.Agents.CliLocator.ActiveCli.Id,
         };
 
@@ -1319,6 +1324,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         _elapsedTimer?.Dispose();
         AppSettings.Changed -= OnAppSettingsChanged;
         CliEndpoint.Dispose();
+        McpTools.Dispose();
+        FolderServers.Dispose();
         foreach (var chat in Chats)
         {
             chat.TurnFinished -= OnTurnFinished;

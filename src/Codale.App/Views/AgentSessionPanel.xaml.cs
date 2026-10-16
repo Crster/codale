@@ -51,10 +51,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
             if (_session is not null)
             {
-                _session.PropertyChanged -= OnSessionPropertyChanged;
-                _session.Todos.CollectionChanged -= OnSessionCollectionChanged;
-                _session.RunningTasks.CollectionChanged -= OnSessionCollectionChanged;
-                _session.Artifacts.CollectionChanged -= OnSessionCollectionChanged;
+                Detach(_session);
             }
 
             _session = value;
@@ -62,10 +59,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
             if (_session is not null)
             {
-                _session.PropertyChanged += OnSessionPropertyChanged;
-                _session.Todos.CollectionChanged += OnSessionCollectionChanged;
-                _session.RunningTasks.CollectionChanged += OnSessionCollectionChanged;
-                _session.Artifacts.CollectionChanged += OnSessionCollectionChanged;
+                Attach(_session);
                 OpenTodosOnFirstGoals();
             }
 
@@ -165,8 +159,40 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _elapsedTimer;
 
+    private void Attach(ChatViewModel session)
+    {
+        session.PropertyChanged += OnSessionPropertyChanged;
+        session.Todos.CollectionChanged += OnSessionCollectionChanged;
+        session.RunningTasks.CollectionChanged += OnSessionCollectionChanged;
+        session.Artifacts.CollectionChanged += OnSessionCollectionChanged;
+    }
+
+    private void Detach(ChatViewModel session)
+    {
+        session.PropertyChanged -= OnSessionPropertyChanged;
+        session.Todos.CollectionChanged -= OnSessionCollectionChanged;
+        session.RunningTasks.CollectionChanged -= OnSessionCollectionChanged;
+        session.Artifacts.CollectionChanged -= OnSessionCollectionChanged;
+    }
+
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // Unloaded detached everything (a tab switch unloads the panel): listen again and
+        // catch up on what changed meanwhile, or the live sections stay as they were.
+        if (_session is not null)
+        {
+            Detach(_session);
+            Attach(_session);
+        }
+
+        if (_workspace is not null)
+        {
+            _workspace.PropertyChanged -= OnWorkspacePropertyChanged;
+            _workspace.PropertyChanged += OnWorkspacePropertyChanged;
+        }
+
+        NotifySessionProperties();
+
         _elapsedTimer ??= DispatcherQueue.CreateTimer();
         _elapsedTimer.Interval = TimeSpan.FromSeconds(1);
         _elapsedTimer.Tick -= OnElapsedTick;
@@ -189,10 +215,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         _elapsedTimer?.Stop();
         if (_session is not null)
         {
-            _session.PropertyChanged -= OnSessionPropertyChanged;
-            _session.Todos.CollectionChanged -= OnSessionCollectionChanged;
-            _session.RunningTasks.CollectionChanged -= OnSessionCollectionChanged;
-            _session.Artifacts.CollectionChanged -= OnSessionCollectionChanged;
+            Detach(_session);
         }
 
         if (_workspace is not null)
@@ -483,6 +506,9 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             // ObservableCollection does not raise PropertyChanged for Count, but the
             // section headers bind to Session.*.Count; refresh those nested paths.
             NotifySessionProperties();
+
+            // A task or todo arriving opens the live sections even before the chat counts as a conversation.
+            UpdateHistoryLayout();
         });
 
     private void OpenTodosOnFirstGoals()
@@ -521,7 +547,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
         var sessions = Workspace.Sessions;
         var conversation = Session.HasConversation;
-        var live = conversation || Session.IsTerminalSession;
+        var live = conversation || Session.IsTerminalSession || Session.RunningTasks.Count > 0 || Session.Todos.Count > 0;
 
         if (conversation != _hadConversation)
         {

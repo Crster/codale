@@ -215,20 +215,20 @@ public sealed partial class ChatTab : UserControl
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is null or nameof(ChatViewModel.IsBusy))
+        if (e.PropertyName is null or nameof(ChatViewModel.IsBusy) or nameof(ChatViewModel.ShowStop))
         {
             UpdateStopPulse();
         }
     }
 
     /// <summary>
-    /// The stop button breathes red for as long as the turn runs - a call to act
-    /// that stays visible without shouting. Built in code because the animated
-    /// target is the brush resource itself.
+    /// The stop button breathes red for as long as it is offered - the turn runs, or a
+    /// background subagent is still working after it - a call to act that stays visible
+    /// without shouting. Built in code because the animated target is the brush resource itself.
     /// </summary>
     private void UpdateStopPulse()
     {
-        if (ViewModel?.IsBusy is true && IsLoaded)
+        if (ViewModel?.ShowStop is true && IsLoaded)
         {
             if (_stopPulse is not null)
             {
