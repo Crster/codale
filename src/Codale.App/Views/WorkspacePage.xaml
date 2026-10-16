@@ -316,6 +316,37 @@
 
         <!--  Right-click menu for one change in the git list; the handlers read the
               item off the flyout's target, since templates bind to the data, not the VM  -->
+        <MenuFlyout x:Key="CommitContextMenu" Opening="OnCommitMenuOpening">
+            <MenuFlyout.MenuFlyoutPresenterStyle>
+                <Style TargetType="MenuFlyoutPresenter">
+                    <Setter Property="CornerRadius" Value="8" />
+                </Style>
+            </MenuFlyout.MenuFlyoutPresenterStyle>
+            <MenuFlyoutItem Click="OnCommitMenuViewChanges" Text="View changes">
+                <MenuFlyoutItem.Icon>
+                    <FontIcon Glyph="&#xE8A5;" />
+                </MenuFlyoutItem.Icon>
+            </MenuFlyoutItem>
+            <MenuFlyoutItem Click="OnCommitMenuCopySha" Text="Copy commit hash">
+                <MenuFlyoutItem.Icon>
+                    <FontIcon Glyph="&#xE8C8;" />
+                </MenuFlyoutItem.Icon>
+            </MenuFlyoutItem>
+            <MenuFlyoutItem Click="OnCommitMenuCopyMessage" Text="Copy message" />
+            <MenuFlyoutSeparator />
+            <MenuFlyoutItem Click="OnCommitMenuNewBranch" Text="Create branch here…" />
+            <MenuFlyoutItem Click="OnCommitMenuCheckout" Text="Checkout commit (detached)" />
+            <MenuFlyoutSeparator />
+            <MenuFlyoutItem Click="OnCommitMenuCherryPick" Text="Cherry-pick" />
+            <MenuFlyoutItem Click="OnCommitMenuRevert" Text="Revert commit" />
+            <MenuFlyoutSeparator />
+            <MenuFlyoutSubItem Text="Reset current branch to here">
+                <MenuFlyoutItem Click="OnCommitMenuReset" Tag="soft" Text="Soft (keep changes staged)" />
+                <MenuFlyoutItem Click="OnCommitMenuReset" Tag="mixed" Text="Mixed (keep changes unstaged)" />
+                <MenuFlyoutItem Click="OnCommitMenuReset" Tag="hard" Text="Hard (discard changes)" />
+            </MenuFlyoutSubItem>
+        </MenuFlyout>
+
         <MenuFlyout x:Key="ChangeContextMenu" Opening="OnChangeMenuOpening">
             <MenuFlyout.MenuFlyoutPresenterStyle>
                 <Style TargetType="MenuFlyoutPresenter">
@@ -1140,7 +1171,11 @@
                             </ListView.ItemContainerStyle>
                             <ListView.ItemTemplate>
                                 <DataTemplate x:DataType="git:GitCommit">
-                                    <StackPanel Orientation="Horizontal" Spacing="6" ToolTipService.ToolTip="{x:Bind Subject}">
+                                    <StackPanel
+                                        ContextFlyout="{StaticResource CommitContextMenu}"
+                                        Orientation="Horizontal"
+                                        Spacing="6"
+                                        ToolTipService.ToolTip="{x:Bind Subject}">
                                         <views:GitGraphCell />
                                         <StackPanel Margin="0,0,0,2">
                                             <TextBlock

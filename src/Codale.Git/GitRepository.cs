@@ -731,6 +731,64 @@ public sealed class GitRepository
             ? RunWriteAsync(["checkout", "-b", name], ct)
             : Task.FromResult(InvalidRef);
 
+    /// <summary>Creates a branch at a commit and switches to it.</summary>
+    public Task<GitWriteResult> CreateBranchAtAsync(string name, string sha, CancellationToken ct = default) =>
+        GitProcess.IsSafeRef(name) && GitProcess.IsSafeRef(sha)
+            ? RunWriteAsync(["checkout", "-b", name, sha], ct)
+            : Task.FromResult(InvalidRef);
+
+    /// <summary>Checks out a commit, leaving HEAD detached.</summary>
+    public Task<GitWriteResult> CheckoutCommitAsync(string sha, CancellationToken ct = default) =>
+        GitProcess.IsSafeRef(sha)
+            ? RunWriteAsync(["checkout", "--detach", sha], ct)
+            : Task.FromResult(InvalidRef);
+
+    /// <summary>Applies a commit on top of HEAD; a conflicting pick is aborted so the tree stays clean.</summary>
+    public async Task<GitWriteResult> CherryPickAsync(string sha, CancellationToken ct = default)
+    {
+        if (!GitProcess.IsSafeRef(sha))
+        {
+            return InvalidRef;
+        }
+
+        var result = await RunWriteAsync(["cherry-pick", sha], ct).ConfigureAwait(false);
+        if (!result.Success)
+        {
+            await RunWriteAsync(["cherry-pick", "--abort"], ct).ConfigureAwait(false);
+        }
+
+        return result;
+    }
+
+    /// <summary>Adds a commit that undoes another; a conflicting revert is aborted.</summary>
+    public async Task<GitWriteResult> RevertAsync(string sha, CancellationToken ct = default)
+    {
+        if (!GitProcess.IsSafeRef(sha))
+        {
+            return InvalidRef;
+        }
+
+        // A merge commit needs its mainline named; the first parent is the branch it merged into.
+        var result = await RunWriteAsync(["revert", "--no-edit", "-m", "1", sha], ct).ConfigureAwait(false);
+        if (!result.Success && result.Error?.Contains("mainline", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            result = await RunWriteAsync(["revert", "--no-edit", sha], ct).ConfigureAwait(false);
+        }
+
+        if (!result.Success)
+        {
+            await RunWriteAsync(["revert", "--abort"], ct).ConfigureAwait(false);
+        }
+
+        return result;
+    }
+
+    /// <summary>Moves the current branch to a commit. <paramref name="mode"/> is soft, mixed or hard.</summary>
+    public Task<GitWriteResult> ResetAsync(string sha, string mode, CancellationToken ct = default) =>
+        GitProcess.IsSafeRef(sha) && mode is "soft" or "mixed" or "hard"
+            ? RunWriteAsync(["reset", $"--{mode}", sha], ct)
+            : Task.FromResult(InvalidRef);
+
     /// <summary>
     /// Pushes the current branch, setting its upstream on the first push so a plain
     /// <c>git push</c> works from then on.

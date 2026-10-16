@@ -685,6 +685,24 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         return await RunWriteAsync(_repository.CreateBranchAsync(name)).ConfigureAwait(true);
     }
 
+    public Task<bool> CreateBranchAtAsync(string name, GitCommit commit) =>
+        string.IsNullOrWhiteSpace(name)
+            ? Task.FromResult(false)
+            : RunWriteAsync(_repository.CreateBranchAtAsync(name.Trim(), commit.Sha));
+
+    public Task<bool> CheckoutCommitAsync(GitCommit commit) =>
+        RunWriteAsync(_repository.CheckoutCommitAsync(commit.Sha));
+
+    public Task<bool> CherryPickAsync(GitCommit commit) =>
+        RunWriteAsync(_repository.CherryPickAsync(commit.Sha));
+
+    public Task<bool> RevertCommitAsync(GitCommit commit) =>
+        RunWriteAsync(_repository.RevertAsync(commit.Sha));
+
+    /// <summary>Resets the current branch to a commit; <paramref name="mode"/> is soft, mixed or hard.</summary>
+    public Task<bool> ResetToAsync(GitCommit commit, string mode) =>
+        RunWriteAsync(_repository.ResetAsync(commit.Sha, mode));
+
     /// <summary>Runs <c>git init</c> in the project folder when it is not a repository yet.</summary>
     [RelayCommand]
     public async Task InitRepositoryAsync()

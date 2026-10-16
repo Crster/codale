@@ -46,6 +46,7 @@ public sealed partial class WorkspacePage : Page
 
     /// <summary>The change the right-click menu is on, captured when the menu opens.</summary>
     private GitFileStatus? _changeMenuItem;
+    private GitCommit? _commitMenuItem;
 
     /// <summary>Every open terminal tab; each one has its own shell.</summary>
     private readonly List<TerminalTabEntry> _terminalTabs = [];
@@ -1617,6 +1618,110 @@ public sealed partial class WorkspacePage : Page
         EnsureDiffTab();
         CentreTabs.SelectedItem = _diffTabItem;
         await ViewModel.DiffViewer.LoadCommitAsync(commit);
+    }
+
+    /// <summary>The history menu is one shared flyout; remember which commit row opened it.</summary>
+    private void OnCommitMenuOpening(object? sender, object e) =>
+        _commitMenuItem = ((sender as MenuFlyout)?.Target as FrameworkElement)?.DataContext as GitCommit;
+
+    private async void OnCommitMenuViewChanges(object sender, RoutedEventArgs e)
+    {
+        if (_commitMenuItem is not { } commit)
+        {
+            return;
+        }
+
+        EnsureDiffTab();
+        CentreTabs.SelectedItem = _diffTabItem;
+        await ViewModel.DiffViewer.LoadCommitAsync(commit);
+    }
+
+    private static void CopyToClipboard(string text)
+    {
+        var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
+        package.SetText(text);
+        Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
+    }
+
+    private void OnCommitMenuCopySha(object sender, RoutedEventArgs e)
+    {
+        if (_commitMenuItem is { } commit)
+        {
+            CopyToClipboard(commit.Sha);
+        }
+    }
+
+    private void OnCommitMenuCopyMessage(object sender, RoutedEventArgs e)
+    {
+        if (_commitMenuItem is { } commit)
+        {
+            CopyToClipboard(commit.Subject);
+        }
+    }
+
+    private async void OnCommitMenuNewBranch(object sender, RoutedEventArgs e)
+    {
+        if (_commitMenuItem is { } commit &&
+            await PromptTextAsync($"New branch at {commit.ShortSha}", "Branch name") is { } name)
+        {
+            await ViewModel.Git.CreateBranchAtAsync(name, commit);
+        }
+    }
+
+    private async void OnCommitMenuCheckout(object sender, RoutedEventArgs e)
+    {
+        if (_commitMenuItem is { } commit)
+        {
+            await ViewModel.Git.CheckoutCommitAsync(commit);
+        }
+    }
+
+    private async void OnCommitMenuCherryPick(object sender, RoutedEventArgs e)
+    {
+        if (_commitMenuItem is { } commit)
+        {
+            await ViewModel.Git.CherryPickAsync(commit);
+        }
+    }
+
+    private async void OnCommitMenuRevert(object sender, RoutedEventArgs e)
+    {
+        if (_commitMenuItem is { } commit)
+        {
+            await ViewModel.Git.RevertCommitAsync(commit);
+        }
+    }
+
+    /// <summary>Reset rewrites the branch (and, hard, the working tree), so it always asks.</summary>
+    private async void OnCommitMenuReset(object sender, RoutedEventArgs e)
+    {
+        if (_commitMenuItem is not { } commit || (sender as FrameworkElement)?.Tag is not string mode)
+        {
+            return;
+        }
+
+        var consequence = mode switch
+        {
+            "soft" => "Commits after it are undone; their changes stay staged.",
+            "mixed" => "Commits after it are undone; their changes stay in your working tree, unstaged.",
+            _ => "Commits after it are undone and every uncommitted change is thrown away for good.",
+        };
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
+            Title = $"Reset to {commit.ShortSha}?",
+            Content = $"Move the current branch back to \"{commit.Subject}\". {consequence}",
+            PrimaryButtonText = "Reset",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+        };
+
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            await ViewModel.Git.ResetToAsync(commit, mode);
+        }
     }
 
     /// <summary>Change paths are relative to the repository root, which may sit above the project folder.</summary>

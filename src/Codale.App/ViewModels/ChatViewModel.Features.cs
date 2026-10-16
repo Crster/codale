@@ -138,6 +138,7 @@ public sealed partial class ChatViewModel
         // The previous task list belongs to a finished prompt: showing it as current leaves
         // unfinished steps hanging and hides the list the agent makes for the new one.
         ShowTodos([]);
+        RestorePendingPlan();
 
         if (hadConversation)
         {
@@ -205,6 +206,10 @@ public sealed partial class ChatViewModel
 
                 case AssistantMessageCompleted reply:
                     text.AppendLine().AppendLine("Agent").AppendLine(reply.Text.Trim());
+                    break;
+
+                case ToolCallStarted tool when ToolCallItem.PlanInput(tool.ToolName, tool.Input) is { Length: > 0 } plan:
+                    text.AppendLine().AppendLine("Agent proposed a plan").AppendLine(plan.Trim());
                     break;
 
                 case ToolCallStarted tool:

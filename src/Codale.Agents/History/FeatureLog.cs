@@ -97,6 +97,11 @@ public sealed class FeatureLog(string directory, string? chatId = null)
                 Append(new { type = "assistant", id = reply.MessageId, model = reply.Model, text = reply.Text, at = DateTimeOffset.Now });
                 break;
 
+            // A proposed plan is the one tool call that is the answer: stopped before approval, it is
+            // otherwise nowhere in the history.
+            case ToolCallStarted { ParentToolUseId: null, ToolName: "ExitPlanMode", Input.ValueKind: JsonValueKind.Object } plan:
+                Append(new { type = "tool", id = plan.ToolUseId, name = plan.ToolName, input = plan.Input, at = DateTimeOffset.Now });
+                break;
         }
     }
 
@@ -180,6 +185,35 @@ public sealed class FeatureLog(string directory, string? chatId = null)
         }
 
         return events;
+    }
+
+    /// <summary>Notes that the plan proposed by <paramref name="toolUseId"/> was decided ("accepted" or "revised").</summary>
+    public void EndPlan(string toolUseId, string outcome) =>
+        Append(new { type = "planEnd", id = toolUseId, outcome, at = DateTimeOffset.Now });
+
+    /// <summary>The newest proposed plan nobody accepted or sent back: stopped on, or set aside for another request.</summary>
+    public ToolCallStarted? LatestOpenPlan()
+    {
+        var decided = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var file in Files().Reverse())
+        {
+            foreach (var record in ReadRecords(file, 0).Reverse())
+            {
+                switch (record.Str("type"))
+                {
+                    case "planEnd" when record.Str("id") is { } ended:
+                        decided.Add(ended);
+                        break;
+
+                    case "tool" when record.Str("name") == "ExitPlanMode" &&
+                                     !decided.Contains(record.Str("id") ?? "") &&
+                                     Translate(record) is ToolCallStarted plan:
+                        return plan with { Timestamp = record.Timestamp("at") };
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <summary>The newest task-list tool call in the feature, for restoring the session panel.</summary>

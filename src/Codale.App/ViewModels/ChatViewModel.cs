@@ -2983,7 +2983,50 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         if (Artifacts.FirstOrDefault(a => a.ToolUseId == toolUseId) is { } artifact)
         {
+            // A plan set aside is answered with a denial, whose result must not read as "revised".
+            if (artifact.Status == SessionArtifactStatus.Pending && status == SessionArtifactStatus.Revised)
+            {
+                return;
+            }
+
             artifact.Status = status;
+            if (status is SessionArtifactStatus.Accepted or SessionArtifactStatus.Revised)
+            {
+                _featureLog?.EndPlan(toolUseId, artifact.StatusText);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A new prompt while a plan still waits for approval ends that plan's turn: it is denied
+    /// (so the agent does not carry on with it) and kept in the list as pending.
+    /// </summary>
+    private void SetAsidePendingPlan()
+    {
+        foreach (var call in _toolCalls.Values.Where(c => c.Approval is { IsPlan: true } a && _approvals.ContainsKey(a.RequestId)).ToList())
+        {
+            SetPlanStatus(call.ToolUseId, SessionArtifactStatus.Pending);
+            RespondToApproval(
+                call.Approval!.RequestId,
+                ApprovalDecision.Deny("The user set this plan aside to send a new request. Do not revise or implement the plan; it stays pending for later. Answer the new message."));
+        }
+    }
+
+    /// <summary>Puts the feature's plan nobody decided on back in the list as pending, e.g. one stopped on in an earlier session.</summary>
+    private void RestorePendingPlan()
+    {
+        if (_featureLog?.LatestOpenPlan() is { } open &&
+            ToolCallItem.PlanInput(open.ToolName, open.Input) is { Length: > 0 } markdown &&
+            Artifacts.All(a => a.ToolUseId != open.ToolUseId))
+        {
+            Artifacts.Insert(0, new SessionArtifact
+            {
+                Kind = SessionArtifactKind.Plan,
+                ToolUseId = open.ToolUseId,
+                Markdown = markdown,
+                UpdatedAt = open.Timestamp ?? DateTimeOffset.Now,
+                Status = SessionArtifactStatus.Pending,
+            });
         }
     }
 
@@ -3598,6 +3641,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // turn (one result closes both), so it must not stop or restart anything here.
         if (IsBusy && _activeTurn is not null && _session is { } running)
         {
+            SetAsidePendingPlan();
             await SteerTurnAsync(running, text, attachments);
             return;
         }

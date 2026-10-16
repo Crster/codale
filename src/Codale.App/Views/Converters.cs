@@ -219,7 +219,7 @@ public sealed partial class ArtifactStatusBrushConverter : IValueConverter
     public object Convert(object value, Type targetType, object parameter, string language) => value switch
     {
         SessionArtifactStatus.Accepted => Palette.Get("StatusSuccessBrush"),
-        SessionArtifactStatus.Revised => Palette.Get("StatusWarnBrush"),
+        SessionArtifactStatus.Revised or SessionArtifactStatus.Pending => Palette.Get("StatusWarnBrush"),
         SessionArtifactStatus.Saved => Palette.Get("KindReadBrush"),
         _ => Palette.Get("KindPlanBrush"),
     };

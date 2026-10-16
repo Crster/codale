@@ -26,6 +26,9 @@ public sealed record PlanRevision(string PreviousMarkdown, IReadOnlyList<PlanAnn
 public enum SessionArtifactStatus
 {
     Proposed,
+
+    /// <summary>Set aside before it was decided: the plan waits in the list for the reader to come back to.</summary>
+    Pending,
     Accepted,
     Revised,
     Saved,
@@ -62,6 +65,7 @@ public sealed partial class SessionArtifact : ObservableObject
 
     public string StatusText => Status switch
     {
+        SessionArtifactStatus.Pending => "pending",
         SessionArtifactStatus.Accepted => "accepted",
         SessionArtifactStatus.Revised => "revised",
         SessionArtifactStatus.Saved => "saved",
