@@ -44,7 +44,7 @@ public sealed partial class TaskPeekPane : UserControl
         task.PropertyChanged += OnTaskChanged;
 
         KindIcon.Glyph = task.KindGlyph;
-        TitleText.Text = task.Title;
+        TitleText.Text = task.DisplayTitle;
 
         LogScroll.Visibility = task.IsShell ? Visibility.Visible : Visibility.Collapsed;
         TranscriptScroll.Visibility = task.IsShell ? Visibility.Collapsed : Visibility.Visible;

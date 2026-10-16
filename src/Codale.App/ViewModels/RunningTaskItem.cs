@@ -111,6 +111,33 @@ public sealed partial class RunningTaskItem : ObservableObject
     /// <summary>Command line or subagent description.</summary>
     public string Title { get; init; } = "";
 
+    private const int MaxTipLines = 12;
+
+    /// <summary>The title's first non-blank line, with an ellipsis when a multi-line script was cut.</summary>
+    public string DisplayTitle
+    {
+        get
+        {
+            var lines = Title.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return lines.Length switch
+            {
+                0 => "",
+                1 => lines[0],
+                _ => lines[0] + " …",
+            };
+        }
+    }
+
+    /// <summary>The title for a tooltip: a long script keeps only its first <see cref="MaxTipLines"/> lines.</summary>
+    public string TitleTip
+    {
+        get
+        {
+            var lines = Title.Replace("\r\n", "\n").Split('\n');
+            return lines.Length <= MaxTipLines ? Title : string.Join('\n', lines.Take(MaxTipLines)) + "\n…";
+        }
+    }
+
     /// <summary>The CLI's id for a background shell; later BashOutput/KillShell calls use it.</summary>
     [ObservableProperty]
     public partial string? ShellId { get; set; }

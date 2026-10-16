@@ -209,7 +209,7 @@
                                 SelectionMode="None">
                                 <ListView.ItemTemplate>
                                     <DataTemplate x:DataType="vm:RunningTaskItem">
-                                        <Grid ColumnSpacing="8" ToolTipService.ToolTip="{x:Bind Title}">
+                                        <Grid ColumnSpacing="8" ToolTipService.ToolTip="{x:Bind TitleTip}">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="*" />
@@ -220,7 +220,7 @@
                                             <TextBlock
                                                 Grid.Column="1"
                                                 FontSize="12"
-                                                Text="{x:Bind Title, Mode=OneWay}"
+                                                Text="{x:Bind DisplayTitle, Mode=OneWay}"
                                                 TextTrimming="CharacterEllipsis"
                                                 TextWrapping="NoWrap" />
                                             <StackPanel
