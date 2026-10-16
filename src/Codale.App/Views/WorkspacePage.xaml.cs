@@ -2568,6 +2568,104 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
+    /// <summary>Shows or hides the filter box; hiding it drops the filter and brings the tree back.</summary>
+    private void OnFileSearchToggle(object sender, RoutedEventArgs e)
+    {
+        if (FileSearchToggle.IsChecked == true)
+        {
+            FileSearchBox.Visibility = Visibility.Visible;
+            FileSearchBox.Focus(FocusState.Programmatic);
+            FileSearchBox.SelectAll();
+        }
+        else
+        {
+            CloseFileSearch();
+        }
+    }
+
+    private void CloseFileSearch()
+    {
+        ViewModel.Files.SearchText = "";
+        FileSearchBox.Visibility = Visibility.Collapsed;
+        FileSearchToggle.IsChecked = false;
+    }
+
+    /// <summary>Escape clears the filter first, and closes the box when it is already empty.</summary>
+    private void OnFileSearchKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (e.Key != Windows.System.VirtualKey.Escape)
+        {
+            return;
+        }
+
+        e.Handled = true;
+
+        if (ViewModel.Files.SearchText.Length > 0)
+        {
+            ViewModel.Files.SearchText = "";
+        }
+        else
+        {
+            CloseFileSearch();
+        }
+    }
+
+    private void OnFileSearchHitClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is FileSearchHit hit)
+        {
+            ShowFile(hit.FullPath);
+        }
+    }
+
+    /// <summary>Rescans the disk, re-reads git, and re-runs the filter if one is up.</summary>
+    private async void OnFilesRefreshClick(object sender, RoutedEventArgs e)
+    {
+        ViewModel.Files.Reload();
+
+        try
+        {
+            await ViewModel.Git.RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Trace($"Files refresh failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>Folds every open folder; the project and added folder roots stay open so the tree is never blank.</summary>
+    private void OnFilesCollapseClick(object sender, RoutedEventArgs e)
+    {
+        var open = new List<TreeViewItem>();
+        CollectTreeItems(FileTree, open);
+
+        // Deepest first, so a parent folding does not hide children still to be reached.
+        for (var i = open.Count - 1; i >= 0; i--)
+        {
+            if (open[i].DataContext is FileNode { IsRootEntry: false })
+            {
+                open[i].IsExpanded = false;
+            }
+        }
+
+        FileTree.UpdateLayout();
+    }
+
+    private static void CollectTreeItems(DependencyObject parent, List<TreeViewItem> into)
+    {
+        var count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent);
+        for (var i = 0; i < count; i++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, i);
+            if (child is TreeViewItem item)
+            {
+                into.Add(item);
+            }
+
+            CollectTreeItems(child, into);
+        }
+    }
+
     private void OnTreeExpanding(TreeView sender, TreeViewExpandingEventArgs args)
     {
         if (args.Item is FileNode node)
@@ -2587,7 +2685,8 @@ public sealed partial class WorkspacePage : Page
     private void OnTreeRightTapped(object sender, RightTappedRoutedEventArgs e)
     {
         // Right-clicking empty space acts on the project root.
-        var hit = (e.OriginalSource as FrameworkElement)?.DataContext as FileNode;
+        var context = (e.OriginalSource as FrameworkElement)?.DataContext;
+        var hit = context as FileNode ?? (context as FileSearchHit)?.Node;
         if (hit is { IsPlaceholder: true })
         {
             return;

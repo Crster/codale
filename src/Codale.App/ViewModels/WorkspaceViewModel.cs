@@ -1361,6 +1361,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
         UpdateRunningCommandCount();
         Git.Dispose();
+        Files.Dispose();
 
         // A warm helper CLI waiting for Automatic mode's next message goes with the window.
         _helper.Dispose();

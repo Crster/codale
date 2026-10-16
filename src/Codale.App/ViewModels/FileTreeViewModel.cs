@@ -17,7 +17,7 @@ public sealed partial class FileNode : ObservableObject
     /// Only git's own store is hidden. Everything else - node_modules, bin, obj - is
     /// shown, faded when .gitignore covers it; loading on expand keeps big ones cheap.
     /// </summary>
-    private static readonly HashSet<string> Skip = new(StringComparer.OrdinalIgnoreCase)
+    internal static readonly HashSet<string> Skip = new(StringComparer.OrdinalIgnoreCase)
     {
         ".git",
     };
@@ -162,8 +162,40 @@ public sealed partial class FileNode : ObservableObject
     }
 }
 
-public sealed partial class FileTreeViewModel : ObservableObject
+/// <summary>One row of the file filter's flat result list.</summary>
+public sealed class FileSearchHit
 {
+    public required FileNode Node { get; init; }
+
+    /// <summary>Where the file lives, relative to the folder that was searched; empty at its top level.</summary>
+    public required string Directory { get; init; }
+
+    public string Name => Node.Name;
+
+    public string FullPath => Node.FullPath;
+
+    public string DirectoryTail => Directory.Length == 0 ? "" : $" {Directory}";
+}
+
+public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
+{
+    /// <summary>The filter lists at most this many files; a query that broad should be narrowed.</summary>
+    private const int MaxSearchResults = 300;
+
+    private readonly Microsoft.UI.Dispatching.DispatcherQueue? _dispatcher =
+        Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+
+    private readonly List<FileSystemWatcher> _watchers = [];
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _watchTimer;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _searchTimer;
+    private CancellationTokenSource? _searchCts;
+    private int _searchStamp;
+    private bool _disposed;
+
+    /// <summary>The status map of the last snapshot, kept so search results can be coloured and pruned.</summary>
+    private GitStatusMap? _lastMap;
+    private string? _lastMapRoot;
+
     /// <summary>The most recent git snapshot, re-applied whenever more of the tree loads.</summary>
     private GitSnapshot? _snapshot;
 
@@ -183,8 +215,384 @@ public sealed partial class FileTreeViewModel : ObservableObject
 
         if (extraFolders is not null)
         {
-            extraFolders.Changed += (_, _) => SyncWorkspaceFolders();
+            extraFolders.Changed += (_, _) =>
+            {
+                SyncWorkspaceFolders();
+                SyncWatchers();
+                RefreshSearch();
+            };
         }
+
+        SyncWatchers();
+    }
+
+    /// <summary>What the user typed in the file filter; blank shows the tree.</summary>
+    [ObservableProperty]
+    public partial string SearchText { get; set; } = "";
+
+    /// <summary>True while a filter is typed: the flat result list replaces the tree.</summary>
+    [ObservableProperty]
+    public partial bool IsSearching { get; set; }
+
+    /// <summary>True once a filter has finished and found nothing.</summary>
+    [ObservableProperty]
+    public partial bool HasNoResults { get; set; }
+
+    public ObservableCollection<FileSearchHit> SearchResults { get; } = [];
+
+    partial void OnSearchTextChanged(string value)
+    {
+        var searching = !string.IsNullOrWhiteSpace(value);
+        IsSearching = searching;
+
+        if (!searching)
+        {
+            CancelSearch();
+            SearchResults.Clear();
+            HasNoResults = false;
+            return;
+        }
+
+        // A search still running answers the old query, so it must not land; the previous
+        // results stay up meanwhile instead of flashing empty, and typing is debounced.
+        _searchCts?.Cancel();
+        _searchStamp++;
+        ScheduleSearch(150);
+    }
+
+    private void CancelSearch()
+    {
+        _searchTimer?.Stop();
+        _searchCts?.Cancel();
+        _searchStamp++;
+    }
+
+    /// <summary>Re-runs the filter against the disk now, if one is active.</summary>
+    public void RefreshSearch()
+    {
+        if (IsSearching)
+        {
+            ScheduleSearch(0);
+        }
+    }
+
+    private void ScheduleSearch(int delayMs)
+    {
+        if (_dispatcher is null)
+        {
+            _ = RunSearchAsync();
+            return;
+        }
+
+        _searchTimer ??= CreateOneShot(() => _ = RunSearchAsync());
+        _searchTimer.Stop();
+        _searchTimer.Interval = TimeSpan.FromMilliseconds(Math.Max(1, delayMs));
+        _searchTimer.Start();
+    }
+
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer CreateOneShot(Action tick)
+    {
+        var timer = _dispatcher!.CreateTimer();
+        timer.IsRepeating = false;
+        timer.Tick += (_, _) => tick();
+        return timer;
+    }
+
+    private IReadOnlyList<string> SearchRoots =>
+    [
+        ProjectPath,
+        .. (_extraFolders?.Folders ?? []).Where(folder =>
+            !string.Equals(folder, ProjectPath, StringComparison.OrdinalIgnoreCase)),
+    ];
+
+    private async Task RunSearchAsync()
+    {
+        var query = SearchText;
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return;
+        }
+
+        _searchCts?.Cancel();
+        var cts = _searchCts = new CancellationTokenSource();
+        var stamp = ++_searchStamp;
+
+        var roots = SearchRoots;
+        var map = _lastMap;
+        var mapRoot = _lastMapRoot;
+
+        List<(string Path, string Directory)> found;
+        try
+        {
+            found = await Task.Run(() => SearchDisk(roots, query, map, mapRoot, cts.Token), cts.Token).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        // A newer keystroke, or a cleared box, owns the list now.
+        if (stamp != _searchStamp || !IsSearching)
+        {
+            return;
+        }
+
+        ApplySearchResults(found);
+        HasNoResults = SearchResults.Count == 0;
+    }
+
+    /// <summary>
+    /// Walks every folder on disk - not only the ones the tree has opened - for files
+    /// whose path holds every word of the query. Ignored folders (node_modules, bin) and
+    /// git's own store are not entered; links to folders are not followed.
+    /// </summary>
+    private static List<(string Path, string Directory)> SearchDisk(
+        IReadOnlyList<string> roots, string query, GitStatusMap? map, string? mapRoot, CancellationToken ct)
+    {
+        var tokens = query.Replace('\\', '/').ToLowerInvariant()
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var whole = string.Join(' ', tokens);
+        var matches = new List<(string Path, string Directory, bool NameHit)>();
+        var options = new EnumerationOptions
+        {
+            AttributesToSkip = 0,
+            IgnoreInaccessible = true,
+            RecurseSubdirectories = false,
+        };
+
+        foreach (var root in roots)
+        {
+            if (!Directory.Exists(root))
+            {
+                continue;
+            }
+
+            var pending = new Stack<string>();
+            pending.Push(root);
+
+            while (pending.Count > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                var current = pending.Pop();
+
+                IEnumerable<FileSystemInfo> entries;
+                try
+                {
+                    entries = new DirectoryInfo(current).EnumerateFileSystemInfos("*", options);
+                }
+                catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+                {
+                    continue;
+                }
+
+                foreach (var entry in entries)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    if (entry is DirectoryInfo)
+                    {
+                        if (FileNode.Skip.Contains(entry.Name) ||
+                            entry.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+                            IsIgnoredDirectory(entry.FullName, map, mapRoot))
+                        {
+                            continue;
+                        }
+
+                        pending.Push(entry.FullName);
+                        continue;
+                    }
+
+                    var relative = Path.GetRelativePath(root, entry.FullName).Replace('\\', '/');
+                    var lower = relative.ToLowerInvariant();
+                    if (!tokens.All(lower.Contains))
+                    {
+                        continue;
+                    }
+
+                    var slash = relative.LastIndexOf('/');
+                    var directory = slash > 0 ? relative[..slash] : "";
+                    matches.Add((entry.FullName, directory, entry.Name.Contains(whole, StringComparison.OrdinalIgnoreCase)));
+                }
+            }
+        }
+
+        return matches
+            .OrderBy(m => m.NameHit ? 0 : 1)
+            .ThenBy(m => Path.GetFileName(m.Path), StringComparer.OrdinalIgnoreCase)
+            .ThenBy(m => m.Path, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxSearchResults)
+            .Select(m => (m.Path, m.Directory))
+            .ToList();
+    }
+
+    private static bool IsIgnoredDirectory(string fullPath, GitStatusMap? map, string? mapRoot)
+    {
+        if (map is null || mapRoot is null ||
+            !fullPath.StartsWith(mapRoot.TrimEnd('\\') + '\\', StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return map.Classify(Path.GetRelativePath(mapRoot, fullPath).Replace('\\', '/')).Ignored;
+    }
+
+    /// <summary>
+    /// Brings the visible list to the new result set with the fewest moves, keeping the
+    /// rows that survive, so a rescan while the filter is up does not flicker or lose scroll.
+    /// </summary>
+    private void ApplySearchResults(List<(string Path, string Directory)> found)
+    {
+        var wanted = found.Select(f => f.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = SearchResults.Count - 1; i >= 0; i--)
+        {
+            if (!wanted.Contains(SearchResults[i].FullPath))
+            {
+                SearchResults.RemoveAt(i);
+            }
+        }
+
+        for (var i = 0; i < found.Count; i++)
+        {
+            if (i < SearchResults.Count &&
+                string.Equals(SearchResults[i].FullPath, found[i].Path, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var existing = -1;
+            for (var j = i + 1; j < SearchResults.Count; j++)
+            {
+                if (string.Equals(SearchResults[j].FullPath, found[i].Path, StringComparison.OrdinalIgnoreCase))
+                {
+                    existing = j;
+                    break;
+                }
+            }
+
+            if (existing >= 0)
+            {
+                SearchResults.Move(existing, i);
+            }
+            else
+            {
+                SearchResults.Insert(i, new FileSearchHit
+                {
+                    Node = FileNode.ForFile(found[i].Path),
+                    Directory = found[i].Directory,
+                });
+            }
+        }
+
+        ClassifySearchResults();
+    }
+
+    /// <summary>Colours the result rows from the current git map, the way tree rows are.</summary>
+    private void ClassifySearchResults()
+    {
+        foreach (var hit in SearchResults)
+        {
+            if (_lastMap is { } map && _lastMapRoot is { } root &&
+                hit.FullPath.StartsWith(root.TrimEnd('\\') + '\\', StringComparison.OrdinalIgnoreCase))
+            {
+                var (status, ignored) = map.Classify(Path.GetRelativePath(root, hit.FullPath).Replace('\\', '/'));
+                hit.Node.GitStatus = status;
+                hit.Node.IsIgnored = ignored;
+            }
+            else
+            {
+                hit.Node.GitStatus = null;
+                hit.Node.IsIgnored = false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Watches the project and added folders for files appearing, vanishing or being
+    /// renamed by anything outside this window - a terminal, another editor, a build.
+    /// Events only restart a short timer; one rescan follows the burst.
+    /// </summary>
+    private void SyncWatchers()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        foreach (var watcher in _watchers)
+        {
+            watcher.Dispose();
+        }
+
+        _watchers.Clear();
+
+        foreach (var root in SearchRoots)
+        {
+            try
+            {
+                if (!Directory.Exists(root))
+                {
+                    continue;
+                }
+
+                var watcher = new FileSystemWatcher(root)
+                {
+                    IncludeSubdirectories = true,
+                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName,
+                    InternalBufferSize = 64 * 1024,
+                };
+                watcher.Created += (_, e) => OnDiskChanged(e.FullPath);
+                watcher.Deleted += (_, e) => OnDiskChanged(e.FullPath);
+                watcher.Renamed += (_, e) => OnDiskChanged(e.FullPath);
+
+                // An overflowed buffer lost events; rescanning is the only way to catch up.
+                watcher.Error += (_, _) => OnDiskChanged(null);
+                watcher.EnableRaisingEvents = true;
+                _watchers.Add(watcher);
+            }
+            catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+            {
+                // A folder that cannot be watched is still covered by the manual refresh.
+            }
+        }
+    }
+
+    private void OnDiskChanged(string? path)
+    {
+        if (path is not null &&
+            (path.Contains("\\.git\\", StringComparison.OrdinalIgnoreCase) ||
+             path.EndsWith("\\.git", StringComparison.OrdinalIgnoreCase) ||
+             path.Contains("\\node_modules\\", StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        _dispatcher?.TryEnqueue(() =>
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _watchTimer ??= CreateOneShot(Reload);
+            _watchTimer.Stop();
+            _watchTimer.Interval = TimeSpan.FromMilliseconds(500);
+            _watchTimer.Start();
+        });
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        CancelSearch();
+        _watchTimer?.Stop();
+
+        foreach (var watcher in _watchers)
+        {
+            watcher.Dispose();
+        }
+
+        _watchers.Clear();
     }
 
     /// <summary>True when the tree lists each folder as its own root instead of the project's entries.</summary>
@@ -274,20 +682,27 @@ public sealed partial class FileTreeViewModel : ObservableObject
     {
         if (_snapshot is not { IsRepository: true } snapshot)
         {
+            _lastMap = null;
+            _lastMapRoot = null;
             foreach (var node in Nodes)
             {
                 WalkNested(node);
             }
 
+            ClassifySearchResults();
             return;
         }
 
         var map = GitStatusMap.Build(snapshot.Changes, snapshot.Ignored);
         var repositoryRoot = snapshot.RepositoryRoot ?? ProjectPath;
+        _lastMap = map;
+        _lastMapRoot = repositoryRoot;
         foreach (var node in Nodes)
         {
             Walk(node, map, repositoryRoot);
         }
+
+        ClassifySearchResults();
     }
 
     /// <summary>
@@ -300,6 +715,10 @@ public sealed partial class FileTreeViewModel : ObservableObject
     /// </summary>
     public void Reload()
     {
+        // Whatever changed on disk may change the filter's answer too; it re-reads the
+        // disk itself, so a filtered list stays correct without falling back to the tree.
+        RefreshSearch();
+
         if (!Root.IsLoaded)
         {
             return;
