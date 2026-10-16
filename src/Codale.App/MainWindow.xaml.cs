@@ -492,6 +492,7 @@ public sealed partial class MainWindow : Window
             var dialog = new ContentDialog
             {
                 XamlRoot = RootGrid.XamlRoot,
+                RequestedTheme = Codale.App.Controls.DialogTheme.Of(RootGrid.XamlRoot),
                 Title = "Save your changes?",
                 Content = new TextBlock { TextWrapping = TextWrapping.Wrap, Text = $"These files have unsaved changes:\n\n{list}" },
                 PrimaryButtonText = "Save all",
@@ -520,6 +521,7 @@ public sealed partial class MainWindow : Window
             await new ContentDialog
             {
                 XamlRoot = RootGrid.XamlRoot,
+                RequestedTheme = Codale.App.Controls.DialogTheme.Of(RootGrid.XamlRoot),
                 Title = "Some files were not saved",
                 Content = new TextBlock
                 {

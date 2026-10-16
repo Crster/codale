@@ -19,6 +19,7 @@ public static class SyntaxDialogs
     private static ContentDialog NewDialog(XamlRoot root, string title, UIElement content, string primary, string close = "Close") => new()
     {
         XamlRoot = root,
+        RequestedTheme = DialogTheme.Of(root),
         Title = title,
         Content = content,
         PrimaryButtonText = primary,

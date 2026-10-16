@@ -426,6 +426,7 @@ public sealed partial class WorkspacePage : Page
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
+            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = $"{cli.DisplayName} not found",
             Content = new TextBlock
             {
@@ -491,6 +492,7 @@ public sealed partial class WorkspacePage : Page
                 var dialog = new ContentDialog
                 {
                     XamlRoot = XamlRoot,
+                    RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
                     Title = $"Codale isn't signed in to {targetCli}",
                     Content = new TextBlock
                     {
@@ -2444,7 +2446,7 @@ public sealed partial class WorkspacePage : Page
                 menu.Items.Add(MenuAction("View diff", () => _ = ShowNodeDiffAsync(node), ""));
             }
 
-            menu.Items.Add(MenuAction("Open with default app", () => _ = OpenWithDefaultAppAsync(node), ""));
+            menu.Items.Add(MenuAction("Open with default app", () => _ = OpenWithDefaultAppAsync(node), ""));
 
             if (TurnAttachment.KindOf(node.FullPath) is not null)
             {
@@ -2727,6 +2729,7 @@ public sealed partial class WorkspacePage : Page
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
+            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = $"Delete {node.Name}?",
             Content = node.IsDirectory
                 ? "The folder and everything in it will be removed."
@@ -2774,6 +2777,7 @@ public sealed partial class WorkspacePage : Page
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
+            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = title,
             Content = box,
             PrimaryButtonText = "OK",
@@ -2795,6 +2799,7 @@ public sealed partial class WorkspacePage : Page
         await new ContentDialog
         {
             XamlRoot = XamlRoot,
+            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = title,
             Content = message,
             CloseButtonText = "OK",
@@ -3003,6 +3008,7 @@ public sealed partial class WorkspacePage : Page
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
+            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = "Discard changes?",
             Content = $"Throw away every uncommitted change to {change.FileName}? Untracked files are deleted for good.",
             PrimaryButtonText = "Discard",
@@ -3086,10 +3092,6 @@ public sealed partial class WorkspacePage : Page
             ToolTipService.SetToolTip(StatusBarCwdButton, $"Working directory: {_terminalCwd}\nClick to change working directory");
         }
 
-        if (TerminalDrawerCwdText is not null)
-        {
-            TerminalDrawerCwdText.Text = display;
-        }
     }
 
     private void OnCwdMenuFlyoutOpening(object? sender, object e)
@@ -3220,14 +3222,40 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
-    private void OnStatusBarCommandBoxGotFocus(object sender, RoutedEventArgs e)
-    {
-        StatusBarCommandBox.ItemsSource = GetCommandSuggestions(StatusBarCommandBox.Text);
-    }
+    private bool _skipInlineCompletion;
+    private int _historyCursor = -1;
 
     private void OnStatusBarCommandBoxKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Key == Windows.System.VirtualKey.Escape && !StatusBarCommandBox.IsSuggestionListOpen)
+        switch (e.Key)
+        {
+            case Windows.System.VirtualKey.Back:
+            case Windows.System.VirtualKey.Delete:
+                _skipInlineCompletion = true;
+                break;
+            case Windows.System.VirtualKey.Up:
+            case Windows.System.VirtualKey.Down:
+                if (_commandHistory.Count > 0)
+                {
+                    e.Handled = true;
+                    var step = e.Key == Windows.System.VirtualKey.Up ? 1 : -1;
+                    var next = _historyCursor + step;
+                    if (next < 0)
+                    {
+                        _historyCursor = -1;
+                        SetStatusBarCommandText("");
+                    }
+                    else if (next < _commandHistory.Count)
+                    {
+                        _historyCursor = next;
+                        SetStatusBarCommandText(_commandHistory[_commandHistory.Count - 1 - next]);
+                    }
+                }
+
+                return;
+        }
+
+        if (e.Key == Windows.System.VirtualKey.Escape)
         {
             e.Handled = true;
             if (_isTerminalDrawerOpen)
@@ -3248,38 +3276,46 @@ public sealed partial class WorkspacePage : Page
             return;
         }
 
-        sender.ItemsSource = GetCommandSuggestions(sender.Text);
+        _historyCursor = -1;
+        var skip = _skipInlineCompletion;
+        _skipInlineCompletion = false;
+        var typed = sender.Text;
+        if (skip || typed.Length == 0)
+        {
+            return;
+        }
+
+        // Complete in place from the most recent matching history entry, leaving the
+        // untyped remainder selected so typing on replaces it and Right accepts it.
+        for (var i = _commandHistory.Count - 1; i >= 0; i--)
+        {
+            var entry = _commandHistory[i];
+            if (entry.Length > typed.Length && entry.StartsWith(typed, StringComparison.OrdinalIgnoreCase))
+            {
+                SetStatusBarCommandText(entry);
+                if (FindTemplateChild(sender, "TextBox") is TextBox inner)
+                {
+                    inner.Select(typed.Length, entry.Length - typed.Length);
+                }
+
+                return;
+            }
+        }
     }
 
-    private void OnStatusBarCommandBoxSuggestionChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args)
+    private void SetStatusBarCommandText(string text)
     {
-        if (args.SelectedItem is string chosen)
+        StatusBarCommandBox.Text = text;
+        if (FindTemplateChild(StatusBarCommandBox, "TextBox") is TextBox inner)
         {
-            sender.Text = chosen;
+            inner.Select(text.Length, 0);
         }
     }
 
     private async void OnStatusBarCommandBoxQuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
     {
-        var command = args.ChosenSuggestion as string ?? args.QueryText;
-        await ExecuteStatusBarCommandAsync(command);
-    }
-
-    // Session-only history (in memory, cleared on app close), most recent first.
-    private List<string> GetCommandSuggestions(string text)
-    {
-        var query = text.Trim();
-        var matches = new List<string>();
-        for (var i = _commandHistory.Count - 1; i >= 0 && matches.Count < 8; i--)
-        {
-            var entry = _commandHistory[i];
-            if (query.Length == 0 || (entry.Contains(query, StringComparison.OrdinalIgnoreCase) && entry != query))
-            {
-                matches.Add(entry);
-            }
-        }
-
-        return matches;
+        _historyCursor = -1;
+        await ExecuteStatusBarCommandAsync(args.QueryText);
     }
 
     protected override void OnKeyDown(KeyRoutedEventArgs e)
@@ -3308,10 +3344,10 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>
-    /// Sends a status bar command to a terminal tab when it is an agent CLI launch or one of the
-    /// project's commands (matched by command line or name). False to run it in the drawer as usual.
+    /// Sends a status bar command to a terminal tab when it is an agent CLI launch.
+    /// False to run it in the drawer as usual.
     /// </summary>
-    private async Task<bool> TryRunInTabAsync(string command)
+    private bool TryRunInTab(string command)
     {
         if (ViewModel is null)
         {
@@ -3323,28 +3359,7 @@ public sealed partial class WorkspacePage : Page
             Path.GetFileName(shell).Contains("powershell", StringComparison.OrdinalIgnoreCase);
 
         // The CLI detector reads a default shell prompt line, so give it one for this command.
-        if (TryOpenCliTab($"{(powershell ? "PS " : "")}{_terminalCwd}> {command}", null))
-        {
-            return true;
-        }
-
-        try
-        {
-            var commands = await Task.Run(ViewModel.DiscoverCommands);
-            if (commands.FirstOrDefault(c =>
-                    string.Equals(c.Command.Trim(), command, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(c.Name.Trim(), command, StringComparison.OrdinalIgnoreCase)) is { } match)
-            {
-                OpenCommandTab(match);
-                return true;
-            }
-        }
-        catch (Exception ex)
-        {
-            CrashLog.Write("Terminal", "Project command lookup failed", ex);
-        }
-
-        return false;
+        return TryOpenCliTab($"{(powershell ? "PS " : "")}{_terminalCwd}> {command}", null);
     }
 
     private async Task ExecuteStatusBarCommandAsync(string rawCommand)
@@ -3359,11 +3374,10 @@ public sealed partial class WorkspacePage : Page
         _commandHistory.Add(command);
 
         StatusBarCommandBox.Text = "";
-        StatusBarCommandBox.ItemsSource = null;
 
-        // An agent CLI or a project command belongs in a tab of its own, where it stays visible and
+        // An agent CLI belongs in a tab of its own, where it stays visible and
         // its exit is known, rather than in the drawer's one-shot output box.
-        if (await TryRunInTabAsync(command))
+        if (TryRunInTab(command))
         {
             return;
         }
@@ -3371,7 +3385,6 @@ public sealed partial class WorkspacePage : Page
         OpenTerminalDrawer();
 
         TerminalDrawerCommandText.Text = $"$ {command}";
-        TerminalDrawerCwdText.Text = _terminalCwd.Replace('\\', '/');
         TerminalDrawerSpinner.Visibility = Visibility.Visible;
         TerminalDrawerSpinner.IsActive = true;
         TerminalDrawerStatusIcon.Visibility = Visibility.Collapsed;

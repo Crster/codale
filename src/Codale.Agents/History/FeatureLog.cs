@@ -29,8 +29,6 @@ public sealed class FeatureLog(string directory, string? chatId = null)
     /// <summary>One gate per log folder, whichever chat or background job holds a <see cref="FeatureLog"/> on it.</summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, object> Gates = new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly HashSet<string> _tools = new(StringComparer.Ordinal);
-
     private object Gate => Gates.GetOrAdd(Path.GetFullPath(directory), _ => new object());
 
     private string LogPath => Path.Combine(directory, "log.jsonl");
@@ -90,7 +88,7 @@ public sealed class FeatureLog(string directory, string? chatId = null)
     /// <summary>Notes that the chat's turn is over, and how it ended ("success", an error subtype, "stopped").</summary>
     public void EndTurn(string outcome) => Append(new { type = "turnEnd", outcome, at = DateTimeOffset.Now });
 
-    /// <summary>Notes what the main conversation did; subagent chatter and stream plumbing are not history.</summary>
+    /// <summary>Notes the main conversation's replies; tool calls, subagents and stream plumbing are not history.</summary>
     public void Append(AgentEvent e)
     {
         switch (e)
@@ -99,21 +97,6 @@ public sealed class FeatureLog(string directory, string? chatId = null)
                 Append(new { type = "assistant", id = reply.MessageId, model = reply.Model, text = reply.Text, at = DateTimeOffset.Now });
                 break;
 
-            case ToolCallStarted { ParentToolUseId: null } started:
-                _tools.Add(started.ToolUseId);
-                Append(new
-                {
-                    type = "tool",
-                    id = started.ToolUseId,
-                    name = started.ToolName,
-                    input = started.Input.ValueKind == JsonValueKind.Undefined ? (JsonElement?)null : started.Input,
-                    at = DateTimeOffset.Now,
-                });
-                break;
-
-            case ToolCallCompleted done when _tools.Contains(done.ToolUseId):
-                Append(new { type = "toolDone", id = done.ToolUseId, error = done.IsError, change = done.FileChange, at = DateTimeOffset.Now });
-                break;
         }
     }
 
@@ -260,8 +243,6 @@ public sealed class FeatureLog(string directory, string? chatId = null)
                 using var trim = new FileStream(archive, FileMode.Open, FileAccess.Write, FileShare.Read);
                 trim.SetLength(trim.Length - tail.Length);
             }
-
-            _tools.Clear();
         }
     }
 

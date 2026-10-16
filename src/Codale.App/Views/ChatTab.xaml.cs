@@ -345,6 +345,8 @@ public sealed partial class ChatTab : UserControl
             Title = ViewModel.FeatureName,
             Content = scroller,
             CloseButtonText = "Close",
+            // Dialogs open in the popup layer, outside RootGrid, so they need the resolved theme passed in.
+            RequestedTheme = ActualTheme,
         }.ShowAsync();
     }
 
@@ -1193,6 +1195,7 @@ public sealed partial class ChatTab : UserControl
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
+            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = title,
             Content = content,
             CloseButtonText = "Close",

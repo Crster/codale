@@ -418,6 +418,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
+            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = "Discard the isolated session?",
             Content = "The work done in the worktree is thrown away and this chat starts a fresh session in the project.",
             PrimaryButtonText = "Discard",
@@ -606,6 +607,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
+            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = "Rename history",
             Content = content,
             PrimaryButtonText = "Save",
@@ -678,6 +680,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
+            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = $"Delete \"{session.Title}\"?",
             Content = "This removes this history's summary, turns and file index. The work it did in your workspace is kept.",
             PrimaryButtonText = "Delete",
@@ -703,6 +706,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         await new ContentDialog
         {
             XamlRoot = XamlRoot,
+            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = title,
             Content = message,
             CloseButtonText = "OK",

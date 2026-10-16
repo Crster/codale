@@ -1056,6 +1056,7 @@ public sealed partial class EditorTab
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
+            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = "Check Issues",
             Content = new ScrollViewer
             {

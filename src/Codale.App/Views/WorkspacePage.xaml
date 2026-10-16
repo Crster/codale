@@ -1357,18 +1357,6 @@
                                         TextTrimming="CharacterEllipsis" />
                                 </Border>
 
-                                <StackPanel Orientation="Horizontal" Spacing="4" Opacity="0.75" VerticalAlignment="Center">
-                                    <FontIcon Glyph="&#xED25;" FontSize="11" VerticalAlignment="Center" />
-                                    <TextBlock
-                                        x:Name="TerminalDrawerCwdText"
-                                        Text="x:/test"
-                                        FontSize="11"
-                                        FontFamily="Cascadia Code, Consolas"
-                                        MaxWidth="220"
-                                        TextTrimming="CharacterEllipsis"
-                                        VerticalAlignment="Center" />
-                                </StackPanel>
-
                                 <Rectangle Width="1" Height="12" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="2,0" />
 
                                 <StackPanel x:Name="TerminalDrawerStatusPanel" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
@@ -1674,10 +1662,8 @@
                             PlaceholderText="Run shell command (e.g. ls)…"
                             UpdateTextOnSelect="False"
                             TextChanged="OnStatusBarCommandBoxTextChanged"
-                            SuggestionChosen="OnStatusBarCommandBoxSuggestionChosen"
                             QuerySubmitted="OnStatusBarCommandBoxQuerySubmitted"
-                            KeyDown="OnStatusBarCommandBoxKeyDown"
-                            GotFocus="OnStatusBarCommandBoxGotFocus">
+                            KeyDown="OnStatusBarCommandBoxKeyDown">
                             <AutoSuggestBox.Resources>
                                 <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="{ThemeResource TextFillColorDisabled}" Opacity="0.7" />
                                 <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver" Color="{ThemeResource TextFillColorDisabled}" Opacity="0.7" />

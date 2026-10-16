@@ -66,6 +66,7 @@ public sealed partial class ProjectPickerPage : Page
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
+            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = "Clear all recent projects?",
             Content = "The list on this page will be emptied. This cannot be undone.",
             PrimaryButtonText = "Clear",
