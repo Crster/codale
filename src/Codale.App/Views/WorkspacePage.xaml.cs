@@ -2568,29 +2568,7 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
-    /// <summary>Shows or hides the filter box; hiding it drops the filter and brings the tree back.</summary>
-    private void OnFileSearchToggle(object sender, RoutedEventArgs e)
-    {
-        if (FileSearchToggle.IsChecked == true)
-        {
-            FileSearchBox.Visibility = Visibility.Visible;
-            FileSearchBox.Focus(FocusState.Programmatic);
-            FileSearchBox.SelectAll();
-        }
-        else
-        {
-            CloseFileSearch();
-        }
-    }
-
-    private void CloseFileSearch()
-    {
-        ViewModel.Files.SearchText = "";
-        FileSearchBox.Visibility = Visibility.Collapsed;
-        FileSearchToggle.IsChecked = false;
-    }
-
-    /// <summary>Escape clears the filter first, and closes the box when it is already empty.</summary>
+    /// <summary>Escape clears the filter and brings the tree back.</summary>
     private void OnFileSearchKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {
         if (e.Key != Windows.System.VirtualKey.Escape)
@@ -2599,15 +2577,7 @@ public sealed partial class WorkspacePage : Page
         }
 
         e.Handled = true;
-
-        if (ViewModel.Files.SearchText.Length > 0)
-        {
-            ViewModel.Files.SearchText = "";
-        }
-        else
-        {
-            CloseFileSearch();
-        }
+        ViewModel.Files.SearchText = "";
     }
 
     private void OnFileSearchHitClick(object sender, ItemClickEventArgs e)

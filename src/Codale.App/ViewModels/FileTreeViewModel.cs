@@ -349,9 +349,9 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
     private static List<(string Path, string Directory)> SearchDisk(
         IReadOnlyList<string> roots, string query, GitStatusMap? map, string? mapRoot, CancellationToken ct)
     {
-        var tokens = query.Replace('\\', '/').ToLowerInvariant()
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var whole = string.Join(' ', tokens);
+        // Spaces carry no meaning in a fuzzy pattern; the characters just have to follow in order.
+        var pattern = query.Replace('\\', '/').ToLowerInvariant().Replace(" ", "");
+        var whole = pattern;
         var matches = new List<(string Path, string Directory, bool NameHit)>();
         var options = new EnumerationOptions
         {
@@ -404,14 +404,14 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
 
                     var relative = Path.GetRelativePath(root, entry.FullName).Replace('\\', '/');
                     var lower = relative.ToLowerInvariant();
-                    if (!tokens.All(lower.Contains))
+                    if (!IsFuzzyMatch(lower, pattern))
                     {
                         continue;
                     }
 
                     var slash = relative.LastIndexOf('/');
                     var directory = slash > 0 ? relative[..slash] : "";
-                    matches.Add((entry.FullName, directory, entry.Name.Contains(whole, StringComparison.OrdinalIgnoreCase)));
+                    matches.Add((entry.FullName, directory, IsFuzzyMatch(entry.Name.ToLowerInvariant(), whole)));
                 }
             }
         }
@@ -423,6 +423,24 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
             .Take(MaxSearchResults)
             .Select(m => (m.Path, m.Directory))
             .ToList();
+    }
+
+    /// <summary>Sublime-style: every pattern character appears in the text, in order, not necessarily adjacent.</summary>
+    private static bool IsFuzzyMatch(string text, string pattern)
+    {
+        var at = 0;
+        foreach (var c in pattern)
+        {
+            at = text.IndexOf(c, at);
+            if (at < 0)
+            {
+                return false;
+            }
+
+            at++;
+        }
+
+        return true;
     }
 
     private static bool IsIgnoredDirectory(string fullPath, GitStatusMap? map, string? mapRoot)
