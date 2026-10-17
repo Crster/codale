@@ -7,18 +7,20 @@ namespace Codale.App.Services;
 /// <summary>
 /// Which of Codale's built-in MCP servers a project's agents get: a browser the agent
 /// can drive to test and verify what it built, and desktop control (screenshots, mouse,
-/// keyboard) for everything a browser cannot reach. The browser is a global preference
-/// that defaults on; desktop control acts on the real screen, so it is per project and
-/// defaults off. Like <see cref="CliEndpointSettings"/> the values are re-read on every
+/// keyboard) for everything a browser cannot reach, and an Android phone (adb) to build and
+/// test mobile apps on. The browser is a global preference that defaults on; desktop and
+/// phone control act on real hardware, so they are per project and default off. Like <see cref="CliEndpointSettings"/> the values are re-read on every
 /// access, so a toggle applies to the next session start.
 /// </summary>
 public sealed class McpServerSettings
 {
     public const string BrowserName = "codale-browser";
     public const string ComputerName = "codale-computer";
+    public const string PhoneName = "codale-phone";
 
     private const string BrowserKey = "mcp.browser.enabled";
     private const string ComputerKey = "mcp.computer.enabled";
+    private const string PhoneKey = "mcp.phone.enabled";
 
     private readonly CodaleStore _store;
     private readonly string _projectPath;
@@ -53,6 +55,15 @@ public sealed class McpServerSettings
         get => _store.GetUiState(_projectPath, ComputerKey) == "1";
         set => _store.SetUiState(_projectPath, ComputerKey, value ? "1" : "0");
     }
+
+    /// <summary>Off unless the user turned it on for this project: it acts on a real attached device.</summary>
+    public bool PhoneEnabled
+    {
+        get => _store.GetUiState(_projectPath, PhoneKey) == "1";
+        set => _store.SetUiState(_projectPath, PhoneKey, value ? "1" : "0");
+    }
+
+    public bool PhoneAvailable => File.Exists(ExePath("Codale.Mcp.Phone"));
 
     public bool BrowserAvailable => File.Exists(ExePath("Codale.Mcp.Browser"));
 
@@ -154,6 +165,22 @@ public sealed class McpServerSettings
             });
         }
 
+        if (PhoneEnabled && PhoneAvailable)
+        {
+            servers.Add(new McpServerSpec
+            {
+                Name = PhoneName,
+                Command = RunnablePath("Codale.Mcp.Phone"),
+                AutoApprove = true,
+
+                // Changing what is on the device, moving files and arbitrary shell commands still ask.
+                AskTools = ["phone_install", "phone_uninstall", "phone_clear_data", "phone_push", "phone_pull", "phone_shell", "phone_emulator_start"],
+
+                // phone_install, phone_push and phone_pull are confined to this folder and refuse without it.
+                Env = new Dictionary<string, string> { ["CODALE_PROJECT_DIR"] = _projectPath },
+            });
+        }
+
         return servers;
     }
 
@@ -251,6 +278,11 @@ public sealed class McpServerSettings
         if (servers.Any(s => s.Name == ComputerName))
         {
             parts.Add($"{ComputerName}: {McpInstructions.Computer}");
+        }
+
+        if (servers.Any(s => s.Name == PhoneName))
+        {
+            parts.Add($"{PhoneName}: {McpInstructions.Phone}");
         }
 
         if (parts.Count == 0)
@@ -625,6 +657,16 @@ public sealed class McpServerSettings
                 $"You can also see and control the user's Windows desktop with the {McpServerSpec.PrefixOf(ComputerName)}* tools, for what " +
                 "the browser tools cannot reach: native apps, installers, system dialogs, the running build of a desktop app. They act on the " +
                 "real screen, so take a computer_screenshot before every click (coordinates refer to the latest screenshot) and the user approves each action.");
+        }
+
+        if (servers.Any(s => s.Name == PhoneName))
+        {
+            parts.Add(
+                $"You can control an Android phone or emulator over adb with the {McpServerSpec.PrefixOf(PhoneName)}* tools, to build and test " +
+                "mobile apps. Call phone_devices first, and take a phone_screenshot or phone_ui_tree before every tap or swipe (coordinates are " +
+                "device pixels on the latest view). Build with the shell (e.g. gradlew installDebug; use start_task for long-running builds or " +
+                "dev servers), install with phone_install, start the app with phone_launch_app and read phone_logcat for crashes before you " +
+                "report the work as done. phone_port_forward (reverse) lets the phone reach a dev server on this computer.");
         }
 
         return parts.Count == 0 ? null : string.Join(' ', parts);

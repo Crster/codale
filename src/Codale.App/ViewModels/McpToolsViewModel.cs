@@ -125,18 +125,27 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(Summary))]
     public partial bool ComputerEnabled { get; set; }
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Summary))]
+    public partial bool PhoneEnabled { get; set; }
+
+    public bool PhoneAvailable => _settings.PhoneAvailable;
+
+    public string PhoneNote => PhoneAvailable
+        ? "Android device or emulator over adb"
+        : "Not installed with this build.";
+
     public bool BrowserAvailable => _settings.BrowserAvailable;
 
     public bool ComputerAvailable => _settings.ComputerAvailable;
 
     /// <summary>The status bar button's text: what the agents can reach.</summary>
-    public string Summary => (BrowserEnabled, ComputerEnabled) switch
+    public string Summary => string.Join(" + ", new[]
     {
-        (true, true) => "Browser + Desktop",
-        (true, false) => "Browser",
-        (false, true) => "Desktop",
-        _ => "",
-    };
+        BrowserEnabled ? "Browser" : null,
+        ComputerEnabled ? "Desktop" : null,
+        PhoneEnabled ? "Phone" : null,
+    }.OfType<string>());
 
     public string BrowserNote => BrowserAvailable
         ? "Open, click and screenshot pages"
@@ -193,6 +202,7 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
         _loading = true;
         BrowserEnabled = _settings.BrowserEnabled;
         ComputerEnabled = _settings.ComputerEnabled;
+        PhoneEnabled = _settings.PhoneEnabled;
         _loading = false;
     }
 
@@ -210,6 +220,15 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
         if (!_loading)
         {
             _settings.ComputerEnabled = value;
+            _settings.SyncWorkspaceMcpConfig();
+        }
+    }
+
+    partial void OnPhoneEnabledChanged(bool value)
+    {
+        if (!_loading)
+        {
+            _settings.PhoneEnabled = value;
             _settings.SyncWorkspaceMcpConfig();
         }
     }

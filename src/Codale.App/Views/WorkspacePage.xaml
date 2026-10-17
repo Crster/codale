@@ -2088,6 +2088,38 @@
                                             OffContent=""
                                             OnContent="" />
                                     </Grid>
+
+                                    <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                                    <!--  Android phone or emulator over adb  -->
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <FontIcon
+                                            VerticalAlignment="Center"
+                                            FontSize="18"
+                                            Glyph="&#xE8EA;"
+                                            Opacity="0.8" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="Phone (Android)" />
+                                            <TextBlock
+                                                FontSize="12"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Text="{x:Bind ViewModel.McpTools.PhoneNote}"
+                                                TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <ToggleSwitch
+                                            Grid.Column="2"
+                                            MinWidth="0"
+                                            VerticalAlignment="Center"
+                                            IsEnabled="{x:Bind ViewModel.McpTools.PhoneAvailable}"
+                                            IsOn="{x:Bind ViewModel.McpTools.PhoneEnabled, Mode=TwoWay}"
+                                            OffContent=""
+                                            OnContent="" />
+                                    </Grid>
                                 </StackPanel>
                             </Flyout>
                         </FlyoutBase.AttachedFlyout>

@@ -10,6 +10,7 @@
     <Project Path="src/Codale.Mcp.Browser/Codale.Mcp.Browser.csproj" />
     <Project Path="src/Codale.Mcp.Common/Codale.Mcp.Common.csproj" />
     <Project Path="src/Codale.Mcp.Computer/Codale.Mcp.Computer.csproj" />
+    <Project Path="src/Codale.Mcp.Phone/Codale.Mcp.Phone.csproj" />
     <Project Path="src/Codale.Mcp.Tasks/Codale.Mcp.Tasks.csproj" />
     <Project Path="src/Codale.Search/Codale.Search.csproj" />
     <Project Path="src/Codale.Storage/Codale.Storage.csproj" />

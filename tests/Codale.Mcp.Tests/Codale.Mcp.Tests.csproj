@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Codale.Core\Codale.Core.csproj" />
     <ProjectReference Include="..\..\src\Codale.Mcp.Common\Codale.Mcp.Common.csproj" />
+    <ProjectReference Include="..\..\src\Codale.Mcp.Phone\Codale.Mcp.Phone.csproj" />
     <ProjectReference Include="..\..\src\Codale.Mcp.Tasks\Codale.Mcp.Tasks.csproj" />
   </ItemGroup>
 

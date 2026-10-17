@@ -49,7 +49,7 @@ $certFriendlyName = "Codale Development"
 # Codale is deliberately multi-instance (one window per project), so this stops every
 # open window. They all lock the binaries the build is about to overwrite.
 Get-Process -Name "Codale.App" -ErrorAction SilentlyContinue | Stop-Process -Force
-foreach ($n in "Codale.Mcp.Browser", "Codale.Mcp.Computer", "Codale.Mcp.Tasks") {
+foreach ($n in "Codale.Mcp.Browser", "Codale.Mcp.Computer", "Codale.Mcp.Phone", "Codale.Mcp.Tasks") {
     Get-Process -Name $n -ErrorAction SilentlyContinue | Stop-Process -Force
 }
 
@@ -286,7 +286,7 @@ if ((Test-Path $shellExtProject) -and $vsMsBuild -and (Test-Path $vsMsBuild)) {
 
 # The built-in MCP servers (browser, desktop control) ship the same way: built first,
 # then packaged as folders beside the app exe.
-foreach ($mcp in "Codale.Mcp.Browser", "Codale.Mcp.Computer", "Codale.Mcp.Tasks") {
+foreach ($mcp in "Codale.Mcp.Browser", "Codale.Mcp.Computer", "Codale.Mcp.Phone", "Codale.Mcp.Tasks") {
     Write-Host "Building $mcp..."
     dotnet build (Join-Path $PSScriptRoot "src\$mcp\$mcp.csproj") -c $Configuration -v minimal --nologo
     if ($LASTEXITCODE -ne 0) {

@@ -117,7 +117,7 @@
                         Background="Transparent"
                         BorderBrush="Transparent"
                         Click="OnTitleBarBrowserClick"
-                        ToolTipService.ToolTip="Browser and desktop tools for the agent">
+                        ToolTipService.ToolTip="Browser, desktop and phone tools for the agent">
                         <FontIcon FontSize="14" Glyph="&#xE774;" />
                     </Button>
                 </StackPanel>

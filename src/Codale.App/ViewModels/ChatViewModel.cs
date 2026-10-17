@@ -1576,10 +1576,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         get
         {
+            // Ctrl+Enter raises the effort for the plan turn only: the chip keeps the pick.
+            var shownEffort = _planEffortRaised ? _planRestoreEffort : RequestedEffort;
             foreach (var tier in ModelTiers)
             {
                 var (model, effort) = TierConfig(tier);
-                if (string.Equals(model, RequestedModel, StringComparison.OrdinalIgnoreCase) && effort == RequestedEffort)
+                if (string.Equals(model, RequestedModel, StringComparison.OrdinalIgnoreCase) && effort == shownEffort)
                 {
                     return tier;
                 }

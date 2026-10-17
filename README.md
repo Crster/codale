@@ -84,7 +84,7 @@ When you launch an AI coding agent directly inside Codale's terminal drawer, Cod
 
 Rather than letting the CLI run as an isolated, uncoordinated process, Codale:
 1. **Spawns a Dedicated CLI Tab**: Elevates the launch into a managed CLI terminal tab.
-2. **Injects Codale MCP Servers Dynamically**: Attaches Codale's built-in MCP servers (`codale-tasks`, `codale-browser`, `codale-computer`) using command line flags or staged configuration files outside the repository, leaving your git working tree pristine.
+2. **Injects Codale MCP Servers Dynamically**: Attaches Codale's built-in MCP servers (`codale-tasks`, `codale-browser`, `codale-computer`, `codale-phone`) using command line flags or staged configuration files outside the repository, leaving your git working tree pristine.
 3. **Mirrors Tasks & Progress in the Session Panel**: Calls to `todos_set` and `artifact_add` are piped back to the main UI, keeping your checklist and deliverables synced.
 4. **Watches for User Confirmation**: Monitors the terminal output for interactive confirmation prompts (`(y/n)`, `Allow this action?`, permission requests) and notifies you when the agent is waiting for approval.
 
@@ -140,6 +140,12 @@ Provides headless and visible Chromium web automation powered by Playwright:
 Optional desktop automation for tasks requiring GUI interaction beyond web pages:
 - Captures desktop screenshots, tracks mouse coordinates, clicks, drags, scrolls, types text, and sends key combinations.
 - **Strict Approval Policy**: Desktop control actions require explicit user confirmation before executing on the host display.
+
+#### 4. `codale-phone`
+Optional Android device and emulator control over `adb` (found via `ANDROID_HOME` / `ANDROID_SDK_ROOT`, the default Android Studio SDK folder, or `PATH`), for building and testing mobile apps. Enabled per project from the Agent tools flyout:
+- Screenshots, a text UI tree, tap/swipe/type/key input, app launch/stop, logcat, and `adb reverse`/`forward` for dev servers.
+- Deployment: install an `.apk`, uninstall, clear app data, push/pull files, and start an emulator AVD. Builds run through the agent's shell (e.g. `gradlew installDebug`).
+- **Approval Policy**: viewing and input tools run unasked; install, uninstall, clear data, file transfer, `phone_shell` and emulator start still ask. File transfer is confined to the project directory (`CODALE_PROJECT_DIR`).
 
 ---
 
@@ -198,6 +204,7 @@ src/
   Codale.Mcp.Tasks/             codale-tasks MCP server (process management, todos, terminals, explore)
   Codale.Mcp.Browser/           codale-browser MCP server (Playwright Chromium browser automation)
   Codale.Mcp.Computer/          codale-computer MCP server (Windows desktop control)
+  Codale.Mcp.Phone/             codale-phone MCP server (Android device/emulator control over adb)
   Codale.Mcp.Common/            Shared MCP protocol definitions and JSON-RPC primitives
   Codale.Search/                Ripgrep wrapper, file indexing, and autonomous SearchAgentLoop
   Codale.Storage/               SQLite database engine (sessions, todos, artifacts, settings)
@@ -244,6 +251,7 @@ flowchart TD
         TasksMcp["codale-tasks"]
         BrowserMcp["codale-browser"]
         ComputerMcp["codale-computer"]
+        PhoneMcp["codale-phone"]
     end
 
     subgraph Agents ["AI Coding CLIs"]
@@ -260,6 +268,7 @@ flowchart TD
     Agents --> TasksMcp
     Agents --> BrowserMcp
     Agents --> ComputerMcp
+    Agents --> PhoneMcp
     TasksMcp -. "todos_set / artifacts" .-> ChatTab
 ```
 

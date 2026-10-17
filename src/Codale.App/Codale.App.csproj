@@ -72,6 +72,12 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content
+      Include="..\Codale.Mcp.Phone\bin\$(Configuration)\net10.0\**\*.*"
+      Condition="Exists('..\Codale.Mcp.Phone\bin\$(Configuration)\net10.0\Codale.Mcp.Phone.exe')">
+      <Link>Codale.Mcp.Phone\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content
       Include="..\Codale.Mcp.Tasks\bin\$(Configuration)\net10.0\**\*.*"
       Condition="Exists('..\Codale.Mcp.Tasks\bin\$(Configuration)\net10.0\Codale.Mcp.Tasks.exe')">
       <Link>Codale.Mcp.Tasks\%(RecursiveDir)%(Filename)%(Extension)</Link>

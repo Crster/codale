@@ -38,4 +38,11 @@ public static class McpInstructions
         "These tools see and control the user's Windows desktop, for what a browser cannot reach: native apps, installers, system " +
         "dialogs, the running build of a desktop app. They act on the real screen, so take a computer_screenshot before every click " +
         "(coordinates refer to the latest screenshot); the user approves each action.";
+
+    public const string Phone =
+        "These tools control an Android phone or emulator over adb, for building and testing mobile apps. Call phone_devices first. " +
+        "Take a phone_screenshot or phone_ui_tree before every tap or swipe (coordinates are device pixels on the latest view). " +
+        "Build with the shell (e.g. gradlew installDebug, flutter run via start_task), install with phone_install, start the app with " +
+        "phone_launch_app and check phone_logcat for crashes before you report the work as done. Use phone_port_forward (reverse) so the " +
+        "phone can reach a dev server on this computer. Installing, uninstalling, clearing data, file transfer, shell commands and starting an emulator ask the user first.";
 }
