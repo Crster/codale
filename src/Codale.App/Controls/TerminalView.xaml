@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <!--
   Codale's own native terminal control. The cell grid is drawn in Win2D on the
-  CanvasControl; the ScrollViewer above it exists only for its scrollbar - its
-  background is null, so pointer input falls through to the canvas everywhere
-  except on the bar itself. Parsing lives in Codale.Terminal's TerminalEmulator;
+  CanvasControl; the scrollbar is an OverlayScrollBar over it, so pointer input
+  reaches the canvas everywhere except on the bar itself. Parsing lives in Codale.Terminal's TerminalEmulator;
   this control turns its buffer into pixels and its keys into VT sequences.
 -->
 <UserControl
@@ -14,7 +13,7 @@
     IsTabStop="True"
     UseSystemFocusVisuals="False">
 
-    <Grid>
+    <Grid x:Name="RootGrid">
         <canvas:CanvasControl
             x:Name="Canvas"
             CreateResources="OnCreateResources"
@@ -36,16 +35,6 @@
             CreateResources="OnCaretCreateResources"
             Draw="OnCaretCanvasDraw" />
 
-        <ScrollViewer
-            x:Name="Scroller"
-            IsTabStop="False"
-            Background="{x:Null}"
-            HorizontalScrollBarVisibility="Disabled"
-            HorizontalScrollMode="Enabled"
-            VerticalScrollBarVisibility="Auto"
-            VerticalScrollMode="Enabled"
-            ViewChanged="OnViewChanged">
-            <Canvas x:Name="Extent" IsHitTestVisible="False" />
-        </ScrollViewer>
+        <!-- The scrollbar (OverlayScrollBar) is added to this grid in code, above the canvases. -->
     </Grid>
 </UserControl>

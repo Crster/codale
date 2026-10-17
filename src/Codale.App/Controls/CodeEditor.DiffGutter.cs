@@ -29,6 +29,8 @@ public sealed partial class CodeEditor
     public void SetDiffMarkers(IReadOnlyList<EditorDiffMarker> markers)
     {
         _diffMarkers = markers;
+        _marksDirty = true;
+        UpdateExtent();
         HideDiffPreview();
         Canvas.Invalidate();
     }

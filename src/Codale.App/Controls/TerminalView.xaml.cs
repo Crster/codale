@@ -108,8 +108,7 @@ public sealed partial class TerminalView : UserControl
     private bool _pinned = true;
     private int _topLine;
 
-    /// <summary>The scroller offset we last asked for, so ViewChanged can tell our own scrolls from the user's.</summary>
-    private double _expectedOffset = double.NaN;
+    private readonly OverlayScrollBar _bar = new(vertical: true);
 
     /// <summary>Fractional wheel notches (precision touchpads send small deltas).</summary>
     private double _wheelLines;
@@ -161,9 +160,12 @@ public sealed partial class TerminalView : UserControl
         };
         LosingFocus += OnTerminalLosingFocus;
 
-        // A ChangeView issued before the extent grew is clamped to the old extent;
-        // once layout catches up, re-issue it so the scrollbar lands where we meant.
-        Extent.SizeChanged += (_, _) => SyncScrollbar();
+        // The bar counts lines: it drags the viewport's top line directly, and the
+        // wheel over it scrolls the terminal like the wheel over the grid.
+        RootGrid.Children.Add(_bar);
+        _bar.ValueChanged += OnScrollBarValueChanged;
+        _bar.WheelScrolled += OnPointerWheelChanged;
+        Canvas.SizeChanged += (_, _) => SyncScrollbar();
 
         // Preview (tunnelling): the focus system consumes Tab and the arrows before a
         // bubbling KeyDown ever fires, which is what broke shell tab-completion.
@@ -961,64 +963,26 @@ public sealed partial class TerminalView : UserControl
     }
 
     /// <summary>
-    /// Mirrors the viewport onto the scrollbar. One scroll step is one line, so the
-    /// extent is exactly the scrollable lines plus one viewport - offset/lineHeight
-    /// is the top line, with no padding or remainder to round away.
+    /// Mirrors the viewport onto the scrollbar, in lines: the largest offset is the
+    /// scrollable line count and the viewport is the grid's rows, so the thumb's value
+    /// is the top line with no pixel remainder to round away. <paramref name="reveal"/>
+    /// flashes the bar for scrolls the user made; output scrolling stays quiet.
     /// </summary>
-    private void SyncScrollbar()
+    private void SyncScrollbar(bool reveal = false)
     {
-        EnsureMetrics();
-        var viewport = Canvas.ActualHeight;
-        if (viewport <= 0)
+        if (Canvas.ActualHeight <= 0)
         {
             return;
         }
 
-        // Every output chunk used to rewrite both extent properties unconditionally,
-        // invalidating ScrollViewer measure per chunk during bursts; during ordinary
-        // output neither value moves.
-        var extentWidth = Canvas.ActualWidth;
-        var extentHeight = MaxTopLine * _lineHeight + viewport;
-        if (Extent.Width != extentWidth)
-        {
-            Extent.Width = extentWidth;
-        }
-
-        if (Extent.Height != extentHeight)
-        {
-            Extent.Height = extentHeight;
-        }
-
-        var target = TopLine * _lineHeight;
-        if (Math.Abs(Scroller.VerticalOffset - target) > 0.5)
-        {
-            _expectedOffset = target;
-            Scroller.ChangeView(null, target, null, disableAnimation: true);
-        }
+        _bar.Update(TopLine, MaxTopLine, _emulator.Rows, reveal);
     }
 
-    private void OnViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
+    private void OnScrollBarValueChanged(object? sender, double value)
     {
-        var offset = Scroller.VerticalOffset;
-
-        // Our own ChangeView landing - the viewport is already where it should be.
-        if (Math.Abs(offset - _expectedOffset) < 0.5)
-        {
-            return;
-        }
-
-        // Our own ChangeView, clamped because layout has not grown the extent yet.
-        // Reading it as a user scroll would unpin the view one line short of the
-        // prompt; Extent.SizeChanged re-issues it once layout catches up.
-        if (_expectedOffset > Scroller.ScrollableHeight + 0.5)
-        {
-            return;
-        }
-
-        // Otherwise the user dragged the scrollbar.
-        _expectedOffset = double.NaN;
         var previous = TopLine;
-        SetTopLine((int)Math.Round(offset / _lineHeight));
+        SetTopLine((int)Math.Round(value));
+        SyncScrollbar();
         if (TopLine != previous)
         {
             InvalidateAll();
@@ -1047,7 +1011,7 @@ public sealed partial class TerminalView : UserControl
         if (lines != 0)
         {
             SetTopLine(TopLine - lines);
-            SyncScrollbar();
+            SyncScrollbar(reveal: true);
             InvalidateAll();
         }
 
@@ -1278,14 +1242,11 @@ public sealed partial class TerminalView : UserControl
     private void OnTerminalLosingFocus(UIElement sender, LosingFocusEventArgs args)
     {
         // WinUI 3 can attempt to shift or drop focus to null (unfocused) or to internal
-        // non-focusable/chrome children (the Win2D canvas or the scrollbar Scroller) during
-        // pointer release. Retain focus on this control unless focus is genuinely moving
-        // to an external element.
+        // non-focusable/chrome children (the Win2D canvas) during pointer release. Retain
+        // focus on this control unless focus is genuinely moving to an external element.
         if (args.NewFocusedElement is null ||
             ReferenceEquals(args.NewFocusedElement, Canvas) ||
-            ReferenceEquals(args.NewFocusedElement, CaretCanvas) ||
-            ReferenceEquals(args.NewFocusedElement, Scroller) ||
-            ReferenceEquals(args.NewFocusedElement, Extent))
+            ReferenceEquals(args.NewFocusedElement, CaretCanvas))
         {
             args.TryCancel();
         }

@@ -29,6 +29,34 @@
             Text="{x:Bind ViewModel.Message, Mode=OneWay}"
             Visibility="{x:Bind ViewModel.Message, Mode=OneWay, Converter={StaticResource NullToVisibility}}" />
 
+        <!--  The file could not be opened: a centered notice in the chat's empty-state style.  -->
+        <StackPanel
+            Grid.Row="1"
+            MaxWidth="420"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            IsHitTestVisible="False"
+            Spacing="6"
+            Visibility="{x:Bind ViewModel.LoadErrorTitle, Mode=OneWay, Converter={StaticResource NullToVisibility}}">
+            <FontIcon
+                HorizontalAlignment="Center"
+                FontSize="28"
+                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                Glyph="&#xE783;" />
+            <TextBlock
+                HorizontalAlignment="Center"
+                FontSize="14"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="{x:Bind ViewModel.LoadErrorTitle, Mode=OneWay}" />
+            <TextBlock
+                HorizontalAlignment="Center"
+                FontSize="12"
+                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                Text="{x:Bind ViewModel.LoadErrorDetail, Mode=OneWay}"
+                TextAlignment="Center"
+                TextWrapping="Wrap" />
+        </StackPanel>
+
         <Grid
             x:Name="EditorSurface"
             Grid.Row="1"

@@ -28,6 +28,13 @@ public sealed partial class EditorViewModel : ObservableObject
     [ObservableProperty]
     public partial string? Message { get; set; }
 
+    /// <summary>Headline of the centered notice shown when the file could not be opened; null otherwise.</summary>
+    [ObservableProperty]
+    public partial string? LoadErrorTitle { get; set; }
+
+    [ObservableProperty]
+    public partial string? LoadErrorDetail { get; set; }
+
     [ObservableProperty]
     public partial bool HasFile { get; set; }
 
@@ -182,6 +189,8 @@ public sealed partial class EditorViewModel : ObservableObject
         FilePath = null;
         FileName = null;
         Message = null;
+        LoadErrorTitle = null;
+        LoadErrorDetail = null;
         IsDirty = false;
         IsPreview = true;
         HasFile = false;
@@ -236,6 +245,8 @@ public sealed partial class EditorViewModel : ObservableObject
         FilePath = path;
         FileName = Path.GetFileName(path);
         Message = null;
+        LoadErrorTitle = null;
+        LoadErrorDetail = null;
         IsDirty = false;
         LoadedText = null;
         IsImage = false;
@@ -249,7 +260,8 @@ public sealed partial class EditorViewModel : ObservableObject
 
             if (!info.Exists)
             {
-                Message = "File not found.";
+                LoadErrorTitle = "File not found";
+                LoadErrorDetail = "It may have been moved, renamed or deleted.";
                 HasFile = false;
                 return;
             }
@@ -275,7 +287,8 @@ public sealed partial class EditorViewModel : ObservableObject
 
             if (info.Length > MaxEditBytes)
             {
-                Message = $"File is {info.Length / 1024 / 1024} MB; too large to edit.";
+                LoadErrorTitle = "File is too large";
+                LoadErrorDetail = $"This file is {info.Length / 1024 / 1024} MB; files over {MaxEditBytes / 1024 / 1024} MB can't be opened in the editor.";
                 HasFile = true;
                 CanEdit = false;
                 return;
@@ -312,7 +325,23 @@ public sealed partial class EditorViewModel : ObservableObject
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             CrashLog.Error("editor", $"load failed: {path}", ex);
-            Message = ex.Message;
+            // ERROR_SHARING_VIOLATION (32) and ERROR_LOCK_VIOLATION (33)
+            if (ex is IOException && (ex.HResult & 0xFFFF) is 32 or 33)
+            {
+                LoadErrorTitle = "File is locked";
+                LoadErrorDetail = "Another program is using this file. Close it there and try again.";
+            }
+            else if (ex is UnauthorizedAccessException)
+            {
+                LoadErrorTitle = "Access denied";
+                LoadErrorDetail = "You don't have permission to open this file.";
+            }
+            else
+            {
+                LoadErrorTitle = "Couldn't open file";
+                LoadErrorDetail = ex.Message;
+            }
+
             HasFile = false;
         }
     }

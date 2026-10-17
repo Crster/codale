@@ -83,6 +83,10 @@ public sealed partial class CodeEditor : UserControl
     private double _verticalOffset;
     private double _horizontalOffset;
 
+    private readonly ScrollModel _scroll = new();
+    private readonly OverlayScrollBar _vBar;
+    private readonly OverlayScrollBar _hBar;
+
 
     // Undo records edits as deltas (range, removed text, inserted text), so a step costs
     // what the edit touched rather than a copy of the whole file. Continuous typing
@@ -261,6 +265,16 @@ public sealed partial class CodeEditor : UserControl
     {
         InitializeComponent();
 
+        _vBar = new OverlayScrollBar(vertical: true);
+        _hBar = new OverlayScrollBar(vertical: false);
+        RootGrid.Children.Add(_vBar);
+        RootGrid.Children.Add(_hBar);
+        _vBar.ValueChanged += (_, value) => _scroll.ChangeView(null, value);
+        _hBar.ValueChanged += (_, value) => _scroll.ChangeView(value, null);
+        _vBar.WheelScrolled += OnPointerWheelChanged;
+        _hBar.WheelScrolled += OnPointerWheelChanged;
+        _scroll.Changed += OnViewChanged;
+
         RefreshThemeColors();
         ActualThemeChanged += (_, _) =>
         {
@@ -331,8 +345,14 @@ public sealed partial class CodeEditor : UserControl
     public double VerticalScroll => _verticalOffset;
 
     /// <summary>Scrolls so <paramref name="offset"/> dips of the buffer are at the top.</summary>
-    public void SetVerticalScroll(double offset) =>
-        Scroller.ChangeView(null, Math.Max(0, offset), null, disableAnimation: true);
+    public void SetVerticalScroll(double offset) => ScrollTo(null, Math.Max(0, offset));
+
+    /// <summary>Moves the view after bringing the extent up to date, so a jump past the old end is not clamped away.</summary>
+    private void ScrollTo(double? horizontal, double? vertical)
+    {
+        UpdateExtent();
+        _scroll.ChangeView(horizontal, vertical);
+    }
 
     /// <summary>The caret position: line 0-based, column 1-based.</summary>
     public EditorCursorPosition CursorPosition =>
@@ -492,7 +512,7 @@ public sealed partial class CodeEditor : UserControl
     {
         EnsureRowMap();
         var target = (RowOffsetOf(Math.Clamp(line, 0, _doc.LineCount - 1)) + 0.5) * _lineHeight - Canvas.ActualHeight / 2;
-        Scroller.ChangeView(null, Math.Max(0, target), null);
+        ScrollTo(null, Math.Max(0, target));
     }
 
     /// <summary>Moves the view so the caret's column is visible.</summary>
@@ -1058,22 +1078,97 @@ public sealed partial class CodeEditor : UserControl
         EnsureRowMap();
         var width = WordWrap ? 0 : TextX + _maxLineWidth + 60;
         var height = _totalRows * _lineHeight + 40;
-        Extent.Width = Math.Max(Canvas.ActualWidth, width);
-        Extent.Height = Math.Max(Canvas.ActualHeight, height);
+        var viewportWidth = Canvas.ActualWidth;
+        var viewportHeight = Canvas.ActualHeight;
+        _scroll.SetLayout(viewportWidth, viewportHeight, Math.Max(viewportWidth, width), Math.Max(viewportHeight, height));
+
+        if (_marksDirty || _marksRows != _totalRows)
+        {
+            RebuildScrollMarks();
+        }
     }
 
     // ------------------------------------------------------------------ scroll
 
-    private void OnViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
+    private void OnViewChanged()
     {
-        var changed = _verticalOffset != Scroller.VerticalOffset || _horizontalOffset != Scroller.HorizontalOffset;
-        _verticalOffset = Scroller.VerticalOffset;
-        _horizontalOffset = Scroller.HorizontalOffset;
+        var changed = _verticalOffset != _scroll.VerticalOffset || _horizontalOffset != _scroll.HorizontalOffset;
+        _verticalOffset = _scroll.VerticalOffset;
+        _horizontalOffset = _scroll.HorizontalOffset;
+        SyncScrollBars(reveal: changed);
         if (changed)
         {
             InvalidateAll();
             ScrollChanged?.Invoke(this, EventArgs.Empty);
         }
+    }
+
+    private void SyncScrollBars(bool reveal)
+    {
+        var hasHorizontal = _scroll.ScrollableWidth > 0.5;
+        _vBar.Margin = new Thickness(0, 0, 0, hasHorizontal ? OverlayScrollBar.Thickness : 0);
+        _vBar.Update(_scroll.VerticalOffset, _scroll.ScrollableHeight, _scroll.ViewportHeight, reveal);
+        _hBar.Margin = new Thickness(0, 0, _scroll.ScrollableHeight > 0.5 ? OverlayScrollBar.Thickness : 0, 0);
+        _hBar.Update(_scroll.HorizontalOffset, _scroll.ScrollableWidth, _scroll.ViewportWidth, reveal);
+    }
+
+    // ------------------------------------------------------------------ track marks
+
+    private bool _marksDirty = true;
+    private int _marksRows = -1;
+    private IReadOnlyList<(int StartLine, int EndLine)> _searchMarks = [];
+    private int _currentSearchMark = -1;
+
+    private static readonly Windows.UI.Color SearchMarkColor = Windows.UI.Color.FromArgb(0xC0, 0xE5, 0xB2, 0x3C);
+    private static readonly Windows.UI.Color CurrentSearchMarkColor = Windows.UI.Color.FromArgb(0xFF, 0xFF, 0x8C, 0x1A);
+
+    /// <summary>
+    /// Stripes the scrollbar track with where the search hit (0-based lines, inclusive
+    /// ranges) - the way to see all matches of a long file at once.
+    /// <paramref name="current"/> is the match the cursor is on, drawn brighter; -1 for none.
+    /// </summary>
+    public void SetSearchMarks(IReadOnlyList<(int StartLine, int EndLine)> spans, int current)
+    {
+        _searchMarks = spans;
+        _currentSearchMark = current;
+        _marksDirty = true;
+        UpdateExtent();
+    }
+
+    private void RebuildScrollMarks()
+    {
+        _marksDirty = false;
+        _marksRows = _totalRows;
+        var marks = new List<ScrollMark>(_diffMarkers.Count + _searchMarks.Count);
+        var lines = _doc.LineCount;
+        if (lines == 0 || _rowOffsets.Count < lines)
+        {
+            _vBar.Marks = marks;
+            return;
+        }
+
+        double RowOf(int line) => (double)(line >= lines ? _totalRows : _rowOffsets[Math.Max(0, line)]) / _totalRows;
+
+        foreach (var marker in _diffMarkers)
+        {
+            var start = Math.Clamp(marker.StartLine, 0, lines);
+            var end = marker.LineCount == 0 ? start : Math.Min(lines, start + marker.LineCount);
+            marks.Add(new ScrollMark(RowOf(start), RowOf(Math.Max(end, start)), DiffColor(marker.Kind), 0));
+        }
+
+        for (var i = 0; i < _searchMarks.Count; i++)
+        {
+            var (first, last) = _searchMarks[i];
+            first = Math.Clamp(first, 0, lines - 1);
+            last = Math.Clamp(Math.Max(first, last), 0, lines - 1);
+            marks.Add(new ScrollMark(
+                RowOf(first),
+                RowOf(last + 1),
+                i == _currentSearchMark ? CurrentSearchMarkColor : SearchMarkColor,
+                1));
+        }
+
+        _vBar.Marks = marks;
     }
 
     private void OnCanvasSizeChanged(object sender, SizeChangedEventArgs e)
@@ -1123,7 +1218,7 @@ public sealed partial class CodeEditor : UserControl
 
         if (targetVertical != _verticalOffset || targetHorizontal != _horizontalOffset)
         {
-            Scroller.ChangeView(targetHorizontal, targetVertical, null);
+            ScrollTo(targetHorizontal, targetVertical);
         }
     }
 
@@ -1239,9 +1334,7 @@ public sealed partial class CodeEditor : UserControl
     {
         if (args.NewFocusedElement is null ||
             ReferenceEquals(args.NewFocusedElement, Canvas) ||
-            ReferenceEquals(args.NewFocusedElement, CaretCanvas) ||
-            ReferenceEquals(args.NewFocusedElement, Scroller) ||
-            ReferenceEquals(args.NewFocusedElement, Extent))
+            ReferenceEquals(args.NewFocusedElement, CaretCanvas))
         {
             args.TryCancel();
         }
@@ -1315,14 +1408,7 @@ public sealed partial class CodeEditor : UserControl
             return;
         }
 
-        Scroller.ChangeView(targetH, targetV, null, disableAnimation: true);
-
-        // ChangeView applies asynchronously; extrapolate the offsets we just asked for so
-        // the caret follows without waiting a tick.
-        var savedV = _verticalOffset;
-        var savedH = _horizontalOffset;
-        _verticalOffset = Math.Min(targetV ?? savedV, Math.Max(0, Scroller.ScrollableHeight));
-        _horizontalOffset = Math.Min(targetH ?? savedH, Math.Max(0, Scroller.ScrollableWidth));
+        ScrollTo(targetH, targetV);
         _caret = PointToDocumentPosition(_dragPoint);
         InvalidateAll();
         RaiseSelectionChanged();
@@ -1352,12 +1438,12 @@ public sealed partial class CodeEditor : UserControl
 
         if (IsShiftDown())
         {
-            Scroller.ChangeView(Math.Max(0, _horizontalOffset - delta), null, null);
+            _scroll.ChangeView(_horizontalOffset - delta, null);
         }
         else
         {
             // Three lines per notch, the classic amount.
-            Scroller.ChangeView(null, Math.Max(0, _verticalOffset - delta * 3 * _lineHeight / 120), null);
+            _scroll.ChangeView(null, _verticalOffset - delta * 3 * _lineHeight / 120);
         }
 
         e.Handled = true;

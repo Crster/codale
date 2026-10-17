@@ -194,6 +194,7 @@ public sealed partial class EditorTab : UserControl
         _currentHighlight = spans.Count > 0 ? Math.Clamp(current, 0, spans.Count - 1) : -1;
         _targetColumn = column;
         _targetEndColumn = endColumn;
+        PushSearchMarks();
 
         _highlightLabel = status;
         HighlightStatus.Text = status;
@@ -216,9 +217,16 @@ public sealed partial class EditorTab : UserControl
         _highlights = [];
         _focusQuery = "";
         _currentHighlight = -1;
+        PushSearchMarks();
         HighlightLayer.Children.Clear();
         HighlightBar.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
     }
+
+    /// <summary>Mirrors the highlighted spans onto the editor's scrollbar track (spans are 1-based lines).</summary>
+    private void PushSearchMarks() =>
+        FileEditor.SetSearchMarks(
+            _highlights.Select(span => (Math.Max(0, span.Start - 1), Math.Max(0, span.End - 1))).ToList(),
+            _currentHighlight);
 
     /// <summary>
     /// Highlights what in this file relates to <paramref name="query"/>: the search's own
@@ -303,6 +311,7 @@ public sealed partial class EditorTab : UserControl
         }
 
         _currentHighlight = index;
+        PushSearchMarks();
         var line = Math.Clamp(_highlights[index].Start - 1, 0, Math.Max(0, FileEditor.NumberOfLines - 1));
 
         // Centre the span; the caret only follows on explicit navigation. Results

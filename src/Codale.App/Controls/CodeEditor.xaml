@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <!--
   Codale's own code editor control. The drawing happens in Win2D on the CanvasControl;
-  the ScrollViewer above it exists only for its scrollbars - its background is null, so
-  pointer input falls through to the canvas everywhere except on the bars themselves,
-  and the invisible extent canvas inside it just gives the bars something to size to.
+  scrolling is a ScrollModel (plain offsets) and the bars are OverlayScrollBars, so
+  pointer input reaches the canvas everywhere except on the bars themselves.
 -->
 <UserControl
     x:Class="Codale.App.Controls.CodeEditor"
@@ -36,17 +35,7 @@
             CreateResources="OnCaretCreateResources"
             Draw="OnCaretCanvasDraw" />
 
-        <ScrollViewer
-            x:Name="Scroller"
-            IsTabStop="False"
-            Background="{x:Null}"
-            HorizontalScrollBarVisibility="Auto"
-            HorizontalScrollMode="Enabled"
-            VerticalScrollBarVisibility="Auto"
-            VerticalScrollMode="Enabled"
-            ViewChanged="OnViewChanged">
-            <Canvas x:Name="Extent" IsHitTestVisible="False" />
-        </ScrollViewer>
+        <!-- The scrollbars (OverlayScrollBar) are added to this grid in code, above the canvases. -->
 
         <!-- Suggestions while typing; never takes focus, the editor keeps the keyboard. -->
         <Popup x:Name="CompletionPopup" IsLightDismissEnabled="False">
