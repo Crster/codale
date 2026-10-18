@@ -66,7 +66,8 @@ public sealed class LocalModelHost(string modelPath) : IDisposable
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            var executor = new StatelessExecutor(EnsureLoaded(), CreateParams());
+            var weights = await Task.Run(EnsureLoaded, ct).ConfigureAwait(false);
+            var executor = new StatelessExecutor(weights, CreateParams());
             var inference = new InferenceParams
             {
                 MaxTokens = maxTokens > 0 ? maxTokens : DefaultMaxTokens,
@@ -113,7 +114,11 @@ public sealed class LocalModelHost(string modelPath) : IDisposable
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            var executor = new StatelessExecutor(EnsureLoaded(), CreateParams(InlineContextSize));
+
+            // An uncontended gate finishes on the caller's thread, which for a keystroke is the UI:
+            // the weights load (seconds, the first time) must happen off it.
+            var weights = await Task.Run(EnsureLoaded, ct).ConfigureAwait(false);
+            var executor = new StatelessExecutor(weights, CreateParams(InlineContextSize));
             var inference = new InferenceParams
             {
                 MaxTokens = maxTokens,

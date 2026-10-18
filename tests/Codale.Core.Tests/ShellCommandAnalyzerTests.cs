@@ -53,4 +53,19 @@ public sealed class ShellCommandAnalyzerTests
     [Fact]
     public void A_long_chain_is_cut_short() =>
         Assert.Equal("a && b && c && d && e …", ShellCommandSummary.Summarize("a; b; c; d; e; f"));
+
+    [Theory]
+    [InlineData("tail -40 /c/Users/x/AppData/Local/Codale/session.log")]
+    [InlineData("sed -n 270,286p src/a.cs")]
+    [InlineData("Get-Content -Tail 20 C:\\log.txt")]
+    [InlineData("cat a.txt | sort | uniq -c")]
+    public void Everyday_tools_are_recognised(string command) =>
+        Assert.True(ShellCommandSummary.IsEveryday(command));
+
+    [Theory]
+    [InlineData("dotnet build src/App -p:Platform=x64")]
+    [InlineData("grep -n x a.cs && npm test")]
+    [InlineData("")]
+    public void Other_programs_are_not_everyday(string command) =>
+        Assert.False(ShellCommandSummary.IsEveryday(command));
 }

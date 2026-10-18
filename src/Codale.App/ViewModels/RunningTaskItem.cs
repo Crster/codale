@@ -2,6 +2,7 @@
 using System.Text;
 
 using Codale.Core.Agents;
+using Codale.Core.Shell;
 using Codale.Core.Tasks;
 
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -116,7 +117,10 @@ public sealed partial class RunningTaskItem : ObservableObject
 
     private const int MaxTipLines = 12;
 
-    /// <summary>The agent's short description when it gave one; else the title's first non-blank line, with an ellipsis when a multi-line script was cut.</summary>
+    /// <summary>
+    /// The agent's short description when it gave one; else a shell's command shortened as its chat
+    /// row is, or a subagent's first non-blank line with an ellipsis when more was cut.
+    /// </summary>
     public string DisplayTitle
     {
         get
@@ -124,6 +128,11 @@ public sealed partial class RunningTaskItem : ObservableObject
             if (Description.Length > 0)
             {
                 return Description;
+            }
+
+            if (IsShell && Title.Trim().Length > 0)
+            {
+                return ShellCommandSummary.Shorten(Title);
             }
 
             var lines = Title.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

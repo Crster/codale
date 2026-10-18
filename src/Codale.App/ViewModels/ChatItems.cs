@@ -1205,14 +1205,9 @@ public sealed partial class ToolCallItem : ChatItem
 
             if (IsShellTool && Command.Length > 0)
             {
-                // A chain or script reads as the programs it runs; the full text stays in the body.
-                if (ShellCommandAnalyzer.SplitSegments(Command).Count > 1)
-                {
-                    return ShellCommandSummary.Summarize(Command);
-                }
-
-                var first = Command.Trim().ReplaceLineEndings("\n").Split('\n')[0];
-                return first.Length > 140 ? first[..140] + "…" : first;
+                // The full text stays in the body.
+                var shown = ShellCommandSummary.Shorten(Command);
+                return shown.Length > 140 ? shown[..140] + "…" : shown;
             }
 
             return Summary == ToolName ? "" : Summary;

@@ -172,6 +172,64 @@ public static class ShellCommandSummary
 
     private static readonly Regex Assignment = new(@"^(\$env:)?[A-Za-z_][A-Za-z0-9_]*=", RegexOptions.Compiled);
 
+    /// <summary>
+    /// Everyday look-around and file tools: their arguments are paths and flags, so the program
+    /// name alone says what the row did, even when the command is not a chain.
+    /// </summary>
+    private static readonly HashSet<string> Vocabulary = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Reading
+        "cat", "head", "tail", "less", "more", "bat", "type", "nl", "od", "xxd", "hexdump", "strings",
+        // Searching
+        "grep", "egrep", "fgrep", "rg", "ag", "ack", "find", "fd", "locate", "which", "where", "whereis",
+        // Listing and inspecting
+        "ls", "dir", "tree", "pwd", "stat", "file", "du", "df", "wc", "realpath", "dirname", "basename", "readlink",
+        // Text processing
+        "sed", "awk", "gawk", "cut", "sort", "uniq", "tr", "paste", "join", "column", "fold", "rev", "tac",
+        "diff", "cmp", "comm", "jq", "yq", "xargs", "tee", "echo", "printf", "true", "false", "sleep",
+        // Files and folders
+        "cd", "pushd", "popd", "mkdir", "rmdir", "touch", "cp", "mv", "ln", "chmod", "chown",
+        "md5sum", "sha1sum", "sha256sum", "certutil",
+        // PowerShell
+        "Get-Content", "gc", "Select-String", "sls", "Get-ChildItem", "gci", "Get-Item", "gi", "Get-Location",
+        "Set-Location", "sl", "Test-Path", "Resolve-Path", "Split-Path", "Join-Path", "Get-Command", "gcm",
+        "Select-Object", "select", "Where-Object", "ForEach-Object", "foreach", "Measure-Object", "measure",
+        "Sort-Object", "Format-Table", "ft", "Format-List", "fl", "Out-String", "Write-Output", "Write-Host",
+        "Get-FileHash", "Get-Process", "gps", "New-Item", "ni", "Copy-Item", "cpi", "Move-Item", "mi",
+        "ConvertFrom-Json", "ConvertTo-Json",
+    };
+
+    /// <summary>
+    /// The short form a row shows: a chain, a script or an everyday tool reads as the programs it
+    /// runs (<see cref="Summarize"/>); anything else keeps its first line, since its arguments matter.
+    /// </summary>
+    public static string Shorten(string command)
+    {
+        if (ShellCommandAnalyzer.SplitSegments(command).Count > 1 || IsEveryday(command))
+        {
+            return Summarize(command);
+        }
+
+        return command.Trim().ReplaceLineEndings("\n").Split('\n')[0];
+    }
+
+    /// <summary>True when every program the command runs is in the everyday <see cref="Vocabulary"/>.</summary>
+    public static bool IsEveryday(string command)
+    {
+        var any = false;
+        foreach (var segment in ShellCommandAnalyzer.SplitSegments(command))
+        {
+            if (ProgramOf(segment) is not { Length: > 0 } program || !Vocabulary.Contains(program))
+            {
+                return false;
+            }
+
+            any = true;
+        }
+
+        return any;
+    }
+
     /// <summary>"cd x &amp;&amp; grep -n a b | head; dotnet build" reads "cd &amp;&amp; grep &amp;&amp; head &amp;&amp; dotnet".</summary>
     public static string Summarize(string command)
     {

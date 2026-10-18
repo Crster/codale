@@ -245,24 +245,45 @@ public static class AppSettings
         HelperApiProvider is { } found ? found.Endpoint : null;
 
     /// <summary>
-    /// What background jobs run on: "" for the Claude CLI, "Codex" for the Codex CLI, else
-    /// the name of a BYOK provider. Independent of the status bar's agent provider picker.
+    /// What background jobs run on: "" for the Claude CLI, "Codex" for the Codex CLI,
+    /// <see cref="LocalHelperProvider"/> for the in-process model, else the name of a BYOK provider.
+    /// Never picked, it is the local model when its file is present, else Claude.
+    /// Independent of the status bar's agent provider picker.
     /// </summary>
     public static string HelperProvider
     {
-        get => Read("helper.provider", "").Trim();
+        get
+        {
+            var stored = Read("helper.provider", "").Trim();
+            if (string.Equals(stored, ClaudeHelperProvider, StringComparison.OrdinalIgnoreCase))
+            {
+                return "";
+            }
+
+            if (stored.Length > 0)
+            {
+                return stored;
+            }
+
+            return HelperLocalModelPath.Length > 0 ? LocalHelperProvider : "";
+        }
         set
         {
+            // Claude is stored by name: an empty value would read back as "never picked".
             var clean = value?.Trim() ?? "";
-            if (HelperProvider == clean)
+            var stored = clean.Length == 0 ? ClaudeHelperProvider : clean;
+            if (string.Equals(Read("helper.provider", "").Trim(), stored, StringComparison.Ordinal))
             {
                 return;
             }
 
-            Write("helper.provider", clean);
+            Write("helper.provider", stored);
             OnChanged();
         }
     }
+
+    /// <summary>What <see cref="HelperProvider"/> stores for an explicit pick of the Claude CLI.</summary>
+    private const string ClaudeHelperProvider = "Claude";
 
     /// <summary>Background jobs run on the in-process fine-tuned model when <see cref="HelperProvider"/> is this.</summary>
     public const string LocalHelperProvider = "Local";
