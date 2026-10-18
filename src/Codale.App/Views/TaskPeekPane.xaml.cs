@@ -1,8 +1,9 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.RegularExpressions;
 
 using Codale.App.ViewModels;
 using Codale.Core.Agents;
+using Codale.Core.Shell;
 
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -46,6 +47,8 @@ public sealed partial class TaskPeekPane : UserControl
         KindIcon.Glyph = task.KindGlyph;
         TitleText.Text = task.DisplayTitle;
 
+        ShowDetails(task);
+
         LogScroll.Visibility = task.IsShell ? Visibility.Visible : Visibility.Collapsed;
         TranscriptScroll.Visibility = task.IsShell ? Visibility.Collapsed : Visibility.Visible;
         if (!task.IsShell)
@@ -65,6 +68,45 @@ public sealed partial class TaskPeekPane : UserControl
 
         Refresh(stickToEnd: true);
         StartTailing();
+    }
+
+    /// <summary>
+    /// Fills the Run / Description / Assessment block above a shell's output: the command as it was
+    /// issued, what the agent said it does (else the programs it runs), and the risk rules' verdict.
+    /// </summary>
+    private void ShowDetails(RunningTaskItem task)
+    {
+        var command = CommandOf(task);
+        DetailsPanel.Visibility = task.IsShell && command.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (DetailsPanel.Visibility == Visibility.Collapsed)
+        {
+            return;
+        }
+
+        TitleText.Text = ShellCommandSummary.Summarize(command);
+        RunText.Text = command;
+        DescriptionText.Text = task.Description.Length > 0
+            ? task.Description
+            : "Runs " + string.Join(", ", ShellCommandAnalyzer.SplitSegments(command).Select(s => ShellCommandSummary.Summarize(s)).Distinct());
+
+        var findings = ShellCommandAnalyzer.Analyze(command);
+        var risk = ShellCommandAnalyzer.Verdict(findings);
+        AssessmentText.Text = findings.Count == 0
+            ? "Safe"
+            : $"{risk} - {string.Join("; ", findings.Select(f => f.Reason).Distinct())}";
+        AssessmentText.Foreground = (Brush)Application.Current.Resources[risk switch
+        {
+            ShellRisk.Danger => "SystemFillColorCriticalBrush",
+            ShellRisk.Caution => "SystemFillColorCautionBrush",
+            _ => "SystemFillColorSuccessBrush",
+        }];
+    }
+
+    /// <summary>The command a shell task runs: its "$ " header lines, else its title.</summary>
+    private static string CommandOf(RunningTaskItem task)
+    {
+        var lines = task.Header.Split('\n').Where(l => l.StartsWith("$ ", StringComparison.Ordinal)).Select(l => l[2..]).ToList();
+        return lines.Count > 0 ? string.Join('\n', lines) : task.Title.Trim();
     }
 
     private void OnTranscriptChanged(object? sender, EventArgs e) => FollowTranscript();
@@ -197,7 +239,8 @@ public sealed partial class TaskPeekPane : UserControl
         var inlines = LogText.Inlines;
         inlines.Clear();
 
-        foreach (var line in task.Header.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        // A shell's command is in the details block above; the log is just its output.
+        foreach (var line in task.IsShell ? [] : task.Header.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             if (line.StartsWith("$ ", StringComparison.Ordinal))
             {
@@ -214,7 +257,7 @@ public sealed partial class TaskPeekPane : UserControl
             }
         }
 
-        if (task.Header.Length > 0)
+        if (task.Header.Length > 0 && !task.IsShell)
         {
             Add(inlines, new string('─', 24) + "\n", DimBrush);
         }

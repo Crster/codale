@@ -480,5 +480,7 @@ public sealed partial class CodeEditor
         {
             CloseCompletion();
         }
+
+        ScheduleGhost();
     }
 }

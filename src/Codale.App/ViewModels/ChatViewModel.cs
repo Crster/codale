@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
@@ -9,6 +9,7 @@ using Codale.Agents;
 using Codale.Agents.Claude;
 using Codale.App.Services;
 using Codale.Core.Agents;
+using Codale.Core.Shell;
 using Codale.Core.Features;
 using Codale.Core.Helper;
 using Codale.Core.Tasks;
@@ -582,6 +583,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 ToolUseId = started.ToolUseId,
                 Kind = RunningTaskKind.Shell,
                 Title = item.Command.Trim(),
+                Description = started.Input.ValueKind == JsonValueKind.Object
+                    && started.Input.TryGetProperty("description", out var shellDescription)
+                    && shellDescription.ValueKind == JsonValueKind.String
+                    ? shellDescription.GetString()!.Trim() : "",
                 StartedAt = started.Timestamp ?? DateTimeOffset.Now,
                 Header = RunningTaskItem.CommandHeader(item.Command),
             });
@@ -3190,6 +3195,30 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// The risk of the shell command an approval is for, with a one-line "why" for the card.
+    /// Anything that is not a shell command with a readable command line counts as <see cref="ShellRisk.Caution"/>,
+    /// so it is never auto-approved by mistake.
+    /// </summary>
+    private ShellRisk ShellApprovalRisk(ApprovalRequested approval, out string note)
+    {
+        note = "";
+        if (!ToolCallItem.IsShellName(approval.ToolName) ||
+            ToolCallItem.CommandInput(approval.ToolName, approval.Input) is not { Length: > 0 } command)
+        {
+            return ShellRisk.Caution;
+        }
+
+        var findings = ShellCommandAnalyzer.Analyze(command, WorktreePath ?? _projectPath);
+        var risk = ShellCommandAnalyzer.Verdict(findings);
+        if (findings.Count > 0)
+        {
+            note = $"{risk}: {string.Join("; ", findings.Select(f => f.Reason).Distinct())}";
+        }
+
+        return risk;
+    }
+
     private async Task HandleApprovalCoreAsync(ApprovalRequested approval)
     {
         // Codale's own sandboxed tools (explore, the task list...) are essential
@@ -3236,6 +3265,21 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             if (_session is { } searching)
             {
                 await searching.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
+            }
+
+            return;
+        }
+
+        // A shell command that trips no risk rule runs without asking; one that does is shown with
+        // why, so the reader decides it knowing what it touches.
+        var shellRisk = ShellApprovalRisk(approval, out var riskNote);
+        if (shellRisk == ShellRisk.Safe && AppSettings.AutoApproveSafeShell && PermissionMode != "plan")
+        {
+            CrashLog.Trace($"{ModeDisplay(PermissionMode)} mode: allowed safe {approval.ToolName} command unasked");
+
+            if (_session is { } running)
+            {
+                await running.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
             }
 
             return;
@@ -3302,6 +3346,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             ToolName = approval.ToolName,
             Input = approval.Input,
             IsPlan = string.Equals(approval.ToolName, "ExitPlanMode", StringComparison.Ordinal),
+            RiskNote = riskNote,
             Questions = ApprovalRequestItem.ParseQuestions(approval.Input),
             Suggestions = approval.Suggestions
                 .Select(s => new SuggestionOption { RequestId = approval.RequestId, Suggestion = s })

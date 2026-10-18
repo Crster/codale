@@ -159,11 +159,21 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _elapsedTimer;
 
+    // A task starting or finishing reorders the list: keep the running ones in view at the top.
+    private void OnSortedTasksChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (Session?.SortedTasks.FirstOrDefault() is { } first)
+        {
+            DispatcherQueue.TryEnqueue(() => RunningTasksList.ScrollIntoView(first, ScrollIntoViewAlignment.Leading));
+        }
+    }
+
     private void Attach(ChatViewModel session)
     {
         session.PropertyChanged += OnSessionPropertyChanged;
         session.Todos.CollectionChanged += OnSessionCollectionChanged;
         session.RunningTasks.CollectionChanged += OnSessionCollectionChanged;
+        session.SortedTasks.CollectionChanged += OnSortedTasksChanged;
         session.Artifacts.CollectionChanged += OnSessionCollectionChanged;
     }
 
@@ -172,6 +182,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         session.PropertyChanged -= OnSessionPropertyChanged;
         session.Todos.CollectionChanged -= OnSessionCollectionChanged;
         session.RunningTasks.CollectionChanged -= OnSessionCollectionChanged;
+        session.SortedTasks.CollectionChanged -= OnSortedTasksChanged;
         session.Artifacts.CollectionChanged -= OnSessionCollectionChanged;
     }
 

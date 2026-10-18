@@ -1,4 +1,4 @@
-using Codale.Agents.History;
+﻿using Codale.Agents.History;
 using Codale.Core.Features;
 using Codale.Core.Helper;
 using Codale.Core.Projects;
@@ -18,6 +18,7 @@ public sealed class FeatureService : IDisposable
     /// <summary>Up to this many features the router is shown them all; past it, the best matches.</summary>
     private const int ListAllUpTo = 12;
     private const int Candidates = 8;
+    private const int RecentCandidates = 3;
     private const int SeedFiles = 30;
 
     /// <summary>The whole brief - search and write-up - before the message goes out on the plain seed instead.</summary>
@@ -77,7 +78,15 @@ public sealed class FeatureService : IDisposable
             return all;
         }
 
-        var picked = _store.Search(message, Candidates).ToList();
+        // Ranked by how much of the message each feature accounts for, not by any one shared word;
+        // the most recently active features ride along, since the next prompt is usually about those.
+        var documents = _store.Documents();
+        var picked = FeatureMatcher.Rank(message, documents).Take(Candidates).Select(m => m.Feature).ToList();
+        foreach (var recent in all.Take(RecentCandidates).Where(r => picked.All(p => p.Id != r.Id)))
+        {
+            picked.Add(recent);
+        }
+
         if (currentId is not null && picked.All(f => f.Id != currentId) && all.FirstOrDefault(f => f.Id == currentId) is { } current)
         {
             picked.Add(current);
@@ -85,6 +94,9 @@ public sealed class FeatureService : IDisposable
 
         return picked;
     }
+
+    /// <summary>The feature a message is plainly about by its words, or null when none clearly is (see <see cref="FeatureMatcher.Confident"/>).</summary>
+    public FeatureInfo? ConfidentMatch(string message) => FeatureMatcher.Confident(message, _store.Documents());
 
     public FeatureInfo Create(string name, string description)
     {

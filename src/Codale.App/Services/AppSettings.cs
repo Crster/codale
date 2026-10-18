@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json;
 
 using Codale.Agents.Claude;
@@ -130,6 +130,13 @@ public static class AppSettings
         set => Set("editor.tabWidth", Math.Clamp(value, 1, 16), FormatInt);
     }
 
+    /// <summary>Whether a shell command that trips none of the risk rules runs without asking (Plan mode aside).</summary>
+    public static bool AutoApproveSafeShell
+    {
+        get => Get("shell.autoApproveSafe", () => ReadFlag("shell.autoApproveSafe", true));
+        set => Set("shell.autoApproveSafe", value, FormatFlag);
+    }
+
     /// <summary>Whether Claude sessions predict the next prompt and show it in the composer. Read when a session starts.</summary>
     public static bool SuggestNextPrompt
     {
@@ -255,6 +262,26 @@ public static class AppSettings
             Write("helper.provider", clean);
             OnChanged();
         }
+    }
+
+    /// <summary>Background jobs run on the in-process fine-tuned model when <see cref="HelperProvider"/> is this.</summary>
+    public const string LocalHelperProvider = "Local";
+
+    /// <summary>Where the fine-tuned model's GGUF is: the setting, else the training workspace's export when present.</summary>
+    public static string HelperLocalModelPath
+    {
+        get
+        {
+            var set = Read("helper.local.modelPath", "").Trim();
+            if (set.Length > 0)
+            {
+                return set;
+            }
+
+            const string workspaceExport = @"X:\CrsterSite\codale-llm\dist\Granite-Codale-3B-q4_k_m.gguf";
+            return File.Exists(workspaceExport) ? workspaceExport : "";
+        }
+        set => Write("helper.local.modelPath", value?.Trim() ?? "");
     }
 
     /// <summary>

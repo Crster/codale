@@ -10,6 +10,7 @@
     <PackageReference Include="TextMateSharp.Grammars" />
     <EmbeddedResource Include="Syntax\Bundled\*.tmLanguage.json" />
     <EmbeddedResource Include="Syntax\Bundled\catalog.json" />
+    <EmbeddedResource Include="Shell\shell_risk_rules.json" LogicalName="shell_risk_rules.json" />
   </ItemGroup>
 
 </Project>

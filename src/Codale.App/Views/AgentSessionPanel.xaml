@@ -783,6 +783,7 @@
                             </ToggleButton>
 
                             <ListView
+                                x:Name="RunningTasksList"
                                 Margin="14,2,0,4"
                                 MaxHeight="260"
                                 IsItemClickEnabled="True"

@@ -1,4 +1,4 @@
-using Codale.Agents;
+﻿using Codale.Agents;
 using Codale.Agents.Claude;
 using Codale.Agents.OpenAi;
 using Codale.App.Services;
@@ -391,6 +391,7 @@ public sealed partial class SettingsPanel : UserControl
 
             HelperProviderBox.Items.Add("Claude");
             HelperProviderBox.Items.Add("Codex");
+            HelperProviderBox.Items.Add(AppSettings.LocalHelperProvider);
 
             var named = _providers.Where(p => p.Name.Trim().Length > 0).ToList();
             foreach (var provider in named)

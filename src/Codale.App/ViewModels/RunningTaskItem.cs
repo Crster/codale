@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Text;
 
 using Codale.Core.Agents;
@@ -111,13 +111,21 @@ public sealed partial class RunningTaskItem : ObservableObject
     /// <summary>Command line or subagent description.</summary>
     public string Title { get; init; } = "";
 
+    /// <summary>What the agent said the command does (the Bash tool's "description"); empty when it gave none.</summary>
+    public string Description { get; init; } = "";
+
     private const int MaxTipLines = 12;
 
-    /// <summary>The title's first non-blank line, with an ellipsis when a multi-line script was cut.</summary>
+    /// <summary>The agent's short description when it gave one; else the title's first non-blank line, with an ellipsis when a multi-line script was cut.</summary>
     public string DisplayTitle
     {
         get
         {
+            if (Description.Length > 0)
+            {
+                return Description;
+            }
+
             var lines = Title.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             return lines.Length switch
             {

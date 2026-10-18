@@ -201,6 +201,7 @@
                         <StackPanel Spacing="6">
                             <TextBlock Style="{StaticResource CardCaption}" Text="RUNNING" />
                             <ListView
+                                x:Name="RunningTasksList"
                                 MaxHeight="220"
                                 IsItemClickEnabled="True"
                                 ItemClick="OnRunningTaskClick"

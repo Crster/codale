@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 
 using Codale.Core.Features;
 
@@ -147,6 +147,17 @@ public sealed class FeatureStore : IDisposable
                 "UPDATE features SET summary = $summary, summary_offset = $offset, log_bytes = coalesce($bytes, log_bytes) WHERE id = $id",
                 ("$id", id), ("$summary", summary), ("$offset", logOffset), ("$bytes", logBytes));
             RefreshSearch(id);
+        }
+    }
+
+    /// <summary>Every feature with the words it is found by, most recently active first.</summary>
+    public IReadOnlyList<FeatureDocument> Documents()
+    {
+        lock (_gate)
+        {
+            var tokens = Query("SELECT id, tokens FROM features_fts", r => (r.GetString(0), r.GetString(1)))
+                .ToDictionary(t => t.Item1, t => t.Item2);
+            return [.. Query($"{Select} ORDER BY updated_at DESC", Read).Select(f => new FeatureDocument(f, tokens.GetValueOrDefault(f.Id, "")))];
         }
     }
 

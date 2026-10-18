@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8" ?>
+﻿<?xml version="1.0" encoding="utf-8" ?>
 <UserControl
     x:Class="Codale.App.Views.TaskPeekPane"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -14,6 +14,7 @@
     <Grid Background="{ThemeResource SolidBackgroundFillColorBaseBrush}" RowSpacing="0">
         <Grid.RowDefinitions>
             <RowDefinition Height="40" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -75,10 +76,74 @@
                 ToolTipService.ToolTip="Close peek" />
         </Grid>
 
+        <!--  A shell task's facts above its output: the command (wrapped), what it does, and how risky it is.  -->
+        <Grid
+            x:Name="DetailsPanel"
+            Grid.Row="1"
+            Padding="12,8,12,8"
+            Background="#0C0C0C"
+            ColumnSpacing="10"
+            RowSpacing="4"
+            Visibility="Collapsed">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="#767676" Text="Run:" />
+            <TextBlock
+                x:Name="RunText"
+                Grid.Column="1"
+                FontFamily="Cascadia Mono, Consolas"
+                FontSize="12"
+                Foreground="#F2F2F2"
+                IsTextSelectionEnabled="True"
+                MaxHeight="140"
+                TextWrapping="Wrap" />
+            <TextBlock
+                Grid.Row="1"
+                FontSize="12"
+                FontWeight="SemiBold"
+                Foreground="#767676"
+                Text="Description:" />
+            <TextBlock
+                x:Name="DescriptionText"
+                Grid.Row="1"
+                Grid.Column="1"
+                FontSize="12"
+                Foreground="#CCCCCC"
+                IsTextSelectionEnabled="True"
+                TextWrapping="Wrap" />
+            <TextBlock
+                Grid.Row="2"
+                FontSize="12"
+                FontWeight="SemiBold"
+                Foreground="#767676"
+                Text="Assessment:" />
+            <TextBlock
+                x:Name="AssessmentText"
+                Grid.Row="2"
+                Grid.Column="1"
+                FontSize="12"
+                FontWeight="SemiBold"
+                TextWrapping="Wrap" />
+            <Rectangle
+                Grid.Row="2"
+                Grid.ColumnSpan="2"
+                Height="1"
+                Margin="0,0,0,-8"
+                VerticalAlignment="Bottom"
+                Fill="#333333" />
+        </Grid>
+
         <!--  A subagent reads as a transcript; only a shell's log is the black terminal panel.  -->
         <ScrollViewer
             x:Name="TranscriptScroll"
-            Grid.Row="1"
+            Grid.Row="2"
             HorizontalScrollBarVisibility="Disabled"
             VerticalScrollBarVisibility="Auto"
             Visibility="Collapsed">
@@ -87,7 +152,7 @@
 
         <ScrollViewer
             x:Name="LogScroll"
-            Grid.Row="1"
+            Grid.Row="2"
             Background="#0C0C0C"
             HorizontalScrollBarVisibility="Auto"
             VerticalScrollBarVisibility="Auto">

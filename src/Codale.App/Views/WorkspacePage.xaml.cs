@@ -3536,6 +3536,67 @@ public sealed partial class WorkspacePage : Page
                 return;
             }
         }
+
+        _ = SuggestShellCompletionAsync(sender, typed);
+    }
+
+    private CancellationTokenSource? _shellSuggestCts;
+
+    /// <summary>
+    /// With no history match, asks the local model to finish the command. Debounced, and a newer
+    /// keystroke cancels the older request; the suggestion lands as the same selected remainder
+    /// a history match uses, and only if the box still holds exactly what was asked about.
+    /// </summary>
+    private async Task SuggestShellCompletionAsync(AutoSuggestBox box, string typed)
+    {
+        _shellSuggestCts?.Cancel();
+        if (BackgroundHelper.Completions is not { } model)
+        {
+            return;
+        }
+
+        var cts = _shellSuggestCts = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(120, cts.Token);
+            var cwd = _terminalCwd;
+            var shell = Path.GetFileNameWithoutExtension(Codale.Terminal.TerminalSession.ResolveShell(AppSettings.TerminalShell));
+            var recent = _commandHistory.TakeLast(5).ToList();
+            var files = await Task.Run(() => ListShellFiles(cwd), cts.Token);
+            var rest = await model.CompleteShellAsync(shell, cwd, recent, files, typed, cts.Token);
+            if (rest.Length == 0 || cts.IsCancellationRequested || box.Text != typed)
+            {
+                return;
+            }
+
+            SetStatusBarCommandText(typed + rest);
+            if (FindTemplateChild(box, "TextBox") is TextBox inner)
+            {
+                inner.Select(typed.Length, rest.Length);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"Shell completion failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>Up to 40 names in the folder, for the model to complete paths against.</summary>
+    private static List<string> ListShellFiles(string cwd)
+    {
+        try
+        {
+            return Directory.Exists(cwd)
+                ? Directory.EnumerateFileSystemEntries(cwd).Select(Path.GetFileName).OfType<string>().Take(40).ToList()
+                : [];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
     }
 
     private void SetStatusBarCommandText(string text)
@@ -3597,10 +3658,38 @@ public sealed partial class WorkspacePage : Page
         return TryOpenCliTab($"{(powershell ? "PS " : "")}{_terminalCwd}> {command}", null);
     }
 
+    private async Task<bool> ConfirmRiskyCommandAsync(string command, IReadOnlyList<Codale.Core.Shell.ShellFinding> findings)
+    {
+        var level = Codale.Core.Shell.ShellCommandAnalyzer.Verdict(findings);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
+            Title = level == Codale.Core.Shell.ShellRisk.Danger ? "This command is dangerous" : "Run this command?",
+            Content = new TextBlock
+            {
+                TextWrapping = TextWrapping.Wrap,
+                Text = string.Join("\n", findings.Select(f => $"{f.Level}: {f.Reason}")) + $"\n\n{command}",
+            },
+            PrimaryButtonText = "Run anyway",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+        };
+
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
     private async Task ExecuteStatusBarCommandAsync(string rawCommand)
     {
         var command = rawCommand.Trim();
         if (string.IsNullOrWhiteSpace(command))
+        {
+            return;
+        }
+
+        // A command the risk rules flag waits for a yes; the text stays in the box if the answer is no.
+        var findings = Codale.Core.Shell.ShellCommandAnalyzer.Analyze(command, _terminalCwd);
+        if (findings.Count > 0 && !await ConfirmRiskyCommandAsync(command, findings))
         {
             return;
         }

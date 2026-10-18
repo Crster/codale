@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 
 using Codale.Agents.History;
 using Codale.App.Services;
@@ -79,10 +79,10 @@ public sealed partial class ChatViewModel
                 // whether an existing feature in this project matches the request before creating a new one.
                 if (FeatureId is null && IsRequest(text))
                 {
-                    var matches = features.Search(text, 1);
-                    if (matches.Count > 0)
+                    // Only a feature the request is plainly about: one shared word is not enough to file it there.
+                    if (features.ConfidentMatch(text) is { } match)
                     {
-                        return await SwitchFeatureAsync(matches[0], created: false);
+                        return await SwitchFeatureAsync(match, created: false);
                     }
 
                     var (started, isNew) = features.FindOrCreate(

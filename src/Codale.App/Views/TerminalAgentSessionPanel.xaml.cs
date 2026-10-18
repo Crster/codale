@@ -185,10 +185,20 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     private void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
+    // A task starting or finishing reorders the list: keep the running ones in view at the top.
+    private void OnSortedTasksChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (Session?.SortedTasks.FirstOrDefault() is { } first)
+        {
+            DispatcherQueue.TryEnqueue(() => RunningTasksList.ScrollIntoView(first, ScrollIntoViewAlignment.Leading));
+        }
+    }
+
     private void Attach(ChatViewModel session)
     {
         session.Todos.CollectionChanged += OnLiveChanged;
         session.RunningTasks.CollectionChanged += OnLiveChanged;
+        session.SortedTasks.CollectionChanged += OnSortedTasksChanged;
         session.Artifacts.CollectionChanged += OnLiveChanged;
         session.Status.Changes.CollectionChanged += OnLiveChanged;
         session.Status.PropertyChanged += OnStatusChanged;
@@ -198,6 +208,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
     {
         session.Todos.CollectionChanged -= OnLiveChanged;
         session.RunningTasks.CollectionChanged -= OnLiveChanged;
+        session.SortedTasks.CollectionChanged -= OnSortedTasksChanged;
         session.Artifacts.CollectionChanged -= OnLiveChanged;
         session.Status.Changes.CollectionChanged -= OnLiveChanged;
         session.Status.PropertyChanged -= OnStatusChanged;

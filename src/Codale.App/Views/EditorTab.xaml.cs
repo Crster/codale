@@ -66,6 +66,7 @@ public sealed partial class EditorTab : UserControl
         Unloaded += (_, _) => Codale.Core.Syntax.SyntaxService.Store.Changed -= OnSyntaxStoreChanged;
 
         BuildContextMenu();
+        FileEditor.FilePathProvider = () => ViewModel?.FilePath;
         FileEditor.SelectionChanged += OnEditorSelectionChanged;
         FileEditor.TextChanged += _ => OnEditorTextChanged();
         FileEditor.ZoomChanged += (_, _) => OnZoomChanged();

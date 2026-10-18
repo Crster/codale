@@ -958,7 +958,7 @@ public sealed partial class CodeEditor : UserControl
 
     private void OnCaretCanvasDraw(CanvasControl sender, CanvasDrawEventArgs args)
     {
-        if (FocusState == FocusState.Unfocused || !_caretVisible)
+        if (FocusState == FocusState.Unfocused)
         {
             return;
         }
@@ -976,7 +976,12 @@ public sealed partial class CodeEditor : UserControl
         var (caretRowInLine, caretColInRow) = Fold(TextDocument.ExpandedColFromRaw(rawLine, _caret.Col));
         var x = TextX + caretColInRow * _charWidth - _horizontalOffset;
         var y = (_rowOffsets[caretLine] + caretRowInLine) * _lineHeight - _verticalOffset + LineHighlightOffset;
-        args.DrawingSession.FillRectangle((float)x, (float)y, CaretWidth, (float)_lineHeight, _caretBrush!);
+        if (_caretVisible)
+        {
+            args.DrawingSession.FillRectangle((float)x, (float)y, CaretWidth, (float)_lineHeight, _caretBrush!);
+        }
+
+        DrawGhost(args.DrawingSession, x, y - LineHighlightOffset);
     }
 
     private void OnCanvasDraw(CanvasControl sender, CanvasDrawEventArgs args)
@@ -1514,6 +1519,24 @@ public sealed partial class CodeEditor : UserControl
 
     private void OnEditorKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (e.Key == VirtualKey.Tab && !CompletionOpen && AcceptGhost())
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key is (VirtualKey)0xDB or (VirtualKey)0xDD && IsCtrlDown() && IsShiftDown() && !CompletionOpen)
+        {
+            CycleGhost(e.Key == (VirtualKey)0xDD ? 1 : -1);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key is not (VirtualKey.Shift or VirtualKey.Control or VirtualKey.Menu))
+        {
+            ClearGhost();
+        }
+
         if (HandleCompletionKey(e))
         {
             e.Handled = true;

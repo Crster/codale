@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 
 namespace Codale.Core.Features;
 
@@ -18,6 +18,9 @@ public static class SearchText
         "when", "where", "which", "should", "would", "could", "need", "want", "make", "let", "lets", "get",
         "to", "of", "in", "is", "it", "on", "at", "as", "be", "by", "do", "if", "or", "so", "we", "an", "my", "me", "no",
     };
+
+    /// <summary>True for a word too common to say what a message is about ("please", "the").</summary>
+    public static bool IsStopWord(string token) => Stop.Contains(token);
 
     /// <summary>The tokens of <paramref name="text"/> in order: each word whole, then its camelCase / snake_case parts.</summary>
     public static IEnumerable<string> Tokens(string text)

@@ -495,3 +495,6 @@ tools/
 
 # ZCode local session data
 .zcode/
+
+# CUDA 13 runtime DLLs bundled by the build (tools/sync-cuda13.ps1)
+/third_party/

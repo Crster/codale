@@ -2,6 +2,15 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Codale.Core\Codale.Core.csproj" />
+    <PackageReference Include="LLamaSharp" />
+    <PackageReference Include="LLamaSharp.Backend.Cpu" />
+    <PackageReference Include="LLamaSharp.Backend.Cuda13" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The CUDA backend's ggml.dll needs a CPU backend beside it; the CUDA runtime DLLs come from third_party/cuda13 (tools/sync-cuda13.ps1) when present. -->
+    <None Include="$(NuGetPackageRoot)llamasharp.backend.cpu/0.30.0/LLamaSharpRuntimes/win-x64/native/avx2/ggml-cpu.dll" Link="runtimes/win-x64/native/cuda13/ggml-cpu.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../../third_party/cuda13/*.dll" Link="runtimes/win-x64/native/cuda13/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <PropertyGroup>

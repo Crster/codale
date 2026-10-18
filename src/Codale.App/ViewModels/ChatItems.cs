@@ -5,6 +5,7 @@ using System.Text.Json;
 
 using Codale.App.Services;
 using Codale.Core.Agents;
+using Codale.Core.Shell;
 using Codale.Git;
 
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -724,10 +725,13 @@ public sealed partial class ApprovalRequestItem : ObservableObject
 
     public bool IsGeneric => !IsAskUserQuestion && !IsPlan;
 
+    /// <summary>Why the shell command is not safe, from the risk rules ("Danger: deletes files outside the working directory"); empty when nothing matched.</summary>
+    public string RiskNote { get; init; } = "";
+
     /// <summary>The permission line: "Allow Bash to run?", "Allow Edit?".</summary>
     public string QuestionHeader => ToolKinds.Of(ToolName) switch
     {
-        ToolKind.Shell => $"Allow {ToolName} to run this command?",
+        ToolKind.Shell => $"Allow {ToolName} to run this command?" + (RiskNote.Length > 0 ? $"\n{RiskNote}" : ""),
         ToolKind.Edit => "Allow this edit?",
         ToolKind.Write => "Allow writing this file?",
         ToolKind.Web => $"Allow {ToolName}?",
@@ -1201,6 +1205,12 @@ public sealed partial class ToolCallItem : ChatItem
 
             if (IsShellTool && Command.Length > 0)
             {
+                // A chain or script reads as the programs it runs; the full text stays in the body.
+                if (ShellCommandAnalyzer.SplitSegments(Command).Count > 1)
+                {
+                    return ShellCommandSummary.Summarize(Command);
+                }
+
                 var first = Command.Trim().ReplaceLineEndings("\n").Split('\n')[0];
                 return first.Length > 140 ? first[..140] + "…" : first;
             }
