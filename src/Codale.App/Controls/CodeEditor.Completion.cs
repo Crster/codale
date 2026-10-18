@@ -438,13 +438,6 @@ public sealed partial class CodeEditor
     /// <summary>Gives the open list first refusal on a key. Returns true when the key was consumed.</summary>
     private bool HandleCompletionKey(KeyRoutedEventArgs e)
     {
-        var ctrl = IsCtrlDown();
-        if (e.Key == VirtualKey.Space && ctrl)
-        {
-            UpdateCompletion(manual: true);
-            return true;
-        }
-
         if (!CompletionOpen)
         {
             return false;
@@ -480,7 +473,5 @@ public sealed partial class CodeEditor
         {
             CloseCompletion();
         }
-
-        ScheduleGhost();
     }
 }

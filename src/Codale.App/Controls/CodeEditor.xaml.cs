@@ -1525,9 +1525,10 @@ public sealed partial class CodeEditor : UserControl
             return;
         }
 
-        if (e.Key is (VirtualKey)0xDB or (VirtualKey)0xDD && IsCtrlDown() && IsShiftDown() && !CompletionOpen)
+        if (e.Key == VirtualKey.Space && IsCtrlDown())
         {
-            CycleGhost(e.Key == (VirtualKey)0xDD ? 1 : -1);
+            CloseCompletion();
+            RequestGhost();
             e.Handled = true;
             return;
         }

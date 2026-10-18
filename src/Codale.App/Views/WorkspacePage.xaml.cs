@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 
@@ -3170,6 +3170,13 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>Ctrl+Enter in the message box commits, the way a chat draft sends.</summary>
+    private void OnGenerateCommitAccelerator(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+        Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        _ = ViewModel.Git.GenerateCommitMessageAsync();
+    }
+
     private void OnCommitAccelerator(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
         Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
     {
@@ -3457,17 +3464,19 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
-    private bool _skipInlineCompletion;
     private int _historyCursor = -1;
 
     private void OnStatusBarCommandBoxKeyDown(object sender, KeyRoutedEventArgs e)
     {
         switch (e.Key)
         {
-            case Windows.System.VirtualKey.Back:
-            case Windows.System.VirtualKey.Delete:
-                _skipInlineCompletion = true;
-                break;
+            case Windows.System.VirtualKey.Space
+                when Microsoft.UI.Input.InputKeyboardSource
+                    .GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control)
+                    .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down):
+                e.Handled = true;
+                _ = CycleShellSuggestionAsync();
+                return;
             case Windows.System.VirtualKey.Up:
             case Windows.System.VirtualKey.Down:
                 if (_commandHistory.Count > 0)
@@ -3506,74 +3515,93 @@ public sealed partial class WorkspacePage : Page
 
     private void OnStatusBarCommandBoxTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
-        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput)
+        if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
         {
-            return;
+            _historyCursor = -1;
         }
-
-        _historyCursor = -1;
-        var skip = _skipInlineCompletion;
-        _skipInlineCompletion = false;
-        var typed = sender.Text;
-        if (skip || typed.Length == 0)
-        {
-            return;
-        }
-
-        // Complete in place from the most recent matching history entry, leaving the
-        // untyped remainder selected so typing on replaces it and Right accepts it.
-        for (var i = _commandHistory.Count - 1; i >= 0; i--)
-        {
-            var entry = _commandHistory[i];
-            if (entry.Length > typed.Length && entry.StartsWith(typed, StringComparison.OrdinalIgnoreCase))
-            {
-                SetStatusBarCommandText(entry);
-                if (FindTemplateChild(sender, "TextBox") is TextBox inner)
-                {
-                    inner.Select(typed.Length, entry.Length - typed.Length);
-                }
-
-                return;
-            }
-        }
-
-        _ = SuggestShellCompletionAsync(sender, typed);
     }
 
     private CancellationTokenSource? _shellSuggestCts;
+    private string _shellTyped = "";
+    private string _shellCurrent = "";
+    private List<string> _shellCandidates = [];
+    private int _shellIndex;
+    private readonly List<string> _shellSeen = [];
 
     /// <summary>
-    /// With no history match, asks the local model to finish the command. Debounced, and a newer
-    /// keystroke cancels the older request; the suggestion lands as the same selected remainder
-    /// a history match uses, and only if the box still holds exactly what was asked about.
+    /// Ctrl+Space in the command box: completes what is typed from the newest matching history entry, then
+    /// older ones, then the helper model. Each press shows the next one as a selected remainder, so typing
+    /// on replaces it. A box that changed since the last suggestion starts over from what is there.
     /// </summary>
-    private async Task SuggestShellCompletionAsync(AutoSuggestBox box, string typed)
+    private async Task CycleShellSuggestionAsync()
+    {
+        var box = StatusBarCommandBox;
+        var text = box.Text;
+        if (text.Length == 0)
+        {
+            return;
+        }
+
+        if (text != _shellCurrent)
+        {
+            _shellTyped = text;
+            _shellIndex = -1;
+            _shellSeen.Clear();
+            _shellCandidates = _commandHistory
+                .AsEnumerable().Reverse()
+                .Where(h => h.Length > text.Length && h.StartsWith(text, StringComparison.OrdinalIgnoreCase))
+                .Distinct()
+                .ToList();
+        }
+
+        _shellIndex++;
+        if (_shellIndex < _shellCandidates.Count)
+        {
+            ShowShellSuggestion(box, _shellTyped, _shellCandidates[_shellIndex]);
+            return;
+        }
+
+        _shellIndex = _shellCandidates.Count - 1;
+        if (await SuggestShellCompletionAsync(box, _shellTyped) is { Length: > 0 } rest)
+        {
+            _shellSeen.Add(rest);
+            _shellIndex++;
+            _shellCandidates.Add(_shellTyped + rest);
+            ShowShellSuggestion(box, _shellTyped, _shellTyped + rest);
+        }
+    }
+
+    private void ShowShellSuggestion(AutoSuggestBox box, string typed, string full)
+    {
+        _shellCurrent = full;
+        SetStatusBarCommandText(full);
+        if (FindTemplateChild(box, "TextBox") is TextBox inner)
+        {
+            inner.Select(typed.Length, full.Length - typed.Length);
+        }
+    }
+
+    /// <summary>
+    /// Asks the helper model to finish the command, steering clear of earlier answers. A newer request
+    /// cancels an older one. Empty when there is nothing to add or the box no longer holds <paramref name="typed"/>.
+    /// </summary>
+    private async Task<string> SuggestShellCompletionAsync(AutoSuggestBox box, string typed)
     {
         _shellSuggestCts?.Cancel();
         if (BackgroundHelper.Completions is not { } model)
         {
-            return;
+            return "";
         }
 
         var cts = _shellSuggestCts = new CancellationTokenSource();
         try
         {
-            await Task.Delay(120, cts.Token);
             var cwd = _terminalCwd;
             var shell = Path.GetFileNameWithoutExtension(Codale.Terminal.TerminalSession.ResolveShell(AppSettings.TerminalShell));
             var recent = _commandHistory.TakeLast(5).ToList();
             var files = await Task.Run(() => ListShellFiles(cwd), cts.Token);
-            var rest = await model.CompleteShellAsync(shell, cwd, recent, files, typed, cts.Token);
-            if (rest.Length == 0 || cts.IsCancellationRequested || box.Text != typed)
-            {
-                return;
-            }
-
-            SetStatusBarCommandText(typed + rest);
-            if (FindTemplateChild(box, "TextBox") is TextBox inner)
-            {
-                inner.Select(typed.Length, rest.Length);
-            }
+            var rest = await model.CompleteShellAsync(shell, cwd, recent, files, typed, _shellSeen.ToList(), cts.Token);
+            return cts.IsCancellationRequested || (box.Text != typed && box.Text != _shellCurrent) ? "" : rest;
         }
         catch (OperationCanceledException)
         {
@@ -3582,8 +3610,9 @@ public sealed partial class WorkspacePage : Page
         {
             Trace.WriteLine($"Shell completion failed: {ex.Message}");
         }
-    }
 
+        return "";
+    }
     /// <summary>Up to 40 names in the folder, for the model to complete paths against.</summary>
     private static List<string> ListShellFiles(string cwd)
     {

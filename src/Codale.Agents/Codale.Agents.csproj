@@ -2,27 +2,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Codale.Core\Codale.Core.csproj" />
-    <PackageReference Include="LLamaSharp" />
-    <PackageReference Include="LLamaSharp.Backend.Cpu" />
-    <PackageReference Include="LLamaSharp.Backend.Cuda13.Windows" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- The CUDA backend's ggml.dll needs a CPU backend beside it; the CUDA runtime DLLs come from third_party/cuda13 (tools/sync-cuda13.ps1) when present. -->
-    <None Include="$(NuGetPackageRoot)llamasharp.backend.cpu/0.30.0/LLamaSharpRuntimes/win-x64/native/avx2/ggml-cpu.dll" Link="runtimes\win-x64\native\cuda13\ggml-cpu.dll" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="$(MSBuildThisFileDirectory)../../third_party/cuda13/*.dll" Link="runtimes\win-x64\native\cuda13\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <!--
-      LLamaSharp.Backend.*.props checks Exists('...\LLamaSharpRuntimes\$(RuntimeIdentifier)').
-      Without a default RuntimeIdentifier here, building Codale.App with -p:RuntimeIdentifier=win-x64
-      strips RuntimeIdentifier on the net10.0 ProjectReference (UndefineProperties), hitting the
-      fallback in LLamaSharp.Backend.*.props that expands <Link>runtimes\%(RecursiveDir)...</Link>
-      to "runtimes\\..." (with a double backslash), which MakeAppx rejects with 0x8007007b.
-    -->
-    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>

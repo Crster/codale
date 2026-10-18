@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 
@@ -39,8 +39,7 @@ public sealed class HelperModel(
     Func<string?>? provider = null,
     Func<string?>? codexModel = null,
     Func<HelperCliEndpoint?>? claudeEndpoint = null,
-    Func<HelperCliEndpoint?>? codexEndpoint = null,
-    Func<IHelperModel?>? local = null) : IHelperModel, IDisposable
+    Func<HelperCliEndpoint?>? codexEndpoint = null) : IHelperModel, IDisposable
 {
     /// <summary>The cheapest Claude model: these jobs are short and latency is what the user feels.</summary>
     public const string ClaudeModel = "haiku";
@@ -99,11 +98,7 @@ public sealed class HelperModel(
     private bool IsCodexSelected =>
         string.Equals(provider?.Invoke()?.Trim(), "codex", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>The in-process model when Settings picked it, else null.</summary>
-    private IHelperModel? Local => local?.Invoke();
-
     public bool IsAvailable =>
-        (Local is { } onDevice ? onDevice.IsAvailable : false) ||
         ApiEndpoint is not null ||
         (IsCodexSelected ? CodexInstalled : ClaudeInstalled);
 
@@ -115,11 +110,6 @@ public sealed class HelperModel(
 
     public async Task<string> CompleteAsync(string systemPrompt, string prompt, int maxTokens, CancellationToken ct = default)
     {
-        if (Local is { } onDevice)
-        {
-            return await onDevice.CompleteAsync(systemPrompt, prompt, maxTokens, ct).ConfigureAwait(false);
-        }
-
         if (ApiEndpoint is { } endpoint)
         {
             return ModelOutput.Clean(await OpenAiApiClient.CompleteAsync(endpoint, systemPrompt, prompt, ct, maxTokens, OnApiRequestServed).ConfigureAwait(false));
@@ -150,11 +140,6 @@ public sealed class HelperModel(
         IReadOnlyList<ToolDefinition> tools,
         CancellationToken ct = default)
     {
-        if (Local is { } onDevice)
-        {
-            return await onDevice.CallToolAsync(systemPrompt, conversation, tools, ct).ConfigureAwait(false);
-        }
-
         if (ApiEndpoint is { } endpoint)
         {
             return await OpenAiApiClient.CallToolAsync(endpoint, systemPrompt, conversation, tools, ct, OnApiRequestServed).ConfigureAwait(false);
@@ -201,11 +186,6 @@ public sealed class HelperModel(
         IReadOnlyList<ToolDefinition> tools,
         CancellationToken ct = default)
     {
-        if (Local is not null)
-        {
-            return await CallToolAsync(systemPrompt, conversation, tools, ct).ConfigureAwait(false) is { } one ? [one] : [];
-        }
-
         if (ApiEndpoint is { } endpoint)
         {
             return await OpenAiApiClient.CallToolsAsync(endpoint, systemPrompt, conversation, tools, ct, OnApiRequestServed).ConfigureAwait(false);
@@ -223,7 +203,7 @@ public sealed class HelperModel(
     public void Prewarm(string systemPrompt, IReadOnlyList<ToolDefinition> tools)
     {
         // An API call or Codex has no Claude process to prewarm.
-        if (Local is not null || ApiEndpoint is not null || IsCodexSelected)
+        if (ApiEndpoint is not null || IsCodexSelected)
         {
             return;
         }

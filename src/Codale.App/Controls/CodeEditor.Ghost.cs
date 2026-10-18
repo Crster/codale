@@ -8,21 +8,19 @@ using Microsoft.UI.Xaml;
 namespace Codale.App.Controls;
 
 /// <summary>
-/// Ghost text: after a typing pause the local model proposes the next few tokens, drawn dimmed after the
-/// caret. Tab accepts them; any other key, a click or a newer keystroke drops or replaces them.
-/// Only runs when Settings runs background jobs on the local model.
+/// Ghost text: Ctrl+Space asks the helper model for the rest of the line, drawn dimmed after the caret.
+/// Tab accepts it; Ctrl+Space again asks for a different one; any other key or a click drops it.
+/// Only runs when Settings runs background jobs on an API model.
 /// </summary>
 public sealed partial class CodeEditor
 {
-    private const int GhostDelayMs = 150;
     private const int GhostPrefixChars = 4500;
 
     private string _ghostText = "";
-    private string _ghostFull = "";
-    private List<int> _ghostStops = [];
-    private int _ghostStop;
     private DocumentPosition _ghostAt;
     private CancellationTokenSource? _ghostCts;
+    private readonly List<string> _ghostSeen = [];
+    private DocumentPosition _ghostSeenAt;
 
     /// <summary>Where the buffer's file lives, for the model's prompt; null for an unsaved buffer.</summary>
     public Func<string?>? FilePathProvider { get; set; }
@@ -32,8 +30,7 @@ public sealed partial class CodeEditor
     private void ClearGhost()
     {
         _ghostCts?.Cancel();
-        _ghostFull = "";
-        _ghostStops = [];
+        _ghostSeen.Clear();
         if (_ghostText.Length > 0)
         {
             _ghostText = "";
@@ -58,22 +55,25 @@ public sealed partial class CodeEditor
         return true;
     }
 
-    /// <summary>Starts a fresh request for the caret's position; call after the user typed.</summary>
-    private void ScheduleGhost()
+    /// <summary>Asks for a one-line proposal at the caret; asking again at the same spot asks for a different one.</summary>
+    private void RequestGhost()
     {
-        ClearGhost();
+        _ghostCts?.Cancel();
         if (_languageId is null || BackgroundHelper.Completions is not { } model || _anchor != _caret)
         {
             return;
         }
 
         var at = _caret;
-        var line = _doc.GetLine(at.Line);
-
-        // Mid-word suggestions fight the keyword popup; wait for the end of the line or a break.
-        if (at.Col < line.Length && !char.IsWhiteSpace(line[at.Col]) && !")]};,".Contains(line[at.Col]))
+        if (_ghostSeenAt != at)
         {
-            return;
+            _ghostSeen.Clear();
+            _ghostSeenAt = at;
+        }
+
+        if (GhostVisible)
+        {
+            _ghostSeen.Add(_ghostText);
         }
 
         var prefix = PrefixBefore(at);
@@ -90,21 +90,17 @@ public sealed partial class CodeEditor
     }
 
     private async Task RunGhostAsync(
-        Codale.Agents.Local.LocalHelperModel model, string name, string language, string prefix, DocumentPosition at, CancellationTokenSource cts)
+        Codale.Agents.Completion.InlineCompleter model, string name, string language, string prefix, DocumentPosition at, CancellationTokenSource cts)
     {
         try
         {
-            await Task.Delay(GhostDelayMs, cts.Token);
-            var text = await model.CompleteCodeAsync(name, language, prefix, cts.Token);
+            var text = await model.CompleteCodeAsync(name, language, prefix, _ghostSeen.ToList(), cts.Token);
             if (text.Length == 0 || cts.IsCancellationRequested || _caret != at)
             {
                 return;
             }
 
-            _ghostFull = text;
-            _ghostStops = FindGhostStops(text);
-            _ghostStop = 0;
-            _ghostText = text[.._ghostStops[0]];
+            _ghostText = text;
             _ghostAt = at;
             CaretCanvas.Invalidate();
         }
@@ -115,61 +111,6 @@ public sealed partial class CodeEditor
         {
             Trace.WriteLine($"Ghost text failed: {ex.Message}");
         }
-    }
-
-    /// <summary>
-    /// Offsets where the proposal should pause for the user: just after an opening quote or after a
-    /// bracket/comma that still has arguments to fill in. The last stop is the whole text.
-    /// </summary>
-    private static List<int> FindGhostStops(string text)
-    {
-        var stops = new List<int>();
-        char quote = '\0';
-        for (var i = 0; i < text.Length; i++)
-        {
-            var ch = text[i];
-            if (quote != '\0')
-            {
-                if (ch == '\\')
-                {
-                    i++;
-                }
-                else if (ch == quote)
-                {
-                    quote = '\0';
-                }
-            }
-            else if (ch is '"' or '\'')
-            {
-                quote = ch;
-                stops.Add(i + 1);
-            }
-            else if ((ch is '(' or '[' or ',') && i + 1 < text.Length && text[i + 1] is not (')' or ']'))
-            {
-                stops.Add(i + 1);
-            }
-        }
-
-        if (stops.Count == 0 || stops[^1] != text.Length)
-        {
-            stops.Add(text.Length);
-        }
-
-        return stops;
-    }
-
-    /// <summary>Ctrl+Shift+[ / ]: shows a proposal, or steps it back / forward through its pause points.</summary>
-    private void CycleGhost(int step)
-    {
-        if (!GhostVisible)
-        {
-            ScheduleGhost();
-            return;
-        }
-
-        _ghostStop = Math.Clamp(_ghostStop + step, 0, _ghostStops.Count - 1);
-        _ghostText = _ghostFull[.._ghostStops[_ghostStop]];
-        CaretCanvas.Invalidate();
     }
 
     /// <summary>The buffer's text before <paramref name="at"/>, at most <see cref="GhostPrefixChars"/> characters, whole lines where it can.</summary>

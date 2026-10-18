@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text.Json;
 
 using Codale.Agents.Claude;
@@ -246,8 +246,7 @@ public static class AppSettings
 
     /// <summary>
     /// What background jobs run on: "" for the Claude CLI, "Codex" for the Codex CLI,
-    /// <see cref="LocalHelperProvider"/> for the in-process model, else the name of a BYOK provider.
-    /// Never picked, it is the local model when its file is present, else Claude.
+    /// else the name of a BYOK provider. Never picked, it is Claude.
     /// Independent of the status bar's agent provider picker.
     /// </summary>
     public static string HelperProvider
@@ -260,12 +259,8 @@ public static class AppSettings
                 return "";
             }
 
-            if (stored.Length > 0)
-            {
-                return stored;
-            }
-
-            return HelperLocalModelPath.Length > 0 ? LocalHelperProvider : "";
+            // A "Local" pick from a build that ran a model in-process names no provider now; it falls back to Claude.
+            return string.Equals(stored, "Local", StringComparison.OrdinalIgnoreCase) ? "" : stored;
         }
         set
         {
@@ -284,26 +279,6 @@ public static class AppSettings
 
     /// <summary>What <see cref="HelperProvider"/> stores for an explicit pick of the Claude CLI.</summary>
     private const string ClaudeHelperProvider = "Claude";
-
-    /// <summary>Background jobs run on the in-process fine-tuned model when <see cref="HelperProvider"/> is this.</summary>
-    public const string LocalHelperProvider = "Local";
-
-    /// <summary>Where the fine-tuned model's GGUF is: the setting, else the training workspace's export when present.</summary>
-    public static string HelperLocalModelPath
-    {
-        get
-        {
-            var set = Read("helper.local.modelPath", "").Trim();
-            if (set.Length > 0)
-            {
-                return set;
-            }
-
-            const string workspaceExport = @"X:\CrsterSite\codale-llm\dist\Granite-Codale-3B-q4_k_m.gguf";
-            return File.Exists(workspaceExport) ? workspaceExport : "";
-        }
-        set => Write("helper.local.modelPath", value?.Trim() ?? "");
-    }
 
     /// <summary>
     /// The BYOK provider background jobs call: only the one named by <see cref="HelperProvider"/>,
