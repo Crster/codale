@@ -1,3 +1,4 @@
+using Codale.Core.Helper;
 using Codale.Core.Shell;
 
 namespace Codale.Core.Tests;
@@ -68,4 +69,75 @@ public sealed class ShellCommandAnalyzerTests
     [InlineData("")]
     public void Other_programs_are_not_everyday(string command) =>
         Assert.False(ShellCommandSummary.IsEveryday(command));
+
+    [Fact]
+    public void Baseline_intent_describes_what_the_command_does_instead_of_listing_programs()
+    {
+        var description = ShellCommandSummary.DescribeIntent(
+            "cd /x/CrsterSite/codale && grep -n \"ViewModel\" src/a.xaml.cs | head -3; dotnet build src/App -p:Platform=x64");
+
+        Assert.DoesNotContain("Runs ", description);
+        Assert.DoesNotContain("&&", description);
+        Assert.Contains("Search", description);
+        Assert.Contains("build", description, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Helper_model_describes_command_and_can_raise_risk_but_never_lower_deterministic_risk()
+    {
+        var dangerCall = ToolCall.FromJson("""
+            {
+              "tool": "assess_command",
+              "arguments": {
+                "description": "Delete the root filesystem recursively",
+                "risk": "safe",
+                "reason": "model mistakenly called it safe"
+              }
+            }
+            """)!;
+
+        var model = new StubHelperModel(dangerCall);
+        var assessment = await ShellCommandAnalyzer.AssessAsync(model, "rm -rf /", Cwd);
+
+        Assert.Equal("Delete the root filesystem recursively", assessment.Description);
+        Assert.Equal(ShellRisk.Danger, assessment.Risk);
+        Assert.Contains("deletes files outside the working directory", assessment.Reason);
+    }
+
+    [Fact]
+    public async Task Helper_model_can_raise_safe_command_to_caution_with_explanation()
+    {
+        var cautionCall = ToolCall.FromJson("""
+            {
+              "tool": "assess_command",
+              "arguments": {
+                "description": "Run custom cleanup script that purges local cache files",
+                "risk": "caution",
+                "reason": "modifies local cache state"
+              }
+            }
+            """)!;
+
+        var model = new StubHelperModel(cautionCall);
+        var assessment = await ShellCommandAnalyzer.AssessAsync(model, "python scripts/cleanup_cache.py", Cwd);
+
+        Assert.Equal("Run custom cleanup script that purges local cache files", assessment.Description);
+        Assert.Equal(ShellRisk.Caution, assessment.Risk);
+        Assert.Equal("modifies local cache state", assessment.Reason);
+    }
+
+    private sealed class StubHelperModel(ToolCall? reply) : IHelperModel
+    {
+        public bool IsAvailable => true;
+
+        public Task<string> CompleteAsync(string systemPrompt, string prompt, CancellationToken ct = default) =>
+            Task.FromResult("");
+
+        public Task<ToolCall?> CallToolAsync(
+            string systemPrompt,
+            string conversation,
+            IReadOnlyList<ToolDefinition> tools,
+            CancellationToken ct = default) =>
+            Task.FromResult(reply);
+    }
 }

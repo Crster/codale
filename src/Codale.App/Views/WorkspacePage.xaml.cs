@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 
@@ -3689,23 +3689,87 @@ public sealed partial class WorkspacePage : Page
 
     private async Task<bool> ConfirmRiskyCommandAsync(string command, IReadOnlyList<Codale.Core.Shell.ShellFinding> findings)
     {
-        var level = Codale.Core.Shell.ShellCommandAnalyzer.Verdict(findings);
+        var assessment = Codale.Core.Shell.ShellCommandAnalyzer.Assess(command, _terminalCwd);
+        var descriptionBlock = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Text = assessment.Description,
+        };
+        var safetyBlock = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Text = $"Safety: {assessment.FormatAssessment()}",
+            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[assessment.Risk switch
+            {
+                Codale.Core.Shell.ShellRisk.Danger => "SystemFillColorCriticalBrush",
+                Codale.Core.Shell.ShellRisk.Caution => "SystemFillColorCautionBrush",
+                _ => "SystemFillColorSuccessBrush",
+            }],
+        };
+        var commandBlock = new TextBlock
+        {
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Mono, Consolas"),
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+            Text = command,
+        };
+
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(descriptionBlock);
+        panel.Children.Add(safetyBlock);
+        panel.Children.Add(commandBlock);
+
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
             RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
-            Title = level == Codale.Core.Shell.ShellRisk.Danger ? "This command is dangerous" : "Run this command?",
-            Content = new TextBlock
-            {
-                TextWrapping = TextWrapping.Wrap,
-                Text = string.Join("\n", findings.Select(f => $"{f.Level}: {f.Reason}")) + $"\n\n{command}",
-            },
+            Title = assessment.Risk == Codale.Core.Shell.ShellRisk.Danger ? "This command is dangerous" : "Run this command?",
+            Content = panel,
             PrimaryButtonText = "Run anyway",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
         };
 
+        if (ViewModel?.Helper is { IsAvailable: true } model)
+        {
+            _ = RefineRiskyCommandDialogAsync(model, command, dialog, descriptionBlock, safetyBlock);
+        }
+
         return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
+    private async Task RefineRiskyCommandDialogAsync(
+        Codale.Core.Helper.IHelperModel model,
+        string command,
+        ContentDialog dialog,
+        TextBlock descriptionBlock,
+        TextBlock safetyBlock)
+    {
+        try
+        {
+            var assessment = await Codale.Core.Shell.ShellCommandAnalyzer.AssessAsync(model, command, _terminalCwd).ConfigureAwait(false);
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (assessment.Description.Length > 0)
+                {
+                    descriptionBlock.Text = assessment.Description;
+                }
+
+                dialog.Title = assessment.Risk == Codale.Core.Shell.ShellRisk.Danger ? "This command is dangerous" : "Run this command?";
+                safetyBlock.Text = $"Safety: {assessment.FormatAssessment()}";
+                safetyBlock.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[assessment.Risk switch
+                {
+                    Codale.Core.Shell.ShellRisk.Danger => "SystemFillColorCriticalBrush",
+                    Codale.Core.Shell.ShellRisk.Caution => "SystemFillColorCautionBrush",
+                    _ => "SystemFillColorSuccessBrush",
+                }];
+            });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Debug("shell", $"risky command dialog assessment failed: {ex.Message}");
+        }
     }
 
     private async Task ExecuteStatusBarCommandAsync(string rawCommand)

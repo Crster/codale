@@ -21,6 +21,7 @@
         <views:CountToInverseVisibilityConverter x:Key="CountToInverseVisibility" />
         <views:AnyToVisibilityConverter x:Key="AnyToVisibility" />
         <views:ToolStatusBrushConverter x:Key="ToolBrush" />
+        <views:ShellRiskBrushConverter x:Key="ShellRiskBrush" />
         <views:ToolKindGlyphConverter x:Key="ToolKindGlyph" />
         <views:ToolKindBrushConverter x:Key="ToolKindBrush" />
         <views:ToolKindTintConverter x:Key="ToolKindTint" />
@@ -639,13 +640,30 @@
                                 FontSize="{x:Bind S14, Mode=OneWay}"
                                 Foreground="{StaticResource StatusWarnBrush}"
                                 Glyph="&#xE83D;" />
-                            <TextBlock
-                                FontFamily="Cascadia Mono, Consolas"
+                            <StackPanel
                                 Grid.Column="1"
                                 VerticalAlignment="Center"
-                                FontWeight="SemiBold"
-                                Text="{x:Bind Approval.QuestionHeader, Mode=OneWay}"
-                                TextWrapping="Wrap" />
+                                Spacing="2">
+                                <TextBlock
+                                    FontFamily="Cascadia Mono, Consolas"
+                                    FontWeight="SemiBold"
+                                    Text="{x:Bind Approval.QuestionHeader, Mode=OneWay}"
+                                    TextWrapping="Wrap" />
+                                <TextBlock
+                                    FontSize="{x:Bind S12, Mode=OneWay}"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="{x:Bind Approval.Description, Mode=OneWay}"
+                                    TextWrapping="Wrap"
+                                    Visibility="{x:Bind Approval.HasDescription, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                <TextBlock
+                                    FontFamily="Cascadia Mono, Consolas"
+                                    FontSize="{x:Bind S11_5, Mode=OneWay}"
+                                    FontWeight="SemiBold"
+                                    Foreground="{x:Bind Approval.Risk, Mode=OneWay, Converter={StaticResource ShellRiskBrush}}"
+                                    Text="{x:Bind Approval.SafetySummary, Mode=OneWay}"
+                                    TextWrapping="Wrap"
+                                    Visibility="{x:Bind Approval.HasRiskNote, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                            </StackPanel>
                             <StackPanel
                                 Grid.Column="2"
                                 Orientation="Horizontal"

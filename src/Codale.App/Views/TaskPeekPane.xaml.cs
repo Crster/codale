@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 
 using Codale.App.ViewModels;
@@ -72,41 +72,32 @@ public sealed partial class TaskPeekPane : UserControl
 
     /// <summary>
     /// Fills the Run / Description / Assessment block above a shell's output: the command as it was
-    /// issued, what the agent said it does (else the programs it runs), and the risk rules' verdict.
+    /// issued, what the AI or agent said it does, and its safety rating.
     /// </summary>
     private void ShowDetails(RunningTaskItem task)
     {
-        var command = CommandOf(task);
+        var command = task.CommandOf();
         DetailsPanel.Visibility = task.IsShell && command.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (DetailsPanel.Visibility == Visibility.Collapsed)
         {
             return;
         }
 
-        TitleText.Text = ShellCommandSummary.Summarize(command);
-        RunText.Text = command;
-        DescriptionText.Text = task.Description.Length > 0
-            ? task.Description
-            : "Runs " + string.Join(", ", ShellCommandAnalyzer.SplitSegments(command).Select(s => ShellCommandSummary.Summarize(s)).Distinct());
+        var baseline = ShellCommandAnalyzer.Assess(command, hint: task.Description);
+        var description = task.Description.Length > 0 ? task.Description : baseline.Description;
+        var risk = (ShellRisk)Math.Max((int)baseline.Risk, (int)task.Risk);
+        var reason = task.RiskReason.Length > 0 ? task.RiskReason : baseline.Reason;
 
-        var findings = ShellCommandAnalyzer.Analyze(command);
-        var risk = ShellCommandAnalyzer.Verdict(findings);
-        AssessmentText.Text = findings.Count == 0
-            ? "Safe"
-            : $"{risk} - {string.Join("; ", findings.Select(f => f.Reason).Distinct())}";
+        TitleText.Text = description.Length > 0 ? description : task.DisplayTitle;
+        RunText.Text = command;
+        DescriptionText.Text = description;
+        AssessmentText.Text = reason.Length > 0 ? $"{risk} - {reason}" : risk.ToString();
         AssessmentText.Foreground = (Brush)Application.Current.Resources[risk switch
         {
             ShellRisk.Danger => "SystemFillColorCriticalBrush",
             ShellRisk.Caution => "SystemFillColorCautionBrush",
             _ => "SystemFillColorSuccessBrush",
         }];
-    }
-
-    /// <summary>The command a shell task runs: its "$ " header lines, else its title.</summary>
-    private static string CommandOf(RunningTaskItem task)
-    {
-        var lines = task.Header.Split('\n').Where(l => l.StartsWith("$ ", StringComparison.Ordinal)).Select(l => l[2..]).ToList();
-        return lines.Count > 0 ? string.Join('\n', lines) : task.Title.Trim();
     }
 
     private void OnTranscriptChanged(object? sender, EventArgs e) => FollowTranscript();
@@ -168,9 +159,27 @@ public sealed partial class TaskPeekPane : UserControl
                 case nameof(RunningTaskItem.OutputPath):
                     StartTailing();
                     break;
-                case nameof(RunningTaskItem.Output):
                 case nameof(RunningTaskItem.Header):
+                    if (_task is not null)
+                    {
+                        ShowDetails(_task);
+                    }
+
                     Refresh(stickToEnd: false);
+                    break;
+                case nameof(RunningTaskItem.Output):
+                    Refresh(stickToEnd: false);
+                    break;
+                case nameof(RunningTaskItem.Description):
+                case nameof(RunningTaskItem.Risk):
+                case nameof(RunningTaskItem.RiskReason):
+                case nameof(RunningTaskItem.DisplayTitle):
+                    if (_task is not null)
+                    {
+                        TitleText.Text = _task.DisplayTitle;
+                        ShowDetails(_task);
+                    }
+
                     break;
                 case nameof(RunningTaskItem.Status):
                 case nameof(RunningTaskItem.CanStop):

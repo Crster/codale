@@ -1,5 +1,6 @@
 using Codale.App.ViewModels;
 using Codale.Core.Agents;
+using Codale.Core.Shell;
 using Codale.Git;
 
 using Microsoft.UI;
@@ -193,6 +194,20 @@ public sealed partial class ToolStatusBrushConverter : IValueConverter
         ToolCallStatus.Failed => Palette.Get("StatusFailedBrush"),
         ToolCallStatus.Denied or ToolCallStatus.AwaitingApproval => Palette.Get("StatusWarnBrush"),
         _ => Palette.Get("StatusRunningBrush"),
+    };
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>Safety rating hue for a shell command: green for Safe, amber for Caution, red for Danger.</summary>
+public sealed partial class ShellRiskBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language) => value switch
+    {
+        ShellRisk.Danger => Palette.Get("StatusFailedBrush"),
+        ShellRisk.Caution => Palette.Get("StatusWarnBrush"),
+        _ => Palette.Get("StatusSuccessBrush"),
     };
 
     public object ConvertBack(object value, Type targetType, object parameter, string language) =>

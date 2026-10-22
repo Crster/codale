@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Text;
 
 using Codale.Core.Agents;
@@ -112,14 +112,29 @@ public sealed partial class RunningTaskItem : ObservableObject
     /// <summary>Command line or subagent description.</summary>
     public string Title { get; init; } = "";
 
-    /// <summary>What the agent said the command does (the Bash tool's "description"); empty when it gave none.</summary>
-    public string Description { get; init; } = "";
+    /// <summary>What the command does: from the agent or the helper model; empty when none has arrived yet.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayTitle))]
+    public partial string Description { get; set; } = "";
+
+    /// <summary>Safety rating of a shell command (<see cref="ShellRisk.Safe"/>, <see cref="ShellRisk.Caution"/>, <see cref="ShellRisk.Danger"/>).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AssessmentText))]
+    public partial ShellRisk Risk { get; set; } = ShellRisk.Safe;
+
+    /// <summary>Why the shell command has its <see cref="Risk"/> rating.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AssessmentText))]
+    public partial string RiskReason { get; set; } = "";
+
+    /// <summary>Formatted safety rating and explanation for the peek view ("Safe - reads git status only").</summary>
+    public string AssessmentText => RiskReason.Length > 0 ? $"{Risk} - {RiskReason}" : Risk.ToString();
 
     private const int MaxTipLines = 12;
 
     /// <summary>
-    /// The agent's short description when it gave one; else a shell's command shortened as its chat
-    /// row is, or a subagent's first non-blank line with an ellipsis when more was cut.
+    /// The short description when available; else for a shell command, its plain-English intent;
+    /// or a subagent's first non-blank line with an ellipsis when more was cut.
     /// </summary>
     public string DisplayTitle
     {
@@ -130,9 +145,13 @@ public sealed partial class RunningTaskItem : ObservableObject
                 return Description;
             }
 
-            if (IsShell && Title.Trim().Length > 0)
+            if (IsShell)
             {
-                return ShellCommandSummary.Shorten(Title);
+                var command = CommandOf();
+                if (command.Length > 0)
+                {
+                    return ShellCommandSummary.DescribeIntent(command);
+                }
             }
 
             var lines = Title.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -143,6 +162,13 @@ public sealed partial class RunningTaskItem : ObservableObject
                 _ => lines[0] + " …",
             };
         }
+    }
+
+    /// <summary>The command a shell task runs: its "$ " header lines, else its title.</summary>
+    public string CommandOf()
+    {
+        var lines = Header.Split('\n').Where(l => l.StartsWith("$ ", StringComparison.Ordinal)).Select(l => l[2..]).ToList();
+        return lines.Count > 0 ? string.Join('\n', lines) : Title.Trim();
     }
 
     /// <summary>The title for a tooltip: a long script keeps only its first <see cref="MaxTipLines"/> lines.</summary>
@@ -241,6 +267,7 @@ public sealed partial class RunningTaskItem : ObservableObject
 
     /// <summary>What was asked - "$ command" or a subagent's prompt - shown above the output. Kept apart so a tailed log or snapshot replacing the output never loses it.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayTitle))]
     public partial string Header { get; set; } = "";
 
     // Appends land in a builder and the string is made only when something reads Output:

@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
@@ -672,6 +672,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (task.Header.Length == 0 && command is not null)
         {
             task.Header = RunningTaskItem.CommandHeader(command);
+            DescribeShellTask(task);
         }
         else if (changed.Prompt is { Length: > 0 } prompt && task.Header.Length == 0)
         {
@@ -1133,10 +1134,72 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private void AddTask(RunningTaskItem task)
     {
         _tasksByToolUse[task.ToolUseId] = task;
+        DescribeShellTask(task);
         RunningTasks.Add(task);
         ResortTasks();
         WatchTask(task);
         NotifySubagents();
+    }
+
+    /// <summary>
+    /// Populates a shell task's description and safety rating immediately from the deterministic
+    /// analyzer, then refines both with the helper model in the background.
+    /// </summary>
+    private void DescribeShellTask(RunningTaskItem task)
+    {
+        if (!task.IsShell)
+        {
+            return;
+        }
+
+        var command = task.CommandOf();
+        if (command.Length == 0)
+        {
+            return;
+        }
+
+        var cwd = WorktreePath ?? _projectPath;
+        var hint = task.Description;
+        var baseline = ShellCommandAnalyzer.Assess(command, cwd, hint);
+        if (task.Description.Length == 0 && baseline.Description.Length > 0)
+        {
+            task.Description = baseline.Description;
+        }
+
+        task.Risk = baseline.Risk;
+        task.RiskReason = baseline.Reason;
+
+        if (Helper is { IsAvailable: true } model)
+        {
+            _ = DescribeShellTaskAsync(model, task, command, cwd, hint);
+        }
+    }
+
+    private async Task DescribeShellTaskAsync(
+        IHelperModel model,
+        RunningTaskItem task,
+        string command,
+        string? cwd,
+        string? hint)
+    {
+        try
+        {
+            var assessment = await ShellCommandAnalyzer.AssessAsync(model, command, cwd, hint).ConfigureAwait(false);
+            _dispatcher.TryEnqueue(() =>
+            {
+                if (assessment.Description.Length > 0)
+                {
+                    task.Description = assessment.Description;
+                }
+
+                task.Risk = assessment.Risk;
+                task.RiskReason = assessment.Reason;
+            });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Debug("tasks", $"shell task assessment failed: {ex.Message}");
+        }
     }
 
     /// <summary>Whatever was still running has lost its process: mark it ended.</summary>
@@ -3197,26 +3260,53 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>
     /// The risk of the shell command an approval is for, with a one-line "why" for the card.
+    /// <summary>
+    /// Assessments for a shell command approval: deterministic risk check plus baseline description.
     /// Anything that is not a shell command with a readable command line counts as <see cref="ShellRisk.Caution"/>,
     /// so it is never auto-approved by mistake.
     /// </summary>
-    private ShellRisk ShellApprovalRisk(ApprovalRequested approval, out string note)
+    private ShellAssessment ShellApprovalAssessment(ApprovalRequested approval, out string? command, out string? hint)
     {
-        note = "";
-        if (!ToolCallItem.IsShellName(approval.ToolName) ||
-            ToolCallItem.CommandInput(approval.ToolName, approval.Input) is not { Length: > 0 } command)
+        command = ToolCallItem.CommandInput(approval.ToolName, approval.Input);
+        hint = approval.Input.ValueKind == JsonValueKind.Object &&
+            approval.Input.TryGetProperty("description", out var desc) &&
+            desc.ValueKind == JsonValueKind.String
+                ? desc.GetString()?.Trim()
+                : null;
+
+        if (!ToolCallItem.IsShellName(approval.ToolName) || string.IsNullOrWhiteSpace(command))
         {
-            return ShellRisk.Caution;
+            return new ShellAssessment("", ShellRisk.Caution, "");
         }
 
-        var findings = ShellCommandAnalyzer.Analyze(command, WorktreePath ?? _projectPath);
-        var risk = ShellCommandAnalyzer.Verdict(findings);
-        if (findings.Count > 0)
-        {
-            note = $"{risk}: {string.Join("; ", findings.Select(f => f.Reason).Distinct())}";
-        }
+        return ShellCommandAnalyzer.Assess(command, WorktreePath ?? _projectPath, hint);
+    }
 
-        return risk;
+    private async Task UpdateShellApprovalAsync(
+        IHelperModel model,
+        ApprovalRequestItem item,
+        string command,
+        string? cwd,
+        string? hint)
+    {
+        try
+        {
+            var assessment = await ShellCommandAnalyzer.AssessAsync(model, command, cwd, hint).ConfigureAwait(false);
+            _dispatcher.TryEnqueue(() =>
+            {
+                if (assessment.Description.Length > 0)
+                {
+                    item.Description = assessment.Description;
+                }
+
+                item.Risk = assessment.Risk;
+                item.RiskNote = assessment.FormatRiskNote();
+            });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Debug("approval", $"shell approval assessment failed: {ex.Message}");
+        }
     }
 
     private async Task HandleApprovalCoreAsync(ApprovalRequested approval)
@@ -3272,8 +3362,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         // A shell command that trips no risk rule runs without asking; one that does is shown with
         // why, so the reader decides it knowing what it touches.
-        var shellRisk = ShellApprovalRisk(approval, out var riskNote);
-        if (shellRisk == ShellRisk.Safe && AppSettings.AutoApproveSafeShell && PermissionMode != "plan")
+        var shellAssessment = ShellApprovalAssessment(approval, out var shellCommand, out var shellHint);
+        if (shellAssessment.Risk == ShellRisk.Safe && AppSettings.AutoApproveSafeShell && PermissionMode != "plan")
         {
             CrashLog.Trace($"{ModeDisplay(PermissionMode)} mode: allowed safe {approval.ToolName} command unasked");
 
@@ -3340,18 +3430,28 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         var answered = new TaskCompletionSource<ApprovalDecision>();
         _approvals[approval.RequestId] = answered;
         OnApprovalsChanged();
-        pending.Approval = new ApprovalRequestItem
+        var approvalItem = new ApprovalRequestItem
         {
             RequestId = approval.RequestId,
             ToolName = approval.ToolName,
             Input = approval.Input,
             IsPlan = string.Equals(approval.ToolName, "ExitPlanMode", StringComparison.Ordinal),
-            RiskNote = riskNote,
+            Description = shellAssessment.Description,
+            Risk = shellAssessment.Risk,
+            RiskNote = ToolCallItem.IsShellName(approval.ToolName) ? shellAssessment.FormatRiskNote() : "",
             Questions = ApprovalRequestItem.ParseQuestions(approval.Input),
             Suggestions = approval.Suggestions
                 .Select(s => new SuggestionOption { RequestId = approval.RequestId, Suggestion = s })
                 .ToArray(),
         };
+        pending.Approval = approvalItem;
+
+        if (ToolCallItem.IsShellName(approval.ToolName) &&
+            !string.IsNullOrWhiteSpace(shellCommand) &&
+            Helper is { IsAvailable: true } model)
+        {
+            _ = UpdateShellApprovalAsync(model, approvalItem, shellCommand, WorktreePath ?? _projectPath, shellHint);
+        }
 
         // The turn is blocked on the reader from here: say so, in case they are elsewhere.
         AttentionNeeded?.Invoke(this, pending.Approval switch
@@ -3361,7 +3461,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             { IsPlan: true } => new AttentionRequest(
                 AttentionKind.Plan, pending.Summary is { Length: > 0 } headline ? headline : "A plan is ready for review."),
             var permission => new AttentionRequest(
-                AttentionKind.Permission, $"{permission.QuestionHeader} {pending.Target}".Trim()),
+                AttentionKind.Permission,
+                $"{permission.QuestionHeader} {(permission.Description.Length > 0 ? permission.Description : pending.Target)}".Trim()),
         });
 
         var decision = await answered.Task;

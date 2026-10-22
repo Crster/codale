@@ -725,13 +725,34 @@ public sealed partial class ApprovalRequestItem : ObservableObject
 
     public bool IsGeneric => !IsAskUserQuestion && !IsPlan;
 
-    /// <summary>Why the shell command is not safe, from the risk rules ("Danger: deletes files outside the working directory"); empty when nothing matched.</summary>
-    public string RiskNote { get; init; } = "";
+    /// <summary>What the shell command is going to do, described briefly by the agent or helper model.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDescription))]
+    public partial string Description { get; set; } = "";
 
-    /// <summary>The permission line: "Allow Bash to run?", "Allow Edit?".</summary>
+    public bool HasDescription => Description.Length > 0;
+
+    /// <summary>Safety rating of the shell command (<see cref="ShellRisk.Safe"/>, <see cref="ShellRisk.Caution"/>, <see cref="ShellRisk.Danger"/>).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SafetySummary))]
+    public partial ShellRisk Risk { get; set; } = ShellRisk.Safe;
+
+    /// <summary>Why the shell command has its safety rating ("Danger: deletes files outside the working directory").</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(QuestionHeader))]
+    [NotifyPropertyChangedFor(nameof(HasRiskNote))]
+    [NotifyPropertyChangedFor(nameof(SafetySummary))]
+    public partial string RiskNote { get; set; } = "";
+
+    public bool HasRiskNote => RiskNote.Length > 0;
+
+    /// <summary>The safety rating and reason for the confirmation card ("Caution: deletes files or directories").</summary>
+    public string SafetySummary => RiskNote;
+
+    /// <summary>The permission line: "Allow Bash to run this command?", "Allow this edit?".</summary>
     public string QuestionHeader => ToolKinds.Of(ToolName) switch
     {
-        ToolKind.Shell => $"Allow {ToolName} to run this command?" + (RiskNote.Length > 0 ? $"\n{RiskNote}" : ""),
+        ToolKind.Shell => $"Allow {ToolName} to run this command?",
         ToolKind.Edit => "Allow this edit?",
         ToolKind.Write => "Allow writing this file?",
         ToolKind.Web => $"Allow {ToolName}?",
