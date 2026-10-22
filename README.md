@@ -73,7 +73,7 @@ Codale features a built-in terminal drawer powered by Windows PseudoConsole (Con
   - **Line-Buffered Scrollback**: Fast, smooth text rendering with configurable buffer limits for standard build outputs, test runners, and script executions.
   - **Win2D Cell Grid**: Automatically takes over when an interactive, full-screen terminal application (such as `vim`, `nano`, `htop`, or interactive TUIs) switches to the alternate screen buffer, with hardware-accelerated text rendering and raw key/escape chord forwarding.
 - **Multi-Tab Workspace**: Open multiple independent terminal tabs per project, rename sessions, and run ad-hoc commands concurrently.
-- **Project Commands Launcher**: Discovers and executes run targets from `.codale/commands.json`, `.claude/launch.json`, VS Code `.vscode/tasks.json`, `.vscode/launch.json`, and `package.json` scripts.
+- **Project Commands Launcher**: Discovers and executes run targets from `.codale/commands.json`, `.claude/launch.json`, VS Code `.vscode/tasks.json`, `.vscode/launch.json`, `package.json`, `deno.json`, .NET (`.sln`/`.csproj`/`launchSettings.json`), Gradle, Maven, Python (`pyproject.toml`/`Pipfile`/`manage.py`), Cargo, Go, Composer, Laravel (`artisan`), Rails, Flutter/Dart, Elixir (`mix.exs`), `Makefile`, `justfile`, `Taskfile.yml`, Docker Compose, Prisma (`schema.prisma`), and root shell scripts.
 - **Agent Terminal Diagnostics**: Agents running in Codale can inspect what ran in your open terminal tabs using `list_terminals` and `read_terminal`. When a build fails in your terminal, the agent can diagnose the error output directly without requiring you to copy and paste stack traces.
 
 ---
@@ -326,7 +326,7 @@ Projects can define one-click commands in `.codale/commands.json`:
 ]
 ```
 
-Commands are also automatically imported from `.claude/launch.json`, `.vscode/tasks.json`, and `package.json`.
+Commands are also automatically detected from `.claude/launch.json`, `.vscode/tasks.json`, `.vscode/launch.json`, `package.json` (npm/yarn/pnpm/bun), `deno.json`, `.sln`/`.csproj`/`launchSettings.json` (.NET), `build.gradle` (Gradle), `pom.xml` (Maven), `pyproject.toml`/`Pipfile`/`manage.py` (Python/Django), `Cargo.toml` (Rust), `go.mod` (Go), `composer.json` & `artisan` (PHP/Laravel), `Gemfile`/`bin/rails` (Rails), `pubspec.yaml` (Flutter/Dart), `mix.exs` (Elixir), `Makefile`, `justfile`, `Taskfile.yml`, `docker-compose.yml`, `schema.prisma` (Prisma), and project root scripts.
 
 ---
 

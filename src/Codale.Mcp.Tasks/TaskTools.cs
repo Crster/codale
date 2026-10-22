@@ -149,8 +149,8 @@ public static class TaskTools
     [
         new McpTool(
             "list_commands",
-            "Show the project's saved run commands: the entries in Codale's commands menu, read from .codale/commands.json, " +
-            ".claude/launch.json, VS Code tasks.json/launch.json and package.json scripts. One line each: name, source, command line. " +
+            "Show the project's saved and auto-detected run commands: the entries in Codale's commands menu, read from .codale/commands.json, " +
+            ".claude/launch.json, VS Code tasks.json/launch.json, package.json scripts, and detected project files (.NET, Gradle, Maven, Python, Cargo, Go, Composer, Laravel, Makefile, Justfile, Taskfile, Docker Compose, Prisma, etc.). One line each: name, source, command line. " +
             "Read-only. Call it before run_command to get the exact name, or before add_command to avoid saving a duplicate.",
             McpTool.Schema(),
             async (_, _) =>
