@@ -74,18 +74,97 @@ internal static partial class PhoneTools
                     return [McpContent.FromText(sb.ToString().TrimEnd())];
                 }),
 
+            new("phone_connect",
+                "Connect a real phone over Wi-Fi (Wireless debugging). First time: action 'pair' with the pairing address and 6-digit code shown under Developer options > Wireless debugging > Pair device with pairing code. Then action 'connect' with the IP:port shown on the Wireless debugging screen (a different port than pairing). 'disconnect' drops it. After connecting it appears in phone_devices.",
+                McpTool.Schema(
+                    [
+                        ("action", "string", "pair, connect or disconnect."),
+                        ("address", "string", "IP:port, e.g. 192.168.1.20:37215. For pair, the pairing address; for connect, the connection address."),
+                        ("code", "string", "The 6-digit pairing code (pair only)."),
+                    ],
+                    "action", "address"),
+                async (a, ct) =>
+                {
+                    var action = a.RequiredKeyword("action");
+                    var address = a.RequiredString("address").Trim();
+                    if (!Regex.IsMatch(address, @"^[A-Za-z0-9.\-]+:\d{1,5}$"))
+                    {
+                        throw new McpToolException($"'{address}' is not an address like 192.168.1.20:37215.");
+                    }
+
+                    string output;
+                    switch (action)
+                    {
+                        case "pair":
+                            var code = a.RequiredString("code").Trim();
+                            if (!Regex.IsMatch(code, @"^\d{6}$"))
+                            {
+                                throw new McpToolException("The pairing code is the 6 digits shown on the phone.");
+                            }
+
+                            output = await adb.RunAsync(["pair", address, code], ct);
+                            break;
+                        case "connect":
+                            output = await adb.RunAsync(["connect", address], ct);
+                            break;
+                        case "disconnect":
+                            output = await adb.RunAsync(["disconnect", address], ct);
+                            break;
+                        default:
+                            throw new McpToolException("action must be pair, connect or disconnect.");
+                    }
+
+                    // adb exits 0 even when the phone refuses, so the outcome is in the text.
+                    var text = output.Trim();
+                    if (action != "disconnect" && !text.Contains("Successfully", StringComparison.OrdinalIgnoreCase) && !text.Contains("connected to", StringComparison.OrdinalIgnoreCase)
+                        || text.Contains("cannot connect", StringComparison.OrdinalIgnoreCase) || text.Contains("failed", StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new McpToolException(text.Length > 0 ? text : "adb gave no answer; check the address and that Wireless debugging is on.");
+                    }
+
+                    return [McpContent.FromText(text.Length > 0 ? text : "Done.")];
+                }),
+
             new("phone_screenshot",
                 "Capture the Android screen as a PNG. This is how you see the app. ALWAYS take one (or phone_ui_tree) before phone_tap / phone_swipe: coordinates are device pixels on the latest screenshot.",
                 McpTool.Schema(With()),
                 OnDevice(adb, async (s, _, ct) =>
-                    [McpContent.FromImage(await adb.RunBinaryAsync(Adb.ForDevice(s, "exec-out", "screencap", "-p"), ct))])),
+                {
+                    await adb.EnsureAwakeAsync(s, ct);
+                    var png = Adb.TrimToPng(await adb.RunBinaryAsync(Adb.ForDevice(s, "exec-out", "screencap", "-p"), ct));
+                    if (png.Length < 8 || png[1] != 0x50)
+                    {
+                        throw new McpToolException("The device returned no screenshot (the screen may be locked or showing a secure window).");
+                    }
+
+                    return [McpContent.FromImage(png)];
+                })),
 
             new("phone_ui_tree",
                 "Read the current screen as text: one line per element with its text, content description, resource id and tap center (x,y). Cheaper and more precise than a screenshot for finding what to tap; pair with phone_tap using the center.",
                 McpTool.Schema(With()),
                 OnDevice(adb, async (s, _, ct) =>
                 {
-                    var xml = await adb.ShellAsync(s, "uiautomator dump /dev/tty", ct);
+                    // /dev/tty is unreliable on recent Android; dump to a file and read it back, retrying while the UI settles.
+                    await adb.EnsureAwakeAsync(s, ct);
+                    const string dump ="uiautomator dump /sdcard/codale_window.xml >/dev/null 2>&1; cat /sdcard/codale_window.xml";
+                    var xml = "";
+                    for (var attempt = 0; attempt < 3; attempt++)
+                    {
+                        xml = (await adb.TryShellAsync(s, dump, ct)).Output;
+                        if (xml.Contains("<hierarchy", StringComparison.Ordinal))
+                        {
+                            break;
+                        }
+
+                        await Task.Delay(700, ct);
+                    }
+
+                    if (!xml.Contains("<hierarchy", StringComparison.Ordinal))
+                    {
+                        throw new McpToolException("The device returned no UI hierarchy (the screen may be off, locked or animating). Try phone_screenshot instead.");
+                    }
+
                     return [McpContent.FromText(UiTree.Parse(xml))];
                 })),
 
@@ -137,6 +216,7 @@ internal static partial class PhoneTools
                 OnDevice(adb, async (s, a, ct) =>
                 {
                     var pkg = RequirePackage(a);
+                    await adb.EnsureAwakeAsync(s, ct);
                     var activity = a.String("activity");
                     if (activity is { Length: > 0 })
                     {
@@ -161,7 +241,28 @@ internal static partial class PhoneTools
 
             new("phone_current_app", "Report which app and activity is in the foreground.",
                 McpTool.Schema(With()),
-                OnDevice(adb, (s, _, ct) => Text(adb.ShellAsync(s, "dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'", ct)))),
+                OnDevice(adb, async (s, _, ct) =>
+                {
+                    foreach (var command in new[]
+                    {
+                        "dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'",
+                        "dumpsys activity activities | grep -E 'topResumedActivity|ResumedActivity'",
+                    })
+                    {
+                        var (_, output) = await adb.TryShellAsync(s, command, ct);
+                        if (output.Contains("null", StringComparison.Ordinal) && !output.Contains('/'))
+                        {
+                            continue;
+                        }
+
+                        if (output.Trim().Length > 0)
+                        {
+                            return [McpContent.FromText(output.TrimEnd())];
+                        }
+                    }
+
+                    return [McpContent.FromText("No foreground app found (the screen may be off or locked).")];
+                })),
 
             new("phone_logcat",
                 "Read recent device logs (logcat), newest last. Filter by app (its process), tag and minimum priority to find a crash or your own log lines. Check it after launching a freshly installed build.",
@@ -183,7 +284,7 @@ internal static partial class PhoneTools
                     if (a.String("package") is { Length: > 0 })
                     {
                         _ = RequirePackage(a);
-                        var pid = (await adb.ShellAsync(s, $"pidof {a.String("package")}", ct)).Trim().Split(' ')[0];
+                        var pid = (await adb.TryShellAsync(s, $"pidof {a.String("package")}", ct)).Output.Trim().Split(' ')[0];
                         if (pid.Length == 0)
                         {
                             return await Done($"{a.String("package")} is not running, so it has no log lines. Launch it first (phone_launch_app).");
@@ -224,7 +325,9 @@ internal static partial class PhoneTools
 
                     if (direction == "list")
                     {
-                        return await Text(adb.RunAsync(Adb.ForDevice(s, "reverse", "--list"), ct));
+                        var reverse = await adb.RunAsync(Adb.ForDevice(s, "reverse", "--list"), ct);
+                        var forward = await adb.RunAsync(Adb.ForDevice(s, "forward", "--list"), ct);
+                        return [McpContent.FromText($"reverse:\n{reverse.Trim()}\nforward:\n{forward.Trim()}")];
                     }
 
                     var local = a.RequiredInt("local_port");
@@ -281,23 +384,60 @@ internal static partial class PhoneTools
                 McpTool.Schema([("avd", "string", "AVD name.")], "avd"),
                 async (a, ct) =>
                 {
-                    Adb.StartEmulator(RequireWord(a.RequiredString("avd"), "AVD name"));
-                    using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    limit.CancelAfter(TimeSpan.FromMinutes(2));
-                    try
+                    // AVD names may contain dots and dashes (Medium_Phone_API_37.0); they are passed as one argument, never through a shell.
+                    var avd = a.RequiredString("avd").Trim();
+                    if (!Regex.IsMatch(avd, @"^[A-Za-z0-9_.\-]+$"))
                     {
-                        await adb.RunAsync(["-e", "wait-for-device"], limit.Token, TimeSpan.FromMinutes(2));
-                        while ((await adb.RunAsync(["-e", "shell", "getprop", "sys.boot_completed"], limit.Token)).Trim() != "1")
+                        throw new McpToolException($"'{avd}' is not a valid AVD name.");
+                    }
+                    static IEnumerable<string> EmulatorSerials(IEnumerable<(string Serial, string State, string Detail)> devices) =>
+                        devices.Where(d => d.Serial.StartsWith("emulator-", StringComparison.Ordinal)).Select(d => d.Serial);
+
+                    var before = EmulatorSerials(await adb.DevicesAsync(ct)).ToHashSet();
+
+                    // Already running this AVD: just wait for it.
+                    string? serial = null;
+                    foreach (var running in before)
+                    {
+                        if (await adb.AvdNameAsync(running, ct) == avd)
                         {
-                            await Task.Delay(1000, limit.Token);
+                            serial = running;
+                            break;
                         }
                     }
-                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+
+                    var launch = serial is null ? Adb.StartEmulator(avd) : null;
+
+                    var deadline = DateTime.UtcNow.AddMinutes(3);
+                    while (DateTime.UtcNow < deadline)
                     {
-                        throw new McpToolException("The emulator did not finish booting in two minutes; check phone_devices later.");
+                        ct.ThrowIfCancellationRequested();
+                        if (launch?.FailureMessage() is { } failure)
+                        {
+                            throw new McpToolException(failure);
+                        }
+
+                        try
+                        {
+                            var devices = await adb.DevicesAsync(ct);
+                            serial ??= EmulatorSerials(devices).FirstOrDefault(x => !before.Contains(x));
+                            if (serial is not null
+                                && devices.Any(d => d.Serial == serial && d.State == "device")
+                                && (await adb.TryShellAsync(serial, "getprop sys.boot_completed", ct, TimeSpan.FromSeconds(10))).Output.Trim() == "1")
+                            {
+                                return [McpContent.FromText($"Emulator booted: {serial}")];
+                            }
+                        }
+                        catch (McpToolException)
+                        {
+                            // adb or the device is not ready yet; keep polling.
+                        }
+
+                        await Task.Delay(2000, ct);
                     }
 
-                    return [McpContent.FromText("Emulator booted.")];
+                    throw new McpToolException("The emulator did not finish booting in three minutes; check phone_devices later." +
+                        (launch?.Output is { Length: > 0 } tail ? "\nEmulator output:\n" + tail : ""));
                 }),
         ];
     }

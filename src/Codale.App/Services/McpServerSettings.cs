@@ -174,7 +174,7 @@ public sealed class McpServerSettings
                 AutoApprove = true,
 
                 // Changing what is on the device, moving files and arbitrary shell commands still ask.
-                AskTools = ["phone_install", "phone_uninstall", "phone_clear_data", "phone_push", "phone_pull", "phone_shell", "phone_emulator_start"],
+                AskTools = ["phone_install", "phone_uninstall", "phone_clear_data", "phone_push", "phone_pull", "phone_shell", "phone_emulator_start", "phone_connect"],
 
                 // phone_install, phone_push and phone_pull are confined to this folder and refuse without it.
                 Env = new Dictionary<string, string> { ["CODALE_PROJECT_DIR"] = _projectPath },

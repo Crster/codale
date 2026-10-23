@@ -59,6 +59,25 @@ public sealed class PhoneToolsTests
     }
 
     [Fact]
+    public void TrimToPng_drops_noise_before_the_signature()
+    {
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2];
+
+        Assert.Equal(png, Adb.TrimToPng([.. "warning\n"u8.ToArray(), .. png]));
+        Assert.Equal(png, Adb.TrimToPng(png));
+    }
+
+    [Fact]
+    public void DropDuplicateWireless_keeps_the_ip_entry_and_drops_the_mdns_twin()
+    {
+        var devices = Adb.ParseDevices("List of devices attached\n192.168.1.2:46131 device product:dm1qxxx model:SM_S911B device:dm1q transport_id:3\nadb-R58M._adb-tls-connect._tcp device product:dm1qxxx model:SM_S911B device:dm1q transport_id:2\nemulator-5554 device product:sdk model:Pixel transport_id:1\n");
+
+        var kept = Adb.DropDuplicateWireless(devices).Select(d => d.Serial).ToList();
+
+        Assert.Equal(["192.168.1.2:46131", "emulator-5554"], kept);
+    }
+
+    [Fact]
     public void ForDevice_prefixes_the_serial()
     {
         Assert.Equal(["-s", "abc", "install", "-r"], Adb.ForDevice("abc", "install", "-r"));

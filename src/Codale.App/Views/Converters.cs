@@ -685,157 +685,217 @@ public sealed partial class UsageToBrushConverter : IValueConverter
         throw new NotSupportedException();
 }
 
-/// <summary>Icon glyph and colour for a file-tree node, keyed on the file's extension.</summary>
+/// <summary>Icon glyph and colour for a file-tree node, keyed on the file name first, then its extension.</summary>
 public static class FileIcons
 {
-    private static readonly Dictionary<string, Windows.UI.Color> Colors = new(StringComparer.OrdinalIgnoreCase)
-    {
-        [".cs"] = Rgb(0x9B, 0x4F, 0xC8),
-        [".csx"] = Rgb(0x9B, 0x4F, 0xC8),
-        [".xaml"] = Rgb(0x00, 0x9F, 0xFF),
-        [".axaml"] = Rgb(0x00, 0x9F, 0xFF),
-        [".csproj"] = Rgb(0x9B, 0x4F, 0xC8),
-        [".sln"] = Rgb(0x9B, 0x4F, 0xC8),
-        [".slnx"] = Rgb(0x9B, 0x4F, 0xC8),
-        [".props"] = Rgb(0x9B, 0x4F, 0xC8),
-        [".targets"] = Rgb(0x9B, 0x4F, 0xC8),
-        [".json"] = Rgb(0xF5, 0xC5, 0x18),
-        [".jsonc"] = Rgb(0xF5, 0xC5, 0x18),
-        [".js"] = Rgb(0xF1, 0xDD, 0x35),
-        [".mjs"] = Rgb(0xF1, 0xDD, 0x35),
-        [".ts"] = Rgb(0x31, 0x78, 0xC6),
-        [".tsx"] = Rgb(0x31, 0x78, 0xC6),
-        [".html"] = Rgb(0xE4, 0x4D, 0x26),
-        [".htm"] = Rgb(0xE4, 0x4D, 0x26),
-        [".css"] = Rgb(0x56, 0x4C, 0xE0),
-        [".scss"] = Rgb(0xCD, 0x67, 0x99),
-        [".md"] = Rgb(0x42, 0xA5, 0xF5),
-        [".txt"] = Rgb(0x9E, 0x9E, 0x9E),
-        [".py"] = Rgb(0x37, 0x76, 0xAB),
-        [".rs"] = Rgb(0xDE, 0xA5, 0x84),
-        [".go"] = Rgb(0x00, 0xAD, 0xD8),
-        [".java"] = Rgb(0xE7, 0x6F, 0x00),
-        [".ps1"] = Rgb(0x30, 0x6F, 0xC8),
-        [".psm1"] = Rgb(0x30, 0x6F, 0xC8),
-        [".sh"] = Rgb(0x4E, 0xAA, 0x25),
-        [".bat"] = Rgb(0x4E, 0xAA, 0x25),
-        [".cmd"] = Rgb(0x4E, 0xAA, 0x25),
-        [".xml"] = Rgb(0xE3, 0x8C, 0x00),
-        [".yml"] = Rgb(0xCB, 0x17, 0x1E),
-        [".yaml"] = Rgb(0xCB, 0x17, 0x1E),
-        [".toml"] = Rgb(0x9C, 0x4A, 0x1A),
-        [".sql"] = Rgb(0xDA, 0xD8, 0xD8),
-        [".png"] = Rgb(0x26, 0xA6, 0x9A),
-        [".jpg"] = Rgb(0x26, 0xA6, 0x9A),
-        [".jpeg"] = Rgb(0x26, 0xA6, 0x9A),
-        [".gif"] = Rgb(0x26, 0xA6, 0x9A),
-        [".svg"] = Rgb(0xFF, 0xB1, 0x3B),
-        [".ico"] = Rgb(0x26, 0xA6, 0x9A),
-        [".editorconfig"] = Rgb(0xA0, 0xA0, 0xA0),
-        [".gitignore"] = Rgb(0xF1, 0x50, 0x2F),
-        [".gitattributes"] = Rgb(0xF1, 0x50, 0x2F),
-        [".lock"] = Rgb(0x9E, 0x9E, 0x9E),
-    };
+    private const string FolderGlyph = "\uE8B7";
+    private const string PageGlyph = "\uE7C3";
+    private const string CodeGlyph = "\uE943";
+    private const string TerminalGlyph = "\uE756";
+    private const string DocGlyph = "\uE8A5";
+    private const string SettingsGlyph = "\uE713";
+    private const string DataGlyph = "\uE8FD";
+    private const string ProjectGlyph = "\uE8F1";
+    private const string PackageGlyph = "\uE7B8";
+    private const string ImageGlyph = "\uEB9F";
+    private const string AudioGlyph = "\uE8D6";
+    private const string VideoGlyph = "\uE714";
+    private const string FontGlyph = "\uE8E9";
+    private const string LockGlyph = "\uE72E";
+    private const string GitGlyph = "\uE8EC";
+    private const string TableGlyph = "\uE80A";
+    private const string DatabaseGlyph = "\uEA86";
+    private const string BinaryGlyph = "\uE950";
 
+    private static readonly Windows.UI.Color Purple = Rgb(0x9B, 0x4F, 0xC8);
+    private static readonly Windows.UI.Color Yellow = Rgb(0xF5, 0xC5, 0x18);
+    private static readonly Windows.UI.Color Blue = Rgb(0x31, 0x78, 0xC6);
+    private static readonly Windows.UI.Color Green = Rgb(0x4E, 0xAA, 0x25);
+    private static readonly Windows.UI.Color Teal = Rgb(0x26, 0xA6, 0x9A);
+    private static readonly Windows.UI.Color Grey = Rgb(0x9E, 0x9E, 0x9E);
+    private static readonly Windows.UI.Color Orange = Rgb(0xE3, 0x8C, 0x00);
+    private static readonly Windows.UI.Color Red = Rgb(0xCB, 0x17, 0x1E);
     private static readonly Windows.UI.Color Folder = Rgb(0xE8, 0xB3, 0x4A);
     private static readonly Windows.UI.Color Default = Rgb(0x8A, 0x9B, 0xB0);
 
+    // Whole-name rules win over extension rules, so global.json is not just "some json".
+    private static readonly Dictionary<string, (string Glyph, Windows.UI.Color Color)> Names = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["global.json"] = (SettingsGlyph, Rgb(0x9B, 0x4F, 0xC8)),
+        ["nuget.config"] = (PackageGlyph, Rgb(0x00, 0x7A, 0xCC)),
+        ["launchSettings.json"] = (SettingsGlyph, Yellow),
+        ["appsettings.json"] = (SettingsGlyph, Yellow),
+        ["package.json"] = (PackageGlyph, Rgb(0xCB, 0x38, 0x37)),
+        ["package-lock.json"] = (LockGlyph, Rgb(0xCB, 0x38, 0x37)),
+        ["tsconfig.json"] = (SettingsGlyph, Blue),
+        ["Directory.Build.props"] = (SettingsGlyph, Purple),
+        ["Directory.Build.targets"] = (SettingsGlyph, Purple),
+        ["Directory.Packages.props"] = (PackageGlyph, Purple),
+        ["Dockerfile"] = (PackageGlyph, Rgb(0x24, 0x96, 0xED)),
+        ["docker-compose.yml"] = (PackageGlyph, Rgb(0x24, 0x96, 0xED)),
+        ["docker-compose.yaml"] = (PackageGlyph, Rgb(0x24, 0x96, 0xED)),
+        ["Makefile"] = (TerminalGlyph, Green),
+        ["README"] = (DocGlyph, Rgb(0x42, 0xA5, 0xF5)),
+        ["README.md"] = (DocGlyph, Rgb(0x42, 0xA5, 0xF5)),
+        ["LICENSE"] = (DocGlyph, Orange),
+        ["LICENSE.md"] = (DocGlyph, Orange),
+        ["LICENSE.txt"] = (DocGlyph, Orange),
+        ["CLAUDE.md"] = (DocGlyph, Rgb(0xD9, 0x77, 0x57)),
+        [".editorconfig"] = (SettingsGlyph, Rgb(0xA0, 0xA0, 0xA0)),
+        [".gitignore"] = (GitGlyph, Rgb(0xF1, 0x50, 0x2F)),
+        [".gitattributes"] = (GitGlyph, Rgb(0xF1, 0x50, 0x2F)),
+        [".gitmodules"] = (GitGlyph, Rgb(0xF1, 0x50, 0x2F)),
+    };
+
+    private static readonly Dictionary<string, (string Glyph, Windows.UI.Color Color)> Extensions = BuildExtensions();
+
+    private static readonly Dictionary<Windows.UI.Color, SolidColorBrush> BrushCache = new();
+
+    private static Dictionary<string, (string, Windows.UI.Color)> BuildExtensions()
+    {
+        var d = new Dictionary<string, (string, Windows.UI.Color)>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(string glyph, Windows.UI.Color color, params string[] exts)
+        {
+            foreach (var e in exts)
+            {
+                d[e] = (glyph, color);
+            }
+        }
+
+        // Languages
+        Add(CodeGlyph, Purple, ".cs", ".csx");
+        Add(CodeGlyph, Rgb(0x00, 0x9F, 0xFF), ".xaml", ".axaml");
+        Add(CodeGlyph, Rgb(0x51, 0x2B, 0xD4), ".razor", ".cshtml");
+        Add(CodeGlyph, Rgb(0xF1, 0xDD, 0x35), ".js", ".mjs", ".cjs");
+        Add(CodeGlyph, Blue, ".ts", ".tsx");
+        Add(CodeGlyph, Rgb(0x61, 0xDA, 0xFB), ".jsx");
+        Add(CodeGlyph, Rgb(0x37, 0x76, 0xAB), ".py", ".pyw");
+        Add(CodeGlyph, Rgb(0xDE, 0xA5, 0x84), ".rs");
+        Add(CodeGlyph, Rgb(0x00, 0xAD, 0xD8), ".go");
+        Add(CodeGlyph, Rgb(0xE7, 0x6F, 0x00), ".java");
+        Add(CodeGlyph, Rgb(0x7F, 0x52, 0xFF), ".kt", ".kts");
+        Add(CodeGlyph, Rgb(0x55, 0x9B, 0xD4), ".c", ".h");
+        Add(CodeGlyph, Rgb(0x00, 0x59, 0x9C), ".cpp", ".cc", ".cxx", ".hpp");
+        Add(CodeGlyph, Rgb(0x77, 0x7B, 0xB4), ".php");
+        Add(CodeGlyph, Rgb(0x41, 0xB8, 0x83), ".vue");
+        Add(CodeGlyph, Rgb(0xFF, 0x3E, 0x00), ".svelte");
+
+        // Markup and styles
+        Add(CodeGlyph, Rgb(0xE4, 0x4D, 0x26), ".html", ".htm");
+        Add(CodeGlyph, Rgb(0x56, 0x4C, 0xE0), ".css", ".less");
+        Add(CodeGlyph, Rgb(0xCD, 0x67, 0x99), ".scss", ".sass");
+
+        // Shell
+        Add(TerminalGlyph, Rgb(0x30, 0x6F, 0xC8), ".ps1", ".psm1");
+        Add(TerminalGlyph, Green, ".sh", ".bash", ".zsh", ".bat", ".cmd");
+
+        // Data
+        Add(DataGlyph, Yellow, ".json", ".jsonc");
+        Add(DataGlyph, Orange, ".xml");
+        Add(DataGlyph, Red, ".yml", ".yaml");
+        Add(DataGlyph, Rgb(0x9C, 0x4A, 0x1A), ".toml");
+        Add(TableGlyph, Teal, ".csv", ".tsv", ".xls", ".xlsx");
+        Add(DatabaseGlyph, Rgb(0xDA, 0xD8, 0xD8), ".sql", ".db", ".sqlite", ".mdf");
+
+        // Projects and settings
+        Add(ProjectGlyph, Purple, ".csproj", ".sln", ".slnx", ".vbproj", ".fsproj");
+        Add(SettingsGlyph, Purple, ".props", ".targets");
+        Add(SettingsGlyph, Grey, ".ini", ".cfg", ".config", ".env");
+
+        // Docs
+        Add(DocGlyph, Rgb(0x42, 0xA5, 0xF5), ".md", ".markdown");
+        Add(DocGlyph, Grey, ".txt", ".rtf", ".log");
+        Add(DocGlyph, Rgb(0xE5, 0x39, 0x35), ".pdf");
+        Add(DocGlyph, Rgb(0x2B, 0x57, 0x9A), ".doc", ".docx");
+
+        // Media
+        Add(ImageGlyph, Teal, ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".bmp", ".tiff");
+        Add(ImageGlyph, Rgb(0xFF, 0xB1, 0x3B), ".svg");
+        Add(AudioGlyph, Rgb(0xAB, 0x47, 0xBC), ".mp3", ".wav", ".flac", ".ogg", ".m4a");
+        Add(VideoGlyph, Rgb(0xEC, 0x40, 0x7A), ".mp4", ".mkv", ".mov", ".avi", ".webm");
+        Add(FontGlyph, Grey, ".ttf", ".otf", ".woff", ".woff2");
+
+        // Packages, binaries, security
+        Add(PackageGlyph, Rgb(0x00, 0x7A, 0xCC), ".nupkg", ".zip", ".7z", ".tar", ".gz", ".rar");
+        Add(BinaryGlyph, Rgb(0x78, 0x90, 0x9C), ".dll", ".exe", ".pdb", ".bin");
+        Add(LockGlyph, Grey, ".lock", ".key", ".pem", ".cer", ".crt", ".pfx");
+
+        return d;
+    }
+
     private static Windows.UI.Color Rgb(byte r, byte g, byte b) => Windows.UI.Color.FromArgb(255, r, g, b);
 
-    public static string Glyph(bool isDirectory) => isDirectory ? "\uE8B7" : "\uE7C3";
+    private static bool TryLookup(string name, out (string Glyph, Windows.UI.Color Color) icon)
+    {
+        if (Names.TryGetValue(name, out icon))
+        {
+            return true;
+        }
 
-    /// <summary>Returns a uniform Segoe Fluent glyph for folder or file based on file type.</summary>
+        // Pattern families: appsettings.Development.json, tsconfig.build.json, ...
+        if (name.StartsWith("appsettings.", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            icon = Names["appsettings.json"];
+            return true;
+        }
+
+        if (name.StartsWith("tsconfig.", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            icon = Names["tsconfig.json"];
+            return true;
+        }
+
+        if (name.StartsWith("Dockerfile.", StringComparison.OrdinalIgnoreCase))
+        {
+            icon = Names["Dockerfile"];
+            return true;
+        }
+
+        if (name.StartsWith(".env.", StringComparison.OrdinalIgnoreCase))
+        {
+            icon = (SettingsGlyph, Grey);
+            return true;
+        }
+
+        // Dotfiles like .gitkeep have no Path extension; real extensions are looked up by suffix.
+        var ext = Path.GetExtension(name);
+        return (ext.Length > 0 && Extensions.TryGetValue(ext, out icon)) || Extensions.TryGetValue(name, out icon);
+    }
+
+    public static string Glyph(bool isDirectory) => isDirectory ? FolderGlyph : PageGlyph;
+
+    /// <summary>Returns a Segoe Fluent glyph for a folder, or for a file based on its name and type.</summary>
     public static string NodeGlyph(bool isDirectory, string? name)
     {
         if (isDirectory)
         {
-            return "\uE8B7"; // Folder
+            return FolderGlyph;
         }
 
-        if (string.IsNullOrEmpty(name))
-        {
-            return "\uE7C3"; // Default page
-        }
-
-        var ext = Path.GetExtension(name);
-        if (string.IsNullOrEmpty(ext))
-        {
-            ext = name;
-        }
-
-        return ext.ToLowerInvariant() switch
-        {
-            // Programming languages & markup
-            ".cs" or ".csx" or ".xaml" or ".axaml" or ".razor" or
-            ".js" or ".mjs" or ".cjs" or ".ts" or ".tsx" or ".jsx" or
-            ".py" or ".pyw" or ".rs" or ".go" or ".java" or ".kt" or ".kts" or
-            ".c" or ".cpp" or ".cc" or ".cxx" or ".h" or ".hpp" or
-            ".html" or ".htm" or ".php" or ".vue" or ".svelte" or
-            ".css" or ".scss" or ".sass" or ".less" or
-            ".sh" or ".bash" or ".zsh" or ".bat" or ".cmd" or ".ps1" or ".psm1" or
-            ".sql" => "\uE943",
-
-            // Documentation & notes
-            ".md" or ".markdown" or ".txt" or ".rtf" or ".pdf" or ".doc" or ".docx" or ".log" or ".csv" or ".tsv" => "\uE8A5",
-
-            // Configuration & projects
-            ".json" or ".jsonc" or ".xml" or ".yml" or ".yaml" or ".toml" or
-            ".csproj" or ".sln" or ".slnx" or ".props" or ".targets" or
-            ".editorconfig" or ".ini" or ".cfg" or ".config" or ".env" => "\uE713",
-
-            // Images
-            ".png" or ".jpg" or ".jpeg" or ".gif" or ".svg" or ".ico" or ".webp" or ".bmp" or ".tiff" => "\uEB9F",
-
-            // Security & keys
-            ".lock" or ".key" or ".pem" or ".cer" or ".crt" or ".pfx" => "\uE72E",
-
-            // Git
-            ".gitignore" or ".gitattributes" or ".gitmodules" => "\uE943",
-
-            // Default file
-            _ => "\uE7C3",
-        };
+        return !string.IsNullOrEmpty(name) && TryLookup(name, out var icon) ? icon.Glyph : PageGlyph;
     }
 
     public static string FileGlyph(string? name) => NodeGlyph(false, name);
 
-    /// <summary>Extension shown inside the file icon: ".cs" gives "CS", ".gitignore" gives "GIT".</summary>
-    public static string Label(bool isDirectory, string name)
-    {
-        if (isDirectory)
-        {
-            return "";
-        }
-
-        var ext = Path.GetExtension(name).TrimStart('.');
-        if (ext.Length == 0)
-        {
-            ext = name.TrimStart('.');
-        }
-
-        return ext.Length > 4 ? ext[..4].ToUpperInvariant() : ext.ToUpperInvariant();
-    }
-
-    public static double LabelSize(bool isDirectory, string name) => Label(isDirectory, name).Length > 3 ? 6 : 7.5;
-
-    public static Visibility FileVisibility(bool isDirectory) => isDirectory ? Visibility.Collapsed : Visibility.Visible;
-
-    public static Visibility FolderVisibility(bool isDirectory) => isDirectory ? Visibility.Visible : Visibility.Collapsed;
-
     public static Brush Brush(bool isDirectory, string name)
     {
+        var color = Default;
         if (isDirectory)
         {
-            return new SolidColorBrush(Folder);
+            color = Folder;
         }
-
-        // Dotfiles like .gitignore have no Path extension, so match the whole name too.
-        var ext = Path.GetExtension(name);
-        if (Colors.TryGetValue(ext, out var c) || Colors.TryGetValue(name, out c))
+        else if (!string.IsNullOrEmpty(name) && TryLookup(name, out var icon))
         {
-            return new SolidColorBrush(c);
+            color = icon.Color;
         }
 
-        return new SolidColorBrush(Default);
+        if (!BrushCache.TryGetValue(color, out var brush))
+        {
+            brush = new SolidColorBrush(color);
+            BrushCache[color] = brush;
+        }
+
+        return brush;
     }
 }

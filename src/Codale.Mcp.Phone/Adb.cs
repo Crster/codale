@@ -87,19 +87,137 @@ internal sealed class Adb
         return Check(await ExecAsync(exe, args, ct, null));
     }
 
-    /// <summary>Starts the emulator for an AVD and returns without waiting for it to exit.</summary>
-    public static void StartEmulator(string avd)
+    /// <summary>Like <see cref="ShellAsync"/> but a non-zero exit is returned, not thrown (pidof, grep and friends use it for "no match").</summary>
+    public async Task<(int Code, string Output)> TryShellAsync(string serial, string command, CancellationToken ct, TimeSpan? timeout = null)
+    {
+        var result = await ExecAsync(AdbPath, ForDevice(serial, "shell", command), ct, timeout);
+        return (result.Code, result.Output);
+    }
+
+    /// <summary>
+    /// Starts the emulator for an AVD and returns without waiting for it to exit. Its output must stay
+    /// redirected (it would otherwise share this server's stdout, the protocol channel) and be drained,
+    /// or a full pipe stalls the emulator.
+    /// </summary>
+    public static EmulatorLaunch StartEmulator(string avd)
     {
         var exe = Find("emulator", "emulator") ?? throw new McpToolException("The Android emulator was not found. Install it with the SDK Manager or set ANDROID_HOME.");
         var info = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         info.ArgumentList.Add("-avd");
         info.ArgumentList.Add(avd);
-        Process.Start(info)?.Dispose();
+        var process = Process.Start(info) ?? throw new McpToolException($"Could not start {exe}.");
+        var launch = new EmulatorLaunch(process);
+        process.OutputDataReceived += (_, e) => launch.Add(e.Data);
+        process.ErrorDataReceived += (_, e) => launch.Add(e.Data);
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        return launch;
+    }
+
+    /// <summary>A started emulator process and the tail of what it printed, so a failed start can report the emulator's own message.</summary>
+    public sealed class EmulatorLaunch(Process process)
+    {
+        private readonly Queue<string> _lines = new();
+
+        public Process Process { get; } = process;
+
+        public void Add(string? line)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return;
+            }
+
+            lock (_lines)
+            {
+                _lines.Enqueue(line.Trim());
+                while (_lines.Count > 15)
+                {
+                    _lines.Dequeue();
+                }
+            }
+        }
+
+        public string Output
+        {
+            get
+            {
+                lock (_lines)
+                {
+                    return string.Join("\n", _lines);
+                }
+            }
+        }
+
+        /// <summary>The emulator's message when it died with an error; null while it runs or after a clean exit.</summary>
+        public string? FailureMessage()
+        {
+            if (!Process.HasExited || Process.ExitCode == 0)
+            {
+                return null;
+            }
+
+            Process.WaitForExit(500);
+            var output = Output;
+            return $"The emulator exited with code {Process.ExitCode}" + (output.Length > 0 ? ":\n" + output : ".");
+        }
+    }
+
+    /// <summary>Wakes the screen (and dismisses a swipe-only lock screen) when the device is asleep; a sleeping screen gives black screenshots and no UI tree.</summary>
+    public async Task EnsureAwakeAsync(string serial, CancellationToken ct)
+    {
+        var (_, power) = await TryShellAsync(serial, "dumpsys power | grep -m1 mWakefulness=", ct, TimeSpan.FromSeconds(15));
+        if (power.Contains("Awake", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        await TryShellAsync(serial, "input keyevent KEYCODE_WAKEUP; wm dismiss-keyguard", ct, TimeSpan.FromSeconds(15));
+        await Task.Delay(800, ct);
+    }
+
+    /// <summary>The AVD name a running emulator serves, or null when it cannot be read.</summary>
+    public async Task<string?> AvdNameAsync(string serial, CancellationToken ct)
+    {
+        try
+        {
+            var result = await ExecAsync(AdbPath, ForDevice(serial, "emu", "avd", "name"), ct, TimeSpan.FromSeconds(10));
+            return result.Code == 0 ? result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() : null;
+        }
+        catch (McpToolException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The PNG inside screencap output, without any leading adb/shell noise; the input when no signature is found.</summary>
+    public static byte[] TrimToPng(byte[] data)
+    {
+        ReadOnlySpan<byte> signature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        var at = data.AsSpan().IndexOf(signature);
+        return at <= 0 ? data : data[at..];
     }
 
     /// <summary>Online devices from <c>adb devices -l</c>: serial and the descriptive tail.</summary>
     public async Task<IReadOnlyList<(string Serial, string State, string Detail)>> DevicesAsync(CancellationToken ct) =>
-        ParseDevices(await RunAsync(["devices", "-l"], ct));
+        DropDuplicateWireless(ParseDevices(await RunAsync(["devices", "-l"], ct)));
+
+    /// <summary>
+    /// A wirelessly paired phone is listed twice: by IP:port and by its mDNS name (<c>adb-ID._adb-tls-connect._tcp</c>).
+    /// Keeps the IP:port entry and drops the mDNS twin (same product/model/device) so the phone counts once.
+    /// </summary>
+    public static IReadOnlyList<(string Serial, string State, string Detail)> DropDuplicateWireless(IReadOnlyList<(string Serial, string State, string Detail)> devices)
+    {
+        static string Identity(string detail) =>
+            string.Join(' ', detail.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(p => !p.StartsWith("transport_id:", StringComparison.Ordinal)));
+
+        var direct = devices
+            .Where(d => !d.Serial.Contains("._adb-tls-", StringComparison.Ordinal) && d.Serial.Contains(':'))
+            .Select(d => Identity(d.Detail))
+            .ToHashSet();
+
+        return devices.Where(d => !d.Serial.Contains("._adb-tls-", StringComparison.Ordinal) || !direct.Contains(Identity(d.Detail))).ToList();
+    }
 
     public static IReadOnlyList<(string Serial, string State, string Detail)> ParseDevices(string output)
     {
@@ -131,7 +249,7 @@ internal sealed class Adb
         return ready.Count switch
         {
             1 => ready[0].Serial,
-            0 => throw new McpToolException("No Android device is connected. Plug one in with USB debugging on, or start an emulator (phone_emulator_start), then check phone_devices."),
+            0 => throw new McpToolException("No Android device is connected. Plug one in with USB debugging on, pair it over Wi-Fi (phone_connect), or start an emulator (phone_emulator_start), then check phone_devices."),
             _ => throw new McpToolException("Several devices are connected; pass 'serial' (see phone_devices): " + string.Join(", ", ready.Select(d => d.Serial))),
         };
     }
