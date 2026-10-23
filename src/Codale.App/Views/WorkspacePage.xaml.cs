@@ -949,7 +949,15 @@ public sealed partial class WorkspacePage : Page
 
             var command = ViewModel.RewriteCliLaunch(promptLine, session) ?? cli.Executable + args;
             CrashLog.Trace($"cli tab: launching {cli.Id} as '{command}'");
-            var terminal = ViewModel.RunCliTerminal(command, cli, PromptDirectory(promptLine) ?? ViewModel.ProjectPath, session);
+            var directory = PromptDirectory(promptLine);
+            if (string.IsNullOrWhiteSpace(directory) ||
+                directory.StartsWith(McpServerSettings.CodaleDataRoot(), StringComparison.OrdinalIgnoreCase) ||
+                !Directory.Exists(directory))
+            {
+                directory = ViewModel.ProjectPath;
+            }
+
+            var terminal = ViewModel.RunCliTerminal(command, cli, directory, session);
             _ = ViewModel.BeginTerminalCliSessionAsync(session, terminal);
             terminal.Exited += (_, _) => DispatcherQueue.TryEnqueue(() => OnCliTerminalExited(terminal));
             WatchCliForTaskCompletion(cli, session, terminal);

@@ -76,7 +76,7 @@ public sealed class AgyHistoryReader : ICliHistoryReader
                     var root = doc.RootElement;
                     if (root.ValueKind != JsonValueKind.Object ||
                         Str(root, "conversationId") is not { Length: > 0 } conversation ||
-                        Str(root, "workspace") is not { } folder || Normalize(folder) != _projectPath ||
+                        Str(root, "workspace") is not { } folder || (Normalize(folder) != _projectPath && !Normalize(folder).StartsWith(_projectPath + "\\", StringComparison.Ordinal)) ||
                         Str(root, "display") is not { } text)
                     {
                         continue;

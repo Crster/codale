@@ -29,6 +29,8 @@ public sealed class FeatureLog(string directory, string? chatId = null)
     /// <summary>One gate per log folder, whichever chat or background job holds a <see cref="FeatureLog"/> on it.</summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, object> Gates = new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly HashSet<string> _tools = new(StringComparer.Ordinal);
+
     private object Gate => Gates.GetOrAdd(Path.GetFullPath(directory), _ => new object());
 
     private string LogPath => Path.Combine(directory, "log.jsonl");
@@ -97,10 +99,20 @@ public sealed class FeatureLog(string directory, string? chatId = null)
                 Append(new { type = "assistant", id = reply.MessageId, model = reply.Model, text = reply.Text, at = DateTimeOffset.Now });
                 break;
 
-            // A proposed plan is the one tool call that is the answer: stopped before approval, it is
-            // otherwise nowhere in the history.
-            case ToolCallStarted { ParentToolUseId: null, ToolName: "ExitPlanMode", Input.ValueKind: JsonValueKind.Object } plan:
-                Append(new { type = "tool", id = plan.ToolUseId, name = plan.ToolName, input = plan.Input, at = DateTimeOffset.Now });
+            case ToolCallStarted { ParentToolUseId: null } started:
+                _tools.Add(started.ToolUseId);
+                Append(new
+                {
+                    type = "tool",
+                    id = started.ToolUseId,
+                    name = started.ToolName,
+                    input = started.Input.ValueKind == JsonValueKind.Undefined ? (JsonElement?)null : started.Input,
+                    at = DateTimeOffset.Now,
+                });
+                break;
+
+            case ToolCallCompleted done when _tools.Contains(done.ToolUseId):
+                Append(new { type = "toolDone", id = done.ToolUseId, error = done.IsError, change = done.FileChange, at = DateTimeOffset.Now });
                 break;
         }
     }
@@ -277,6 +289,8 @@ public sealed class FeatureLog(string directory, string? chatId = null)
                 using var trim = new FileStream(archive, FileMode.Open, FileAccess.Write, FileShare.Read);
                 trim.SetLength(trim.Length - tail.Length);
             }
+
+            _tools.Clear();
         }
     }
 

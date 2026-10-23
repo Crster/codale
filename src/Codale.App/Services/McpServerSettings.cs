@@ -127,8 +127,8 @@ public sealed class McpServerSettings
         "To view static files (a built site, an HTML report, a generated page) in a browser, call mcp__codale-tasks__serve_folder: " +
         "Codale hosts the folder on http://localhost:PORT/ until stop_serving, so do not start an http server with start_task for that. " +
         "Codale's session panel is fed by two codale-tasks tools and nothing else. " +
-        "Show your progress with mcp__codale-tasks__todos_set: pass the whole step list every call (2-6 short steps, one in_progress, " +
-        "finished ones completed) when you start, as you begin each step and when the last one finishes. The built-in task-list tools " +
+        "MANDATORY: Show your progress with mcp__codale-tasks__todos_set (or todos_set): pass the whole step list every call (2-6 short steps, one in_progress, " +
+        "finished ones completed) immediately as your FIRST action when you start, as you begin each step and when the last one finishes. The built-in task-list tools " +
         "(TodoWrite, TaskCreate, TaskUpdate) are switched off; do not look for them. " +
         "Use mcp__codale-tasks__artifact_add for a deliverable that is not project source (a report, document, image or data file): " +
         "pass a path or markdown and it is listed for the user to open; do not add source files you edited. " +
@@ -221,7 +221,7 @@ public sealed class McpServerSettings
         {
             try
             {
-                var json = McpServerSpec.ToClaudeConfig(servers);
+                var json = McpServerSpec.ToAgyConfig(servers);
                 var rootConfig = Path.Combine(dir, "mcp_config.json");
                 var agentsConfig = Path.Combine(dir, ".agents", "mcp_config.json");
 
@@ -360,7 +360,7 @@ public sealed class McpServerSettings
             return cli.Id switch
             {
                 // Last, because --mcp-config takes any number of values and would swallow a trailing prompt.
-                "claude" => $"claude{tail} --mcp-config \"{Stage("claude", key, McpServerSpec.ToClaudeConfig(servers)!)}\"",
+                "claude" => StageClaude(key, servers, tail, powershell),
                 "copilot" => $"copilot --additional-mcp-config {Quote(powershell, "@" + Stage("copilot", key, CopilotConfig(servers)))}{tail}",
                 "codex" => $"codex {CodexOverrides(powershell, servers)}{tail}",
                 "gemini" => WithEnv(powershell, "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
@@ -370,7 +370,7 @@ public sealed class McpServerSettings
                     StageSettings("qwen", key, servers, Path.Combine(programData, "qwen-code", "settings.json"), "QWEN_CODE_SYSTEM_SETTINGS_PATH"),
                     "qwen" + tail),
                 "opencode" => WithEnv(powershell, "OPENCODE_CONFIG", StageOpenCode(key, servers), "opencode" + tail),
-                "agy" => $"agy --add-dir {Quote(powershell, CodaleDataRoot())}{tail}",
+                "agy" => StageAgy(key, servers, tail, powershell),
                 _ => null,
             };
         }
@@ -387,6 +387,67 @@ public sealed class McpServerSettings
         var path = StagedPath(cli, key);
         File.WriteAllText(path, content);
         return path;
+    }
+
+    private string StageClaude(string key, IReadOnlyList<McpServerSpec> servers, string tail, bool powershell)
+    {
+        var configPath = Stage("claude", key, McpServerSpec.ToClaudeConfig(servers)!);
+        var settingsDoc = new System.Text.Json.Nodes.JsonObject();
+        var permissions = new System.Text.Json.Nodes.JsonObject();
+        var allow = servers.Where(s => s.AutoApprove && !s.RequireApproval)
+            .Select(s => (System.Text.Json.Nodes.JsonNode)$"mcp__{s.Name}")
+            .ToArray();
+        if (allow.Length > 0)
+        {
+            permissions["allow"] = new System.Text.Json.Nodes.JsonArray(allow);
+        }
+
+        var ask = servers.Where(s => s.RequireApproval).Select(s => $"mcp__{s.Name}")
+            .Concat(servers.Where(s => !s.RequireApproval)
+                .SelectMany(s => s.AskTools.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => McpServerSpec.PrefixOf(s.Name) + t.Trim())))
+            .Distinct(StringComparer.Ordinal)
+            .Select(rule => (System.Text.Json.Nodes.JsonNode)rule)
+            .ToArray();
+        if (ask.Length > 0)
+        {
+            permissions["ask"] = new System.Text.Json.Nodes.JsonArray(ask);
+        }
+
+        if (permissions.Count > 0)
+        {
+            settingsDoc["permissions"] = permissions;
+        }
+
+        var settingsPath = StagedPath("claude-settings", key);
+        File.WriteAllText(settingsPath, settingsDoc.ToJsonString());
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append("claude");
+        sb.Append(tail);
+        sb.Append(" --mcp-config ");
+        sb.Append(Quote(powershell, configPath));
+        sb.Append(" --settings ");
+        sb.Append(Quote(powershell, settingsPath));
+        return sb.ToString();
+    }
+
+    private string StageAgy(string key, IReadOnlyList<McpServerSpec> servers, string tail, bool powershell)
+    {
+        var stageDir = Path.Combine(StagingRoot(), "cli", $"agy-{ProjectHash()}-{key}");
+        var agentsDir = Path.Combine(stageDir, ".agents");
+        Directory.CreateDirectory(agentsDir);
+
+        var json = McpServerSpec.ToAgyConfig(servers);
+        if (json is { Length: > 0 })
+        {
+            File.WriteAllText(Path.Combine(stageDir, "mcp_config.json"), json);
+            File.WriteAllText(Path.Combine(agentsDir, "mcp_config.json"), json);
+        }
+
+        WriteAgyRules(Path.Combine(agentsDir, "rules", "codale.md"), servers);
+
+        var skip = tail.Contains("--dangerously-skip-permissions", StringComparison.OrdinalIgnoreCase) ? "" : " --dangerously-skip-permissions";
+        return $"agy --add-dir {Quote(powershell, stageDir)}{skip}{tail}";
     }
 
     /// <summary>One file per project and session: each CLI carries its own pipe and token, so two launches must not share one.</summary>
@@ -408,9 +469,14 @@ public sealed class McpServerSettings
             var directory = Path.Combine(StagingRoot(), "cli");
             if (Directory.Exists(directory))
             {
-                foreach (var file in Directory.EnumerateFiles(directory, $"*-{ProjectHash()}-{key}.json"))
+                foreach (var file in Directory.EnumerateFiles(directory, $"*-{ProjectHash()}-{key}*"))
                 {
                     File.Delete(file);
+                }
+
+                foreach (var dir in Directory.EnumerateDirectories(directory, $"*-{ProjectHash()}-{key}*"))
+                {
+                    Directory.Delete(dir, recursive: true);
                 }
             }
         }
@@ -483,6 +549,15 @@ public sealed class McpServerSettings
             if (server.Env is { Count: > 0 } env)
             {
                 parts.Add($"-c {Quote(powershell, $"{key}.env={{{string.Join(",", env.Select(e => $"{e.Key}={Literal(e.Value)}"))}}}")}");
+            }
+
+            if (server.RequireApproval)
+            {
+                parts.Add($"-c {Quote(powershell, $"{key}.default_tools_approval_mode='prompt'")}");
+            }
+            else if (server.AutoApprove)
+            {
+                parts.Add($"-c {Quote(powershell, $"{key}.default_tools_approval_mode='approve'")}");
             }
         }
 
@@ -594,7 +669,7 @@ public sealed class McpServerSettings
                         // Gemini has no "type" field; "trust" skips its per-call confirmation.
                         e.Remove("type");
                         var spec = servers.First(s => s.Name == name);
-                        if (spec.AutoApprove && !spec.RequireApproval && spec.AskTools.Count == 0)
+                        if (spec.AutoApprove && !spec.RequireApproval)
                         {
                             e["trust"] = true;
                         }
@@ -666,7 +741,8 @@ public sealed class McpServerSettings
         {
             parts.Add(
                 $"You can control an Android phone or emulator over adb with the {McpServerSpec.PrefixOf(PhoneName)}* tools, to build and test " +
-                "mobile apps. Call phone_devices first, and take a phone_screenshot or phone_ui_tree before every tap or swipe (coordinates are " +
+                "mobile apps. MANDATORY: NEVER execute raw 'adb' commands via terminal or shell tools. Always use the codale-phone tools instead. " +
+                "Call phone_devices first, and take a phone_screenshot or phone_ui_tree before every tap or swipe (coordinates are " +
                 "device pixels on the latest view). Build with the shell (e.g. gradlew installDebug; use start_task for long-running builds or " +
                 "dev servers), install with phone_install, start the app with phone_launch_app and read phone_logcat for crashes before you " +
                 "report the work as done. phone_port_forward (reverse) lets the phone reach a dev server on this computer.");

@@ -217,6 +217,10 @@ public sealed class McpServer(string name, string version, IReadOnlyList<McpTool
                         ["name"] = t.Name,
                         ["description"] = t.Description,
                         ["inputSchema"] = t.InputSchema.DeepClone(),
+                        ["_meta"] = new JsonObject
+                        {
+                            ["antigravity/alwaysLoad"] = true,
+                        },
                     }).ToArray()),
                 }),
                 "tools/call" => Result(id, await CallToolAsync(msg["params"] as JsonObject, ct)),

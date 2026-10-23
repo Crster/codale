@@ -45,7 +45,42 @@ public sealed record McpServerSpec
                          !s.AskTools.Contains(toolName[PrefixOf(s.Name).Length..], StringComparer.Ordinal));
 
     /// <summary>Standard <c>mcp_config.json</c> document for servers, recognized by Antigravity and other MCP-compliant CLIs.</summary>
-    public static string? ToStandardMcpConfig(IReadOnlyList<McpServerSpec> servers) => ToClaudeConfig(servers);
+    public static string? ToStandardMcpConfig(IReadOnlyList<McpServerSpec> servers) => ToAgyConfig(servers);
+
+    /// <summary>Generates <c>mcp_config.json</c> for Antigravity, marking all tools eager so they are directly exposed.</summary>
+    public static string? ToAgyConfig(IReadOnlyList<McpServerSpec> servers)
+    {
+        if (servers.Count == 0)
+        {
+            return null;
+        }
+
+        var map = new JsonObject();
+        foreach (var server in servers)
+        {
+            var entry = new JsonObject
+            {
+                ["command"] = server.Command,
+                ["args"] = new JsonArray(server.Args.Select(a => (JsonNode)a).ToArray()),
+                ["force_all_tools_eager"] = true,
+            };
+
+            if (server.Env is { Count: > 0 } env)
+            {
+                var vars = new JsonObject();
+                foreach (var (key, value) in env)
+                {
+                    vars[key] = value;
+                }
+
+                entry["env"] = vars;
+            }
+
+            map[server.Name] = entry;
+        }
+
+        return new JsonObject { ["mcpServers"] = map }.ToJsonString();
+    }
 
     /// <summary>The <c>--mcp-config</c> document for a set of servers, or null when there are none.</summary>
     public static string? ToClaudeConfig(IReadOnlyList<McpServerSpec> servers)
