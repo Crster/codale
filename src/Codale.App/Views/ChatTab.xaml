@@ -28,6 +28,8 @@
         <views:NoticeSeverityBrushConverter x:Key="NoticeBrush" />
         <views:BoolToChevronConverter x:Key="ChevronGlyph" />
         <views:TurnOutcomeBrushConverter x:Key="TurnOutcomeBrush" />
+        <views:TurnOutcomeTintConverter x:Key="TurnOutcomeTint" />
+        <views:TimestampTextConverter x:Key="TimestampText" />
         <views:PathToImageSourceConverter x:Key="PathToImage" />
         <views:AttachmentGlyphConverter x:Key="AttachmentGlyph" />
         <views:SuggestionGlyphConverter x:Key="SuggestionGlyph" />
@@ -55,12 +57,13 @@
 
         <!--  A workspace file a step touched: quiet until hovered, then it reads as the link it is.  -->
         <Style x:Key="ToolFileChip" TargetType="Button">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="5,2" />
+            <Setter Property="Background" Value="{StaticResource DetailSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource DetailStrokeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="6,2" />
             <Setter Property="Margin" Value="0" />
             <Setter Property="MinHeight" Value="0" />
-            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="CornerRadius" Value="6" />
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -301,11 +304,13 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <Border
-                                Width="20"
-                                Height="20"
+                                Width="22"
+                                Height="22"
                                 VerticalAlignment="Center"
                                 Background="{x:Bind Kind, Converter={StaticResource ToolKindTint}}"
-                                CornerRadius="10">
+                                BorderBrush="{x:Bind Kind, Converter={StaticResource ToolKindBrush}}"
+                                BorderThickness="1"
+                                CornerRadius="11">
                                 <FontIcon
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center"
@@ -325,7 +330,8 @@
                                 <Run
                                     FontFamily="Cascadia Mono, Consolas"
                                     FontSize="{x:Bind S12_5, Mode=OneWay}"
-                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    FontWeight="SemiBold"
+                                    Foreground="{x:Bind Kind, Converter={StaticResource ToolKindBrush}}"
                                     Text="{x:Bind Verb, Mode=OneWay}" />
                                 <Run
                                     FontFamily="Cascadia Mono, Consolas"
@@ -394,19 +400,53 @@
                     Visibility="{x:Bind IsExpanded, Mode=OneWay}">
                     <!--  The command in full, highlighted: approving what you cannot read is no approval.  -->
                     <Border
-                        Padding="12,8"
                         Background="{StaticResource CodeSurfaceBrush}"
                         BorderBrush="{StaticResource DetailStrokeBrush}"
                         BorderThickness="1"
-                        CornerRadius="6"
+                        CornerRadius="8"
                         Visibility="{x:Bind ShellCommand, Converter={StaticResource NullToVisibility}}">
-                        <TextBlock
-                            FontFamily="Cascadia Mono, Consolas"
-                            FontSize="{x:Bind S12_5, Mode=OneWay}"
-                            IsTextSelectionEnabled="True"
-                            TextWrapping="Wrap"
-                            views:CodeText.Code="{x:Bind ShellCommand}"
-                            views:CodeText.Syntax="shell" />
+                        <StackPanel>
+                            <Grid
+                                Padding="12,6"
+                                Background="{StaticResource CodeHeaderSurfaceBrush}"
+                                BorderBrush="{StaticResource DetailStrokeBrush}"
+                                BorderThickness="0,0,0,1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <FontIcon FontSize="11" Foreground="{StaticResource KindShellBrush}" Glyph="&#xE756;" />
+                                    <TextBlock
+                                        FontFamily="Cascadia Mono, Consolas"
+                                        FontSize="{x:Bind S11, Mode=OneWay}"
+                                        FontWeight="SemiBold"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Text="Command" />
+                                </StackPanel>
+                                <Button
+                                    Grid.Column="2"
+                                    Padding="4,2"
+                                    Click="OnCopyToolCommandClick"
+                                    Style="{StaticResource LinkButton}"
+                                    Tag="{x:Bind}"
+                                    ToolTipService.ToolTip="Copy command">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <FontIcon FontSize="11" Glyph="&#xE8C8;" />
+                                        <TextBlock FontSize="{x:Bind S11, Mode=OneWay}" Text="Copy" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                            <TextBlock
+                                Padding="12,10"
+                                FontFamily="Cascadia Mono, Consolas"
+                                FontSize="{x:Bind S12_5, Mode=OneWay}"
+                                IsTextSelectionEnabled="True"
+                                TextWrapping="Wrap"
+                                views:CodeText.Code="{x:Bind ShellCommand}"
+                                views:CodeText.Syntax="shell" />
+                        </StackPanel>
                     </Border>
 
                     <!--  The change itself: what went, what replaced it.  -->
@@ -702,22 +742,56 @@
 
                     <!--  The result as a terminal page: monospaced, columns intact, scrollable.  -->
                     <Border
-                        Padding="12,8"
                         Background="{StaticResource CodeSurfaceBrush}"
                         BorderBrush="{StaticResource DetailStrokeBrush}"
                         BorderThickness="1"
-                        CornerRadius="6"
+                        CornerRadius="8"
                         Visibility="{x:Bind ShowOutput, Mode=OneWay}">
-                        <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto">
-                            <TextBlock
-                                FontFamily="Cascadia Mono, Consolas"
-                                FontSize="{x:Bind S12, Mode=OneWay}"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                IsTextSelectionEnabled="True"
-                                TextWrapping="Wrap"
-                                views:CodeText.Code="{x:Bind Output, Mode=OneWay}"
-                                views:CodeText.Syntax="text" />
-                        </ScrollViewer>
+                        <StackPanel>
+                            <Grid
+                                Padding="12,6"
+                                Background="{StaticResource CodeHeaderSurfaceBrush}"
+                                BorderBrush="{StaticResource DetailStrokeBrush}"
+                                BorderThickness="0,0,0,1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <FontIcon FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE756;" />
+                                    <TextBlock
+                                        FontFamily="Cascadia Mono, Consolas"
+                                        FontSize="{x:Bind S11, Mode=OneWay}"
+                                        FontWeight="SemiBold"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Text="Output" />
+                                </StackPanel>
+                                <Button
+                                    Grid.Column="2"
+                                    Padding="4,2"
+                                    Click="OnCopyToolOutputClick"
+                                    Style="{StaticResource LinkButton}"
+                                    Tag="{x:Bind}"
+                                    ToolTipService.ToolTip="Copy output">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <FontIcon FontSize="11" Glyph="&#xE8C8;" />
+                                        <TextBlock FontSize="{x:Bind S11, Mode=OneWay}" Text="Copy" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                            <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto">
+                                <TextBlock
+                                    Padding="12,10"
+                                    FontFamily="Cascadia Mono, Consolas"
+                                    FontSize="{x:Bind S12, Mode=OneWay}"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    IsTextSelectionEnabled="True"
+                                    TextWrapping="Wrap"
+                                    views:CodeText.Code="{x:Bind Output, Mode=OneWay}"
+                                    views:CodeText.Syntax="text" />
+                            </ScrollViewer>
+                        </StackPanel>
                     </Border>
                 </StackPanel>
             </StackPanel>
@@ -981,32 +1055,122 @@
 
         <DataTemplate x:Key="UserTemplate" x:DataType="vm:UserMessageItem">
             <StackPanel
-                MaxWidth="560"
+                MaxWidth="620"
                 Margin="{x:Bind RowMargin, Mode=OneWay}"
                 HorizontalAlignment="Right"
-                Spacing="4">
+                Spacing="5">
+                <!-- User message header with You badge, mode tags, timestamp and copy button -->
+                <Grid Margin="0,0,2,0" HorizontalAlignment="Right" ColumnSpacing="6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Button
+                        Width="22"
+                        Height="22"
+                        Padding="0"
+                        VerticalAlignment="Center"
+                        Click="OnCopyUserTextClick"
+                        Style="{StaticResource LinkButton}"
+                        Tag="{x:Bind}"
+                        ToolTipService.ToolTip="Copy message"
+                        Visibility="{x:Bind HasText, Converter={StaticResource BoolToVisibility}}">
+                        <FontIcon FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE8C8;" />
+                    </Button>
+
+                    <TextBlock
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        FontFamily="Cascadia Mono, Consolas"
+                        FontSize="{x:Bind S10_5, Mode=OneWay}"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Text="{x:Bind Timestamp, Converter={StaticResource TimestampText}}" />
+
+                    <Border
+                        Grid.Column="2"
+                        Padding="7,2"
+                        VerticalAlignment="Center"
+                        Background="{StaticResource KindPlanTintBrush}"
+                        BorderBrush="{StaticResource KindPlanBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Visibility="{x:Bind SentAsPlan, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <FontIcon FontSize="9" Foreground="{StaticResource KindPlanBrush}" Glyph="&#xE8FD;" />
+                            <TextBlock
+                                FontSize="{x:Bind S10, Mode=OneWay}"
+                                FontWeight="Bold"
+                                Foreground="{StaticResource KindPlanBrush}"
+                                Text="PLAN" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border
+                        Grid.Column="3"
+                        Padding="7,2"
+                        VerticalAlignment="Center"
+                        Background="{StaticResource KindEditTintBrush}"
+                        BorderBrush="{StaticResource KindEditBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Visibility="{x:Bind IsSteer, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <FontIcon FontSize="9" Foreground="{StaticResource KindEditBrush}" Glyph="&#xE8AC;" />
+                            <TextBlock
+                                FontSize="{x:Bind S10, Mode=OneWay}"
+                                FontWeight="Bold"
+                                Foreground="{StaticResource KindEditBrush}"
+                                Text="STEER" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border
+                        Grid.Column="4"
+                        Padding="8,2"
+                        VerticalAlignment="Center"
+                        Background="{StaticResource UserBubbleBrush}"
+                        BorderBrush="{StaticResource UserBubbleStrokeBrush}"
+                        BorderThickness="1"
+                        CornerRadius="10">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <FontIcon FontSize="10" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE77B;" />
+                            <TextBlock
+                                FontSize="{x:Bind S11, Mode=OneWay}"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                Text="You" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
                 <ItemsControl
                     HorizontalAlignment="Right"
                     ItemsSource="{x:Bind Attachments}"
                     Visibility="{x:Bind HasAttachments, Converter={StaticResource BoolToVisibility}}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <StackPanel Orientation="Horizontal" Spacing="4" />
+                            <StackPanel Orientation="Horizontal" Spacing="6" />
                         </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="core:TurnAttachment">
                             <Border
-                                Padding="6,3"
-                                Background="{StaticResource PillBackgroundBrush}"
-                                CornerRadius="6"
+                                Padding="8,4"
+                                Background="{StaticResource DetailSurfaceBrush}"
+                                BorderBrush="{StaticResource DetailStrokeBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8"
                                 Tag="{x:Bind}"
                                 Tapped="OnPreviewAttachment"
                                 ToolTipService.ToolTip="Preview">
-                                <StackPanel Orientation="Horizontal" Spacing="5">
-                                    <FontIcon FontSize="11" Glyph="{x:Bind Kind, Converter={StaticResource AttachmentGlyph}}" />
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon FontSize="12" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="{x:Bind Kind, Converter={StaticResource AttachmentGlyph}}" />
                                     <TextBlock
-                                        MaxWidth="150"
+                                        MaxWidth="160"
                                         VerticalAlignment="Center"
                                         FontSize="12"
                                         Text="{x:Bind Name}"
@@ -1016,39 +1180,17 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
+
                 <Border
-                    Padding="8,2"
-                    HorizontalAlignment="Right"
-                    Background="{StaticResource KindPlanTintBrush}"
-                    CornerRadius="4"
-                    Visibility="{x:Bind SentAsPlan, Converter={StaticResource BoolToVisibility}}">
-                    <TextBlock
-                        FontSize="{x:Bind S10, Mode=OneWay}"
-                        FontWeight="SemiBold"
-                        Foreground="{StaticResource KindPlanBrush}"
-                        Text="PLAN" />
-                </Border>
-                <Border
-                    Padding="8,2"
-                    HorizontalAlignment="Right"
-                    Background="{StaticResource PillBackgroundBrush}"
-                    CornerRadius="4"
-                    Visibility="{x:Bind IsSteer, Converter={StaticResource BoolToVisibility}}">
-                    <TextBlock
-                        FontSize="{x:Bind S10, Mode=OneWay}"
-                        FontWeight="SemiBold"
-                        Opacity="0.7"
-                        Text="STEER" />
-                </Border>
-                <Border
-                    Padding="14,9"
+                    Padding="16,11"
                     HorizontalAlignment="Right"
                     Background="{StaticResource UserBubbleBrush}"
                     BorderBrush="{StaticResource UserBubbleStrokeBrush}"
                     BorderThickness="1"
-                    CornerRadius="14,14,4,14"
+                    CornerRadius="16,16,4,16"
                     Visibility="{x:Bind HasText, Converter={StaticResource BoolToVisibility}}">
                     <TextBlock
+                        FontSize="{x:Bind S13_5, Mode=OneWay}"
                         IsTextSelectionEnabled="True"
                         Text="{x:Bind Text}"
                         TextWrapping="Wrap" />
@@ -1056,83 +1198,104 @@
             </StackPanel>
         </DataTemplate>
 
-        <!--  A turn: the header line (live clock, or outcome + time + pills once it
-              lands) and, while open, the step timeline beneath it.  -->
+        <!--  A turn: the header capsule and, while open, the step timeline beneath it.  -->
         <DataTemplate x:Key="ActivityTemplate" x:DataType="vm:TurnActivityItem">
-            <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="2">
-                <!--  The header only appears once the turn lands: while it runs, the
-                      live status sits at the bottom of the chat, above the composer.  -->
+            <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="4">
                 <Button
-                    Padding="0,3,10,3"
+                    Padding="0"
                     Click="OnTurnToggleClick"
                     Style="{StaticResource ToolToggle}"
                     Tag="{x:Bind}"
                     ToolTipService.ToolTip="Show or hide the steps of this turn"
                     Visibility="{x:Bind IsFinished, Mode=OneWay}">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <Grid Width="22" Height="20" VerticalAlignment="Center">
-                            <FontIcon
-                                HorizontalAlignment="Center"
+                    <Border
+                        Padding="10,6,12,6"
+                        Background="{StaticResource DetailSurfaceBrush}"
+                        BorderBrush="{StaticResource DetailStrokeBrush}"
+                        BorderThickness="1"
+                        CornerRadius="10">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <!-- Status disc with outcome -->
+                            <Border
+                                Width="22"
+                                Height="22"
                                 VerticalAlignment="Center"
-                                FontSize="{x:Bind S11, Mode=OneWay}"
-                                Foreground="{x:Bind Outcome, Mode=OneWay, Converter={StaticResource TurnOutcomeBrush}}"
-                                Glyph="{x:Bind StatusGlyph, Mode=OneWay}"
-                                Visibility="{x:Bind IsFinished, Mode=OneWay}" />
-                        </Grid>
-                        <TextBlock
-                            VerticalAlignment="Center"
-                            FontSize="{x:Bind S12, Mode=OneWay}"
-                            FontWeight="SemiBold"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="{x:Bind HeaderText, Mode=OneWay}" />
-                        <ItemsControl
-                            VerticalAlignment="Center"
-                            ItemsSource="{x:Bind Pills, Mode=OneWay}"
-                            Visibility="{x:Bind IsFinished, Mode=OneWay}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" Spacing="5" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="vm:ActivityPill">
-                                    <Border
-                                        Height="20"
-                                        Padding="9,0"
-                                        VerticalAlignment="Center"
-                                        Background="{x:Bind Kind, Converter={StaticResource ToolKindTint}}"
-                                        CornerRadius="10">
-                                        <TextBlock
+                                Background="{x:Bind Outcome, Mode=OneWay, Converter={StaticResource TurnOutcomeTint}}"
+                                CornerRadius="11">
+                                <FontIcon
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    FontSize="{x:Bind S11, Mode=OneWay}"
+                                    Foreground="{x:Bind Outcome, Mode=OneWay, Converter={StaticResource TurnOutcomeBrush}}"
+                                    Glyph="{x:Bind StatusGlyph, Mode=OneWay}" />
+                            </Border>
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                FontSize="{x:Bind S12_5, Mode=OneWay}"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                Text="{x:Bind HeaderText, Mode=OneWay}" />
+                            <ItemsControl
+                                VerticalAlignment="Center"
+                                ItemsSource="{x:Bind Pills, Mode=OneWay}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" Spacing="6" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:ActivityPill">
+                                        <Border
+                                            Height="22"
+                                            Padding="8,0"
                                             VerticalAlignment="Center"
-                                            FontSize="11"
-                                            FontWeight="SemiBold">
-                                            <Run Foreground="{x:Bind Kind, Converter={StaticResource ToolKindBrush}}" Text="{x:Bind Label}" />
-                                            <Run
-                                                FontFamily="Cascadia Mono, Consolas"
-                                                Foreground="{StaticResource DiffAddedForegroundBrush}"
-                                                Text="{x:Bind AddedText}" />
-                                            <Run
-                                                FontFamily="Cascadia Mono, Consolas"
-                                                Foreground="{StaticResource DiffRemovedForegroundBrush}"
-                                                Text="{x:Bind RemovedText}" />
-                                        </TextBlock>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                        <TextBlock
-                            VerticalAlignment="Center"
-                            FontSize="{x:Bind S11, Mode=OneWay}"
-                            FontWeight="SemiBold"
-                            Foreground="{x:Bind OverallStatus, Mode=OneWay, Converter={StaticResource ToolBrush}}"
-                            Text="{x:Bind ProblemText, Mode=OneWay}"
-                            Visibility="{x:Bind HasProblems, Mode=OneWay}" />
-                        <FontIcon
-                            FontSize="{x:Bind S8, Mode=OneWay}"
-                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Glyph="{x:Bind IsExpanded, Mode=OneWay, Converter={StaticResource ChevronGlyph}}"
-                            Visibility="{x:Bind HasSteps, Mode=OneWay}" />
-                    </StackPanel>
+                                            Background="{x:Bind Kind, Converter={StaticResource ToolKindTint}}"
+                                            BorderBrush="{x:Bind Kind, Converter={StaticResource ToolKindBrush}}"
+                                            BorderThickness="1"
+                                            CornerRadius="11">
+                                            <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                                <FontIcon
+                                                    FontSize="10"
+                                                    Foreground="{x:Bind Kind, Converter={StaticResource ToolKindBrush}}"
+                                                    Glyph="{x:Bind Kind, Converter={StaticResource ToolKindGlyph}}" />
+                                                <TextBlock
+                                                    VerticalAlignment="Center"
+                                                    FontSize="11"
+                                                    FontWeight="SemiBold">
+                                                    <Run Foreground="{x:Bind Kind, Converter={StaticResource ToolKindBrush}}" Text="{x:Bind Label}" />
+                                                    <Run
+                                                        FontFamily="Cascadia Mono, Consolas"
+                                                        Foreground="{StaticResource DiffAddedForegroundBrush}"
+                                                        Text="{x:Bind AddedText}" />
+                                                    <Run
+                                                        FontFamily="Cascadia Mono, Consolas"
+                                                        Foreground="{StaticResource DiffRemovedForegroundBrush}"
+                                                        Text="{x:Bind RemovedText}" />
+                                                </TextBlock>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <Border
+                                Padding="6,2"
+                                VerticalAlignment="Center"
+                                Background="{StaticResource StatusFailedTintBrush}"
+                                CornerRadius="6"
+                                Visibility="{x:Bind HasProblems, Mode=OneWay}">
+                                <TextBlock
+                                    FontSize="{x:Bind S11, Mode=OneWay}"
+                                    FontWeight="SemiBold"
+                                    Foreground="{StaticResource StatusFailedBrush}"
+                                    Text="{x:Bind ProblemText, Mode=OneWay}" />
+                            </Border>
+                            <FontIcon
+                                FontSize="{x:Bind S8, Mode=OneWay}"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Glyph="{x:Bind IsExpanded, Mode=OneWay, Converter={StaticResource ChevronGlyph}}"
+                                Visibility="{x:Bind HasSteps, Mode=OneWay}" />
+                        </StackPanel>
+                    </Border>
                 </Button>
                 <ItemsControl
                     ItemTemplateSelector="{StaticResource StepSelector}"
@@ -1141,32 +1304,108 @@
             </StackPanel>
         </DataTemplate>
 
-        <!--  The answer: plain prose under the folded turn, no chrome.  -->
+        <!--  The answer: clean assistant card with header, timestamp, thinking pill and copy button.  -->
         <DataTemplate x:Key="AssistantTemplate" x:DataType="vm:AssistantMessageItem">
-            <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="4">
-                <StackPanel
-                    Orientation="Horizontal"
-                    Spacing="6"
-                    Visibility="{x:Bind HasThinking, Mode=OneWay}">
-                    <FontIcon
-                        FontSize="{x:Bind S12_5, Mode=OneWay}"
-                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                        Glyph="&#xEA80;" />
+            <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="6">
+                <!-- Assistant Header -->
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Avatar / Bot Icon -->
+                    <Border
+                        Width="22"
+                        Height="22"
+                        VerticalAlignment="Center"
+                        Background="{ThemeResource AccentFillColorDefaultBrush}"
+                        CornerRadius="6">
+                        <FontIcon
+                            FontSize="11"
+                            Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                            Glyph="&#xE99A;" />
+                    </Border>
+
+                    <!-- Agent Name -->
                     <TextBlock
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
                         FontSize="{x:Bind S12_5, Mode=OneWay}"
+                        FontWeight="SemiBold"
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                        Text="Codale" />
+
+                    <!-- Timestamp -->
+                    <TextBlock
+                        Grid.Column="2"
+                        VerticalAlignment="Center"
+                        FontFamily="Cascadia Mono, Consolas"
+                        FontSize="{x:Bind S10_5, Mode=OneWay}"
                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                        Text="thought about this" />
-                </StackPanel>
-                <views:MarkdownView BaseFontSize="{x:Bind S13_5, Mode=OneWay}" Markdown="{x:Bind Text, Mode=OneWay}" />
-                <Rectangle
-                    Width="7"
-                    Height="14"
+                        Text="{x:Bind Timestamp, Converter={StaticResource TimestampText}}" />
+
+                    <!-- Copy Response Button -->
+                    <Button
+                        Grid.Column="4"
+                        Width="26"
+                        Height="26"
+                        Padding="0"
+                        VerticalAlignment="Center"
+                        Click="OnCopyAssistantTextClick"
+                        Style="{StaticResource LinkButton}"
+                        Tag="{x:Bind}"
+                        ToolTipService.ToolTip="Copy response">
+                        <FontIcon FontSize="12" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE8C8;" />
+                    </Button>
+                </Grid>
+
+                <!-- Thinking Chip (if thinking was recorded) -->
+                <Border
+                    Padding="10,5"
                     HorizontalAlignment="Left"
-                    Fill="{ThemeResource AccentFillColorDefaultBrush}"
-                    RadiusX="1"
-                    RadiusY="1"
-                    Visibility="{x:Bind IsStreaming, Mode=OneWay}"
-                    views:Pulse.IsActive="{Binding IsStreaming, Mode=OneWay}" />
+                    Background="{StaticResource KindAskTintBrush}"
+                    BorderBrush="{StaticResource AskStrokeBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Visibility="{x:Bind HasThinking, Mode=OneWay}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon
+                            FontSize="{x:Bind S11_5, Mode=OneWay}"
+                            Foreground="{StaticResource KindAskBrush}"
+                            Glyph="&#xEA80;" />
+                        <TextBlock
+                            FontSize="{x:Bind S11_5, Mode=OneWay}"
+                            FontWeight="SemiBold"
+                            Foreground="{StaticResource KindAskBrush}"
+                            Text="Thought Process" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Assistant Response Body Container -->
+                <Border
+                    Padding="16,12"
+                    Background="{StaticResource AssistantCardBrush}"
+                    BorderBrush="{StaticResource AssistantCardStrokeBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12">
+                    <StackPanel Spacing="6">
+                        <views:MarkdownView BaseFontSize="{x:Bind S13_5, Mode=OneWay}" Markdown="{x:Bind Text, Mode=OneWay}" />
+                        
+                        <!-- Streaming Cursor -->
+                        <Border
+                            Width="8"
+                            Height="16"
+                            HorizontalAlignment="Left"
+                            Background="{ThemeResource AccentFillColorDefaultBrush}"
+                            CornerRadius="2"
+                            Visibility="{x:Bind IsStreaming, Mode=OneWay}"
+                            views:Pulse.IsActive="{Binding IsStreaming, Mode=OneWay}" />
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </DataTemplate>
 
@@ -1181,27 +1420,30 @@
         </DataTemplate>
 
         <DataTemplate x:Key="NoticeTemplate" x:DataType="vm:NoticeItem">
-            <!--  Grid, not a horizontal StackPanel: an unconstrained width never wraps,
-                  so long notices were clipped to one line.  -->
-            <Grid
+            <Border
                 Margin="{x:Bind RowMargin, Mode=OneWay}"
-                ColumnSpacing="8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <Ellipse
-                    Width="5"
-                    Height="5"
-                    VerticalAlignment="Center"
-                    Fill="{x:Bind Severity, Converter={StaticResource NoticeBrush}}" />
-                <TextBlock
-                    Grid.Column="1"
-                    FontSize="{x:Bind S12, Mode=OneWay}"
-                    Foreground="{x:Bind Severity, Converter={StaticResource NoticeBrush}}"
-                    Text="{x:Bind Text}"
-                    TextWrapping="Wrap" />
-            </Grid>
+                Padding="12,8"
+                Background="{StaticResource DetailSurfaceBrush}"
+                BorderBrush="{x:Bind Severity, Converter={StaticResource NoticeBrush}}"
+                BorderThickness="2,0,0,0"
+                CornerRadius="0,8,8,0">
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon
+                        FontSize="{x:Bind S12, Mode=OneWay}"
+                        Foreground="{x:Bind Severity, Converter={StaticResource NoticeBrush}}"
+                        Glyph="{x:Bind Glyph}" />
+                    <TextBlock
+                        Grid.Column="1"
+                        FontSize="{x:Bind S12, Mode=OneWay}"
+                        Foreground="{x:Bind Severity, Converter={StaticResource NoticeBrush}}"
+                        Text="{x:Bind Text}"
+                        TextWrapping="Wrap" />
+                </Grid>
+            </Border>
         </DataTemplate>
 
         <DataTemplate x:Key="ComposerNoticeTemplate" x:DataType="vm:NoticeItem">
@@ -1527,92 +1769,281 @@
         <ScrollViewer x:Name="ChatScroller" VerticalScrollBarVisibility="Auto">
             <ItemsControl
                 x:Name="Transcript"
-                Padding="0,0,8,8"
+                Padding="12,12,16,16"
                 ItemTemplateSelector="{StaticResource ChatTemplateSelector}"
                 ItemsSource="{x:Bind ViewModel.Items}" />
         </ScrollViewer>
 
-        <!--  Shown until the first message arrives.  -->
-        <StackPanel
+        <!--  Shown until the first message arrives: Vibrant Welcome & Quick Starters  -->
+        <ScrollViewer
             HorizontalAlignment="Center"
             VerticalAlignment="Center"
-            IsHitTestVisible="False"
-            Spacing="6"
+            HorizontalScrollBarVisibility="Disabled"
+            VerticalScrollBarVisibility="Auto"
             Visibility="{x:Bind ViewModel.Items.Count, Mode=OneWay, Converter={StaticResource CountToInverseVisibility}}">
-            <FontIcon
-                HorizontalAlignment="Center"
-                FontSize="28"
-                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                Glyph="&#xE8BD;" />
-            <TextBlock
-                HorizontalAlignment="Center"
-                FontSize="14"
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Text="No messages yet" />
-            <TextBlock
-                HorizontalAlignment="Center"
-                FontSize="12"
-                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                Text="Ask a question or describe a task to get started." />
-        </StackPanel>
+            <StackPanel
+                MaxWidth="620"
+                Margin="24,16"
+                Spacing="20">
+                <!-- Glowing Emblem & Header -->
+                <StackPanel HorizontalAlignment="Center" Spacing="10">
+                    <Border
+                        Width="56"
+                        Height="56"
+                        HorizontalAlignment="Center"
+                        Background="{StaticResource KindAskTintBrush}"
+                        BorderBrush="{StaticResource AskStrokeBrush}"
+                        BorderThickness="1.5"
+                        CornerRadius="16">
+                        <FontIcon
+                            FontSize="26"
+                            Foreground="{StaticResource KindAskBrush}"
+                            Glyph="&#xEA80;" />
+                    </Border>
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        FontSize="20"
+                        FontWeight="Bold"
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                        Text="What are we building today?" />
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        FontSize="13"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="Explore the codebase, edit files, run commands, or plan new features." />
+                </StackPanel>
 
-        <!--  The live status, always at the bottom while a turn runs: a playful line
-              that changes every few seconds, the clock, and what the agent says it is
-              on. It turns amber when the turn is waiting on the reader.  -->
-        <Grid
+                <!-- 2x2 Grid of Quick Starters -->
+                <Grid ColumnSpacing="12" RowSpacing="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Card 1: Build & Tests -->
+                    <Button
+                        Grid.Row="0"
+                        Grid.Column="0"
+                        Padding="14,12"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        Background="{StaticResource StarterCardBrush}"
+                        BorderBrush="{StaticResource StarterCardStrokeBrush}"
+                        BorderThickness="1"
+                        Click="OnStarterPromptClick"
+                        CornerRadius="10"
+                        Tag="Compile the project with dotnet build and run unit tests to check for failures.">
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border
+                                Width="32"
+                                Height="32"
+                                VerticalAlignment="Center"
+                                Background="{StaticResource KindWriteTintBrush}"
+                                CornerRadius="8">
+                                <FontIcon FontSize="15" Foreground="{StaticResource KindWriteBrush}" Glyph="&#xE768;" />
+                            </Border>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock FontSize="12.5" FontWeight="SemiBold" Text="Build &amp; Test Project" />
+                                <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="Compile solution and verify tests" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Grid>
+                    </Button>
+
+                    <!-- Card 2: Git Diff & Status -->
+                    <Button
+                        Grid.Row="0"
+                        Grid.Column="1"
+                        Padding="14,12"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        Background="{StaticResource StarterCardBrush}"
+                        BorderBrush="{StaticResource StarterCardStrokeBrush}"
+                        BorderThickness="1"
+                        Click="OnStarterPromptClick"
+                        CornerRadius="10"
+                        Tag="Check git status and summarize pending changes and modified files.">
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border
+                                Width="32"
+                                Height="32"
+                                VerticalAlignment="Center"
+                                Background="{StaticResource KindEditTintBrush}"
+                                CornerRadius="8">
+                                <FontIcon FontSize="15" Foreground="{StaticResource KindEditBrush}" Glyph="&#xE70F;" />
+                            </Border>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock FontSize="12.5" FontWeight="SemiBold" Text="Review Git Changes" />
+                                <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="Inspect pending diffs and status" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Grid>
+                    </Button>
+
+                    <!-- Card 3: Code Architecture -->
+                    <Button
+                        Grid.Row="1"
+                        Grid.Column="0"
+                        Padding="14,12"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        Background="{StaticResource StarterCardBrush}"
+                        BorderBrush="{StaticResource StarterCardStrokeBrush}"
+                        BorderThickness="1"
+                        Click="OnStarterPromptClick"
+                        CornerRadius="10"
+                        Tag="Explain the high-level architecture of this codebase, key projects and how they relate.">
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border
+                                Width="32"
+                                Height="32"
+                                VerticalAlignment="Center"
+                                Background="{StaticResource KindReadTintBrush}"
+                                CornerRadius="8">
+                                <FontIcon FontSize="15" Foreground="{StaticResource KindReadBrush}" Glyph="&#xE8B7;" />
+                            </Border>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock FontSize="12.5" FontWeight="SemiBold" Text="Explain Architecture" />
+                                <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="Walk through structure and design" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Grid>
+                    </Button>
+
+                    <!-- Card 4: Plan Next Feature -->
+                    <Button
+                        Grid.Row="1"
+                        Grid.Column="1"
+                        Padding="14,12"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        Background="{StaticResource StarterCardBrush}"
+                        BorderBrush="{StaticResource StarterCardStrokeBrush}"
+                        BorderThickness="1"
+                        Click="OnStarterPromptClick"
+                        CornerRadius="10"
+                        Tag="Help me plan a new feature. Interview me about requirements and propose a design.">
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border
+                                Width="32"
+                                Height="32"
+                                VerticalAlignment="Center"
+                                Background="{StaticResource KindPlanTintBrush}"
+                                CornerRadius="8">
+                                <FontIcon FontSize="15" Foreground="{StaticResource KindPlanBrush}" Glyph="&#xE8FD;" />
+                            </Border>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock FontSize="12.5" FontWeight="SemiBold" Text="Plan New Feature" />
+                                <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="Interactive planning and design" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Grid>
+                    </Button>
+                </Grid>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!--  The live status capsule, always at the bottom while a turn runs  -->
+        <Border
             Grid.Row="1"
-            Margin="4,8,4,0"
-            ColumnSpacing="10"
+            Margin="0,8,0,0"
+            Padding="12,7"
+            Background="{StaticResource DetailSurfaceBrush}"
+            BorderBrush="{StaticResource DetailStrokeBrush}"
+            BorderThickness="1"
+            CornerRadius="12"
             Visibility="{x:Bind ViewModel.IsBusy, Mode=OneWay}">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <Grid Width="10" VerticalAlignment="Center">
-                <Ellipse
-                    Width="8"
-                    Height="8"
-                    Fill="{ThemeResource AccentFillColorDefaultBrush}"
-                    Visibility="{x:Bind ViewModel.IsWorkingOnItsOwn, Mode=OneWay}"
-                    views:Pulse.IsActive="{x:Bind ViewModel.IsBusyWorking, Mode=OneWay}" />
-                <Ellipse
-                    Width="8"
-                    Height="8"
-                    Fill="{StaticResource StatusWarnBrush}"
-                    Visibility="{x:Bind ViewModel.IsWaitingForYou, Mode=OneWay}"
-                    views:Pulse.IsActive="{x:Bind ViewModel.IsWaitingForYou, Mode=OneWay}" />
-            </Grid>
-            <Grid Grid.Column="1" VerticalAlignment="Center">
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Border
+                    Width="18"
+                    Height="18"
+                    VerticalAlignment="Center"
+                    CornerRadius="9"
+                    Background="{StaticResource StatusRunningTintBrush}"
+                    Visibility="{x:Bind ViewModel.IsWorkingOnItsOwn, Mode=OneWay}">
+                    <Ellipse
+                        Width="8"
+                        Height="8"
+                        Fill="{StaticResource StatusRunningBrush}"
+                        views:Pulse.IsActive="{x:Bind ViewModel.IsBusyWorking, Mode=OneWay}" />
+                </Border>
+                <Border
+                    Width="18"
+                    Height="18"
+                    VerticalAlignment="Center"
+                    CornerRadius="9"
+                    Background="{StaticResource StatusWarnTintBrush}"
+                    Visibility="{x:Bind ViewModel.IsWaitingForYou, Mode=OneWay}">
+                    <Ellipse
+                        Width="8"
+                        Height="8"
+                        Fill="{StaticResource StatusWarnBrush}"
+                        views:Pulse.IsActive="{x:Bind ViewModel.IsWaitingForYou, Mode=OneWay}" />
+                </Border>
+
+                <Grid Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock
+                        FontSize="12.5"
+                        FontWeight="Bold"
+                        Foreground="{StaticResource StatusRunningBrush}"
+                        Text="{x:Bind ViewModel.WorkingMessage, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.IsWorkingOnItsOwn, Mode=OneWay}" />
+                    <TextBlock
+                        FontSize="12.5"
+                        FontWeight="Bold"
+                        Foreground="{StaticResource StatusWarnBrush}"
+                        Text="Action required"
+                        Visibility="{x:Bind ViewModel.IsWaitingForYou, Mode=OneWay}" />
+                </Grid>
+
+                <Border
+                    Grid.Column="2"
+                    Padding="6,1"
+                    VerticalAlignment="Center"
+                    Background="{StaticResource CodeSurfaceBrush}"
+                    BorderBrush="{StaticResource DetailStrokeBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4">
+                    <TextBlock
+                        FontFamily="Cascadia Mono, Consolas"
+                        FontSize="11"
+                        FontWeight="SemiBold"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{x:Bind ViewModel.WorkingElapsed, Mode=OneWay}" />
+                </Border>
+
                 <TextBlock
-                    FontSize="12.5"
-                    FontWeight="SemiBold"
-                    Foreground="{ThemeResource AccentFillColorDefaultBrush}"
-                    Text="{x:Bind ViewModel.WorkingMessage, Mode=OneWay}"
-                    Visibility="{x:Bind ViewModel.IsWorkingOnItsOwn, Mode=OneWay}" />
-                <TextBlock
-                    FontSize="12.5"
-                    FontWeight="SemiBold"
-                    Foreground="{StaticResource StatusWarnBrush}"
-                    Text="Waiting for you…"
-                    Visibility="{x:Bind ViewModel.IsWaitingForYou, Mode=OneWay}" />
+                    Grid.Column="3"
+                    VerticalAlignment="Center"
+                    FontSize="12"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    Text="{x:Bind ViewModel.StatusDetail, Mode=OneWay}"
+                    TextTrimming="CharacterEllipsis" />
             </Grid>
-            <TextBlock
-                Grid.Column="2"
-                VerticalAlignment="Center"
-                FontFamily="Cascadia Mono, Consolas"
-                FontSize="11.5"
-                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                Text="{x:Bind ViewModel.WorkingElapsed, Mode=OneWay}" />
-            <TextBlock
-                Grid.Column="3"
-                VerticalAlignment="Center"
-                FontSize="11.5"
-                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                Text="{x:Bind ViewModel.StatusDetail, Mode=OneWay}"
-                TextTrimming="CharacterEllipsis" />
-        </Grid>
+        </Border>
 
         <Grid Grid.Row="2" Margin="0,8,0,0">
             <!--  The / and @ suggestions. A Popup rather than a Flyout: a flyout takes

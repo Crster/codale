@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8" ?>
 <Page
     x:Class="Codale.App.Views.WorkspacePage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -463,37 +463,42 @@
                             </Grid.ColumnDefinitions>
                             <TextBox
                                 x:Name="FileSearchBox"
-                                MinHeight="32"
+                                Height="26"
+                                MinHeight="26"
+                                Padding="7,2"
+                                FontSize="12"
+                                CornerRadius="4"
                                 VerticalAlignment="Center"
                                 KeyDown="OnFileSearchKeyDown"
                                 PlaceholderText="Search files…"
-                                Text="{x:Bind ViewModel.Files.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                Text="{x:Bind ViewModel.Files.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                                <TextBox.Resources>
+                                    <x:Double x:Key="TextControlThemeMinHeight">24</x:Double>
+                                </TextBox.Resources>
+                            </TextBox>
                             <StackPanel
                                 Grid.Column="1"
+                                VerticalAlignment="Center"
                                 Orientation="Horizontal"
                                 Spacing="0">
                                 <Button
-                                    Width="32"
-                                    Height="32"
-                                    Padding="0"
+                                    Padding="6,3"
                                     VerticalAlignment="Center"
                                     Background="Transparent"
                                     BorderBrush="Transparent"
                                     Click="OnFilesRefreshClick"
                                     ToolTipService.ToolTip="Refresh">
-                                    <FontIcon FontSize="16" Glyph="&#xE72C;" />
+                                    <FontIcon FontSize="13" Glyph="&#xE72C;" />
                                 </Button>
                                 <Button
-                                    Width="32"
-                                    Height="32"
-                                    Padding="0"
+                                    Padding="6,3"
                                     VerticalAlignment="Center"
                                     Background="Transparent"
                                     BorderBrush="Transparent"
                                     Click="OnFilesCollapseClick"
                                     IsEnabled="{x:Bind ViewModel.Files.IsSearching, Mode=OneWay, Converter={StaticResource NotBool}}"
                                     ToolTipService.ToolTip="Collapse all folders">
-                                    <FontIcon FontSize="16" Glyph="&#xE70E;" />
+                                    <FontIcon FontSize="13" Glyph="&#xE70E;" />
                                 </Button>
                             </StackPanel>
                         </Grid>
@@ -522,25 +527,14 @@
                                         Orientation="Horizontal"
                                         Spacing="8"
                                         ToolTipService.ToolTip="{x:Bind FullPath}">
-                                        <Grid Width="14" Height="16">
-                                            <Viewbox Stretch="Fill">
-                                                <Grid Width="18" Height="22">
-                                                    <Path
-                                                        Data="M0,2 Q0,0 2,0 L11,0 L18,7 L18,20 Q18,22 16,22 L2,22 Q0,22 0,20 Z"
-                                                        Fill="{x:Bind views:FileIcons.Brush(Node.IsDirectory, Name)}" />
-                                                    <Path Data="M11,0 L18,7 L13,7 Q11,7 11,5 Z" Fill="#66FFFFFF" />
-                                                </Grid>
-                                            </Viewbox>
-                                            <TextBlock
-                                                Margin="0,5,0,0"
-                                                HorizontalAlignment="Center"
-                                                VerticalAlignment="Center"
-                                                FontSize="{x:Bind views:FileIcons.LabelSize(Node.IsDirectory, Name)}"
-                                                FontWeight="Bold"
-                                                Foreground="White"
-                                                Text="{x:Bind views:FileIcons.Label(Node.IsDirectory, Name)}" />
-                                        </Grid>
-                                        <TextBlock TextTrimming="CharacterEllipsis">
+                                        <FontIcon
+                                            Width="16"
+                                            Height="16"
+                                            FontSize="12"
+                                            VerticalAlignment="Center"
+                                            Foreground="{x:Bind views:FileIcons.Brush(Node.IsDirectory, Name)}"
+                                            Glyph="{x:Bind views:FileIcons.NodeGlyph(Node.IsDirectory, Name)}" />
+                                        <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
                                             <Run Foreground="{Binding Node.GitStatus, Converter={StaticResource GitStatusBrush}}" Text="{x:Bind Name}" /><Run Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="{x:Bind DirectoryTail}" />
                                         </TextBlock>
                                     </StackPanel>
@@ -580,38 +574,19 @@
                                             Orientation="Horizontal"
                                             Spacing="8">
                                             <FontIcon
-                                                FontSize="13"
-                                                Foreground="{x:Bind views:FileIcons.Brush(IsDirectory, Name)}"
-                                                Glyph="&#xE8B7;"
-                                                Visibility="{x:Bind views:FileIcons.FolderVisibility(IsDirectory)}" />
-                                            <!--  Document badge: coloured page with a folded corner, extension inside  -->
-                                            <Grid
-                                                Width="14"
+                                                Width="16"
                                                 Height="16"
-                                                Visibility="{x:Bind views:FileIcons.FileVisibility(IsDirectory)}">
-                                                <Viewbox Stretch="Fill">
-                                                    <Grid Width="18" Height="22">
-                                                        <Path
-                                                            Data="M0,2 Q0,0 2,0 L11,0 L18,7 L18,20 Q18,22 16,22 L2,22 Q0,22 0,20 Z"
-                                                            Fill="{x:Bind views:FileIcons.Brush(IsDirectory, Name)}" />
-                                                        <Path Data="M11,0 L18,7 L13,7 Q11,7 11,5 Z" Fill="#66FFFFFF" />
-                                                    </Grid>
-                                                </Viewbox>
-                                                <TextBlock
-                                                    Margin="0,5,0,0"
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center"
-                                                    FontSize="{x:Bind views:FileIcons.LabelSize(IsDirectory, Name)}"
-                                                    FontWeight="Bold"
-                                                    Foreground="White"
-                                                    Text="{x:Bind views:FileIcons.Label(IsDirectory, Name)}" />
-                                            </Grid>
+                                                FontSize="12"
+                                                VerticalAlignment="Center"
+                                                Foreground="{x:Bind views:FileIcons.Brush(IsDirectory, Name)}"
+                                                Glyph="{x:Bind views:FileIcons.NodeGlyph(IsDirectory, Name)}" />
                                             <!--  The converter answers null for clean nodes so the
                                                   theme's own foreground stands; it must never
                                                   answer UnsetValue - the compiled binding casts
                                                   its result straight to Brush and an UnsetValue
                                                   crashes the layout pass.  -->
                                             <TextBlock
+                                                VerticalAlignment="Center"
                                                 Foreground="{Binding GitStatus, Mode=OneWay, Converter={StaticResource GitStatusBrush}}"
                                                 Text="{x:Bind Name}" />
                                         </StackPanel>

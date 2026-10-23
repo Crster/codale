@@ -350,6 +350,63 @@ public sealed partial class ChatTab : UserControl
         }.ShowAsync();
     }
 
+    private static void SetClipboardText(string text)
+    {
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(text);
+            Clipboard.SetContent(package);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Error("chat", "copy text failed", ex);
+        }
+    }
+
+    private void OnCopyAssistantTextClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: AssistantMessageItem item } && !string.IsNullOrEmpty(item.Text))
+        {
+            SetClipboardText(item.Text);
+        }
+    }
+
+    private void OnCopyUserTextClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: UserMessageItem item } && !string.IsNullOrEmpty(item.Text))
+        {
+            SetClipboardText(item.Text);
+        }
+    }
+
+    private void OnCopyToolCommandClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: ToolCallItem item } && !string.IsNullOrEmpty(item.Command))
+        {
+            SetClipboardText(item.Command);
+        }
+    }
+
+    private void OnCopyToolOutputClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: ToolCallItem item } && !string.IsNullOrEmpty(item.Output))
+        {
+            SetClipboardText(item.Output);
+        }
+    }
+
+    private void OnStarterPromptClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string prompt } && ViewModel is not null)
+        {
+            ViewModel.Draft = prompt;
+            DraftBox.Focus(FocusState.Programmatic);
+            DraftBox.SelectionStart = DraftBox.Text.Length;
+            DraftBox.SelectionLength = 0;
+        }
+    }
+
     private void OnToolFileClick(object sender, RoutedEventArgs e)
     {
         if (((FrameworkElement)sender).Tag is ToolCallItem { PrimaryFile: { } file } call)

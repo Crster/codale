@@ -327,6 +327,29 @@ public sealed partial class TurnOutcomeBrushConverter : IValueConverter
         throw new NotSupportedException();
 }
 
+public sealed partial class TurnOutcomeTintConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language) => value switch
+    {
+        TurnOutcome.Completed => Palette.Get("StatusSuccessTintBrush"),
+        TurnOutcome.Stopped => Palette.Get("PillBackgroundBrush"),
+        TurnOutcome.Failed or TurnOutcome.NotSent => Palette.Get("StatusFailedTintBrush"),
+        _ => Palette.Get("StatusRunningTintBrush"),
+    };
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
+}
+
+public sealed partial class TimestampTextConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language) =>
+        value is DateTimeOffset dto ? dto.ToLocalTime().ToString("t") : "";
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
+}
+
 public sealed partial class NoticeSeverityBrushConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, string language) => value switch
@@ -667,8 +690,8 @@ public static class FileIcons
 {
     private static readonly Dictionary<string, Windows.UI.Color> Colors = new(StringComparer.OrdinalIgnoreCase)
     {
-        [".cs"] = Rgb(0x68, 0x21, 0x7A),
-        [".csx"] = Rgb(0x68, 0x21, 0x7A),
+        [".cs"] = Rgb(0x9B, 0x4F, 0xC8),
+        [".csx"] = Rgb(0x9B, 0x4F, 0xC8),
         [".xaml"] = Rgb(0x00, 0x9F, 0xFF),
         [".axaml"] = Rgb(0x00, 0x9F, 0xFF),
         [".csproj"] = Rgb(0x9B, 0x4F, 0xC8),
@@ -720,6 +743,61 @@ public static class FileIcons
     private static Windows.UI.Color Rgb(byte r, byte g, byte b) => Windows.UI.Color.FromArgb(255, r, g, b);
 
     public static string Glyph(bool isDirectory) => isDirectory ? "\uE8B7" : "\uE7C3";
+
+    /// <summary>Returns a uniform Segoe Fluent glyph for folder or file based on file type.</summary>
+    public static string NodeGlyph(bool isDirectory, string? name)
+    {
+        if (isDirectory)
+        {
+            return "\uE8B7"; // Folder
+        }
+
+        if (string.IsNullOrEmpty(name))
+        {
+            return "\uE7C3"; // Default page
+        }
+
+        var ext = Path.GetExtension(name);
+        if (string.IsNullOrEmpty(ext))
+        {
+            ext = name;
+        }
+
+        return ext.ToLowerInvariant() switch
+        {
+            // Programming languages & markup
+            ".cs" or ".csx" or ".xaml" or ".axaml" or ".razor" or
+            ".js" or ".mjs" or ".cjs" or ".ts" or ".tsx" or ".jsx" or
+            ".py" or ".pyw" or ".rs" or ".go" or ".java" or ".kt" or ".kts" or
+            ".c" or ".cpp" or ".cc" or ".cxx" or ".h" or ".hpp" or
+            ".html" or ".htm" or ".php" or ".vue" or ".svelte" or
+            ".css" or ".scss" or ".sass" or ".less" or
+            ".sh" or ".bash" or ".zsh" or ".bat" or ".cmd" or ".ps1" or ".psm1" or
+            ".sql" => "\uE943",
+
+            // Documentation & notes
+            ".md" or ".markdown" or ".txt" or ".rtf" or ".pdf" or ".doc" or ".docx" or ".log" or ".csv" or ".tsv" => "\uE8A5",
+
+            // Configuration & projects
+            ".json" or ".jsonc" or ".xml" or ".yml" or ".yaml" or ".toml" or
+            ".csproj" or ".sln" or ".slnx" or ".props" or ".targets" or
+            ".editorconfig" or ".ini" or ".cfg" or ".config" or ".env" => "\uE713",
+
+            // Images
+            ".png" or ".jpg" or ".jpeg" or ".gif" or ".svg" or ".ico" or ".webp" or ".bmp" or ".tiff" => "\uEB9F",
+
+            // Security & keys
+            ".lock" or ".key" or ".pem" or ".cer" or ".crt" or ".pfx" => "\uE72E",
+
+            // Git
+            ".gitignore" or ".gitattributes" or ".gitmodules" => "\uE943",
+
+            // Default file
+            _ => "\uE7C3",
+        };
+    }
+
+    public static string FileGlyph(string? name) => NodeGlyph(false, name);
 
     /// <summary>Extension shown inside the file icon: ".cs" gives "CS", ".gitignore" gives "GIT".</summary>
     public static string Label(bool isDirectory, string name)
