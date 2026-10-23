@@ -1664,7 +1664,7 @@
                         </StackPanel>
                     </StackPanel>
 
-                    <!--  No repository: say so instead of hiding the section  -->
+                    <!--  No repository: say so, and offer to create one  -->
                     <StackPanel
                         Orientation="Horizontal"
                         Spacing="6"
@@ -1674,8 +1674,15 @@
                             VerticalAlignment="Center"
                             FontSize="12"
                             Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="Git is not in use"
+                            Text="No repository"
                             ToolTipService.ToolTip="This folder is not a Git repository" />
+                        <HyperlinkButton
+                            Padding="4,0"
+                            VerticalAlignment="Center"
+                            Command="{x:Bind ViewModel.Git.InitRepositoryCommand}"
+                            Content="Initialize"
+                            FontSize="12"
+                            ToolTipService.ToolTip="Run git init in this folder to start a repository" />
                     </StackPanel>
 
 

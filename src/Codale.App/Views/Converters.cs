@@ -596,6 +596,16 @@ public sealed partial class GitStatusBrushConverter : IValueConverter
     private static readonly SolidColorBrush DeletedBrush = new(Colors.IndianRed);
     private static readonly SolidColorBrush ConflictedBrush = new(Colors.OrangeRed);
 
+    /// <summary>The state's colour, or null for a clean file (callers keep their own text colour).</summary>
+    public static SolidColorBrush? ForChange(GitChangeKind? kind) => kind switch
+    {
+        GitChangeKind.Added or GitChangeKind.Untracked => AddedBrush,
+        GitChangeKind.Modified or GitChangeKind.Renamed or GitChangeKind.Copied => ModifiedBrush,
+        GitChangeKind.Deleted => DeletedBrush,
+        GitChangeKind.Conflicted => ConflictedBrush,
+        _ => null,
+    };
+
     public object? Convert(object value, Type targetType, object parameter, string language) => value switch
     {
         GitChangeKind.Added or GitChangeKind.Untracked => AddedBrush,

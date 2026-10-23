@@ -217,6 +217,14 @@ public sealed class ClaudeStreamParser
                     : new CliMessageIgnored("system/commands_changed", Truncate(raw));
                 break;
 
+            case "dev_intent":
+                if (root.Str("kind") is { Length: > 0 } intentKind)
+                {
+                    yield return new DevIntentDetected(intentKind, root.Str("trigger"));
+                }
+
+                break;
+
             case "vcs_state_changed":
                 yield return new VcsStateChanged();
                 break;

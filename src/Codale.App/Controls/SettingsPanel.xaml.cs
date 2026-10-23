@@ -45,6 +45,23 @@ public sealed partial class SettingsPanel : UserControl
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => CloseRequested?.Invoke(this, EventArgs.Empty);
 
+    private void OnOpenInstallFolderClick(object sender, RoutedEventArgs e) => OpenFolder(AppContext.BaseDirectory);
+
+    private void OnOpenDataFolderClick(object sender, RoutedEventArgs e) => OpenFolder(McpServerSettings.CodaleDataRoot());
+
+    private static void OpenFolder(string path)
+    {
+        try
+        {
+            Directory.CreateDirectory(path);
+            _ = Launcher.LaunchFolderPathAsync(path);
+        }
+        catch (Exception)
+        {
+            // Nothing sensible to do if Explorer cannot be launched.
+        }
+    }
+
     private void OnCategoryTabChanged(object sender, RoutedEventArgs e)
     {
         if (SectionGeneral is null || SectionAi is null || SectionEditor is null || SectionTerminal is null || SectionGitShortcuts is null)

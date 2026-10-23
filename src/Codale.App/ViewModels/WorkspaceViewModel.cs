@@ -1158,7 +1158,16 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     }
 
     /// <summary>Every git poll re-colours the file tree from the same snapshot.</summary>
-    private void OnGitSnapshotRefreshed(object? sender, GitSnapshot snapshot) => Files.ApplyGitStatus(snapshot);
+    private void OnGitSnapshotRefreshed(object? sender, GitSnapshot snapshot)
+    {
+        Files.ApplyGitStatus(snapshot);
+
+        // Open tabs carry the same colour and letter as the tree row.
+        foreach (var editor in _editors)
+        {
+            editor.GitStatus = editor.FilePath is { } path ? Files.GitStatusOf(path) : null;
+        }
+    }
 
     private void OnNestedSnapshotsRefreshed(object? sender, IReadOnlyList<GitSnapshot> snapshots) => Files.ApplyNestedGitStatus(snapshots);
 

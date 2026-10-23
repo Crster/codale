@@ -1,3 +1,4 @@
+using Codale.Git;
 using Codale.App.Services;
 
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -82,6 +83,23 @@ public sealed partial class EditorViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(TabState))]
     public partial bool IsDirty { get; set; }
+
+    /// <summary>The file's working-tree state in git, or null when clean, untracked-by-nothing or outside a repository.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(GitBadge))]
+    public partial GitChangeKind? GitStatus { get; set; }
+
+    /// <summary>The one-letter decoration VS Code shows on a tab: M modified, U untracked, A added, D deleted, R renamed, ! conflict.</summary>
+    public string GitBadge => GitStatus switch
+    {
+        GitChangeKind.Modified => "M",
+        GitChangeKind.Untracked => "U",
+        GitChangeKind.Added => "A",
+        GitChangeKind.Deleted => "D",
+        GitChangeKind.Renamed or GitChangeKind.Copied => "R",
+        GitChangeKind.Conflicted => "!",
+        _ => "",
+    };
 
     /// <summary>Which tab icon fits: preview, untitled new file, edited, or saved.</summary>
     public string TabState => IsPreview ? "preview" : FilePath is null ? "new" : IsDirty ? "edited" : "saved";

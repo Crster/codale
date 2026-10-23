@@ -177,6 +177,27 @@
                             </StackPanel>
                         </Border>
 
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="Folders" />
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock Style="{StaticResource RowTitle}" Text="Installation folder" />
+                                        <TextBlock Style="{StaticResource RowDesc}" Text="Where the Codale app files are installed." />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" VerticalAlignment="Center" Content="Open" Click="OnOpenInstallFolderClick" />
+                                </Grid>
+                                <Rectangle Style="{StaticResource Divider}" />
+                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock Style="{StaticResource RowTitle}" Text="User data folder" />
+                                        <TextBlock Style="{StaticResource RowDesc}" Text="Logs, settings, database and artifacts." />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" VerticalAlignment="Center" Content="Open" Click="OnOpenDataFolderClick" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
                         <TextBlock Style="{StaticResource SectionTitle}" Text="Chat experience" />
                         <Border Style="{StaticResource Card}">
                             <StackPanel>

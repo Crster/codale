@@ -1891,11 +1891,49 @@ public sealed partial class WorkspacePage : Page
             Converter = (IValueConverter)Resources["PreviewToItalic"],
         });
 
+        // The file's git state, as VS Code decorates a tab: name coloured (struck through when
+        // deleted) and a one-letter badge. Clean files keep the theme's own text colour.
+        var badge = new TextBlock
+        {
+            FontSize = 10,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        void ApplyGit()
+        {
+            var brush = GitStatusBrushConverter.ForChange(vm.GitStatus);
+            if (brush is null)
+            {
+                name.ClearValue(TextBlock.ForegroundProperty);
+            }
+            else
+            {
+                name.Foreground = brush;
+            }
+
+            name.TextDecorations = vm.GitStatus == GitChangeKind.Deleted
+                ? Windows.UI.Text.TextDecorations.Strikethrough
+                : Windows.UI.Text.TextDecorations.None;
+            badge.Text = vm.GitBadge;
+            badge.Foreground = brush;
+            badge.Visibility = vm.GitBadge.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        ApplyGit();
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(EditorViewModel.GitStatus))
+            {
+                ApplyGit();
+            }
+        };
+
         entry.Item.Header = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 6,
-            Children = { icon, name },
+            Children = { icon, name, badge },
         };
     }
 

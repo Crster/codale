@@ -695,6 +695,18 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
         RefreshGitStatus();
     }
 
+    /// <summary>The git state of one file from the last snapshot, or null when clean or outside the repository.</summary>
+    public GitChangeKind? GitStatusOf(string fullPath)
+    {
+        if (_lastMap is not { } map || _lastMapRoot is not { } root ||
+            !fullPath.StartsWith(root.TrimEnd('\\') + '\\', StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return map.Classify(Path.GetRelativePath(root, fullPath).Replace('\\', '/')).Status;
+    }
+
     /// <summary>Re-applies the last snapshot, after lazily loading more of the tree.</summary>
     public void RefreshGitStatus()
     {

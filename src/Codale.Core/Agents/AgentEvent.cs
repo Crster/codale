@@ -122,6 +122,9 @@ public sealed record BackgroundTaskChanged(string TaskId, string? ToolUseId, str
 /// <summary>The repository changed under the session (a branch switch, a commit, a shell command): git views are stale.</summary>
 public sealed record VcsStateChanged : AgentEvent;
 
+/// <summary>The CLI worked out what kind of project this is (e.g. "android_app") and what tipped it off (e.g. "gradle_plugin").</summary>
+public sealed record DevIntentDetected(string Kind, string? Trigger) : AgentEvent;
+
 /// <summary>
 /// A CLI message the transcript has no use for, kept so it can be logged: building on
 /// real payloads beats guessing at an undocumented protocol.

@@ -2613,6 +2613,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 ApplyBackgroundTask(changed);
                 break;
 
+            case DevIntentDetected { Kind: "android_app" }:
+                OfferPhoneTools();
+                break;
+
             case CliMessageIgnored ignored:
                 CrashLog.Debug("cli-ignored", $"{ignored.Kind}: {ignored.Raw}");
                 break;
@@ -3309,6 +3313,49 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    private bool _phoneOffered;
+
+    /// <summary>
+    /// The CLI recognised an Android project: offer, once per chat, to switch the Phone tools
+    /// on for it. Nothing is offered when they are already on or their server did not ship.
+    /// </summary>
+    private void OfferPhoneTools()
+    {
+        if (_phoneOffered || _mcpSettings is not { PhoneAvailable: true, PhoneEnabled: false } settings)
+        {
+            return;
+        }
+
+        _phoneOffered = true;
+        Add(new NoticeItem
+        {
+            Text = "This looks like an Android project. Turn on the Phone tools so the agent can install, launch and inspect the app on a device or emulator?",
+            ActionText = "Turn on Phone tools",
+            Action = () =>
+            {
+                settings.PhoneEnabled = true;
+                settings.SyncWorkspaceMcpConfig();
+                Add(new NoticeItem { Text = "Phone tools are on. They start with the next session; installing, clearing data and shell commands on the device still ask first." });
+                return Task.CompletedTask;
+            },
+        });
+    }
+
+    /// <summary>Why a high-risk MCP tool asks, and what approving it does, so the reader can judge the risk.</summary>
+    private static (string Why, string Effect)? McpRiskNote(string toolName) => toolName[(toolName.LastIndexOf("__", StringComparison.Ordinal) + 1)..].TrimStart('_') switch
+    {
+        "phone_install" => ("Installs an app on the connected phone.", "Risk: medium. Adds software to the device; it can be uninstalled later."),
+        "phone_uninstall" => ("Removes an app from the connected phone.", "Risk: high. The app and its data are deleted."),
+        "phone_clear_data" => ("Wipes an app's data on the connected phone.", "Risk: high. Logins, settings and saved files of that app are erased and cannot be undone."),
+        "phone_push" => ("Copies a file from the project onto the phone.", "Risk: medium. Can overwrite an existing file on the device."),
+        "phone_shell" => ("Runs a shell command on the phone.", "Risk: high. The command can change device settings or delete files."),
+        "computer_type" => ("Types text on your desktop into the focused window.", "Risk: medium. The text goes wherever focus is, such as a terminal or form."),
+        "computer_key" => ("Presses keys or shortcuts on your desktop.", "Risk: medium. Shortcuts can close windows, submit forms or trigger commands."),
+        "browser_upload" => ("Uploads a project file through the browser.", "Risk: medium. The file is sent to the website open in the page."),
+        "browser_evaluate" => ("Runs JavaScript inside the current web page.", "Risk: medium. The script can read or change page data and act as your logged-in session."),
+        _ => null,
+    };
+
     private async Task HandleApprovalCoreAsync(ApprovalRequested approval)
     {
         // Codale's own sandboxed tools (explore, the task list...) are essential
@@ -3430,15 +3477,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         var answered = new TaskCompletionSource<ApprovalDecision>();
         _approvals[approval.RequestId] = answered;
         OnApprovalsChanged();
+        var mcpRisk = McpRiskNote(approval.ToolName);
         var approvalItem = new ApprovalRequestItem
         {
             RequestId = approval.RequestId,
             ToolName = approval.ToolName,
             Input = approval.Input,
             IsPlan = string.Equals(approval.ToolName, "ExitPlanMode", StringComparison.Ordinal),
-            Description = shellAssessment.Description,
+            Description = mcpRisk is { } known ? known.Why : shellAssessment.Description,
             Risk = shellAssessment.Risk,
-            RiskNote = ToolCallItem.IsShellName(approval.ToolName) ? shellAssessment.FormatRiskNote() : "",
+            RiskNote = mcpRisk is { } noted ? noted.Effect : ToolCallItem.IsShellName(approval.ToolName) ? shellAssessment.FormatRiskNote() : "",
             Questions = ApprovalRequestItem.ParseQuestions(approval.Input),
             Suggestions = approval.Suggestions
                 .Select(s => new SuggestionOption { RequestId = approval.RequestId, Suggestion = s })

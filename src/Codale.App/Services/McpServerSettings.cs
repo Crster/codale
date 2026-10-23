@@ -161,7 +161,10 @@ public sealed class McpServerSettings
             {
                 Name = ComputerName,
                 Command = RunnablePath("Codale.Mcp.Computer"),
-                RequireApproval = true,
+                AutoApprove = true,
+
+                // Looking, moving the pointer and clicking run unasked; typing and key presses can enter commands or data, so those ask.
+                AskTools = ["computer_type", "computer_key"],
             });
         }
 
@@ -173,8 +176,8 @@ public sealed class McpServerSettings
                 Command = RunnablePath("Codale.Mcp.Phone"),
                 AutoApprove = true,
 
-                // Changing what is on the device, moving files and arbitrary shell commands still ask.
-                AskTools = ["phone_install", "phone_uninstall", "phone_clear_data", "phone_push", "phone_pull", "phone_shell", "phone_emulator_start", "phone_connect"],
+                // Only what changes or erases device state, writes to it, or runs arbitrary commands asks.
+                AskTools = ["phone_install", "phone_uninstall", "phone_clear_data", "phone_push", "phone_shell"],
 
                 // phone_install, phone_push and phone_pull are confined to this folder and refuse without it.
                 Env = new Dictionary<string, string> { ["CODALE_PROJECT_DIR"] = _projectPath },
