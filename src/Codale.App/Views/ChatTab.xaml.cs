@@ -522,8 +522,17 @@ public sealed partial class ChatTab : UserControl
         }
     }
 
-    private void OnQuestionNext(object sender, RoutedEventArgs e) =>
-        (((FrameworkElement)sender).Tag as ApprovalRequestItem)?.Next();
+    private void OnQuestionNext(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).Tag is ApprovalRequestItem approval)
+        {
+            approval.Next();
+            if (sender is FrameworkElement el)
+            {
+                FocusPromptCardPositiveButton(el);
+            }
+        }
+    }
 
     private void OnQuestionBack(object sender, RoutedEventArgs e) =>
         (((FrameworkElement)sender).Tag as ApprovalRequestItem)?.Back();
@@ -557,11 +566,19 @@ public sealed partial class ChatTab : UserControl
         {
             case VirtualKey.Enter when approval.IsLast && approval.CanSubmit:
                 ViewModel.RespondToAskUserQuestion(approval);
+                DispatcherQueue.TryEnqueue(FocusDraft);
                 e.Handled = true;
                 break;
 
             case VirtualKey.Enter when !approval.IsLast && approval.CanAdvance:
                 approval.Next();
+                if (sender is FrameworkElement card)
+                {
+                    DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+                    {
+                        FindPositiveButton(card)?.Focus(FocusState.Programmatic);
+                    });
+                }
                 e.Handled = true;
                 break;
 
@@ -572,14 +589,97 @@ public sealed partial class ChatTab : UserControl
         }
     }
 
-    /// <summary>
-    /// When a question card appears the agent is blocked on it, so the keyboard goes
-    /// there - unless the reader is mid-sentence in the composer. Cards are shown by
-    /// visibility, not re-created, so the hook is the visibility change itself.
-    /// </summary>
     private void OnQuestionCardLoaded(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement card || !_hookedCards.TryAdd(card, new object()))
+        if (sender is FrameworkElement card)
+        {
+            HookPromptCardFocus(card);
+        }
+    }
+
+    private void OnPlanCardLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement card)
+        {
+            HookPromptCardFocus(card);
+        }
+    }
+
+    private void OnPermissionCardLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement card)
+        {
+            HookPromptCardFocus(card);
+        }
+    }
+
+    private void OnPermissionCardKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).Tag is not ApprovalRequestItem approval)
+        {
+            return;
+        }
+
+        switch (e.Key)
+        {
+            case VirtualKey.Enter:
+                RespondToApproval(approval, ApprovalDecision.Allow());
+                e.Handled = true;
+                break;
+
+            case VirtualKey.Escape:
+                RespondToApproval(approval, ApprovalDecision.Deny("The user denied this from Codale."));
+                e.Handled = true;
+                break;
+        }
+    }
+
+    private void OnPlanCardKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).Tag is not ApprovalRequestItem approval)
+        {
+            return;
+        }
+
+        var typing = e.OriginalSource is TextBox;
+        if (typing)
+        {
+            if (e.Key is VirtualKey.Escape)
+            {
+                approval.IsRevising = false;
+                e.Handled = true;
+            }
+            return;
+        }
+
+        switch (e.Key)
+        {
+            case VirtualKey.Enter:
+                ViewModel.RespondToApproval(
+                    approval.RequestId,
+                    new ApprovalDecision { Behavior = ApprovalBehavior.Allow, SwitchToMode = "acceptEdits" });
+                DispatcherQueue.TryEnqueue(FocusDraft);
+                e.Handled = true;
+                break;
+
+            case VirtualKey.Escape:
+                ViewModel.RespondToApproval(
+                    approval.RequestId,
+                    ApprovalDecision.Deny("The user declined this plan from Codale."));
+                DispatcherQueue.TryEnqueue(FocusDraft);
+                e.Handled = true;
+                break;
+        }
+    }
+
+    /// <summary>
+    /// When an approval prompt card appears (permission, question, or plan), automatically
+    /// focus its positive/accent button so the user can immediately press Enter to accept
+    /// or Esc to decline, without having to grab the mouse.
+    /// </summary>
+    private void HookPromptCardFocus(FrameworkElement card)
+    {
+        if (!_hookedCards.TryAdd(card, new object()))
         {
             return;
         }
@@ -592,31 +692,86 @@ public sealed partial class ChatTab : UserControl
                 return;
             }
 
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
-                FindDescendant<Button>(card)?.Focus(FocusState.Programmatic));
+            void TryFocus()
+            {
+                if (card.Visibility != Visibility.Visible)
+                {
+                    return;
+                }
+
+                var btn = FindPositiveButton(card);
+                btn?.Focus(FocusState.Programmatic);
+            }
+
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, TryFocus);
         }
 
         card.RegisterPropertyChangedCallback(VisibilityProperty, (_, _) => FocusIfShown());
         FocusIfShown();
     }
 
-    private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+    private void FocusPromptCardPositiveButton(FrameworkElement element)
     {
-        for (var i = 0; i < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root); i++)
+        for (DependencyObject? current = element; current is not null; current = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(current))
         {
-            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, i);
-            if (child is T match && (child is not Button b || b.Tag is ApprovalQuestionOption))
+            if (current is Border { Tag: ApprovalRequestItem } card)
             {
-                return match;
+                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+                {
+                    FindPositiveButton(card)?.Focus(FocusState.Programmatic);
+                });
+                break;
             }
+        }
+    }
 
-            if (FindDescendant<T>(child) is { } deeper)
+    private static Button? FindPositiveButton(DependencyObject root)
+    {
+        Button? accentButton = null;
+        Button? fallbackButton = null;
+
+        void Traverse(DependencyObject parent)
+        {
+            var count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent);
+            for (var i = 0; i < count; i++)
             {
-                return deeper;
+                var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, i);
+                if (child is Button b && b.Visibility == Visibility.Visible && b.IsEnabled)
+                {
+                    if (b.Tag is not ApprovalQuestionOption)
+                    {
+                        var text = b.Content as string;
+                        if (text is not null &&
+                            (text.StartsWith("Allow", StringComparison.OrdinalIgnoreCase) ||
+                             text.StartsWith("Accept", StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(text, "Submit", StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(text, "Next", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            accentButton = b;
+                            return;
+                        }
+
+                        if (Application.Current.Resources.TryGetValue("AccentButtonStyle", out var styleObj) &&
+                            b.Style == styleObj as Style)
+                        {
+                            accentButton = b;
+                            return;
+                        }
+
+                        fallbackButton ??= b;
+                    }
+                }
+
+                Traverse(child);
+                if (accentButton is not null)
+                {
+                    return;
+                }
             }
         }
 
-        return null;
+        Traverse(root);
+        return accentButton ?? fallbackButton;
     }
 
     private void OnApprovalSuggestion(object sender, RoutedEventArgs e)
@@ -643,6 +798,7 @@ public sealed partial class ChatTab : UserControl
             ViewModel.RespondToApproval(
                 approval.RequestId,
                 new ApprovalDecision { Behavior = ApprovalBehavior.Allow, SwitchToMode = mode });
+            DispatcherQueue.TryEnqueue(FocusDraft);
         }
     }
 
@@ -671,6 +827,11 @@ public sealed partial class ChatTab : UserControl
         if (((FrameworkElement)sender).Tag is ApprovalQuestionOption option)
         {
             option.Owner?.Toggle(option);
+
+            if (sender is FrameworkElement el)
+            {
+                FocusPromptCardPositiveButton(el);
+            }
         }
     }
 
@@ -679,6 +840,7 @@ public sealed partial class ChatTab : UserControl
         if (((FrameworkElement)sender).Tag is ApprovalRequestItem approval)
         {
             ViewModel.RespondToAskUserQuestion(approval);
+            DispatcherQueue.TryEnqueue(FocusDraft);
         }
     }
 
@@ -687,6 +849,7 @@ public sealed partial class ChatTab : UserControl
         if (approval is not null)
         {
             ViewModel.RespondToApproval(approval.RequestId, decision);
+            DispatcherQueue.TryEnqueue(FocusDraft);
         }
     }
 
@@ -716,11 +879,21 @@ public sealed partial class ChatTab : UserControl
             return;
         }
 
-        if (e.Key is VirtualKey.Escape && IsSuggestOpen)
+        if (e.Key is VirtualKey.Escape)
         {
-            e.Handled = true;
-            CloseSuggestions();
-            return;
+            if (IsSuggestOpen)
+            {
+                e.Handled = true;
+                CloseSuggestions();
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(DraftBox.Text) && ViewModel.DeclineActiveApproval())
+            {
+                e.Handled = true;
+                DispatcherQueue.TryEnqueue(FocusDraft);
+                return;
+            }
         }
 
         if (e.Key is VirtualKey.Up or VirtualKey.Down && IsSuggestOpen)
@@ -752,6 +925,13 @@ public sealed partial class ChatTab : UserControl
         }
 
         CloseSuggestions();
+
+        if (string.IsNullOrWhiteSpace(DraftBox.Text) && ViewModel.AcceptActiveApproval())
+        {
+            DispatcherQueue.TryEnqueue(FocusDraft);
+            return;
+        }
+
         ExecuteIfCan(ViewModel.SendCommand);
     }
 

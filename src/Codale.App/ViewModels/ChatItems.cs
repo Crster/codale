@@ -889,6 +889,11 @@ public sealed partial class ApprovalRequestItem : ObservableObject
                 option.Index = index++;
             }
 
+            if (!question.MultiSelect && question.Options.Count > 0)
+            {
+                question.Options[0].IsSelected = true;
+            }
+
             questions.Add(question);
         }
 

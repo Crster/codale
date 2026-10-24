@@ -603,6 +603,7 @@
                                         IsEnabled="{x:Bind Approval.CanAdvance, Mode=OneWay}"
                                         Style="{StaticResource AccentButtonStyle}"
                                         Tag="{x:Bind Approval, Mode=OneWay}"
+                                        ToolTipService.ToolTip="Next question (Enter)"
                                         Visibility="{x:Bind Approval.IsNotLast, Mode=OneWay}" />
                                     <Button
                                         Padding="16,5"
@@ -611,6 +612,7 @@
                                         IsEnabled="{x:Bind Approval.CanSubmit, Mode=OneWay}"
                                         Style="{StaticResource AccentButtonStyle}"
                                         Tag="{x:Bind Approval, Mode=OneWay}"
+                                        ToolTipService.ToolTip="Submit answers (Enter)"
                                         Visibility="{x:Bind Approval.IsLast, Mode=OneWay}" />
                                 </StackPanel>
                             </Grid>
@@ -624,6 +626,9 @@
                         BorderBrush="{StaticResource AskStrokeBrush}"
                         BorderThickness="1"
                         CornerRadius="10"
+                        KeyDown="OnPlanCardKeyDown"
+                        Loaded="OnPlanCardLoaded"
+                        Tag="{x:Bind Approval, Mode=OneWay}"
                         Visibility="{x:Bind PlanApprovalVisible, Mode=OneWay}">
                         <StackPanel Spacing="10">
                             <StackPanel Orientation="Horizontal" Spacing="8">
@@ -648,7 +653,7 @@
                                     Content="Accept · review edits"
                                     Style="{StaticResource AccentButtonStyle}"
                                     Tag="{x:Bind Approval, Mode=OneWay}"
-                                    ToolTipService.ToolTip="Build it, asking before each file change" />
+                                    ToolTipService.ToolTip="Build it, asking before each file change (Enter)" />
                                 <Button
                                     Click="OnApprovalPlanAccept"
                                     CommandParameter="automatic"
@@ -679,6 +684,9 @@
                         BorderBrush="{StaticResource ApprovalStrokeBrush}"
                         BorderThickness="1"
                         CornerRadius="10"
+                        KeyDown="OnPermissionCardKeyDown"
+                        Loaded="OnPermissionCardLoaded"
+                        Tag="{x:Bind Approval, Mode=OneWay}"
                         Visibility="{x:Bind PermissionVisible, Mode=OneWay}">
                         <Grid ColumnSpacing="10">
                             <Grid.ColumnDefinitions>
@@ -739,13 +747,15 @@
                                     Click="OnApprovalDeny"
                                     Content="Deny"
                                     Style="{StaticResource QuietButton}"
-                                    Tag="{x:Bind Approval, Mode=OneWay}" />
+                                    Tag="{x:Bind Approval, Mode=OneWay}"
+                                    ToolTipService.ToolTip="Deny (Esc)" />
                                 <Button
                                     Padding="16,5"
                                     Click="OnApprovalAllow"
                                     Content="Allow"
                                     Style="{StaticResource AccentButtonStyle}"
-                                    Tag="{x:Bind Approval, Mode=OneWay}" />
+                                    Tag="{x:Bind Approval, Mode=OneWay}"
+                                    ToolTipService.ToolTip="Allow (Enter)" />
                             </StackPanel>
                         </Grid>
                     </Border>

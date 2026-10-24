@@ -1745,10 +1745,15 @@ public sealed partial class WorkspacePage : Page
     /// contents. Editing the file pins its tab, so the next click opens a fresh
     /// preview and the edited file stays open.
     /// </summary>
-    private void ShowFile(string path) => _ = ShowFileTabAsync(path);
+    private void ShowFile(string path, bool revealInTree = true) => _ = ShowFileTabAsync(path, revealInTree);
 
-    private async Task<EditorTabEntry> ShowFileTabAsync(string path)
+    private async Task<EditorTabEntry> ShowFileTabAsync(string path, bool revealInTree = true)
     {
+        if (revealInTree)
+        {
+            RevealFileInFilesPanel(path);
+        }
+
         // A pinned tab already showing this file wins over the preview tab.
         var open = _editorTabs.FirstOrDefault(t =>
             !t.Tab.ViewModel.IsPreview && PathsEqual(t.Tab.ViewModel.FilePath, path));
@@ -2566,6 +2571,84 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
+    /// <summary>
+    /// Expands the LeftPanel to the Files tab if collapsed or hidden, reveals the file
+    /// in the tree hierarchy, selects it, and scrolls it into view.
+    /// </summary>
+    private void RevealFileInFilesPanel(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        var targetNode = ViewModel.Files.RevealPath(path);
+        if (targetNode is null)
+        {
+            return;
+        }
+
+        if (LeftPanel.Visibility != Visibility.Visible)
+        {
+            ToggleLeftPanel();
+        }
+
+        if (LeftPanel.Items.OfType<PivotItem>().FirstOrDefault(item => item.Header as string == "Files") is { } filesTab)
+        {
+            LeftPanel.SelectedItem = filesTab;
+        }
+
+        if (ViewModel.Files.IsSearching || !string.IsNullOrEmpty(ViewModel.Files.SearchText))
+        {
+            ViewModel.Files.SearchText = "";
+        }
+
+        FileTree.SelectedItem = targetNode;
+
+        void ScrollTargetIntoView()
+        {
+            if (FindDescendant<ListViewBase>(FileTree) is { } list)
+            {
+                list.ScrollIntoView(targetNode);
+            }
+
+            if (FileTree.ContainerFromItem(targetNode) is UIElement container)
+            {
+                container.StartBringIntoView();
+            }
+        }
+
+        FileTree.UpdateLayout();
+        ScrollTargetIntoView();
+
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            FileTree.UpdateLayout();
+            ScrollTargetIntoView();
+        });
+    }
+
+    private static T? FindDescendant<T>(DependencyObject element) where T : DependencyObject
+    {
+        var count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(element);
+        for (var i = 0; i < count; i++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(element, i);
+            if (child is T match)
+            {
+                return match;
+            }
+
+            var found = FindDescendant<T>(child);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
     private void OnTitleBarSearchTyping(object? sender, bool inFile) => ViewModel.Search.Prewarm(inFile);
 
     private async void OnTitleBarSearchSubmitted(object? sender, SearchSubmission submission)
@@ -2658,13 +2741,32 @@ public sealed partial class WorkspacePage : Page
         // Deepest first, so a parent folding does not hide children still to be reached.
         for (var i = open.Count - 1; i >= 0; i--)
         {
-            if (open[i].DataContext is FileNode { IsRootEntry: false })
+            if (open[i].DataContext is FileNode { IsRootEntry: false } node)
             {
                 open[i].IsExpanded = false;
+                node.IsExpanded = false;
             }
         }
 
+        CollapseLoadedSubnodes(ViewModel.Files.Nodes);
+
         FileTree.UpdateLayout();
+    }
+
+    private static void CollapseLoadedSubnodes(IEnumerable<FileNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            if (!node.IsRootEntry)
+            {
+                node.IsExpanded = false;
+            }
+
+            if (node.IsDirectory && node.IsLoaded)
+            {
+                CollapseLoadedSubnodes(node.Children);
+            }
+        }
     }
 
     private static void CollectTreeItems(DependencyObject parent, List<TreeViewItem> into)
@@ -3123,7 +3225,7 @@ public sealed partial class WorkspacePage : Page
         }
         else
         {
-            ShowFile(node.FullPath);
+            ShowFile(node.FullPath, revealInTree: false);
         }
     }
 

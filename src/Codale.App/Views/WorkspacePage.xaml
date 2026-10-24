@@ -566,7 +566,7 @@
                         <TreeView.ItemTemplate>
                             <DataTemplate x:DataType="vm:FileNode">
                                 <!--  Root folders (the project and any added ones) start expanded  -->
-                                <TreeViewItem IsExpanded="{x:Bind IsRootEntry}" ItemsSource="{x:Bind Children}">
+                                <TreeViewItem IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}" ItemsSource="{x:Bind Children}">
                                     <StackPanel>
                                         <!--  Ignored files fade; changed names take their git colour  -->
                                         <StackPanel

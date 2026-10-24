@@ -3576,6 +3576,79 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    /// <summary>The currently pending approval awaiting user response, if any.</summary>
+    public ApprovalRequestItem? ActiveApproval =>
+        _toolCalls.Values
+            .Select(c => c.Approval)
+            .LastOrDefault(a => a is not null && _approvals.ContainsKey(a.RequestId));
+
+    /// <summary>Accepts the currently active approval prompt (Enter accelerator / keyboard shortcut).</summary>
+    public bool AcceptActiveApproval()
+    {
+        if (ActiveApproval is not { } approval)
+        {
+            return false;
+        }
+
+        if (approval.IsAskUserQuestion)
+        {
+            if (approval.IsLast && approval.CanSubmit)
+            {
+                RespondToAskUserQuestion(approval);
+                return true;
+            }
+
+            if (!approval.IsLast && approval.CanAdvance)
+            {
+                approval.Next();
+                return true;
+            }
+
+            return false;
+        }
+
+        if (approval.IsPlan)
+        {
+            RespondToApproval(
+                approval.RequestId,
+                new ApprovalDecision { Behavior = ApprovalBehavior.Allow, SwitchToMode = "acceptEdits" });
+            return true;
+        }
+
+        RespondToApproval(approval.RequestId, ApprovalDecision.Allow());
+        return true;
+    }
+
+    /// <summary>Declines the currently active approval prompt (Esc accelerator / keyboard shortcut).</summary>
+    public bool DeclineActiveApproval()
+    {
+        if (ActiveApproval is not { } approval)
+        {
+            return false;
+        }
+
+        if (approval.IsAskUserQuestion)
+        {
+            RespondToApproval(
+                approval.RequestId,
+                ApprovalDecision.Deny("The user chose not to answer. Continue with your best judgement."));
+            return true;
+        }
+
+        if (approval.IsPlan)
+        {
+            RespondToApproval(
+                approval.RequestId,
+                ApprovalDecision.Deny("The user declined this plan from Codale."));
+            return true;
+        }
+
+        RespondToApproval(
+            approval.RequestId,
+            ApprovalDecision.Deny("The user denied this from Codale."));
+        return true;
+    }
+
     /// <summary>
     /// Annotations sent back on a plan. While the plan still awaits approval the turn is
     /// blocked on it, so the annotations answer that approval as a revision (the old plan

@@ -51,6 +51,21 @@ public sealed partial class FileNode : ObservableObject
     public bool IsRootEntry { get; init; }
 
     /// <summary>
+    /// Whether this node is expanded in the tree. Two-way bound to the TreeViewItem so
+    /// expanding in code reflects in the UI and vice versa.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsExpanded { get; set; }
+
+    partial void OnIsExpandedChanged(bool value)
+    {
+        if (value && IsDirectory && !IsLoaded)
+        {
+            LoadChildren();
+        }
+    }
+
+    /// <summary>
     /// This node's git state, folders included - a folder shows the most severe change
     /// beneath it. Null means clean, which leaves the name in the theme's own colour.
     /// </summary>
@@ -67,28 +82,44 @@ public sealed partial class FileNode : ObservableObject
 
     public static FileNode ForDirectory(string path, bool isRootEntry = false)
     {
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var name = Path.GetFileName(trimmed);
+
         var node = new FileNode
         {
-            Name = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar)),
+            Name = string.IsNullOrEmpty(name) ? path : name,
             FullPath = path,
             IsDirectory = true,
             IsRootEntry = isRootEntry,
         };
 
-        node.Children.Add(Placeholder(path));
+        if (isRootEntry)
+        {
+            node.IsExpanded = true;
+            node.LoadChildren();
+        }
+        else
+        {
+            node.Children.Add(Placeholder(path));
+        }
+
         return node;
     }
 
     /// <summary>A folder added to the workspace beside the project root; its name carries the parent so two "src" folders stay apart.</summary>
     public static FileNode ForWorkspaceFolder(string path)
     {
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var name = Path.GetFileName(trimmed);
+
         var node = new FileNode
         {
-            Name = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar)),
+            Name = string.IsNullOrEmpty(name) ? path : name,
             FullPath = path,
             IsDirectory = true,
             IsWorkspaceRoot = true,
             IsRootEntry = true,
+            IsExpanded = true,
         };
 
         // Shown expanded, so read it now rather than on an expand that never happens.
@@ -673,6 +704,137 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
 
     /// <summary>Top level entries: the project's own, or - with added folders - one root per folder.</summary>
     public ObservableCollection<FileNode> Nodes { get; } = [];
+
+    /// <summary>
+    /// Expands the folder hierarchy leading down to <paramref name="path"/>, ensuring every
+    /// intermediate directory is loaded and marked expanded. Returns the matching node for the
+    /// target (file or directory), or null if the path is outside the workspace or does not exist.
+    /// </summary>
+    public FileNode? RevealPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        string fullPath;
+        try
+        {
+            fullPath = !Path.IsPathRooted(path)
+                ? Path.GetFullPath(Path.Combine(ProjectPath, path))
+                : Path.GetFullPath(path);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        ObservableCollection<FileNode> currentCollection;
+        FileNode? currentNode;
+        string rootPath;
+
+        if (HasRoots)
+        {
+            var matchingRoot = Nodes
+                .Where(n => string.Equals(n.FullPath.TrimEnd('\\', '/'), fullPath.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase) ||
+                            fullPath.StartsWith(n.FullPath.TrimEnd('\\', '/') + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+                            fullPath.StartsWith(n.FullPath.TrimEnd('\\', '/') + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(n => n.FullPath.Length)
+                .FirstOrDefault();
+
+            if (matchingRoot is null)
+            {
+                return null;
+            }
+
+            if (string.Equals(matchingRoot.FullPath.TrimEnd('\\', '/'), fullPath.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
+            {
+                return matchingRoot;
+            }
+
+            matchingRoot.IsExpanded = true;
+            matchingRoot.LoadChildren();
+            currentNode = matchingRoot;
+            currentCollection = matchingRoot.Children;
+            rootPath = matchingRoot.FullPath;
+        }
+        else
+        {
+            var projectRootTrimmed = ProjectPath.TrimEnd('\\', '/');
+            var fullPathTrimmed = fullPath.TrimEnd('\\', '/');
+
+            if (string.Equals(projectRootTrimmed, fullPathTrimmed, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            if (!fullPath.StartsWith(projectRootTrimmed + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
+                !fullPath.StartsWith(projectRootTrimmed + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            if (!Root.IsLoaded)
+            {
+                Root.LoadChildren();
+            }
+
+            currentNode = null;
+            currentCollection = Nodes;
+            rootPath = ProjectPath;
+        }
+
+        var relative = Path.GetRelativePath(rootPath, fullPath);
+        var segments = relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0 || segments[0] == "..")
+        {
+            return null;
+        }
+
+        for (var i = 0; i < segments.Length; i++)
+        {
+            var segment = segments[i];
+            var isLast = i == segments.Length - 1;
+
+            var match = currentCollection.FirstOrDefault(n => string.Equals(n.Name, segment, StringComparison.OrdinalIgnoreCase));
+            if (match is null)
+            {
+                if (currentNode is not null)
+                {
+                    ReloadChildren(currentNode, currentCollection);
+                }
+                else
+                {
+                    ReloadChildren(Root, Nodes);
+                }
+
+                match = currentCollection.FirstOrDefault(n => string.Equals(n.Name, segment, StringComparison.OrdinalIgnoreCase));
+                if (match is null)
+                {
+                    return null;
+                }
+            }
+
+            if (isLast)
+            {
+                RefreshGitStatus();
+                return match;
+            }
+
+            if (!match.IsDirectory)
+            {
+                return null;
+            }
+
+            match.IsExpanded = true;
+            match.LoadChildren();
+            currentNode = match;
+            currentCollection = match.Children;
+        }
+
+        RefreshGitStatus();
+        return null;
+    }
 
     /// <summary>
     /// Colours the tree from a fresh snapshot. Only the nodes already loaded are
