@@ -55,7 +55,20 @@ public sealed partial class EditorViewModel : ObservableObject
     public partial bool IsBinary { get; set; }
 
     /// <summary>True when the centre shows the hex viewer instead of the editor or an image.</summary>
-    public bool IsBinaryPlaceholder => IsBinary && !IsImage;
+    public bool IsBinaryPlaceholder => IsBinary && !IsImage && !IsMedia;
+
+    /// <summary>Set when the file is audio or video the media player can play.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsBinaryPlaceholder))]
+    public partial bool IsMedia { get; set; }
+
+    private static readonly HashSet<string> MediaExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".wma", ".opus",
+        ".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".wmv",
+    };
+
+    public static bool IsMediaPath(string path) => MediaExtensions.Contains(Path.GetExtension(path));
 
     private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -214,6 +227,7 @@ public sealed partial class EditorViewModel : ObservableObject
         HasFile = false;
         CanEdit = false;
         IsImage = false;
+        IsMedia = false;
         IsBinary = false;
         LoadedText = null;
         IsTabActive = false;
@@ -268,6 +282,7 @@ public sealed partial class EditorViewModel : ObservableObject
         IsDirty = false;
         LoadedText = null;
         IsImage = false;
+        IsMedia = false;
         IsBinary = false;
         ResetFileState();
         ResetEditorStatus(null);
@@ -290,6 +305,15 @@ public sealed partial class EditorViewModel : ObservableObject
                 HasFile = true;
                 CanEdit = false;
                 IsImage = true;
+                IsBinary = true;
+                return;
+            }
+
+            if (IsMediaPath(path))
+            {
+                HasFile = true;
+                CanEdit = false;
+                IsMedia = true;
                 IsBinary = true;
                 return;
             }

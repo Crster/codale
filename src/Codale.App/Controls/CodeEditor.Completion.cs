@@ -29,6 +29,9 @@ public sealed partial class CodeEditor
         Enum,
         Function,
         Variable,
+        Tag,
+        Attribute,
+        Property,
     }
 
     private sealed record CompletionItem(string Text, CompletionKind Kind, int Score);
@@ -47,6 +50,45 @@ public sealed partial class CodeEditor
     [GeneratedRegex(@"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")]
     private static partial Regex CallRegex();
 
+    [GeneratedRegex(@"<([A-Za-z][\w:.-]*)")]
+    private static partial Regex TagRegex();
+
+    [GeneratedRegex(@"\s([A-Za-z_@:][\w:.-]*)\s*=")]
+    private static partial Regex AttributeRegex();
+
+    private readonly HashSet<string> _docTags = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _docAttrs = new(StringComparer.Ordinal);
+
+    private bool IsMarkup => _languageId is "html" or "xml" or "xsl" or "vue" or "svelte" || _syntax is CodeSyntax.Html or CodeSyntax.XML;
+
+    /// <summary>Tag when the caret names an element (just after '&lt;' or '&lt;/'), Attribute inside an open tag, else null.</summary>
+    private static CompletionKind? MarkupContext(string line, int start)
+    {
+        var before = line.AsSpan(0, start);
+        var open = before.LastIndexOf('<');
+        if (open < 0 || before[open..].Contains('>'))
+        {
+            return null;
+        }
+
+        var inner = before[(open + 1)..].TrimStart('/');
+        return inner.Contains(' ') || inner.Contains('\t') ? CompletionKind.Attribute : CompletionKind.Tag;
+    }
+
+    private static readonly string[] HtmlTags =
+    [
+        "a", "abbr", "address", "article", "aside", "audio", "b", "body", "br", "button", "canvas", "caption", "code", "col", "div", "em", "fieldset", "figure", "footer", "form",
+        "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hr", "html", "i", "iframe", "img", "input", "label", "legend", "li", "link", "main", "meta", "nav", "ol", "option",
+        "p", "pre", "script", "section", "select", "small", "source", "span", "strong", "style", "sub", "summary", "svg", "table", "tbody", "td", "template", "textarea", "tfoot",
+        "th", "thead", "title", "tr", "ul", "video",
+    ];
+
+    private static readonly string[] HtmlAttributes =
+    [
+        "alt", "aria-label", "autofocus", "checked", "class", "colspan", "content", "data-", "disabled", "href", "id", "lang", "name", "onclick", "placeholder", "readonly",
+        "rel", "required", "role", "rowspan", "selected", "src", "srcset", "style", "tabindex", "target", "title", "type", "value", "width", "height",
+    ];
+
     private readonly Dictionary<string, (CompletionKind Kind, int Count)> _docWords = new(StringComparer.Ordinal);
     private bool _docWordsDirty = true;
     private DateTime _docWordsBuiltUtc = DateTime.MinValue;
@@ -57,8 +99,44 @@ public sealed partial class CodeEditor
 
     private bool CompletionOpen => CompletionPopup.IsOpen;
 
+    /// <summary>Every live editor, so each one can suggest words from the files open in the others.</summary>
+    private static readonly List<WeakReference<CodeEditor>> OpenEditors = [];
+
+    /// <summary>Words of the other open files, merged: a declared kind beats a plain variable.</summary>
+    private Dictionary<string, CompletionKind> OtherFileWords()
+    {
+        var merged = new Dictionary<string, CompletionKind>(StringComparer.Ordinal);
+        lock (OpenEditors)
+        {
+            OpenEditors.RemoveAll(r => !r.TryGetTarget(out _));
+            foreach (var reference in OpenEditors)
+            {
+                if (!reference.TryGetTarget(out var other) || ReferenceEquals(other, this))
+                {
+                    continue;
+                }
+
+                other.EnsureDocWords();
+                foreach (var (word, info) in other._docWords)
+                {
+                    if (!merged.TryGetValue(word, out var kind) || kind == CompletionKind.Variable)
+                    {
+                        merged[word] = info.Kind;
+                    }
+                }
+            }
+        }
+
+        return merged;
+    }
+
     private void InitCompletion()
     {
+        lock (OpenEditors)
+        {
+            OpenEditors.Add(new WeakReference<CodeEditor>(this));
+        }
+
         LostFocus += (_, _) =>
         {
             // Clicking an entry moves focus onto the list for a moment; only close when it really left.
@@ -108,6 +186,14 @@ public sealed partial class CodeEditor
             }
         }
 
+        if (_languageId is not null && StandardNames.TryGetValue(_languageId, out var standard))
+        {
+            foreach (var word in standard)
+            {
+                list.Add((word, char.IsUpper(word[0]) ? CompletionKind.Type : CompletionKind.Function));
+            }
+        }
+
         return list;
     }
 
@@ -136,9 +222,26 @@ public sealed partial class CodeEditor
         _docWordsDirty = false;
         _docWordsBuiltUtc = DateTime.UtcNow;
         _docWords.Clear();
+        _docTags.Clear();
+        _docAttrs.Clear();
 
         var text = _doc.GetText();
-        foreach (Match m in WordRegex().Matches(text))
+        if (IsMarkup)
+        {
+            foreach (Match m in TagRegex().Matches(text))
+            {
+                _docTags.Add(m.Groups[1].Value);
+            }
+
+            foreach (Match m in AttributeRegex().Matches(text))
+            {
+                _docAttrs.Add(m.Groups[1].Value);
+            }
+        }
+
+        CollectLanguageNames(text);
+
+        foreach (Match m in (DocWordRegex() ?? WordRegex()).Matches(text))
         {
             if (m.Length < 2 || m.Length > 64)
             {
@@ -225,6 +328,14 @@ public sealed partial class CodeEditor
             start--;
         }
 
+        var markup = IsMarkup;
+
+        // Some languages carry '-', ':' or '$' inside names (data-id, border-radius, $this); keep them in the prefix.
+        while (start > 0 && (IsWordChar(line[start - 1]) || IsExtraNameChar(line[start - 1])))
+        {
+            start--;
+        }
+
         var prefix = line[start.._caret.Col];
         if ((prefix.Length == 0 && !manual) || (prefix.Length > 0 && char.IsDigit(prefix[0])))
         {
@@ -273,6 +384,35 @@ public sealed partial class CodeEditor
             found[text] = new CompletionItem(text, kind, score);
         }
 
+        if (markup && MarkupContext(line, start) is { } place)
+        {
+            var isTag = place == CompletionKind.Tag;
+            var builtIn = _languageId is "xml" or "xsl" ? Array.Empty<string>() : isTag ? HtmlTags : HtmlAttributes;
+            foreach (var word in isTag ? _docTags : _docAttrs)
+            {
+                Offer(word, place);
+            }
+
+            foreach (var word in builtIn)
+            {
+                Offer(word, place);
+            }
+
+            ShowItems(found, start);
+            return;
+        }
+
+        if (NativeCandidates(line, start) is { } native)
+        {
+            foreach (var (word, kind) in native)
+            {
+                Offer(word, kind);
+            }
+
+            ShowItems(found, start);
+            return;
+        }
+
         // Declared names first, so a class beats the plain variable of the same spelling.
         foreach (var (word, info) in _docWords)
         {
@@ -298,6 +438,30 @@ public sealed partial class CodeEditor
             }
         }
 
+        // Then the other open files, after everything local so the current file wins ties.
+        var others = OtherFileWords();
+        foreach (var (word, kind) in others)
+        {
+            if (kind != CompletionKind.Variable)
+            {
+                Offer(word, kind);
+            }
+        }
+
+        foreach (var (word, kind) in others)
+        {
+            if (kind == CompletionKind.Variable)
+            {
+                Offer(word, kind);
+            }
+        }
+
+        ShowItems(found, start);
+    }
+
+    private void ShowItems(Dictionary<string, CompletionItem> found, int start)
+    {
+        var prefix = _doc.GetLine(_caret.Line)[start.._caret.Col];
         var items = found.Values
             .OrderBy(i => i.Score)
             .ThenBy(i => i.Text.Length)
@@ -357,6 +521,9 @@ public sealed partial class CodeEditor
         CompletionKind.Struct => ("S", "struct", CodeTokenKind.Type),
         CompletionKind.Enum => ("E", "enum", CodeTokenKind.Type),
         CompletionKind.Function => ("ƒ", "function", CodeTokenKind.Property),
+        CompletionKind.Tag => ("<>", "tag", CodeTokenKind.Tag),
+        CompletionKind.Attribute => ("a", "attribute", CodeTokenKind.Attribute),
+        CompletionKind.Property => ("p", "property", CodeTokenKind.Property),
         _ => ("v", "variable", CodeTokenKind.Variable),
     };
 

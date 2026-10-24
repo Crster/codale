@@ -594,6 +594,7 @@ public sealed partial class EditorTab : UserControl
         // Highlights belong to the file they were found in.
         ClearHighlights();
         ImagePreview.Source = null;
+        StopMedia();
         HexView.Close();
 
         var sequence = ++_loadSequence;
@@ -607,6 +608,10 @@ public sealed partial class EditorTab : UserControl
         if (ViewModel.IsImage)
         {
             _ = ShowImageAsync(path);
+        }
+        else if (ViewModel.IsMedia)
+        {
+            PlayMedia(path);
         }
         else if (ViewModel.IsBinaryPlaceholder)
         {
@@ -693,6 +698,7 @@ public sealed partial class EditorTab : UserControl
 
         ClearHighlights();
         ImagePreview.Source = null;
+        StopMedia();
         HexView.Close();
 
         var sequence = ++_loadSequence;
@@ -706,6 +712,10 @@ public sealed partial class EditorTab : UserControl
         if (ViewModel.IsImage)
         {
             _ = ShowImageAsync(path);
+        }
+        else if (ViewModel.IsMedia)
+        {
+            PlayMedia(path);
         }
         else if (ViewModel.IsBinaryPlaceholder)
         {
@@ -728,6 +738,30 @@ public sealed partial class EditorTab : UserControl
 
             ApplyHighlighting(path);
             _ = RefreshDiffMarkersAsync(refetchHead: true);
+        }
+    }
+
+    /// <summary>Releases the player so the file isn't locked and nothing keeps playing in a closed tab.</summary>
+    private void StopMedia()
+    {
+        if (MediaPlayer.MediaPlayer is { } player)
+        {
+            player.Pause();
+        }
+
+        MediaPlayer.Source = null;
+    }
+
+    private void PlayMedia(string path)
+    {
+        try
+        {
+            MediaPlayer.Source = Windows.Media.Core.MediaSource.CreateFromUri(new Uri(path));
+        }
+        catch (Exception ex) when (ex is UriFormatException or System.Runtime.InteropServices.COMException)
+        {
+            ViewModel.Message = "This media file could not be played.";
+            ViewModel.IsMedia = false;
         }
     }
 

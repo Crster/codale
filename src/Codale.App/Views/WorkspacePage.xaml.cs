@@ -1956,6 +1956,32 @@ public sealed partial class WorkspacePage : Page
 
     private void OnCentreTabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
     {
+        // Closing a working chat or a terminal with a command running kills it: ask first.
+        var running = new List<string>();
+        if (_chatTabs.FirstOrDefault(t => ReferenceEquals(t.Item, args.Item)) is { } busyChat)
+        {
+            if (busyChat.Chat.IsBusy)
+            {
+                running.Add($"Chat: {busyChat.Chat.TabTitle}");
+            }
+
+            running.AddRange(busyChat.Chat.RunningTasks
+                .Where(t => t.Hosted is not null && t.IsRunning)
+                .Select(t => $"Task: {t.DisplayTitle}"));
+        }
+        else if (_terminalTabs.FirstOrDefault(t => ReferenceEquals(t.Item, args.Item)) is { } busyTerminal
+            && busyTerminal.Terminal.Activity == TerminalActivity.Busy)
+        {
+            running.Add($"Command: {busyTerminal.Terminal.CommandName ?? "terminal"}");
+        }
+
+        if (running.Count > 0 && !_closeTabConfirmed)
+        {
+            _ = ConfirmThenCloseTabAsync(sender, args, running);
+            return;
+        }
+
+        _closeTabConfirmed = false;
         sender.TabItems.Remove(args.Item);
         UpdateEmptyState();
         UpdateSessionPanelForActiveTab();
@@ -2021,6 +2047,19 @@ public sealed partial class WorkspacePage : Page
             _searchTab = null;
             _searchTabItem = null;
         }
+    }
+
+    private bool _closeTabConfirmed;
+
+    private async Task ConfirmThenCloseTabAsync(TabView sender, TabViewTabCloseRequestedEventArgs args, List<string> running)
+    {
+        if (!await Codale.App.Controls.RunningWorkPrompt.ConfirmAsync(XamlRoot, running, "Closing this tab"))
+        {
+            return;
+        }
+
+        _closeTabConfirmed = true;
+        OnCentreTabCloseRequested(sender, args);
     }
 
     private void OnTitleBarMcpToolsRequested(object? sender, EventArgs e)
@@ -2853,7 +2892,12 @@ public sealed partial class WorkspacePage : Page
         menu.Items.Add(paste);
         menu.Items.Add(new MenuFlyoutSeparator());
 
-        menu.Items.Add(MenuAction("Copy full path", () => CopyText(node.FullPath)));
+        if (node.IsDirectory)
+        {
+            menu.Items.Add(MenuAction("Explore", () => ExploreFolder(node.FullPath)));
+        }
+
+        menu.Items.Add(MenuAction("Copy full path",() => CopyText(node.FullPath)));
         menu.Items.Add(MenuAction("Copy relative path", () => CopyText(isRoot ? "." : RelativeToProject(node.FullPath))));
 
         if (!isRoot)
@@ -2878,6 +2922,19 @@ public sealed partial class WorkspacePage : Page
                 Position = e.GetPosition((FrameworkElement)sender),
             });
         e.Handled = true;
+    }
+
+    /// <summary>Opens the folder in Windows Explorer.</summary>
+    private static void ExploreFolder(string path)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            // Explorer unavailable: nothing to show.
+        }
     }
 
     private static async Task OpenWithDefaultAppAsync(FileNode node)

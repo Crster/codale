@@ -146,9 +146,35 @@ public sealed partial class CodeEditor : UserControl
 
         /// <summary>One laid-out text per visual row; a non-wrapped line has exactly one.</summary>
         public readonly List<CanvasTextLayout> RowLayouts = [];
+
+        /// <summary>Whether this entry is listed in <see cref="_laidOut"/>.</summary>
+        public bool Tracked;
+
+        public void DisposeLayouts()
+        {
+            foreach (var layout in RowLayouts)
+            {
+                layout.Dispose();
+            }
+
+            RowLayouts.Clear();
+        }
     }
 
     private readonly List<LineCache> _lineCache = [];
+
+    /// <summary>
+    /// The entries that built layouts since the last trim. Scrolling through a large file
+    /// used to keep a DirectWrite layout alive for every line ever shown; the trim walks
+    /// this list instead of the whole cache and releases the ones far from the view.
+    /// </summary>
+    private readonly List<LineCache> _laidOut = [];
+
+    /// <summary>Line-number layouts by line index; the text depends on the index alone.</summary>
+    private readonly Dictionary<int, CanvasTextLayout> _lineNumberLayouts = [];
+
+    /// <summary>How many viewports of layouts are kept on either side of the visible one.</summary>
+    private const int LayoutKeepViewports = 3;
 
     // Visual rows: a logical line folds into one or more rows of _wrapCols columns each
     // (the sentinel NoWrapCols makes every line a single row when wrap is off). The row
@@ -751,14 +777,61 @@ public sealed partial class CodeEditor : UserControl
 
     private void ClearLayouts()
     {
-        foreach (var entry in _lineCache)
+        foreach (var entry in _laidOut)
         {
-            foreach (var layout in entry.RowLayouts)
+            entry.DisposeLayouts();
+            entry.Tracked = false;
+        }
+
+        _laidOut.Clear();
+
+        foreach (var layout in _lineNumberLayouts.Values)
+        {
+            layout.Dispose();
+        }
+
+        _lineNumberLayouts.Clear();
+    }
+
+    /// <summary>
+    /// Releases layouts of lines well outside the view once the caches outgrow it, so a
+    /// long scroll holds a few viewports of layouts rather than one per line it passed.
+    /// </summary>
+    private void TrimLayoutCaches(int firstLine, int lastLine)
+    {
+        var margin = (lastLine - firstLine + 1) * LayoutKeepViewports;
+        var keepFrom = Math.Max(0, firstLine - margin);
+        var keepTo = Math.Min(_lineCache.Count - 1, lastLine + margin);
+        var budget = (keepTo - keepFrom + 1) * 2 + 256;
+
+        if (_laidOut.Count > budget)
+        {
+            var keep = new HashSet<LineCache>();
+            for (var i = keepFrom; i <= keepTo; i++)
             {
-                layout.Dispose();
+                keep.Add(_lineCache[i]);
             }
 
-            entry.RowLayouts.Clear();
+            _laidOut.RemoveAll(entry =>
+            {
+                if (keep.Contains(entry))
+                {
+                    return false;
+                }
+
+                entry.DisposeLayouts();
+                entry.Tracked = false;
+                return true;
+            });
+        }
+
+        if (_lineNumberLayouts.Count > budget)
+        {
+            foreach (var line in _lineNumberLayouts.Keys.Where(l => l < keepFrom || l > keepTo).ToList())
+            {
+                _lineNumberLayouts[line].Dispose();
+                _lineNumberLayouts.Remove(line);
+            }
         }
     }
 
@@ -821,12 +894,7 @@ public sealed partial class CodeEditor : UserControl
             }
 
             var entry = _lineCache[line];
-            foreach (var layout in entry.RowLayouts)
-            {
-                layout.Dispose();
-            }
-
-            entry.RowLayouts.Clear();
+            entry.DisposeLayouts();
             entry.Source = source;
             entry.StateIn = state;
             entry.Display = TextDocument.ExpandTabs(source);
@@ -843,10 +911,7 @@ public sealed partial class CodeEditor : UserControl
         {
             for (var i = _doc.LineCount; i < _lineCache.Count; i++)
             {
-                foreach (var layout in _lineCache[i].RowLayouts)
-                {
-                    layout.Dispose();
-                }
+                _lineCache[i].DisposeLayouts();
             }
 
             _lineCache.RemoveRange(_doc.LineCount, _lineCache.Count - _doc.LineCount);
@@ -868,12 +933,12 @@ public sealed partial class CodeEditor : UserControl
             return;
         }
 
-        foreach (var layout in entry.RowLayouts)
+        entry.DisposeLayouts();
+        if (!entry.Tracked)
         {
-            layout.Dispose();
+            entry.Tracked = true;
+            _laidOut.Add(entry);
         }
-
-        entry.RowLayouts.Clear();
 
         for (var r = 0; r < rows; r++)
         {
@@ -917,9 +982,12 @@ public sealed partial class CodeEditor : UserControl
                 }
             }
 
-            if (r == 0 && !WordWrap)
+            // LayoutBounds comes from the metrics DirectWrite already computed; DrawBounds
+            // walks every glyph outline for ink bounds and was a large share of the cost of
+            // each line scrolled into view.
+            if (r == 0 && !WordWrap && display.Length > 0)
             {
-                _maxLineWidth = Math.Max(_maxLineWidth, layout.DrawBounds.Width * (display.Length == 0 ? 0 : 1));
+                _maxLineWidth = Math.Max(_maxLineWidth, layout.LayoutBounds.Width);
             }
 
             entry.RowLayouts.Add(layout);
@@ -1062,18 +1130,22 @@ public sealed partial class CodeEditor : UserControl
 
                 if (r == 0 && ShowLineNumbers)
                 {
-                    session.DrawText(
-                        (line + 1).ToString(),
-                        (float)(gutter - TextLeftPad),
-                        (float)y,
-                        Brush(session, _lineNumberText),
-                        _lineNumberFormat!);
+                    // DrawText(string) shapes a fresh layout on every call; cache them. A
+                    // zero-size box keeps DrawText's anchoring: right-aligned, ending at x.
+                    if (!_lineNumberLayouts.TryGetValue(line, out var number))
+                    {
+                        number = new CanvasTextLayout(Canvas, (line + 1).ToString(), _lineNumberFormat!, 0, 0);
+                        _lineNumberLayouts[line] = number;
+                    }
+
+                    session.DrawTextLayout(number, (float)(gutter - TextLeftPad), (float)y, Brush(session, _lineNumberText));
                 }
             }
         }
 
         DrawDiffPeek(session, viewportHeight);
         DrawDiffMarkers(session, viewportHeight);
+        TrimLayoutCaches(firstLine, lastLine);
         UpdateExtent();
     }
 

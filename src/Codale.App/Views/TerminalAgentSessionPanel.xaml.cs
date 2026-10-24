@@ -530,17 +530,6 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     #region History
 
-    private void OnViewChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
-    {
-        var history = ReferenceEquals(sender.SelectedItem, HistoryItem);
-        LiveHost.Visibility = history ? Visibility.Collapsed : Visibility.Visible;
-        HistoryHost.Visibility = history ? Visibility.Visible : Visibility.Collapsed;
-        if (history)
-        {
-            _ = RefreshHistoryAsync();
-        }
-    }
-
     /// <summary>
     /// Refreshes the list when the CLI logs a turn: its history file or folder is watched, and a burst of
     /// writes collapses into one refresh a moment after the last.
@@ -627,6 +616,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
         if (reader is null || !CliResume.IsSupported(cli.Id))
         {
             HistoryList.ItemsSource = null;
+            HistoryCountBadge.Visibility = Visibility.Collapsed;
             HistoryHint.Text = $"{cli.DisplayName} has no session id Codale can resume by, so its past conversations are not listed here.";
             return;
         }
@@ -635,6 +625,8 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
         {
             var rows = await Task.Run(() => reader.ListSessions());
             HistoryList.ItemsSource = rows.Select(r => new TerminalHistoryRow(r, true)).ToList();
+            HistoryCountText.Text = rows.Count.ToString();
+            HistoryCountBadge.Visibility = rows.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
             HistoryHint.Text = rows.Count == 0
                 ? $"No {cli.DisplayName} conversations in this project yet."
                 : "Pick a conversation to resume it in a new tab, with its full context.";

@@ -281,6 +281,9 @@ public static class CodeTokenizer
     public static IEnumerable<string> TypesOf(CodeSyntax syntax) =>
         Defs.TryGetValue(syntax, out var def) ? def.Types : [];
 
+    /// <summary>The batch commands the highlighter knows, for the completion list.</summary>
+    public static IEnumerable<string> BatchKeywordsOf() => BatchKeywords;
+
     private const int ModeInBlockComment = 1;
     private const int ModeInTripleString = 2;
 

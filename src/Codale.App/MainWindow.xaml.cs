@@ -75,6 +75,25 @@ public sealed partial class MainWindow : Window
 
     public void OpenProject(string projectPath)
     {
+        if (_workspace is { RunningActivities.Count: > 0 })
+        {
+            _ = OpenProjectConfirmedAsync(projectPath);
+            return;
+        }
+
+        OpenProjectCore(projectPath);
+    }
+
+    private async Task OpenProjectConfirmedAsync(string projectPath)
+    {
+        if (await ConfirmRunningWorkAsync("Opening another project"))
+        {
+            OpenProjectCore(projectPath);
+        }
+    }
+
+    private void OpenProjectCore(string projectPath)
+    {
         // Opening over a project that is still open would leak its sessions and terminals.
         if (_workspace is { } previous)
         {
@@ -391,7 +410,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            if (!await ConfirmUnsavedEditsAsync())
+            if (!await ConfirmUnsavedEditsAsync() || !await ConfirmRunningWorkAsync("Changing folder"))
             {
                 return;
             }
@@ -437,7 +456,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            if (!await ConfirmUnsavedEditsAsync())
+            if (!await ConfirmUnsavedEditsAsync() || !await ConfirmRunningWorkAsync("Closing Codale"))
             {
                 return;
             }
@@ -471,6 +490,10 @@ public sealed partial class MainWindow : Window
             CrashLog.Error("MainWindow", "workspace shutdown failed", ex);
         }
     }
+
+    private Task<bool> ConfirmRunningWorkAsync(string action) =>
+        Codale.App.Controls.RunningWorkPrompt.ConfirmAsync(
+            RootGrid.XamlRoot, _workspace?.RunningActivities ?? [], action);
 
     /// <summary>
     /// Save / Don't save / Cancel for edits that are not on disk. True to go ahead (saved or

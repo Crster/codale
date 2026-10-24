@@ -484,6 +484,29 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     public IReadOnlyList<TerminalViewModel> RunningCommands =>
         _terminals.Where(t => t.IsCommandTerminal && t.Activity == TerminalActivity.Busy).ToList();
 
+    /// <summary>What is still running behind the window (working chats, hosted tasks, commands), for the close prompt.</summary>
+    public IReadOnlyList<string> RunningActivities
+    {
+        get
+        {
+            var list = new List<string>();
+            foreach (var chat in Chats)
+            {
+                if (chat.IsBusy)
+                {
+                    list.Add($"Chat: {chat.TabTitle}");
+                }
+
+                list.AddRange(chat.RunningTasks
+                    .Where(t => t.Hosted is not null && t.IsRunning)
+                    .Select(t => $"Task: {t.DisplayTitle}"));
+            }
+
+            list.AddRange(RunningCommands.Select(t => $"Command: {t.CommandName ?? "terminal"}"));
+            return list;
+        }
+    }
+
     /// <summary>How many commands are executing; the title-bar play button's badge.</summary>
     [ObservableProperty]
     public partial int RunningCommandCount { get; private set; }

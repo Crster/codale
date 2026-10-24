@@ -461,6 +461,15 @@
                 Stretch="Uniform" />
         </ScrollViewer>
 
+        <!--  Audio and video: played with the built-in transport controls  -->
+        <MediaPlayerElement
+            x:Name="MediaPlayer"
+            Grid.Row="1"
+            AreTransportControlsEnabled="True"
+            AutoPlay="False"
+            Stretch="Uniform"
+            Visibility="{x:Bind ViewModel.IsMedia, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+
         <!--  Other binary files: a full hex dump, loaded lazily from disk  -->
         <controls:HexViewer
             x:Name="HexView"
