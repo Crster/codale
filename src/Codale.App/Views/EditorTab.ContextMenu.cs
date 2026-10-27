@@ -1,3 +1,4 @@
+using Codale.App.Controls;
 using Codale.App.ViewModels;
 using Codale.Core.Helper;
 using Codale.Core.Text;
@@ -1053,18 +1054,18 @@ public sealed partial class EditorTab
             return;
         }
 
-        var dialog = new ContentDialog
+        var dialog = AppDialog.Apply(new ContentDialog
         {
             XamlRoot = XamlRoot,
-            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = "Check Issues",
             Content = new ScrollViewer
             {
                 MaxHeight = 360,
-                Content = new TextBlock { Text = ModelOutput.CleanText(reply), TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true },
+                Content = AppDialog.Message(ModelOutput.CleanText(reply)),
             },
             CloseButtonText = "Close",
-        };
+            DefaultButton = ContentDialogButton.Close,
+        }, DialogTone.Info, AppDialog.Glyphs.Search);
         await dialog.ShowAsync();
     }
 

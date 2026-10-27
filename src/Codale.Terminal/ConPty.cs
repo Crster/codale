@@ -40,6 +40,64 @@ internal sealed partial class ConPty : IDisposable
         _process.hProcess == IntPtr.Zero ||
         (WaitForSingleObject(_process.hProcess, 0) == 0);
 
+    /// <summary>
+    /// True while a live process names the shell as its parent: the command a wrapped shell
+    /// launched, or whatever is running at its prompt. The shell itself outlives a command it
+    /// was started with, so being alive alone does not mean anything is still running in it.
+    /// </summary>
+    /// <remarks>
+    /// The pseudoconsole host is a child of the calling app, not of the shell, so an idle shell
+    /// has none. A parent id can be stale - an orphan whose dead parent's id was later reused by
+    /// this shell - so a candidate started before the shell does not count.
+    /// </remarks>
+    public bool HasChildProcesses()
+    {
+        if (HasExited)
+        {
+            return false;
+        }
+
+        var snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snapshot == INVALID_HANDLE_VALUE)
+        {
+            return false;
+        }
+
+        try
+        {
+            var entry = new PROCESSENTRY32W { dwSize = Marshal.SizeOf<PROCESSENTRY32W>() };
+            for (var more = Process32FirstW(snapshot, ref entry); more; more = Process32NextW(snapshot, ref entry))
+            {
+                if (entry.th32ParentProcessID == ProcessId && StartedAfterShell(entry.th32ProcessID))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        finally
+        {
+            CloseHandle(snapshot);
+        }
+    }
+
+    private bool StartedAfterShell(int childId)
+    {
+        try
+        {
+            using var shell = System.Diagnostics.Process.GetProcessById(ProcessId);
+            using var child = System.Diagnostics.Process.GetProcessById(childId);
+            return child.StartTime >= shell.StartTime;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception)
+        {
+            // Gone already means it is not running; one we may not inspect still counts - asking
+            // once too often beats silently killing a running command.
+            return ex is Win32Exception;
+        }
+    }
+
     public void Start(string command, string workingDirectory, short columns, short rows)
     {
         // Two pipes: one each direction. The child gets the far ends.
@@ -253,4 +311,33 @@ internal sealed partial class ConPty : IDisposable
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     private static partial uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+
+    private const uint TH32CS_SNAPPROCESS = 0x00000002;
+    private static readonly IntPtr INVALID_HANDLE_VALUE = -1;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private unsafe struct PROCESSENTRY32W
+    {
+        public int dwSize;
+        public int cntUsage;
+        public int th32ProcessID;
+        public IntPtr th32DefaultHeapID;
+        public int th32ModuleID;
+        public int cntThreads;
+        public int th32ParentProcessID;
+        public int pcPriClassBase;
+        public int dwFlags;
+        public fixed char szExeFile[260];
+    }
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    private static partial IntPtr CreateToolhelp32Snapshot(uint flags, int processId);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool Process32FirstW(IntPtr snapshot, ref PROCESSENTRY32W entry);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool Process32NextW(IntPtr snapshot, ref PROCESSENTRY32W entry);
 }

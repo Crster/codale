@@ -18,9 +18,7 @@ public sealed class ClaudeSessionHistoryReader(string projectPath) : ICliHistory
     // A CLI run in the terminal keeps the default account (see CodaleAccount), not Codale's own,
     // so its transcripts live under ~/.claude (or wherever the user pointed CLAUDE_CONFIG_DIR).
     private readonly string _directory = Path.Combine(
-        Environment.GetEnvironmentVariable(CodaleAccount.ClaudeVariable) is { Length: > 0 } configured
-            ? configured
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude"),
+        CodaleAccount.UserClaudeHome,
         "projects",
         ProjectPaths.ClaudeHistoryFolderName(projectPath));
 

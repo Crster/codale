@@ -91,6 +91,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Set when the user pressed Stop, cleared when the turn ends.</summary>
     private bool _interruptPending;
 
+    /// <summary>Set when auto mode's safety check stopped the turn for want of a verdict, cleared when the turn ends.</summary>
+    private bool _autoModeUnavailable;
+
     /// <summary>Endpoint overrides (proxy/gateway) the user configured; null keeps the CLI defaults.</summary>
     private readonly CliEndpointSettings? _endpointSettings;
 
@@ -187,7 +190,81 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         };
 
         Attachments.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasAttachments));
+
+        _idleCompactTimer = _dispatcher.CreateTimer();
+        _idleCompactTimer.IsRepeating = false;
+        _idleCompactTimer.Tick += (_, _) => RunInBackgroundOnUi(CompactWhileCacheWarmAsync);
     }
+
+    /// <summary>Fires once the chat has sat idle almost as long as the prompt cache lives.</summary>
+    private readonly DispatcherQueueTimer _idleCompactTimer;
+
+    /// <summary>The running turn is an idle compaction the app started, not one the reader asked for.</summary>
+    private bool _idleCompacting;
+
+    /// <summary>The context was compacted after the last prompt: compacting it again would only lose detail.</summary>
+    private bool _compactedSinceLastPrompt;
+
+    /// <summary>
+    /// Arms the idle compaction after a finished turn. The API's prompt cache lives about five
+    /// minutes from its last read: a reader who comes back later pays to re-write the whole
+    /// history. Compacting just before that reads the history at the cache-hit price and leaves
+    /// a summary small enough that the re-write costs little.
+    /// </summary>
+    private void ArmIdleCompaction()
+    {
+        _idleCompactTimer.Stop();
+        if (AppSettings.IdleCompact && !_compactedSinceLastPrompt &&
+            _status.ContextTokens >= AppSettings.IdleCompactMinTokens)
+        {
+            _idleCompactTimer.Interval = TimeSpan.FromSeconds(AppSettings.IdleCompactSeconds);
+            _idleCompactTimer.Start();
+        }
+    }
+
+    private async Task CompactWhileCacheWarmAsync()
+    {
+        // A draft in the composer means the reader is about to send, which reads the warm cache anyway.
+        if (_session is null || !IsConnected || IsBusy || Draft.Length > 0 || Attachments.Count > 0 ||
+            !AppSettings.IdleCompact || _compactedSinceLastPrompt || _status.ContextTokens < AppSettings.IdleCompactMinTokens)
+        {
+            return;
+        }
+
+        CrashLog.Trace($"Idle compaction: {_status.ContextTokens} context tokens before the prompt cache expires");
+        Add(new NoticeItem
+        {
+            Text = $"Idle for {AppSettings.IdleCompactSeconds / 60.0:0.#} min: compacting {_status.ContextTokens:N0} tokens of context " +
+                "while the prompt cache is still warm, so the next message does not re-send the whole history.",
+            Severity = NoticeSeverity.Info,
+        });
+
+        _idleCompacting = true;
+        await CompactAsync();
+        if (!IsBusy)
+        {
+            // Never started (the session went away in between).
+            _idleCompacting = false;
+        }
+    }
+
+    /// <summary>A UI-thread callback that starts async work; a failure is logged, never left unobserved.</summary>
+    private static async void RunInBackgroundOnUi(Func<Task> work)
+    {
+        try
+        {
+            await work();
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Error("chat", "idle compaction failed", ex);
+        }
+    }
+
+    /// <summary>Whether a prompt is the compact command, which Codex runs as a protocol request rather than a prompt.</summary>
+    private static bool IsCompactCommand(string text) =>
+        text.Trim() is var command && (command.Equals("/compact", StringComparison.OrdinalIgnoreCase) ||
+            command.StartsWith("/compact ", StringComparison.OrdinalIgnoreCase));
 
     public ObservableCollection<ChatItem> Items { get; } = [];
 
@@ -2029,7 +2106,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     Model = model,
                     Effort = effort,
                     PermissionMode = permissionMode,
-                    SystemPromptAppend = WithMcpDirective(AlwaysPlanDirective, mcpServers),
+                    // The task server's directive already asks for the step list; saying it twice is paid on every request.
+                    SystemPromptAppend = WithMcpDirective(shellGuard is null ? AlwaysPlanDirective : "", mcpServers).Trim(),
                     McpServers = mcpServers,
                     BackgroundShellGuardCommand = shellGuard,
                     DisallowedTools = shellGuard is not null ? McpServerSettings.NativeTodoTools : null,
@@ -2486,9 +2564,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
                 // Pinned above the composer rather than appended to the transcript: it
                 // always lands last in the chat, where the reader is about to type.
+                // An outage's message is written for the model; the reader gets a plain line.
+                _autoModeUnavailable |= denied.EndsTurn;
                 ComposerNotice = new NoticeItem
                 {
-                    Text = denied.Message ?? $"{denied.ToolName} was denied.",
+                    Text = denied.IsClassifierOutage
+                        ? $"Auto mode's safety check isn't responding, so {denied.ToolName.Split("__")[^1]} didn't run. Claude may try again."
+                        : denied.Message ?? $"{denied.ToolName} was denied.",
                     Severity = NoticeSeverity.Warning,
                 };
                 break;
@@ -2558,31 +2640,63 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
                 AbandonPendingApprovals();
 
+                var interrupted = _interruptPending && turn.Subtype == "error_during_execution";
+                var paused = !interrupted && turn.IsError && _autoModeUnavailable;
                 var outcome = turn.Subtype == "success" ? TurnOutcome.Completed
-                    : _interruptPending && turn.Subtype == "error_during_execution" ? TurnOutcome.Stopped
+                    : interrupted || paused ? TurnOutcome.Stopped
                     : TurnOutcome.Failed;
 
-                if (_interruptPending && turn.Subtype == "error_during_execution")
+                if (interrupted)
                 {
                     // What an interrupted turn looks like (see interrupt.jsonl) - expected,
                     // not a failure.
                     Add(new NoticeItem { Text = "Turn interrupted.", Severity = NoticeSeverity.Info });
                 }
+                else if (paused)
+                {
+                    // Auto mode's safety service is down, not the work: nothing it was asked about
+                    // ran, and the same conversation picks up where it stopped. The CLI's own
+                    // line about it is in the transcript now, so the composer's copy goes.
+                    ComposerNotice = null;
+                    Add(new NoticeItem
+                    {
+                        Text = "Claude paused: auto mode's safety check stopped responding, so the last actions didn't run. " +
+                            "Retry once it's back, or switch to another mode to keep going.",
+                        Severity = NoticeSeverity.Warning,
+                        ActionText = "Retry",
+                        Action = () => IsBusy ? Task.CompletedTask
+                            : SendRoutedAsync("Auto mode's safety check is available again. Continue where you left off.", [], RouteIntent.Act),
+                    });
+                }
                 else if (turn.IsError)
                 {
-                    Add(new NoticeItem { Text = $"Turn ended: {turn.Subtype}", Severity = NoticeSeverity.Error });
+                    Add(new NoticeItem
+                    {
+                        Text = turn.Errors is [var reason, ..] ? $"Turn ended: {reason}" : $"Turn ended: {turn.Subtype}",
+                        Severity = NoticeSeverity.Error,
+                    });
                 }
 
                 _interruptPending = false;
+                _autoModeUnavailable = false;
                 EndTurn(outcome);
 
+                // The reader asked for nothing, so an idle compaction finishing is no reason to call them back.
+                var idleCompaction = _idleCompacting;
+                _idleCompacting = false;
+                if (outcome == TurnOutcome.Completed)
+                {
+                    ArmIdleCompaction();
+                }
+
                 // The agent is done and the next move is the reader's.
-                if (outcome is TurnOutcome.Completed or TurnOutcome.Failed)
+                if (!idleCompaction && (outcome is TurnOutcome.Completed or TurnOutcome.Failed || paused))
                 {
                     var answer = Items.OfType<AssistantMessageItem>().LastOrDefault()?.Text;
                     AttentionNeeded?.Invoke(this, outcome == TurnOutcome.Completed
                         ? new AttentionRequest(AttentionKind.TurnFinished, answer is { Length: > 0 } ? Shorten(answer, 140) : "Finished.")
-                        : new AttentionRequest(AttentionKind.TurnFailed, $"The turn ended with an error ({turn.Subtype})."));
+                        : paused ? new AttentionRequest(AttentionKind.TurnFailed, "Paused: auto mode's safety check isn't responding.")
+                        : new AttentionRequest(AttentionKind.TurnFailed, $"The turn ended with an error ({turn.Errors.FirstOrDefault() ?? turn.Subtype})."));
                 }
                 TurnFinished?.Invoke(this, EventArgs.Empty);
                 SessionStateChanged?.Invoke(this, EventArgs.Empty);
@@ -2696,6 +2810,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 // ends with no assistant message: the stale pre-compact reading below would
                 // otherwise be re-applied at turn end and the meter would never drop.
                 _lastMessageUsage = null;
+                _compactedSinceLastPrompt = true;
+                _idleCompactTimer.Stop();
                 if (compacted.PostTokens is { } post and > 0)
                 {
                     _status.Apply(new UsageSnapshot { InputTokens = (int)Math.Min(post, int.MaxValue) });
@@ -3906,6 +4022,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private async Task SendTurnAsync(string text, IReadOnlyList<TurnAttachment> attachments, bool planOnly, bool askOnly)
     {
+        _idleCompactTimer.Stop();
+        var compact = IsCompactCommand(text);
+        if (!compact)
+        {
+            _compactedSinceLastPrompt = false;
+            _idleCompacting = false;
+        }
+
         // A message sent while a turn runs steers it: the CLI folds it into the running
         // turn (one result closes both), so it must not stop or restart anything here.
         if (IsBusy && _activeTurn is not null && _session is { } running)
@@ -3977,7 +4101,19 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             var context = seed is { Length: > 0 } ? SessionBriefing.ContextBlock(seed) : null;
 
-            await session.SendAsync(new UserTurn(text) { Attachments = attachments, PlanOnly = planOnly, AskOnly = askOnly, ContextPrefix = context });
+            if (compact && await session.TryCompactAsync())
+            {
+                // Started as the provider's own request; its turn reports back like any other.
+            }
+            else if (compact && IsCodexSession)
+            {
+                // Sent as a prompt, codex would answer "/compact" as chat and grow the context instead.
+                throw new InvalidOperationException("this Codex CLI cannot compact a conversation; update it to use /compact.");
+            }
+            else
+            {
+                await session.SendAsync(new UserTurn(text) { Attachments = attachments, PlanOnly = planOnly, AskOnly = askOnly, ContextPrefix = context });
+            }
         }
         catch (Exception ex)
         {
@@ -4728,6 +4864,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // A tab closed mid-turn would otherwise leave the 500ms timer ticking forever,
         // keeping this view model and its whole transcript rooted.
         _turnTimer.Stop();
+        _idleCompactTimer.Stop();
+        _idleCompacting = false;
 
         // Nobody is left to answer an open question once the session goes.
         AbandonPendingApprovals();

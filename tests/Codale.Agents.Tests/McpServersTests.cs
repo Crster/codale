@@ -19,9 +19,9 @@ public sealed class McpServersTests
         Assert.Contains("codale-browser", config);
         Assert.Contains("codale-computer", config);
 
-        var settings = args[args.IndexOf("--settings") + 1];
-        Assert.Contains("mcp__codale-computer", settings);
-        Assert.DoesNotContain("codale-browser", settings);
+        var permissions = System.Text.Json.JsonDocument.Parse(args[args.IndexOf("--settings") + 1]).RootElement.GetProperty("permissions");
+        Assert.Equal("mcp__codale-computer", permissions.GetProperty("ask")[0].GetString());
+        Assert.Equal("mcp__codale-browser", permissions.GetProperty("allow")[0].GetString());
     }
 
     [Fact]
@@ -69,11 +69,13 @@ public sealed class McpServersTests
     }
 
     [Fact]
-    public void Browser_only_needs_no_ask_settings()
+    public void Browser_only_gets_an_allow_rule_and_no_ask_rule()
     {
-        var args = new ClaudeSessionOptions { WorkingDirectory = ".", McpServers = [Browser] }.BuildArguments();
+        var args = new ClaudeSessionOptions { WorkingDirectory = ".", McpServers = [Browser] }.BuildArguments().ToList();
 
         Assert.Contains("--mcp-config", args);
-        Assert.DoesNotContain("--settings", args);
+        var settings = args[args.IndexOf("--settings") + 1];
+        Assert.Contains("\"allow\":[\"mcp__codale-browser\"]", settings);
+        Assert.DoesNotContain("\"ask\"", settings);
     }
 }

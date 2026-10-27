@@ -9,6 +9,7 @@
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
                 <ResourceDictionary Source="ms-appx:///Themes/ChatPalette.xaml" />
+                <ResourceDictionary Source="ms-appx:///Themes/Dialogs.xaml" />
             </ResourceDictionary.MergedDictionaries>
             <!--
                 Shell surfaces. Dark keeps the Fluent layers over Mica; in Light those

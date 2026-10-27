@@ -15,11 +15,15 @@ public static class ClaudeUsageClient
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
 
     /// <summary>The current windows, or null when not signed in with a subscription or the call fails.</summary>
-    public static async Task<RateLimitSnapshot?> FetchAsync(CancellationToken ct = default)
+    /// <param name="claudeHome">
+    /// The account folder whose sign-in to use: Codale's own (the default) for a chat, or
+    /// <see cref="CodaleAccount.UserClaudeHome"/> for a CLI in a terminal, which may be another account.
+    /// </param>
+    public static async Task<RateLimitSnapshot?> FetchAsync(string? claudeHome = null, CancellationToken ct = default)
     {
         try
         {
-            var token = ReadAccessToken();
+            var token = ReadAccessToken(claudeHome ?? CodaleAccount.ClaudeHome);
             if (token is null)
             {
                 return null;
@@ -86,9 +90,9 @@ public static class ClaudeUsageClient
         return (utilization, resetsAt);
     }
 
-    private static string? ReadAccessToken()
+    private static string? ReadAccessToken(string claudeHome)
     {
-        var path = Path.Combine(CodaleAccount.ClaudeHome, ".credentials.json");
+        var path = Path.Combine(claudeHome, ".credentials.json");
         if (!File.Exists(path))
         {
             return null;

@@ -30,6 +30,8 @@ public sealed class ConPtySmokeTests
 
         public Task Exited => _exited.Task;
 
+        public TerminalSession Session => _session;
+
         public Task WriteAsync(string text) => _session.WriteAsync(text);
 
         public void Dispose() => _session.Dispose();
@@ -53,6 +55,63 @@ public sealed class ConPtySmokeTests
         using var collector = new OutputCollector("cmd.exe /c exit");
 
         await collector.Exited.WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public async Task An_exited_shell_reports_nothing_running()
+    {
+        // The tab close prompt reads this; an exited shell must close without asking.
+        using var collector = new OutputCollector("cmd.exe /c exit");
+
+        await collector.Exited.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.False(collector.Session.IsRunning);
+        Assert.False(collector.Session.IsCommandRunning);
+    }
+
+    [Fact]
+    public async Task A_shell_whose_process_exited_reports_it_before_the_exit_event()
+    {
+        // Exited is raised after a drain delay; a close in that window must still see the exit.
+        using var collector = new OutputCollector("cmd.exe /c exit");
+
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (collector.Session.IsRunning && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert.False(collector.Session.IsRunning);
+        Assert.False(collector.Session.IsCommandRunning);
+    }
+
+    [Fact]
+    public async Task A_kept_shell_runs_its_command_then_goes_idle()
+    {
+        // A command tab's shell stays after its command; only the command running counts.
+        using var collector = new OutputCollector("cmd.exe /k ping -n 3 127.0.0.1 >nul");
+
+        await Task.Delay(TimeSpan.FromMilliseconds(500));
+        Assert.True(collector.Session.IsCommandRunning);
+
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (collector.Session.IsCommandRunning && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(100);
+        }
+
+        Assert.True(collector.Session.IsRunning);
+        Assert.False(collector.Session.IsCommandRunning);
+    }
+
+    [Fact]
+    public void A_disposed_session_reports_nothing_running()
+    {
+        var collector = new OutputCollector("cmd.exe");
+        collector.Dispose();
+
+        Assert.False(collector.Session.IsRunning);
+        Assert.False(collector.Session.IsCommandRunning);
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using Codale.App.Controls;
 using Codale.App.Services;
 
 using Microsoft.UI.Xaml;
@@ -63,16 +64,15 @@ public sealed partial class ProjectPickerPage : Page
 
     private async void OnClearRecentsClick(object sender, RoutedEventArgs e)
     {
-        var dialog = new ContentDialog
+        var dialog = AppDialog.Apply(new ContentDialog
         {
             XamlRoot = XamlRoot,
-            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = "Clear all recent projects?",
             Content = "The list on this page will be emptied. This cannot be undone.",
             PrimaryButtonText = "Clear",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
-        };
+        }, DialogTone.Danger, AppDialog.Glyphs.Clear);
 
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
         {

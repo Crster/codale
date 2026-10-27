@@ -44,4 +44,22 @@ public sealed class CodexTokenUsageTests
         var running = Assert.Single(events.OfType<SessionTokensUpdated>());
         Assert.Equal(40000, running.Total);
     }
+
+    [Fact]
+    public async Task Context_compaction_item_reports_compacting_then_the_boundary()
+    {
+        var session = new CodexAgentSession(new CodexSessionOptions { WorkingDirectory = "." });
+        session.AdoptThread("main");
+
+        await session.HandleNotificationAsync("item/started", Json("""
+            {"threadId":"main","turnId":"t2","item":{"type":"contextCompaction","id":"c1"}}
+            """));
+        await session.HandleNotificationAsync("item/completed", Json("""
+            {"threadId":"main","turnId":"t2","item":{"type":"contextCompaction","id":"c1"}}
+            """));
+
+        var events = Drain(session);
+        Assert.Equal("compacting", Assert.Single(events.OfType<CliStatusChanged>()).Status);
+        Assert.Single(events.OfType<ConversationCompacted>());
+    }
 }

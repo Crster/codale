@@ -41,7 +41,17 @@ public sealed class TerminalSession : IDisposable
     /// <summary>Diagnostics sink the host app wires up; null (silent) in tests and tools.</summary>
     public static Action<string>? Log { get; set; }
 
-    public bool IsRunning => _reader is { IsCompleted: false };
+    /// <summary>
+    /// True from Start until the shell process exits, read from its handle. The output reader is no
+    /// signal: the pseudoconsole owns that pipe, so it stays open after the shell is gone.
+    /// </summary>
+    public bool IsRunning => _reader is not null && !_disposed && !_pty.HasExited;
+
+    /// <summary>
+    /// True while the shell is alive and something runs inside it (a child process). Read live, so
+    /// it is right even before <see cref="Exited"/> - posted after a drain delay - has been raised.
+    /// </summary>
+    public bool IsCommandRunning => IsRunning && _pty.HasChildProcesses();
 
     /// <summary>The shell's process id, root of the tab's process tree.</summary>
     public int ProcessId => _pty.ProcessId;

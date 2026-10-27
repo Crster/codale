@@ -3,6 +3,7 @@ using System.ComponentModel;
 
 using Codale.Agents;
 using Codale.Agents.Claude;
+using Codale.App.Controls;
 using Codale.App.Services;
 using Codale.App.ViewModels;
 using Codale.Core.Agents;
@@ -449,16 +450,15 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private async void OnDiscardIsolatedClick(object sender, RoutedEventArgs e)
     {
-        var dialog = new ContentDialog
+        var dialog = AppDialog.Apply(new ContentDialog
         {
             XamlRoot = XamlRoot,
-            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = "Discard the isolated session?",
             Content = "The work done in the worktree is thrown away and this chat starts a fresh session in the project.",
             PrimaryButtonText = "Discard",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
-        };
+        }, DialogTone.Danger, AppDialog.Glyphs.Delete);
 
         if (await dialog.ShowAsync() == ContentDialogResult.Primary)
         {
@@ -626,13 +626,8 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             Margin = new Thickness(0, 8, 0, 0),
         };
 
-        var hint = new TextBlock
-        {
-            FontSize = 11,
-            Foreground = ChatPaletteTheme.Brush("TextFillColorTertiaryBrush"),
-            Margin = new Thickness(0, 4, 0, 0),
-            TextWrapping = TextWrapping.Wrap,
-        };
+        var hint = AppDialog.Note();
+        hint.Margin = new Thickness(0, 4, 0, 0);
 
         var content = new StackPanel
         {
@@ -641,16 +636,15 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             Children = { input, suggestButton, hint },
         };
 
-        var dialog = new ContentDialog
+        var dialog = AppDialog.Apply(new ContentDialog
         {
             XamlRoot = XamlRoot,
-            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = "Rename history",
             Content = content,
             PrimaryButtonText = "Save",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
-        };
+        }, DialogTone.Info, AppDialog.Glyphs.Rename);
 
         using var cts = new CancellationTokenSource();
         dialog.Closing += (_, _) => cts.Cancel();
@@ -714,16 +708,15 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             return;
         }
 
-        var dialog = new ContentDialog
+        var dialog = AppDialog.Apply(new ContentDialog
         {
             XamlRoot = XamlRoot,
-            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = $"Delete \"{session.Title}\"?",
             Content = "This removes this history's summary, turns and file index. The work it did in your workspace is kept.",
             PrimaryButtonText = "Delete",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
-        };
+        }, DialogTone.Danger, AppDialog.Glyphs.Delete);
 
         if (await dialog.ShowAsync() == ContentDialogResult.Primary)
         {
@@ -740,14 +733,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private async Task ShowErrorAsync(string title, string message)
     {
-        await new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
-            Title = title,
-            Content = message,
-            CloseButtonText = "OK",
-        }.ShowAsync();
+        await AppDialog.AlertAsync(XamlRoot, title, message);
     }
 
     #endregion

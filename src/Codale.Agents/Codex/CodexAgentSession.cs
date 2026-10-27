@@ -277,6 +277,25 @@ public sealed class CodexAgentSession : IAgentSession
     }
 
     /// <summary>
+    /// The app-server has no slash commands - a "/compact" prompt would be answered as
+    /// chat - so compaction is its own request. It runs as a turn whose
+    /// <c>contextCompaction</c> item marks the boundary. False on a CLI without it.
+    /// </summary>
+    public async Task<bool> TryCompactAsync(CancellationToken ct = default)
+    {
+        var threadId = RequireThread();
+        try
+        {
+            await SendRequestAsync("thread/compact/start", request => request["threadId"] = threadId, ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Codex takes the permission mode per turn rather than mid-turn: recording it here
     /// means the very next turn (including a plan-mode turn raised while one runs, which
     /// the host restarts anyway) runs under it.
@@ -988,6 +1007,17 @@ public sealed class CodexAgentSession : IAgentSession
 
             case "reasoning":
                 return; // summaries arrive as deltas; nothing to add on completion
+
+            case "contextCompaction":
+                // Requested or automatic alike; the next tokenUsage update carries the new occupancy.
+                if (parent is null)
+                {
+                    await _events.Writer.WriteAsync(completed
+                        ? new ConversationCompacted(Trigger: null, PreTokens: null, PostTokens: null)
+                        : new CliStatusChanged("compacting")).ConfigureAwait(false);
+                }
+
+                return;
 
             case "commandExecution":
                 if (!completed)

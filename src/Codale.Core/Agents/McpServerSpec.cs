@@ -118,8 +118,8 @@ public sealed record McpServerSpec
     }
 
     /// <summary>
-    /// The one <c>--settings</c> document: ask rules for servers that require approval (and
-    /// for individual <see cref="AskTools"/>) and the host's hooks - the shell
+    /// The one <c>--settings</c> document: allow rules for <see cref="AutoApprove"/> servers, ask rules
+    /// for servers that require approval (and for individual <see cref="AskTools"/>) and the host's hooks - the shell
     /// guard being a <c>PreToolUse</c> hook that refuses background launches (see the tasks
     /// MCP exe). Null when there is nothing to say.
     /// </summary>
@@ -127,6 +127,16 @@ public sealed record McpServerSpec
     {
         var settings = new JsonObject();
         var permissions = new JsonObject();
+
+        // Auto mode's classifier judges every call no rule allows, and may refuse the host's own
+        // tools (todos_set) before the host is asked. Ask rules outrank allow, so AskTools still ask.
+        var allow = servers.Where(s => s is { AutoApprove: true, RequireApproval: false })
+            .Select(s => (JsonNode)$"mcp__{s.Name}")
+            .ToArray();
+        if (allow.Length > 0)
+        {
+            permissions["allow"] = new JsonArray(allow);
+        }
 
         // A whole-server rule already covers that server's tools, so its AskTools add nothing.
         var ask = servers.Where(s => s.RequireApproval).Select(s => $"mcp__{s.Name}")

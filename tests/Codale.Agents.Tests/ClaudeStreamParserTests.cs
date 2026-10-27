@@ -171,6 +171,36 @@ public sealed class ClaudeStreamParserTests
         Assert.Empty(parser.Parse("{\"type\":\"prompt_suggestion\",\"suggestion\":\"\"}"));
     }
 
+    [Theory]
+    [InlineData("Classifier unavailable", true, false)]
+    [InlineData("Auto mode unavailable — stopped after repeated responses with no safety verdict", true, true)]
+    [InlineData("The server-side auto mode classifier judged this action dangerous (it gave no explanation)", false, false)]
+    public void A_classifier_outage_is_told_apart_from_a_refusal(string reason, bool outage, bool endsTurn)
+    {
+        var parser = new ClaudeStreamParser();
+
+        var denied = Assert.IsType<PermissionDenied>(Assert.Single(parser.Parse(
+            "{\"type\":\"system\",\"subtype\":\"permission_denied\",\"tool_name\":\"mcp__codale-tasks__read_task\",\"tool_use_id\":\"t\"," +
+            $"\"decision_reason_type\":\"classifier\",\"decision_reason\":\"{reason}\",\"message\":\"m\"}}")));
+
+        Assert.Equal(outage, denied.IsClassifierOutage);
+        Assert.Equal(endsTurn, denied.EndsTurn);
+    }
+
+    [Fact]
+    public void Result_errors_drop_diagnostics_and_repair_mojibake()
+    {
+        var parser = new ClaudeStreamParser();
+
+        // Recorded: the CLI writes "—" in result errors as UTF-8 read back as Windows-1252.
+        var turn = Assert.IsType<TurnCompleted>(Assert.Single(parser.Parse(
+            "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"errors\":[" +
+            "\"[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use\"," +
+            "\"Auto mode is unavailable \\u00e2\\u20ac\\u201d the server returned no safety verdict\"]}")));
+
+        Assert.Equal("Auto mode is unavailable — the server returned no safety verdict", Assert.Single(turn.Errors));
+    }
+
     [Fact]
     public void Vcs_state_change_maps_to_its_own_event()
     {

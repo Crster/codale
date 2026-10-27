@@ -115,24 +115,20 @@ public sealed class McpServerSettings
     private string TasksHook(string arguments) => $"\"{RunnablePath("Codale.Mcp.Tasks").Replace('\\', '/')}\" {arguments}";
 
     /// <summary>Standing instruction that sends long-running commands to the task tools.</summary>
+    /// <remarks>
+    /// It rides in the system prompt of every request a session makes, so every word is paid
+    /// for on each call (at the cache-read price at best): facts only, no rationale.
+    /// </remarks>
     public const string TasksDirective =
-        "Shell tools cannot run commands in the background here (run_in_background, &, Start-Job and nohup are refused). " +
-        "For a dev server, watcher, watch-mode build or any command that keeps running, call mcp__codale-tasks__start_task; " +
-        "it returns a task id, read_task follows the output and stop_task ends it. Codale shows the task and its live output " +
-        "to the user. Quick commands that finish in seconds still run normally in the foreground shell. " +
-        "The project keeps a saved command list that the user sees in Codale's commands menu: list_commands shows it, " +
-        "add_command saves a reusable run command to it (saving only, nothing runs), and run_command runs a saved one by name as a task. " +
-        "The user's own terminal tabs are readable too: when they say a command in their terminal failed or ask you to look at its " +
-        "result, call list_terminals and then read_terminal to diagnose the output (read-only). " +
-        "To view static files (a built site, an HTML report, a generated page) in a browser, call mcp__codale-tasks__serve_folder: " +
-        "Codale hosts the folder on http://localhost:PORT/ until stop_serving, so do not start an http server with start_task for that. " +
-        "Codale's session panel is fed by two codale-tasks tools and nothing else. " +
-        "MANDATORY: Show your progress with mcp__codale-tasks__todos_set (or todos_set): pass the whole step list every call (2-6 short steps, one in_progress, " +
-        "finished ones completed) immediately as your FIRST action when you start, as you begin each step and when the last one finishes. The built-in task-list tools " +
-        "(TodoWrite, TaskCreate, TaskUpdate) are switched off; do not look for them. " +
-        "Use mcp__codale-tasks__artifact_add for a deliverable that is not project source (a report, document, image or data file): " +
-        "pass a path or markdown and it is listed for the user to open; do not add source files you edited. " +
-        "If these tools are not directly available, load them with one ToolSearch (select:mcp__codale-tasks__todos_set,mcp__codale-tasks__artifact_add).";
+        "Background shells are refused here (run_in_background, &, Start-Job, nohup). For a dev server, watcher or any command " +
+        "that keeps running, call mcp__codale-tasks__start_task (read_task follows its output, stop_task ends it); quick commands run normally. " +
+        "Saved project commands: list_commands, add_command (saves only), run_command (runs one by name as a task). " +
+        "When the user's own terminal output matters, list_terminals then read_terminal (read-only). " +
+        "To view static files in a browser, serve_folder hosts them on http://localhost:PORT/ until stop_serving; do not start_task an http server for that. " +
+        "MANDATORY when a request needs tools: your FIRST action is mcp__codale-tasks__todos_set with the whole list (2-6 short steps, one in_progress), " +
+        "called again as each step starts and when the last finishes. TodoWrite, TaskCreate and TaskUpdate are off; do not look for them. " +
+        "Deliverables that are not project source (report, document, image, data) go to mcp__codale-tasks__artifact_add (a path or markdown). " +
+        "If these tools are not loaded, load them with one ToolSearch (select:mcp__codale-tasks__todos_set,mcp__codale-tasks__artifact_add).";
 
     /// <summary>The servers to attach to a session started now; a server whose exe did not ship is left out.</summary>
     public IReadOnlyList<McpServerSpec> Servers()
@@ -392,34 +388,8 @@ public sealed class McpServerSettings
     private string StageClaude(string key, IReadOnlyList<McpServerSpec> servers, string tail, bool powershell)
     {
         var configPath = Stage("claude", key, McpServerSpec.ToClaudeConfig(servers)!);
-        var settingsDoc = new System.Text.Json.Nodes.JsonObject();
-        var permissions = new System.Text.Json.Nodes.JsonObject();
-        var allow = servers.Where(s => s.AutoApprove && !s.RequireApproval)
-            .Select(s => (System.Text.Json.Nodes.JsonNode)$"mcp__{s.Name}")
-            .ToArray();
-        if (allow.Length > 0)
-        {
-            permissions["allow"] = new System.Text.Json.Nodes.JsonArray(allow);
-        }
-
-        var ask = servers.Where(s => s.RequireApproval).Select(s => $"mcp__{s.Name}")
-            .Concat(servers.Where(s => !s.RequireApproval)
-                .SelectMany(s => s.AskTools.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => McpServerSpec.PrefixOf(s.Name) + t.Trim())))
-            .Distinct(StringComparer.Ordinal)
-            .Select(rule => (System.Text.Json.Nodes.JsonNode)rule)
-            .ToArray();
-        if (ask.Length > 0)
-        {
-            permissions["ask"] = new System.Text.Json.Nodes.JsonArray(ask);
-        }
-
-        if (permissions.Count > 0)
-        {
-            settingsDoc["permissions"] = permissions;
-        }
-
         var settingsPath = StagedPath("claude-settings", key);
-        File.WriteAllText(settingsPath, settingsDoc.ToJsonString());
+        File.WriteAllText(settingsPath, McpServerSpec.ToClaudeSettings(servers, new ClaudeHookSettings()) ?? "{}");
 
         var sb = new System.Text.StringBuilder();
         sb.Append("claude");
@@ -719,14 +689,11 @@ public sealed class McpServerSettings
         if (servers.Any(s => s.Name == BrowserName))
         {
             parts.Add(
-                $"You can drive a real Chromium browser with the {McpServerSpec.PrefixOf(BrowserName)}* tools (Codale's own automation " +
-                "browser, not the user's). After you change something a browser can show (a web page, UI, or a local dev server), open it with " +
-                "browser_navigate, read it with browser_snapshot, look at it with browser_screenshot, exercise the changed flow, and check " +
-                "browser_console_messages for errors, before you report the work as done. The browser is hidden by default and keeps logins " +
-                "between runs. When a page needs a sign-in, captcha or 2FA, do not give up or ask for credentials: call browser_handoff and the " +
-                "user completes it in a visible window. To check responsive layouts use browser_set_viewport (mobile, tablet, laptop, desktop, 4k) " +
-                "or browser_responsive_check for screenshots at several sizes in one call; browser_emulate switches dark mode. " +
-                "Element refs (e12) come from the latest browser_snapshot and expire at the next one.");
+                $"The {McpServerSpec.PrefixOf(BrowserName)}* tools drive Codale's own Chromium (not the user's; hidden, keeps logins). " +
+                "After changing something a browser can show, verify it before reporting done: browser_navigate, browser_snapshot (prefer it " +
+                "over screenshots; its refs like e12 expire at the next snapshot), exercise the flow, check browser_console_messages. " +
+                "For a sign-in, captcha or 2FA call browser_handoff; never ask for credentials. Layouts: browser_set_viewport or " +
+                "browser_responsive_check; dark mode: browser_emulate.");
         }
 
         if (servers.Any(s => s.Name == ComputerName))

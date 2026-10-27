@@ -134,6 +134,8 @@ public sealed class ClaudeStreamParser
                     ToolName = root.Str("tool_name") ?? "unknown",
                     ToolUseId = root.Str("tool_use_id"),
                     Message = root.Str("message"),
+                    ReasonType = root.Str("decision_reason_type"),
+                    Reason = root.Str("decision_reason"),
                 };
                 break;
 
@@ -396,7 +398,33 @@ public sealed class ClaudeStreamParser
             StopReason = root.Str("stop_reason"),
             Usage = usage,
             ContextWindow = contextWindow,
+
+            // "[ede_diagnostic] ..." entries are the CLI's debugging breadcrumbs, not reasons.
+            Errors = [.. root.StrArray("errors").Where(e => !e.StartsWith('[')).Select(RepairMojibake)],
         };
+    }
+
+    /// <summary>
+    /// The CLI has written result errors as UTF-8 read back as Windows-1252 ("â€”" for "—").
+    /// Reversing that is lossless when it applies; text that does not round-trip is kept as is.
+    /// </summary>
+    private static string RepairMojibake(string text)
+    {
+        if (!text.Contains('â') && !text.Contains('Ã'))
+        {
+            return text;
+        }
+
+        try
+        {
+            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+            var bytes = System.Text.Encoding.GetEncoding(1252, System.Text.EncoderFallback.ExceptionFallback, System.Text.DecoderFallback.ExceptionFallback).GetBytes(text);
+            return new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true).GetString(bytes);
+        }
+        catch (Exception ex) when (ex is System.Text.EncoderFallbackException or System.Text.DecoderFallbackException or ArgumentException)
+        {
+            return text;
+        }
     }
 
     private static AgentEvent ParseRateLimit(JsonElement root)

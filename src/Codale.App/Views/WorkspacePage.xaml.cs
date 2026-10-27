@@ -424,23 +424,19 @@ public sealed partial class WorkspacePage : Page
         }
 
         var command = cli.InstallCommand;
-        var dialog = new ContentDialog
+        var dialog = AppDialog.Apply(new ContentDialog
         {
             XamlRoot = XamlRoot,
-            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = $"{cli.DisplayName} not found",
-            Content = new TextBlock
-            {
-                TextWrapping = TextWrapping.Wrap,
-                Text = command is { Length: > 0 }
-                    ? $"The '{cli.Executable}' command isn't on this system's PATH. " +
-                      $"Install it now? This runs the following in a new terminal:\n\n{command}"
-                    : $"The '{cli.Executable}' command isn't on this system's PATH. Install the {cli.DisplayName} CLI, then try again.",
-            },
+            Content = command is { Length: > 0 }
+                ? AppDialog.Stack(
+                    AppDialog.Message($"The '{cli.Executable}' command isn't on this system's PATH. Install it now? This runs the following in a new terminal:"),
+                    AppDialog.Code(command))
+                : $"The '{cli.Executable}' command isn't on this system's PATH. Install the {cli.DisplayName} CLI, then try again.",
             PrimaryButtonText = command is { Length: > 0 } ? "Install" : "Close",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
-        };
+        }, DialogTone.Warning, AppDialog.Glyphs.Download);
 
         if (await dialog.ShowAsync() != ContentDialogResult.Primary || command is not { Length: > 0 })
         {
@@ -490,20 +486,15 @@ public sealed partial class WorkspacePage : Page
             _loginPromptOpen = true;
             try
             {
-                var dialog = new ContentDialog
+                var dialog = AppDialog.Apply(new ContentDialog
                 {
                     XamlRoot = XamlRoot,
-                    RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
                     Title = $"Codale isn't signed in to {targetCli}",
-                    Content = new TextBlock
-                    {
-                        TextWrapping = TextWrapping.Wrap,
-                        Text = description,
-                    },
+                    Content = description,
                     PrimaryButtonText = "Open terminal",
                     CloseButtonText = "Cancel",
                     DefaultButton = ContentDialogButton.Primary,
-                };
+                }, DialogTone.Info, AppDialog.Glyphs.Account);
 
                 if (await dialog.ShowAsync() == ContentDialogResult.Primary)
                 {
@@ -1715,16 +1706,15 @@ public sealed partial class WorkspacePage : Page
             _ => "Commits after it are undone and every uncommitted change is thrown away for good.",
         };
 
-        var dialog = new ContentDialog
+        var dialog = AppDialog.Apply(new ContentDialog
         {
             XamlRoot = XamlRoot,
-            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = $"Reset to {commit.ShortSha}?",
             Content = $"Move the current branch back to \"{commit.Subject}\". {consequence}",
             PrimaryButtonText = "Reset",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
-        };
+        }, mode is "soft" or "mixed" ? DialogTone.Warning : DialogTone.Danger, AppDialog.Glyphs.Undo);
 
         if (await dialog.ShowAsync() == ContentDialogResult.Primary)
         {
@@ -1956,7 +1946,8 @@ public sealed partial class WorkspacePage : Page
 
     private void OnCentreTabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
     {
-        // Closing a working chat or a terminal with a command running kills it: ask first.
+        // Closing a working chat or a terminal with a command running kills it: ask first. A
+        // terminal whose shell exited, or whose command has finished, closes without asking.
         var running = new List<string>();
         if (_chatTabs.FirstOrDefault(t => ReferenceEquals(t.Item, args.Item)) is { } busyChat)
         {
@@ -1970,7 +1961,8 @@ public sealed partial class WorkspacePage : Page
                 .Select(t => $"Task: {t.DisplayTitle}"));
         }
         else if (_terminalTabs.FirstOrDefault(t => ReferenceEquals(t.Item, args.Item)) is { } busyTerminal
-            && busyTerminal.Terminal.Activity == TerminalActivity.Busy)
+            && busyTerminal.Terminal.Activity == TerminalActivity.Busy
+            && busyTerminal.Terminal.IsCommandRunning)
         {
             running.Add($"Command: {busyTerminal.Terminal.CommandName ?? "terminal"}");
         }
@@ -3166,10 +3158,9 @@ public sealed partial class WorkspacePage : Page
 
     private async Task DeleteAsync(FileNode node)
     {
-        var dialog = new ContentDialog
+        var dialog = AppDialog.Apply(new ContentDialog
         {
             XamlRoot = XamlRoot,
-            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = $"Delete {node.Name}?",
             Content = node.IsDirectory
                 ? "The folder and everything in it will be removed."
@@ -3177,7 +3168,7 @@ public sealed partial class WorkspacePage : Page
             PrimaryButtonText = "Delete",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
-        };
+        }, DialogTone.Danger, AppDialog.Glyphs.Delete);
 
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
         {
@@ -3214,16 +3205,16 @@ public sealed partial class WorkspacePage : Page
     {
         var box = new TextBox { PlaceholderText = placeholder, Text = initial };
 
-        var dialog = new ContentDialog
+        var dialog = AppDialog.Apply(new ContentDialog
         {
             XamlRoot = XamlRoot,
-            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = title,
             Content = box,
             PrimaryButtonText = "OK",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
-        };
+        }, DialogTone.Info, AppDialog.Glyphs.Rename);
+        dialog.Opened += (_, _) => box.Focus(FocusState.Programmatic);
 
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
         {
@@ -3236,14 +3227,7 @@ public sealed partial class WorkspacePage : Page
 
     private async Task ShowTreeErrorAsync(string title, string message)
     {
-        await new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
-            Title = title,
-            Content = message,
-            CloseButtonText = "OK",
-        }.ShowAsync();
+        await AppDialog.AlertAsync(XamlRoot, title, message);
     }
 
     private void OnTreeItemInvoked(TreeView sender, TreeViewItemInvokedEventArgs args)
@@ -3452,16 +3436,15 @@ public sealed partial class WorkspacePage : Page
             return;
         }
 
-        var dialog = new ContentDialog
+        var dialog = AppDialog.Apply(new ContentDialog
         {
             XamlRoot = XamlRoot,
-            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = "Discard changes?",
             Content = $"Throw away every uncommitted change to {change.FileName}? Untracked files are deleted for good.",
             PrimaryButtonText = "Discard",
             CloseButtonText = "Keep",
             DefaultButton = ContentDialogButton.Close,
-        };
+        }, DialogTone.Danger, AppDialog.Glyphs.Undo);
 
         if (await dialog.ShowAsync() == ContentDialogResult.Primary)
         {
@@ -3895,11 +3878,7 @@ public sealed partial class WorkspacePage : Page
     private async Task<bool> ConfirmRiskyCommandAsync(string command, IReadOnlyList<Codale.Core.Shell.ShellFinding> findings)
     {
         var assessment = Codale.Core.Shell.ShellCommandAnalyzer.Assess(command, _terminalCwd);
-        var descriptionBlock = new TextBlock
-        {
-            TextWrapping = TextWrapping.Wrap,
-            Text = assessment.Description,
-        };
+        var descriptionBlock = AppDialog.Message(assessment.Description);
         var safetyBlock = new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
@@ -3912,29 +3891,16 @@ public sealed partial class WorkspacePage : Page
                 _ => "SystemFillColorSuccessBrush",
             }],
         };
-        var commandBlock = new TextBlock
-        {
-            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Mono, Consolas"),
-            TextWrapping = TextWrapping.Wrap,
-            IsTextSelectionEnabled = true,
-            Text = command,
-        };
-
-        var panel = new StackPanel { Spacing = 8 };
-        panel.Children.Add(descriptionBlock);
-        panel.Children.Add(safetyBlock);
-        panel.Children.Add(commandBlock);
-
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
-            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
-            Title = assessment.Risk == Codale.Core.Shell.ShellRisk.Danger ? "This command is dangerous" : "Run this command?",
-            Content = panel,
+            Content = AppDialog.Stack(AppDialog.Code(command), descriptionBlock, safetyBlock),
             PrimaryButtonText = "Run anyway",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
         };
+        AppDialog.Apply(dialog, DialogTone.Danger);
+        SetRiskyCommandHeader(dialog, assessment.Risk);
 
         if (ViewModel?.Helper is { IsAvailable: true } model)
         {
@@ -3942,6 +3908,19 @@ public sealed partial class WorkspacePage : Page
         }
 
         return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
+    /// <summary>Red for a dangerous command, amber for one that only needs care.</summary>
+    private static void SetRiskyCommandHeader(ContentDialog dialog, Codale.Core.Shell.ShellRisk risk)
+    {
+        if (risk == Codale.Core.Shell.ShellRisk.Danger)
+        {
+            AppDialog.SetHeader(dialog, "This command is dangerous", DialogTone.Danger, AppDialog.Glyphs.Terminal);
+        }
+        else
+        {
+            AppDialog.SetHeader(dialog, "Run this command?", DialogTone.Warning, AppDialog.Glyphs.Terminal);
+        }
     }
 
     private async Task RefineRiskyCommandDialogAsync(
@@ -3961,7 +3940,7 @@ public sealed partial class WorkspacePage : Page
                     descriptionBlock.Text = assessment.Description;
                 }
 
-                dialog.Title = assessment.Risk == Codale.Core.Shell.ShellRisk.Danger ? "This command is dangerous" : "Run this command?";
+                SetRiskyCommandHeader(dialog, assessment.Risk);
                 safetyBlock.Text = $"Safety: {assessment.FormatAssessment()}";
                 safetyBlock.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[assessment.Risk switch
                 {

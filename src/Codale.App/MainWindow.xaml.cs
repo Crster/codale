@@ -1,3 +1,4 @@
+using Codale.App.Controls;
 using Codale.App.Services;
 using Codale.App.ViewModels;
 using Codale.App.Views;
@@ -509,20 +510,16 @@ public sealed partial class MainWindow : Window
         try
         {
             var names = workspace.DirtyEditorNames;
-            var list = string.Join("\n", names.Take(8).Select(name => "•  " + name))
-                + (names.Count > 8 ? $"\n…and {names.Count - 8} more" : "");
-
-            var dialog = new ContentDialog
+            var dialog = AppDialog.Apply(new ContentDialog
             {
                 XamlRoot = RootGrid.XamlRoot,
-                RequestedTheme = Codale.App.Controls.DialogTheme.Of(RootGrid.XamlRoot),
                 Title = "Save your changes?",
-                Content = new TextBlock { TextWrapping = TextWrapping.Wrap, Text = $"These files have unsaved changes:\n\n{list}" },
+                Content = AppDialog.List("These files have unsaved changes:", names),
                 PrimaryButtonText = "Save all",
                 SecondaryButtonText = "Don't save",
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Primary,
-            };
+            }, DialogTone.Warning, AppDialog.Glyphs.Save);
 
             var choice = await dialog.ShowAsync();
             if (choice == ContentDialogResult.None)
@@ -541,19 +538,17 @@ public sealed partial class MainWindow : Window
                 return true;
             }
 
-            await new ContentDialog
+            await AppDialog.Apply(new ContentDialog
             {
                 XamlRoot = RootGrid.XamlRoot,
-                RequestedTheme = Codale.App.Controls.DialogTheme.Of(RootGrid.XamlRoot),
                 Title = "Some files were not saved",
-                Content = new TextBlock
-                {
-                    TextWrapping = TextWrapping.Wrap,
-                    Text = "These could not be saved (untitled, changed on disk, or write failed). " +
-                           $"Save them from their tabs, or close again to discard them:\n\n{string.Join("\n", unsaved.Select(name => "•  " + name))}",
-                },
+                Content = AppDialog.List(
+                    "These could not be saved (untitled, changed on disk, or write failed). " +
+                    "Save them from their tabs, or close again to discard them:",
+                    unsaved),
                 CloseButtonText = "OK",
-            }.ShowAsync();
+                DefaultButton = ContentDialogButton.Close,
+            }, DialogTone.Danger).ShowAsync();
             return false;
         }
         catch (Exception ex)

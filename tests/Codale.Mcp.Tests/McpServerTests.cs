@@ -294,4 +294,17 @@ public sealed class McpServerTests
         var ask = JsonNode.Parse(json!)!["permissions"]!["ask"]!.AsArray();
         Assert.Equal("mcp__codale-computer", (string)Assert.Single(ask)!);
     }
+
+    [Fact]
+    public void Auto_approved_servers_get_an_allow_rule_so_auto_mode_does_not_classify_them()
+    {
+        var json = McpServerSpec.ToClaudeSettings([
+            new McpServerSpec { Name = "codale-tasks", Command = "t", AutoApprove = true, AskTools = ["start_task"] },
+            new McpServerSpec { Name = "codale-computer", Command = "c", AutoApprove = true, RequireApproval = true },
+        ], new ClaudeHookSettings());
+
+        var permissions = JsonNode.Parse(json!)!["permissions"]!;
+        Assert.Equal("mcp__codale-tasks", (string)Assert.Single(permissions["allow"]!.AsArray())!);
+        Assert.Contains("mcp__codale-tasks__start_task", permissions["ask"]!.AsArray().Select(n => (string)n!));
+    }
 }

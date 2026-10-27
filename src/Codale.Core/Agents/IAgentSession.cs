@@ -59,9 +59,8 @@ public sealed record UserTurn(string Text)
 
     /// <summary>The prefix an ask-mode turn carries; history strips it back off.</summary>
     public const string AskInstruction =
-        "[Ask mode] Answer this with a detailed explanation only. You may read files, search the " +
-        "project and search or fetch from the web to ground the answer, but do not edit, create or " +
-        "delete files and do not run commands that change anything. Explain what you would do and why, " +
+        "[Ask mode] Explain only. Read files and search the project or web as needed, but do not edit, " +
+        "create or delete files or run commands that change anything. Say what you would do and why, " +
         "with code snippets where they help.\n\n";
 
     private const string AskMarker = "[Ask mode] ";
@@ -156,6 +155,12 @@ public interface IAgentSession : IAsyncDisposable
 
     /// <summary>Stop one runtime-tracked task by its <see cref="AgentTaskInfo.Id"/>. False when it could not be stopped.</summary>
     Task<bool> CancelTaskAsync(string taskId, CancellationToken ct = default) => Task.FromResult(false);
+
+    /// <summary>
+    /// Compacts the conversation through a native protocol request, which then runs as a turn
+    /// of its own. False when the provider has none - Claude takes <c>/compact</c> as a prompt instead.
+    /// </summary>
+    Task<bool> TryCompactAsync(CancellationToken ct = default) => Task.FromResult(false);
 }
 
 public enum AgentTaskKind

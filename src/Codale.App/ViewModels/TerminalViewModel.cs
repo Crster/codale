@@ -97,6 +97,14 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     public partial TerminalActivity Activity { get; set; } = TerminalActivity.Idle;
 
     /// <summary>
+    /// Whether closing the tab would kill a running command: the shell is still alive and has a
+    /// process running in it. <see cref="Activity"/> cannot tell - a command tab reads busy until its
+    /// shell exits, which with a kept shell is long after the command ended, and the exit itself lands
+    /// a beat late - so this asks the process tree directly.
+    /// </summary>
+    public bool IsCommandRunning => _session?.IsCommandRunning == true;
+
+    /// <summary>
     /// Swaps a command typed at the shell prompt for an adjusted one (an agent CLI launched with
     /// Codale's MCP servers attached); null result leaves it as typed.
     /// </summary>

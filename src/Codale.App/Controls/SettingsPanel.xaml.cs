@@ -340,9 +340,10 @@ public sealed partial class SettingsPanel : UserControl
             ("codex", CodexAccountStatus, CodexSignInButton, CodexSignOutButton),
         })
         {
-            var signedIn = await CodaleAccountCli.IsSignedInAsync(cli);
+            var (signedIn, email) = await CodaleAccountCli.GetAccountAsync(cli);
             status.Text = signedIn ? "Signed in" : "Signed out";
             signIn.Content = signedIn ? "Sign in again" : "Sign in";
+            signOut.Content = signedIn && email is not null ? $"Sign out {email}" : "Sign out";
             signOut.IsEnabled = signedIn;
         }
     }

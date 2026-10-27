@@ -107,6 +107,23 @@ public sealed record PermissionDenied : AgentEvent
     public required string ToolName { get; init; }
     public string? ToolUseId { get; init; }
     public string? Message { get; init; }
+
+    /// <summary>Who refused it: "classifier" for auto mode's server-side safety check, among others.</summary>
+    public string? ReasonType { get; init; }
+
+    /// <summary>The CLI's short reason, e.g. "Classifier unavailable".</summary>
+    public string? Reason { get; init; }
+
+    /// <summary>
+    /// Auto mode's safety check gave no verdict (an outage, not a judgment of the call): the CLI
+    /// backs off and the model may retry. After ten in a row the CLI ends the turn (<see cref="EndsTurn"/>).
+    /// </summary>
+    public bool IsClassifierOutage => ReasonType == "classifier" && Reason is { } reason &&
+        (reason.StartsWith("Classifier unavailable", StringComparison.Ordinal) ||
+         reason.StartsWith("Auto mode unavailable", StringComparison.Ordinal));
+
+    /// <summary>The outage denial that stops the turn: auto mode gave up after repeated responses with no verdict.</summary>
+    public bool EndsTurn => IsClassifierOutage && Reason!.StartsWith("Auto mode unavailable", StringComparison.Ordinal);
 }
 
 /// <summary>The CLI's guess at what the user will type next, emitted after a turn when prompt suggestions are on.</summary>
@@ -189,6 +206,9 @@ public sealed record TurnCompleted : AgentEvent
 
     /// <summary>Authoritative context window for the model that served this turn.</summary>
     public int? ContextWindow { get; init; }
+
+    /// <summary>The CLI's human-readable reasons an error turn ended (its diagnostics left out).</summary>
+    public IReadOnlyList<string> Errors { get; init; } = [];
 }
 
 public sealed record SessionEnded(int ExitCode, string? Error = null) : AgentEvent;

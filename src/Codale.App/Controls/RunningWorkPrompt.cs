@@ -16,19 +16,15 @@ public static class RunningWorkPrompt
 
         try
         {
-            var list = string.Join("\n", running.Take(8).Select(name => "•  " + name))
-                + (running.Count > 8 ? $"\n…and {running.Count - 8} more" : "");
-
-            var dialog = new ContentDialog
+            var dialog = AppDialog.Apply(new ContentDialog
             {
                 XamlRoot = xamlRoot,
-                RequestedTheme = DialogTheme.Of(xamlRoot),
                 Title = "Still running",
-                Content = new TextBlock { TextWrapping = TextWrapping.Wrap, Text = $"{action} will stop:\n\n{list}" },
+                Content = AppDialog.List($"{action} will stop:", running, AppDialog.Glyphs.Stop),
                 PrimaryButtonText = "Stop and continue",
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Close,
-            };
+            }, DialogTone.Warning, AppDialog.Glyphs.Stop);
 
             return await dialog.ShowAsync() == ContentDialogResult.Primary;
         }

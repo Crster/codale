@@ -145,6 +145,31 @@ public static class AppSettings
     }
 
     /// <summary>
+    /// Whether an idle chat compacts itself just before its prompt cache expires. Compacting
+    /// while the cache is warm reads the history at the cache-hit price; once it expires the
+    /// next prompt re-writes the whole history to the cache instead.
+    /// </summary>
+    public static bool IdleCompact
+    {
+        get => Get("tokens.idleCompact", () => ReadFlag("tokens.idleCompact", true));
+        set => Set("tokens.idleCompact", value, FormatFlag);
+    }
+
+    /// <summary>Idle seconds before that compaction: just under the API's 5-minute cache lifetime.</summary>
+    public static int IdleCompactSeconds
+    {
+        get => Get("tokens.idleCompactSeconds", () => Read("tokens.idleCompactSeconds", 240, ParseInt));
+        set => Set("tokens.idleCompactSeconds", Math.Clamp(value, 60, 3600), FormatInt);
+    }
+
+    /// <summary>Context below this many tokens is not worth a summary: compacting it would save less than it costs.</summary>
+    public static int IdleCompactMinTokens
+    {
+        get => Get("tokens.idleCompactMinTokens", () => Read("tokens.idleCompactMinTokens", 50_000, ParseInt));
+        set => Set("tokens.idleCompactMinTokens", Math.Max(0, value), FormatInt);
+    }
+
+    /// <summary>
     /// Whether chats keep a history per feature of the project: each message is routed to a feature
     /// (or to none, when it is no project work), and a session starts from that feature's summary.
     /// </summary>
@@ -573,12 +598,13 @@ public static class AppSettings
     [
         "editor.lineNumbers", "editor.highlighting", "editor.wordWrap", "chat.suggestNextPrompt",
         "tokens.compressShell", "tokens.digest", "tokens.explore", "tokens.readGuard", "tokens.handoffNudge", "tokens.terse",
+        "tokens.idleCompact",
     ];
 
     private static readonly HashSet<string> NumberKeys =
     [
         "editor.fontSize", "editor.tabWidth", "terminal.fontSize", "terminal.scrollback", "chat.fontSize", "git.pollSeconds",
-        "tokens.autoCompactPercent",
+        "tokens.autoCompactPercent", "tokens.idleCompactSeconds", "tokens.idleCompactMinTokens",
     ];
 
     private static readonly object FileLock = new();

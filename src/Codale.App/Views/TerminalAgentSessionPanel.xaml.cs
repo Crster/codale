@@ -8,6 +8,7 @@ using Codale.Agents.Codex;
 using Codale.Agents.History;
 using Codale.App.Services;
 using Codale.App.ViewModels;
+using Codale.Core.Agents;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -343,7 +344,8 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
                 if (_ticks++ >= UsageEveryTicks)
                 {
                     _ticks = 0;
-                    if (await ClaudeUsageClient.FetchAsync() is { } limits)
+                    // The terminal's CLI runs on the default account, not Codale's: its quota is that account's.
+                    if (await ClaudeUsageClient.FetchAsync(CodaleAccount.UserClaudeHome) is { } limits)
                     {
                         session.Status.Apply(limits);
                     }

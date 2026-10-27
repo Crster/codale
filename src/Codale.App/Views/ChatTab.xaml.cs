@@ -1,5 +1,6 @@
 using System.Windows.Input;
 
+using Codale.App.Controls;
 using Codale.App.Services;
 using Codale.App.ViewModels;
 using Codale.Core.Agents;
@@ -339,15 +340,14 @@ public sealed partial class ChatTab : UserControl
         };
 
         Load();
-        await new ContentDialog
+        await AppDialog.Apply(new ContentDialog
         {
             XamlRoot = XamlRoot,
             Title = ViewModel.FeatureName,
             Content = scroller,
             CloseButtonText = "Close",
-            // Dialogs open in the popup layer, outside RootGrid, so they need the resolved theme passed in.
-            RequestedTheme = ActualTheme,
-        }.ShowAsync();
+            DefaultButton = ContentDialogButton.Close,
+        }, DialogTone.Info, AppDialog.Glyphs.History).ShowAsync();
     }
 
     private static void SetClipboardText(string text)
@@ -1431,15 +1431,14 @@ public sealed partial class ChatTab : UserControl
 
     private async Task ShowPreviewDialogAsync(string title, UIElement content)
     {
-        var dialog = new ContentDialog
+        var dialog = AppDialog.Apply(new ContentDialog
         {
             XamlRoot = XamlRoot,
-            RequestedTheme = Codale.App.Controls.DialogTheme.Of(XamlRoot),
             Title = title,
             Content = content,
             CloseButtonText = "Close",
             DefaultButton = ContentDialogButton.Close,
-        };
+        }, DialogTone.Info, AppDialog.Glyphs.Document);
 
         try
         {

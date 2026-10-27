@@ -22,6 +22,15 @@ public static class CodaleAccount
     /// <summary>The folder passed to the Codex CLI as <c>CODEX_HOME</c>; codex refuses to start when it is missing.</summary>
     public static string CodexHome => Ensure(Path.Combine(Root, "codex"));
 
+    /// <summary>
+    /// The default account's folder, which a Claude CLI run in a terminal uses: wherever the user
+    /// pointed <c>CLAUDE_CONFIG_DIR</c>, else <c>~/.claude</c>. Not created; it is the CLI's.
+    /// </summary>
+    public static string UserClaudeHome =>
+        Environment.GetEnvironmentVariable(ClaudeVariable) is { Length: > 0 } configured
+            ? configured
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude");
+
     public const string ClaudeVariable = "CLAUDE_CONFIG_DIR";
 
     public const string CodexVariable = "CODEX_HOME";

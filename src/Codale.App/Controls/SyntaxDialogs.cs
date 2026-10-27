@@ -1,7 +1,6 @@
 using Codale.Core.Helper;
 using Codale.Core.Syntax;
 
-using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -16,24 +15,17 @@ namespace Codale.App.Controls;
 /// </summary>
 public static class SyntaxDialogs
 {
-    private static ContentDialog NewDialog(XamlRoot root, string title, UIElement content, string primary, string close = "Close") => new()
+    private static ContentDialog NewDialog(XamlRoot root, string title, UIElement content, string primary, string close = "Close", string? glyph = null) => AppDialog.Apply(new ContentDialog
     {
         XamlRoot = root,
-        RequestedTheme = DialogTheme.Of(root),
         Title = title,
         Content = content,
         PrimaryButtonText = primary,
         CloseButtonText = close,
         DefaultButton = ContentDialogButton.Primary,
-    };
+    }, DialogTone.Info, glyph);
 
-    private static TextBlock Note(string text = "") => new()
-    {
-        Text = text,
-        FontSize = 12,
-        TextWrapping = TextWrapping.Wrap,
-        Opacity = 0.7,
-    };
+    private static TextBlock Note(string text = "") => AppDialog.Note(text);
 
     /// <summary>Lists the catalog's grammars with check boxes and installs the ones ticked.</summary>
     public static async Task ShowCatalogAsync(XamlRoot root)
@@ -64,7 +56,7 @@ public static class SyntaxDialogs
         body.Children.Add(progress);
         body.Children.Add(status);
 
-        var dialog = NewDialog(root, "Download syntax grammars", body, "Install");
+        var dialog = NewDialog(root, "Download syntax grammars", body, "Install", glyph: AppDialog.Glyphs.Download);
         dialog.PrimaryButtonClick += async (_, args) =>
         {
             var picked = boxes.Where(b => b.Box.IsChecked == true).Select(b => b.Entry).ToList();
@@ -142,7 +134,7 @@ public static class SyntaxDialogs
 
         GeneratedGrammar? generated = null;
         CancellationTokenSource? cts = null;
-        var dialog = NewDialog(root, "Generate syntax with AI", body, "Generate", "Cancel");
+        var dialog = NewDialog(root, "Generate syntax with AI", body, "Generate", "Cancel", AppDialog.Glyphs.Sparkle);
         dialog.IsPrimaryButtonEnabled = generator.IsAvailable;
         dialog.Closing += (_, _) => cts?.Cancel();
         dialog.PrimaryButtonClick += async (_, args) =>
@@ -219,19 +211,11 @@ public static class SyntaxDialogs
         try
         {
             var entry = SyntaxService.Store.Import(file.Path);
-            await Message(root, "Grammar imported", $"{entry.Name} is installed and colours .{string.Join(", .", entry.Extensions)} files.");
+            await AppDialog.AlertAsync(root, "Grammar imported", $"{entry.Name} is installed and colours .{string.Join(", .", entry.Extensions)} files.", DialogTone.Success);
         }
         catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
         {
-            await Message(root, "Could not import that grammar", ex.Message);
+            await AppDialog.AlertAsync(root, "Could not import that grammar", ex.Message);
         }
-    }
-
-    private static async Task Message(XamlRoot root, string title, string text)
-    {
-        var dialog = NewDialog(root, title, new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, MaxWidth = 420, FontWeight = FontWeights.Normal }, "", "OK");
-        dialog.PrimaryButtonText = "";
-        dialog.DefaultButton = ContentDialogButton.Close;
-        await dialog.ShowAsync();
     }
 }
