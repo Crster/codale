@@ -950,8 +950,97 @@ public sealed partial class ChatTab : UserControl
         }
     }
 
+    private readonly record struct DraftSnapshot(string Text, int Caret);
+
+    private const int MaxDraftHistory = 200;
+    private static readonly TimeSpan DraftCoalesceWindow = TimeSpan.FromMilliseconds(900);
+
+    private readonly List<DraftSnapshot> _draftUndo = [];
+    private readonly List<DraftSnapshot> _draftRedo = [];
+    private DraftSnapshot _draftLast = new("", 0);
+    private DateTime _draftLastChange;
+    private bool _restoringDraft;
+
+    /// <summary>
+    /// The composer keeps its own history: the text is rewritten programmatically
+    /// (suggestions, paste, send), which leaves the TextBox's native undo unreliable.
+    /// Quick single-character typing coalesces into one step.
+    /// </summary>
+    private void RecordDraftChange()
+    {
+        var text = DraftBox.Text;
+        if (_restoringDraft || text == _draftLast.Text)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var small = Math.Abs(text.Length - _draftLast.Text.Length) <= 1;
+        var coalesce = small && _draftUndo.Count > 0 && now - _draftLastChange < DraftCoalesceWindow;
+        if (!coalesce)
+        {
+            _draftUndo.Add(_draftLast);
+            if (_draftUndo.Count > MaxDraftHistory)
+            {
+                _draftUndo.RemoveAt(0);
+            }
+        }
+
+        _draftRedo.Clear();
+        _draftLast = new DraftSnapshot(text, DraftBox.SelectionStart);
+        _draftLastChange = now;
+    }
+
+    private void RestoreDraft(DraftSnapshot snapshot)
+    {
+        _restoringDraft = true;
+        try
+        {
+            DraftBox.Text = snapshot.Text;
+            DraftBox.SelectionStart = Math.Min(snapshot.Caret, snapshot.Text.Length);
+            DraftBox.SelectionLength = 0;
+            _draftLast = snapshot;
+            _draftLastChange = default;
+        }
+        finally
+        {
+            _restoringDraft = false;
+        }
+    }
+
+    private void OnUndoAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        if (_draftUndo.Count == 0)
+        {
+            return;
+        }
+
+        var current = new DraftSnapshot(DraftBox.Text, DraftBox.SelectionStart);
+        var previous = _draftUndo[^1];
+        _draftUndo.RemoveAt(_draftUndo.Count - 1);
+        _draftRedo.Add(current);
+        RestoreDraft(previous);
+    }
+
+    private void OnRedoAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        if (_draftRedo.Count == 0)
+        {
+            return;
+        }
+
+        var current = new DraftSnapshot(DraftBox.Text, DraftBox.SelectionStart);
+        var next = _draftRedo[^1];
+        _draftRedo.RemoveAt(_draftRedo.Count - 1);
+        _draftUndo.Add(current);
+        RestoreDraft(next);
+    }
+
     private void OnDraftTextChanged(object sender, TextChangedEventArgs e)
     {
+        RecordDraftChange();
         ViewModel.UpdateSuggestions();
 
         if (ViewModel.Suggestions.Count > 0)

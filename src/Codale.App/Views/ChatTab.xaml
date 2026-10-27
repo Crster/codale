@@ -2238,6 +2238,18 @@
                                 Key="Enter"
                                 Invoked="OnPlanEnterAccelerator"
                                 Modifiers="Control" />
+                            <KeyboardAccelerator
+                                Key="Z"
+                                Invoked="OnUndoAccelerator"
+                                Modifiers="Control" />
+                            <KeyboardAccelerator
+                                Key="Y"
+                                Invoked="OnRedoAccelerator"
+                                Modifiers="Control" />
+                            <KeyboardAccelerator
+                                Key="Z"
+                                Invoked="OnRedoAccelerator"
+                                Modifiers="Control,Shift" />
                         </TextBox.KeyboardAccelerators>
                     </TextBox>
 
