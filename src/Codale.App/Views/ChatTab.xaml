@@ -1180,23 +1180,17 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="core:TurnAttachment">
                                 <Border
-                                    Padding="10,5"
-                                    Background="{StaticResource DetailSurfaceBrush}"
-                                    BorderBrush="{StaticResource DetailStrokeBrush}"
-                                    BorderThickness="1"
-                                    CornerRadius="14"
+                                    Width="22"
+                                    Height="22"
+                                    Background="Transparent"
+                                    CornerRadius="6"
                                     Tag="{x:Bind}"
                                     Tapped="OnPreviewAttachment"
-                                    ToolTipService.ToolTip="Preview">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <FontIcon FontSize="12" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE930;" />
-                                        <TextBlock
-                                            MaxWidth="160"
-                                            VerticalAlignment="Center"
-                                            FontSize="12"
-                                            Text="{x:Bind Name}"
-                                            TextTrimming="CharacterEllipsis" />
-                                    </StackPanel>
+                                    ToolTipService.ToolTip="{x:Bind Name}">
+                                    <FontIcon
+                                        FontSize="11"
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                        Glyph="&#xE723;" />
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -1331,40 +1325,34 @@
         <DataTemplate x:Key="AssistantTemplate" x:DataType="vm:AssistantMessageItem">
             <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="6">
                 <!-- Assistant Header -->
-                <Grid ColumnSpacing="8">
+                <Grid Margin="2,0,0,0" HorizontalAlignment="Left" ColumnSpacing="6">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <!-- Avatar / Bot Icon -->
+                    <!-- Agent badge, mirrors the user's "You" badge -->
                     <Border
-                        Width="24"
-                        Height="24"
+                        Padding="8,2"
                         VerticalAlignment="Center"
-                        Background="#F5A94A"
-                        CornerRadius="7">
-                        <FontIcon
-                            FontSize="12"
-                            Foreground="#3A2A12"
-                            Glyph="&#xE99A;" />
+                        Background="{StaticResource UserBubbleBrush}"
+                        BorderBrush="{StaticResource UserBubbleStrokeBrush}"
+                        BorderThickness="1"
+                        CornerRadius="10">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <FontIcon FontSize="10" Foreground="#F5A94A" Glyph="&#xE99A;" />
+                            <TextBlock
+                                FontSize="{x:Bind S11, Mode=OneWay}"
+                                FontWeight="SemiBold"
+                                Foreground="#F5A94A"
+                                Text="Codale" />
+                        </StackPanel>
                     </Border>
-
-                    <!-- Agent Name -->
-                    <TextBlock
-                        Grid.Column="1"
-                        VerticalAlignment="Center"
-                        FontSize="{x:Bind S12_5, Mode=OneWay}"
-                        FontWeight="SemiBold"
-                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                        Text="Codale" />
 
                     <!-- Timestamp -->
                     <TextBlock
-                        Grid.Column="2"
+                        Grid.Column="1"
                         VerticalAlignment="Center"
                         FontFamily="Cascadia Mono, Consolas"
                         FontSize="{x:Bind S10_5, Mode=OneWay}"
@@ -1373,16 +1361,16 @@
 
                     <!-- Copy Response Button -->
                     <Button
-                        Grid.Column="4"
-                        Width="26"
-                        Height="26"
+                        Grid.Column="2"
+                        Width="22"
+                        Height="22"
                         Padding="0"
                         VerticalAlignment="Center"
                         Click="OnCopyAssistantTextClick"
                         Style="{StaticResource LinkButton}"
                         Tag="{x:Bind}"
                         ToolTipService.ToolTip="Copy response">
-                        <FontIcon FontSize="12" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE8C8;" />
+                        <FontIcon FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE8C8;" />
                     </Button>
                 </Grid>
 

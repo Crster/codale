@@ -2652,11 +2652,13 @@ public sealed partial class WorkspacePage : Page
         FileTree.UpdateLayout();
         ScrollTargetIntoView();
 
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        // Folders expanded just above realize their children over several layout passes, so the first
+        // assignments can be dropped: keep re-selecting until the target's own container exists and shows selected.
+        var attempts = 0;
+        void ApplySelection()
         {
             FileTree.UpdateLayout();
 
-            // Folders expanded just above are only realized after layout, so the first assignment can be dropped.
             if (!ReferenceEquals(FileTree.SelectedItem, targetNode))
             {
                 FileTree.SelectedItem = targetNode;
@@ -2664,7 +2666,23 @@ public sealed partial class WorkspacePage : Page
             }
 
             ScrollTargetIntoView();
-        });
+
+            var settled = FileTree.ContainerFromItem(targetNode) is TreeViewItem { IsSelected: true };
+            if (!settled && ++attempts < 12)
+            {
+                var timer = DispatcherQueue.CreateTimer();
+                timer.Interval = TimeSpan.FromMilliseconds(60);
+                timer.IsRepeating = false;
+                timer.Tick += (t, _) =>
+                {
+                    t.Stop();
+                    ApplySelection();
+                };
+                timer.Start();
+            }
+        }
+
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ApplySelection);
     }
 
     private static T? FindDescendant<T>(DependencyObject element) where T : DependencyObject

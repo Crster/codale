@@ -54,6 +54,8 @@ public sealed partial class StatusViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(ShowEmptyUsage))]
     [NotifyPropertyChangedFor(nameof(HasUsageMeter))]
     [NotifyPropertyChangedFor(nameof(FiveHourPercent))]
+    [NotifyPropertyChangedFor(nameof(PreviousFiveHourPercent))]
+    [NotifyPropertyChangedFor(nameof(LastPromptPercent))]
     [NotifyPropertyChangedFor(nameof(FiveHourText))]
     [NotifyPropertyChangedFor(nameof(FiveHourSummary))]
     [NotifyPropertyChangedFor(nameof(UsageSummary))]
@@ -281,6 +283,22 @@ public sealed partial class StatusViewModel : ObservableObject
 
     /// <summary>0-100, for the status bar meters.</summary>
     public double FiveHourPercent => Math.Clamp((FiveHourUtilization ?? 0) * 100, 0, 100);
+
+    private double _promptBaseline;
+
+    /// <summary>Marks the 5-hour usage so far as history; what is spent after this is the latest prompt's.</summary>
+    public void BeginPrompt()
+    {
+        _promptBaseline = FiveHourPercent;
+        OnPropertyChanged(nameof(PreviousFiveHourPercent));
+        OnPropertyChanged(nameof(LastPromptPercent));
+    }
+
+    /// <summary>The 5-hour usage before the latest prompt (the whole bar once the window has rolled over).</summary>
+    public double PreviousFiveHourPercent => Math.Min(_promptBaseline, FiveHourPercent);
+
+    /// <summary>The share of the 5-hour window the latest prompt spent.</summary>
+    public double LastPromptPercent => FiveHourPercent - PreviousFiveHourPercent;
 
     public double SevenDayPercent => Math.Clamp((SevenDayUtilization ?? 0) * 100, 0, 100);
 

@@ -610,12 +610,22 @@
                                                 Text="{x:Bind Workspace.Status.FiveHourSummary, Mode=OneWay}"
                                                 TextTrimming="CharacterEllipsis" />
                                         </Grid>
-                                        <ProgressBar
-                                            MinHeight="6"
-                                            CornerRadius="3"
-                                            Foreground="{x:Bind Workspace.Status.FiveHourPercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}"
-                                            Maximum="100"
-                                            Value="{x:Bind Workspace.Status.FiveHourPercent, Mode=OneWay}" />
+                                        <!--  Total in the accent colour, the history drawn over it: the visible tail is the latest prompt  -->
+                                        <Grid>
+                                            <ProgressBar
+                                                MinHeight="6"
+                                                CornerRadius="3"
+                                                Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                                Maximum="100"
+                                                Value="{x:Bind Workspace.Status.FiveHourPercent, Mode=OneWay}" />
+                                            <ProgressBar
+                                                MinHeight="6"
+                                                Background="Transparent"
+                                                CornerRadius="3"
+                                                Foreground="{x:Bind Workspace.Status.FiveHourPercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}"
+                                                Maximum="100"
+                                                Value="{x:Bind Workspace.Status.PreviousFiveHourPercent, Mode=OneWay}" />
+                                        </Grid>
                                     </StackPanel>
                                     <StackPanel Spacing="4" Visibility="{x:Bind Workspace.Status.HasLongWindowOnly, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                                         <Grid ColumnSpacing="8">

@@ -3904,6 +3904,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        // A mid-turn message belongs to the running prompt; only a fresh one starts a new segment.
+        if (!IsBusy)
+        {
+            _status.BeginPrompt();
+        }
+
         // Smart history reads the message first: which feature it is work on (or that it is no
         // project work), and in Automatic mode the mode for the turn. Slash commands are the CLI's
         // own syntax and go out untouched; so does anything sent mid-turn, which the running turn covers.
