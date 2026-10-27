@@ -2655,6 +2655,14 @@ public sealed partial class WorkspacePage : Page
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             FileTree.UpdateLayout();
+
+            // Folders expanded just above are only realized after layout, so the first assignment can be dropped.
+            if (!ReferenceEquals(FileTree.SelectedItem, targetNode))
+            {
+                FileTree.SelectedItem = targetNode;
+                FileTree.UpdateLayout();
+            }
+
             ScrollTargetIntoView();
         });
     }
