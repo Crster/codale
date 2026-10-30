@@ -87,22 +87,26 @@ public sealed partial class EditorTab
         return item;
     }
 
+    private readonly MenuFlyoutSeparator _previewSeparator = new();
+
     private void BuildContextMenu()
     {
-        _copyItem = Item("Copy", FileEditor.CopyToClipboard, "Ctrl+C", "");
+        _copyItem = Item("Copy", FileEditor.CopyToClipboard, "Ctrl+C", "");
         _pasteItem = Item("Paste", FileEditor.PasteFromClipboard, "Ctrl+V", "");
-        _formatItem = Item("Format Document", () => _ = FormatDocumentAsync(), null, "");
-        _askItem = Item("Edit here…", () => _ = AskClaudeAsync(), null, "\uE9CE");
-        _checkItem = Item("Check Issues", () => _ = CheckIssuesAsync(), null, "");
         _referencesItem = Item("Find References", FindReferences, null, "");
-        _previewItem = Item("Preview", TogglePreview, null, "");
+        _askItem = Item("Edit here…", () => _ = AskClaudeAsync(), null, "");
+        _checkItem = Item("Check Issues", () => _ = CheckIssuesAsync(), null, "");
+        _formatItem = Item("Format Document", () => _ = FormatDocumentAsync(), null, "");
+        _previewItem = Item("Preview", TogglePreview, null, "");
 
+        // Clipboard, then navigation, then the model jobs, then the view switch.
         var menu = new MenuFlyout();
         foreach (var item in new MenuFlyoutItemBase[]
         {
             _copyItem, _pasteItem, new MenuFlyoutSeparator(),
             _referencesItem, new MenuFlyoutSeparator(),
-            _formatItem, _askItem, _checkItem, _previewItem,
+            _askItem, _checkItem, _formatItem, _previewSeparator,
+            _previewItem,
         })
         {
             menu.Items.Add(item);
@@ -155,6 +159,7 @@ public sealed partial class EditorTab
 
         var kind = PreviewKind();
         _previewItem.Visibility = kind == PreviewTarget.None ? Visibility.Collapsed : Visibility.Visible;
+        _previewSeparator.Visibility = _previewItem.Visibility;
         _previewItem.Text = kind == PreviewTarget.Browser ? "Preview in Browser" : "Preview";
     }
 

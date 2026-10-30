@@ -53,6 +53,7 @@ internal static class Attention
                       <text>{SecurityElement.Escape(body)}</text>
                     </binding>
                   </visual>
+                  <audio silent="true"/>
                 </toast>
                 """;
 
