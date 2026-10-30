@@ -156,7 +156,7 @@
                                                                 MinWidth="40"
                                                                 FontFamily="Cascadia Mono, Consolas"
                                                                 FontSize="12"
-                                                                Opacity="0.4"
+                                                                Opacity="0.6"
                                                                 Text="{x:Bind Gutter}"
                                                                 TextAlignment="Right" />
                                                             <TextBlock
@@ -166,6 +166,7 @@
                                                                 IsTextSelectionEnabled="True"
                                                                 Text="{x:Bind Code}"
                                                                 views:KeywordHighlight.Lines="{x:Bind MatchLines}"
+                                                                views:KeywordHighlight.Path="{x:Bind FilePath}"
                                                                 views:KeywordHighlight.Terms="{x:Bind Terms}" />
                                                         </Grid>
                                                     </ScrollViewer>

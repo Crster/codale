@@ -395,6 +395,12 @@ public sealed class MarkdownView : StackPanel
             Foreground = ThemeBrush("MdBodyBrush", 0xD4, 0xD7, 0xDF),
             Margin = new Thickness(margin.L, margin.T, margin.R, margin.B),
         };
+        // Roomier leading for the large reading size; chat's compact size keeps its default.
+        if (size >= 15)
+        {
+            text.LineHeight = size * 1.55;
+        }
+
         Selectable(text);
         FillInlines(text.Inlines, content, size);
         Highlight(text);

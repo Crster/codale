@@ -440,10 +440,15 @@
         <ScrollViewer
             x:Name="MarkdownPreviewHost"
             Grid.Row="1"
-            Padding="0,0,12,0"
+            Padding="24,16,24,32"
             VerticalScrollBarVisibility="Auto"
             Visibility="Collapsed">
-            <views:MarkdownView x:Name="MarkdownPreview" />
+            <!--  A centred reading column with larger text; wide panes no longer stretch the lines  -->
+            <views:MarkdownView
+                x:Name="MarkdownPreview"
+                MaxWidth="820"
+                HorizontalAlignment="Center"
+                BaseFontSize="16" />
         </ScrollViewer>
 
         <!--  Images: drawn at their size, shrunk to fit when larger than the tab  -->

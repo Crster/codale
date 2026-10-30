@@ -298,6 +298,7 @@ public sealed partial class CodeEditor : UserControl
         _vBar.ValueChanged += (_, value) => _scroll.ChangeView(null, value);
         _hBar.ValueChanged += (_, value) => _scroll.ChangeView(value, null);
         _vBar.WheelScrolled += OnPointerWheelChanged;
+        _vBar.MarkClicked += OnScrollMarkClicked;
         _hBar.WheelScrolled += OnPointerWheelChanged;
         _scroll.Changed += OnViewChanged;
 
@@ -567,16 +568,22 @@ public sealed partial class CodeEditor : UserControl
 
     private void RaiseTextChanged()
     {
+        QueueOccurrences();
         _docWordsDirty = true;
         TextChanged?.Invoke(this);
     }
 
-    private void RaiseSelectionChanged() =>
+    private void RaiseSelectionChanged()
+    {
+        QueueOccurrences();
+        _marksDirty = true;
+        UpdateExtent();
         SelectionChanged?.Invoke(this, new EditorSelectionEventArgs
         {
             LineNumber = _caret.Line,
             CharacterPositionInLine = _caret.Col + 1,
         });
+    }
 
     // ------------------------------------------------------------------ theme colours
 
@@ -606,17 +613,19 @@ public sealed partial class CodeEditor : UserControl
 
         _baseText = FromBrush("TextFillColorPrimaryBrush");
         _lineNumberText = FromBrush("TextFillColorTertiaryBrush");
-        if (light && _baseText.R > 0x80)
+        if (light)
         {
-            // The theme lookup missed; fall back to the Fluent light text values.
-            _baseText = Windows.UI.Color.FromArgb(0xE4, 0, 0, 0);
-            _lineNumberText = Windows.UI.Color.FromArgb(0x72, 0, 0, 0);
+            // Fluent's light text is a translucent black, which turns grey over the editor's
+            // pale surface; code reads better in a solid, near-black ink.
+            _baseText = Windows.UI.Color.FromArgb(0xFF, 0x1F, 0x23, 0x28);
+            _lineNumberText = Windows.UI.Color.FromArgb(0xFF, 0x6A, 0x73, 0x7D);
         }
 
         _caretColor = _baseText;
 
         var accent = FromBrush("AccentFillColorDefaultBrush");
         _selectionColor = Windows.UI.Color.FromArgb(0x42, accent.R, accent.G, accent.B);
+        _occurrenceColor = Windows.UI.Color.FromArgb(0x26, accent.R, accent.G, accent.B);
 
         // The active line: a whisper of the text colour, so it works on any theme
         // without competing with the selection.
@@ -791,6 +800,56 @@ public sealed partial class CodeEditor : UserControl
         }
 
         _lineNumberLayouts.Clear();
+    }
+
+    private bool _prefetchQueued;
+
+    /// <summary>
+    /// Shaping a line costs far more than drawing it, and a wheel notch brings several new
+    /// lines into view at once - done inside the draw that stutters. Once the UI is idle this
+    /// shapes a viewport of lines either side of the view, in short slices, so the next
+    /// scroll finds them ready. The trim keeps three viewports each way, so none are lost.
+    /// </summary>
+    private void QueueLayoutPrefetch()
+    {
+        if (_prefetchQueued)
+        {
+            return;
+        }
+
+        _prefetchQueued = true;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            _prefetchQueued = false;
+            if (_textFormat is null || _doc.LineCount == 0 || _lineHeight <= 0 || Canvas.ActualHeight <= 0)
+            {
+                return;
+            }
+
+            EnsureRowMap();
+            var firstRow = Math.Max(0, (int)(_verticalOffset / _lineHeight));
+            var lastRow = Math.Min(_totalRows - 1, (int)((_verticalOffset + Canvas.ActualHeight) / _lineHeight));
+            var (firstLine, _) = RowAt(firstRow);
+            var (lastLine, _) = RowAt(lastRow);
+            var span = lastLine - firstLine + 1;
+            var from = Math.Max(0, firstLine - span);
+            var to = Math.Min(_doc.LineCount - 1, lastLine + span);
+
+            EnsureTokens(to);
+
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            for (var line = from; line <= to && line < _lineCache.Count; line++)
+            {
+                EnsureRowLayouts(_lineCache[line]);
+                if (clock.ElapsedMilliseconds >= 6)
+                {
+                    QueueLayoutPrefetch();
+                    return;
+                }
+            }
+
+            UpdateExtent();
+        });
     }
 
     /// <summary>
@@ -1084,6 +1143,8 @@ public sealed partial class CodeEditor : UserControl
             }
         }
 
+        DrawOccurrences(session, firstLine, lastLine);
+
         // Selection spans, one rectangle per folded row.
         if (HasSelection)
         {
@@ -1147,6 +1208,7 @@ public sealed partial class CodeEditor : UserControl
         DrawDiffMarkers(session, viewportHeight);
         TrimLayoutCaches(firstLine, lastLine);
         UpdateExtent();
+        QueueLayoutPrefetch();
     }
 
     /// <summary>Sizes the scroll extent to the content, never smaller than the viewport.</summary>
@@ -1175,7 +1237,14 @@ public sealed partial class CodeEditor : UserControl
         SyncScrollBars(reveal: changed);
         if (changed)
         {
-            InvalidateAll();
+            Canvas.Invalidate();
+
+            // The caret layer paints nothing without focus, so scrolling an idle editor leaves it be.
+            if (FocusState != FocusState.Unfocused)
+            {
+                CaretCanvas.Invalidate();
+            }
+
             ScrollChanged?.Invoke(this, EventArgs.Empty);
         }
     }
@@ -1195,6 +1264,16 @@ public sealed partial class CodeEditor : UserControl
     private int _marksRows = -1;
     private IReadOnlyList<(int StartLine, int EndLine)> _searchMarks = [];
     private int _currentSearchMark = -1;
+
+    private static readonly Windows.UI.Color CaretMarkColor = Windows.UI.Color.FromArgb(0xFF, 0x3B, 0x82, 0xF6);
+
+    /// <summary>A click on a scrollbar mark: put the caret there and bring it to the middle of the view.</summary>
+    private void OnScrollMarkClicked(object? sender, ScrollMark mark)
+    {
+        SetCursorPosition(mark.Line, mark.Column, scrollIntoView: false);
+        ScrollLineToCenter(_caret.Line);
+        Focus(FocusState.Pointer);
+    }
 
     private static readonly Windows.UI.Color SearchMarkColor = Windows.UI.Color.FromArgb(0xC0, 0xE5, 0xB2, 0x3C);
     private static readonly Windows.UI.Color CurrentSearchMarkColor = Windows.UI.Color.FromArgb(0xFF, 0xFF, 0x8C, 0x1A);
@@ -1230,8 +1309,10 @@ public sealed partial class CodeEditor : UserControl
         {
             var start = Math.Clamp(marker.StartLine, 0, lines);
             var end = marker.LineCount == 0 ? start : Math.Min(lines, start + marker.LineCount);
-            marks.Add(new ScrollMark(RowOf(start), RowOf(Math.Max(end, start)), DiffColor(marker.Kind), 0));
+            marks.Add(new ScrollMark(RowOf(start), RowOf(Math.Max(end, start)), DiffColor(marker.Kind), 0, start));
         }
+
+        AddOccurrenceMarks(marks, RowOf, lines);
 
         for (var i = 0; i < _searchMarks.Count; i++)
         {
@@ -1242,8 +1323,13 @@ public sealed partial class CodeEditor : UserControl
                 RowOf(first),
                 RowOf(last + 1),
                 i == _currentSearchMark ? CurrentSearchMarkColor : SearchMarkColor,
-                1));
+                1,
+                first));
         }
+
+        // The caret, last so it lies over the rest.
+        var caretLine = Math.Clamp(_caret.Line, 0, lines - 1);
+        marks.Add(new ScrollMark(RowOf(caretLine), RowOf(caretLine + 1), CaretMarkColor, 2, caretLine, _caret.Col));
 
         _vBar.Marks = marks;
     }
@@ -1519,11 +1605,60 @@ public sealed partial class CodeEditor : UserControl
         }
         else
         {
-            // Three lines per notch, the classic amount.
-            _scroll.ChangeView(null, _verticalOffset - delta * 3 * _lineHeight / 120);
+            // Three lines per notch, the classic amount - eased toward rather than jumped to,
+            // so a notch glides over a few frames instead of snapping a whole step in one.
+            var from = _wheelTarget ?? _verticalOffset;
+            _wheelTarget = Math.Clamp(from - delta * 3 * _lineHeight / 120, 0, _scroll.ScrollableHeight);
+            StartWheelGlide();
         }
 
         e.Handled = true;
+    }
+
+    private double? _wheelTarget;
+    private double _wheelLast;
+    private bool _wheelGliding;
+
+    private void StartWheelGlide()
+    {
+        if (_wheelGliding)
+        {
+            return;
+        }
+
+        _wheelGliding = true;
+        _wheelLast = _verticalOffset;
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnWheelGlideFrame;
+    }
+
+    private void StopWheelGlide()
+    {
+        _wheelTarget = null;
+        if (_wheelGliding)
+        {
+            _wheelGliding = false;
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnWheelGlideFrame;
+        }
+    }
+
+    private void OnWheelGlideFrame(object? sender, object e)
+    {
+        // Something else moved the view (scrollbar, go-to-line, search): let it win.
+        if (_wheelTarget is not { } target || Math.Abs(_scroll.VerticalOffset - _wheelLast) > 0.01)
+        {
+            StopWheelGlide();
+            return;
+        }
+
+        var gap = target - _scroll.VerticalOffset;
+        var next = Math.Abs(gap) < 0.5 ? target : _scroll.VerticalOffset + gap * 0.32;
+        _scroll.ChangeView(null, next);
+        _wheelLast = _scroll.VerticalOffset;
+
+        if (next == target || _scroll.VerticalOffset == _wheelLast && Math.Abs(target - _wheelLast) < 0.5)
+        {
+            StopWheelGlide();
+        }
     }
 
     private DocumentPosition PointToDocumentPosition(Windows.Foundation.Point point)

@@ -1292,6 +1292,13 @@ public sealed partial class WorkspacePage : Page
             return;
         }
 
+        // A link followed from a rendered file must not replace that file: pin the tab
+        // it was clicked in, so the target opens as a fresh preview beside it.
+        if (_editorTabs.FirstOrDefault(t => t.Tab.ContainsPreview(source)) is { } host)
+        {
+            PromoteEditorTab(host);
+        }
+
         await OpenFileAtAsync(link.Path, link.Line, link.Column, link.EndLine, link.EndColumn, source.BasePath);
     }
 
@@ -1771,14 +1778,15 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>A search result: open the file and mark what the search found in it.</summary>
-    private async Task ShowSearchResultAsync(SearchOpenRequest request)
+    private async Task ShowSearchResultAsync(SearchOpenRequest request, SearchViewModel? source = null)
     {
+        var query = (source ?? ViewModel.Search).Query;
         var entry = await ShowFileTabAsync(request.FilePath);
         var count = request.Spans.Count;
 
         entry.Tab.ShowHighlights(
             request.Spans,
-            count == 1 ? $"1 match · {ViewModel.Search.Query}" : $"{count} matches · {ViewModel.Search.Query}",
+            count == 1 ? $"1 match · {query}" : $"{count} matches · {query}",
             reveal: true,
             current: request.Current,
             moveCaret: true,
@@ -1804,8 +1812,7 @@ public sealed partial class WorkspacePage : Page
         tab.Edited += (_, _) => PromoteEditorTab(entry);
         tab.FindReferencesRequested += (_, text) =>
         {
-            OpenSearchTab();
-            ViewModel.Search.FindReferences(text);
+            ShowReferences(text);
         };
         tab.LanguageChanged += (_, _) =>
         {
@@ -2383,23 +2390,82 @@ public sealed partial class WorkspacePage : Page
         {
             PeekPane.Detach();
             PeekPane.Visibility = Visibility.Collapsed;
-            PeekSplitter.Visibility = Visibility.Collapsed;
-            PeekSplitterColumn.Width = new GridLength(0);
-            PeekColumn.Width = new GridLength(0);
-            CentreTabsColumn.Width = new GridLength(1, GridUnitType.Star);
+            if (ReferencesPane.Visibility != Visibility.Visible)
+            {
+                CloseSideColumn();
+            }
+
             return;
         }
 
-        if (PeekPane.Visibility != Visibility.Visible)
+        // The side column holds the peek or the references, never both.
+        ReferencesPane.Visibility = Visibility.Collapsed;
+        OpenSideColumn();
+        PeekPane.Visibility = Visibility.Visible;
+        PeekPane.Show(task);
+    }
+
+    private void OpenSideColumn()
+    {
+        if (PeekSplitter.Visibility == Visibility.Visible)
         {
-            CentreTabsColumn.Width = new GridLength(1, GridUnitType.Star);
-            PeekSplitterColumn.Width = GridLength.Auto;
-            PeekColumn.Width = new GridLength(1, GridUnitType.Star);
-            PeekSplitter.Visibility = Visibility.Visible;
-            PeekPane.Visibility = Visibility.Visible;
+            return;
         }
 
-        PeekPane.Show(task);
+        CentreTabsColumn.Width = new GridLength(1, GridUnitType.Star);
+        PeekSplitterColumn.Width = GridLength.Auto;
+        PeekColumn.Width = new GridLength(1, GridUnitType.Star);
+        PeekSplitter.Visibility = Visibility.Visible;
+    }
+
+    private void CloseSideColumn()
+    {
+        PeekSplitter.Visibility = Visibility.Collapsed;
+        PeekSplitterColumn.Width = new GridLength(0);
+        PeekColumn.Width = new GridLength(0);
+        CentreTabsColumn.Width = new GridLength(1, GridUnitType.Star);
+    }
+
+    /// <summary>
+    /// Find References: lists every usage in a split on the right, so the editor stays on
+    /// the left and a click on a result opens that file there. The file the lookup started
+    /// from is among the results, which is the way back.
+    /// </summary>
+    private void ShowReferences(string text)
+    {
+        if (ReferencesList.ViewModel is null)
+        {
+            ReferencesList.ViewModel = ViewModel.References;
+            ReferencesList.FileOpenRequested += async (_, request) =>
+            {
+                try
+                {
+                    await ShowSearchResultAsync(request, ViewModel.References);
+                }
+                catch (Exception ex)
+                {
+                    CrashLog.Write("WorkspacePage.ShowReferenceResult", ex.Message, ex);
+                }
+            };
+        }
+
+        if (PeekPane.Visibility == Visibility.Visible)
+        {
+            PeekPane.Detach();
+            PeekPane.Visibility = Visibility.Collapsed;
+        }
+
+        OpenSideColumn();
+        ReferencesPane.Visibility = Visibility.Visible;
+        ReferencesTitle.Text = $"References · {text}";
+        ViewModel.References.FindReferences(text);
+    }
+
+    private void OnReferencesCloseClick(object sender, RoutedEventArgs e)
+    {
+        _ = ViewModel.References.StopCommand.ExecuteAsync(null);
+        ReferencesPane.Visibility = Visibility.Collapsed;
+        CloseSideColumn();
     }
 
     private void OnPeekCloseRequested(object? sender, EventArgs e) => SetPeek(null);
@@ -2666,6 +2732,22 @@ public sealed partial class WorkspacePage : Page
             }
 
             ScrollTargetIntoView();
+
+            // Children of a just-expanded folder join the tree's node list a pass later, so SelectedItem
+            // is ignored until then. Once the container exists, select through it and its node directly.
+            if (FileTree.ContainerFromItem(targetNode) is TreeViewItem container)
+            {
+                if (FileTree.NodeFromContainer(container) is { } treeNode &&
+                    !ReferenceEquals(FileTree.SelectedNode, treeNode))
+                {
+                    FileTree.SelectedNode = treeNode;
+                }
+
+                if (!container.IsSelected)
+                {
+                    container.IsSelected = true;
+                }
+            }
 
             var settled = FileTree.ContainerFromItem(targetNode) is TreeViewItem { IsSelected: true };
             if (!settled && ++attempts < 12)

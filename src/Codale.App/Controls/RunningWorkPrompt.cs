@@ -20,11 +20,11 @@ public static class RunningWorkPrompt
             {
                 XamlRoot = xamlRoot,
                 Title = "Still running",
-                Content = AppDialog.List($"{action} will stop:", running, AppDialog.Glyphs.Stop),
+                Content = AppDialog.List($"{action} will stop:", running, AppDialog.Glyphs.Terminal),
                 PrimaryButtonText = "Stop and continue",
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Close,
-            }, DialogTone.Warning, AppDialog.Glyphs.Stop);
+            }, DialogTone.Warning, AppDialog.Glyphs.Warning);
 
             return await dialog.ShowAsync() == ContentDialogResult.Primary;
         }

@@ -56,6 +56,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         Files = new FileTreeViewModel(ProjectPath, ExtraFolders);
         Git = new GitViewModel(ProjectPath, _helper);
         Search = new SearchViewModel(ProjectPath, _helper);
+        References = new SearchViewModel(ProjectPath, _helper);
         Diff = new DiffViewModel(ProjectPath);
         DiffViewer = new DiffViewerViewModel(ProjectPath);
         Features = new FeatureService(ProjectPath, _helper);
@@ -604,6 +605,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     public IHelperModel Helper => _helper;
 
     public SearchViewModel Search { get; }
+
+    /// <summary>Find References results, kept apart from the Search tab so neither overwrites the other.</summary>
+    public SearchViewModel References { get; }
 
     public DiffViewModel Diff { get; }
 

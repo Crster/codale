@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
 
 using Codale.App.Services;
 using Codale.Terminal;
@@ -327,6 +329,13 @@ public sealed partial class TerminalView : UserControl
         var content = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
         if (!content.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
         {
+            // Image (or file) on the clipboard: forward Ctrl+V so the CLI reads the clipboard itself.
+            if (content.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Bitmap) ||
+                content.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems))
+            {
+                await WriteToShellAsync("\x16");
+            }
+
             return;
         }
 
@@ -1479,12 +1488,69 @@ public sealed partial class TerminalView : UserControl
             return;
         }
 
-        if (ctrl && ControlPunctuation.TryGetValue(e.Key, out var mapped))
+        if (ctrl && (ControlPunctuation.TryGetValue(e.Key, out var mapped) || ControlDigit(e.Key, shift, out mapped)))
         {
-            _ = WriteToShellAsync(mapped.ToString());
+            _ = WriteToShellAsync((alt ? "\x1b" : "") + mapped);
+            e.Handled = true;
+            return;
+        }
+
+        // Alt+<any printable key> is ESC-prefixed (meta); CharacterReceived never carries these.
+        // Translated through the active keyboard layout so punctuation and non-US layouts work.
+        if (alt && !ctrl && TranslateKey(e.Key, shift) is { } text)
+        {
+            _ = WriteToShellAsync("\x1b" + text);
             e.Handled = true;
         }
     }
+
+    /// <summary>Ctrl+2..8 produce NUL, ESC, FS, GS, RS, US and DEL, as in xterm.</summary>
+    private static bool ControlDigit(VirtualKey key, bool shift, out char code)
+    {
+        code = '\0';
+        if (shift || key is < VirtualKey.Number2 or > VirtualKey.Number8)
+        {
+            return false;
+        }
+
+        code = key == VirtualKey.Number8 ? '\x7f' : key == VirtualKey.Number2 ? '\0' : (char)(key - VirtualKey.Number3 + 0x1b);
+        return true;
+    }
+
+    /// <summary>The character a key types on the current layout with only Shift applied, or null for non-printing keys.</summary>
+    private static string? TranslateKey(VirtualKey key, bool shift)
+    {
+        var state = new byte[256];
+        if (shift)
+        {
+            state[0x10] = 0x80;
+        }
+
+        if (GetKeyState(0x14) != 0)
+        {
+            state[0x14] = 0x01; // Caps Lock
+        }
+
+        var buffer = new StringBuilder(8);
+        var scan = MapVirtualKeyEx((uint)key, 0, GetKeyboardLayout(0));
+
+        // Flag 4 leaves the keyboard's dead-key state untouched.
+        var count = ToUnicodeEx((uint)key, scan, state, buffer, buffer.Capacity, 4, GetKeyboardLayout(0));
+        return count > 0 && buffer[0] >= ' ' ? buffer.ToString(0, count) : null;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetKeyboardLayout(uint threadId);
+
+    [DllImport("user32.dll")]
+    private static extern uint MapVirtualKeyEx(uint code, uint mapType, IntPtr layout);
+
+    [DllImport("user32.dll")]
+    private static extern short GetKeyState(int virtualKey);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int ToUnicodeEx(uint virtualKey, uint scanCode, byte[] keyState,
+        [Out, MarshalAs(UnmanagedType.LPWStr, SizeParamIndex = 4)] StringBuilder buffer, int bufferSize, uint flags, IntPtr layout);
 
     /// <summary>Ctrl+left bracket and friends, mapped to their control characters. The OEM keys have no VirtualKey names, so they are addressed by scancode value; ^ is Shift+6, _ is Shift+minus.</summary>
     private static readonly IReadOnlyDictionary<VirtualKey, char> ControlPunctuation = new Dictionary<VirtualKey, char>

@@ -79,19 +79,19 @@ public static class CodePalette
     public static Windows.UI.Color Get(CodeTokenKind kind, bool light) => light
         ? kind switch
         {
-            CodeTokenKind.Keyword => Windows.UI.Color.FromArgb(0xFF, 0xA6, 0x26, 0xA4),
-            CodeTokenKind.Type => Windows.UI.Color.FromArgb(0xFF, 0xB0, 0x6E, 0x00),
-            CodeTokenKind.String => Windows.UI.Color.FromArgb(0xFF, 0x3E, 0x8E, 0x3D),
-            CodeTokenKind.Number => Windows.UI.Color.FromArgb(0xFF, 0x98, 0x68, 0x01),
-            CodeTokenKind.Comment => Windows.UI.Color.FromArgb(0xFF, 0x6E, 0x77, 0x81),
-            CodeTokenKind.Operator => Windows.UI.Color.FromArgb(0xFF, 0x01, 0x7C, 0xA8),
-            CodeTokenKind.Preprocessor => Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x3E, 0x32),
-            CodeTokenKind.Tag => Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x3E, 0x32),
-            CodeTokenKind.Attribute => Windows.UI.Color.FromArgb(0xFF, 0x98, 0x68, 0x01),
-            CodeTokenKind.Property => Windows.UI.Color.FromArgb(0xFF, 0x30, 0x63, 0xD6),
-            CodeTokenKind.Constant => Windows.UI.Color.FromArgb(0xFF, 0x98, 0x68, 0x01),
-            CodeTokenKind.Variable => Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x3E, 0x32),
-            CodeTokenKind.Heading => Windows.UI.Color.FromArgb(0xFF, 0x30, 0x63, 0xD6),
+            CodeTokenKind.Keyword => Windows.UI.Color.FromArgb(0xFF, 0x8E, 0x1A, 0xA8),
+            CodeTokenKind.Type => Windows.UI.Color.FromArgb(0xFF, 0x8A, 0x4B, 0x00),
+            CodeTokenKind.String => Windows.UI.Color.FromArgb(0xFF, 0x11, 0x63, 0x29),
+            CodeTokenKind.Number => Windows.UI.Color.FromArgb(0xFF, 0x05, 0x50, 0xAE),
+            CodeTokenKind.Comment => Windows.UI.Color.FromArgb(0xFF, 0x57, 0x60, 0x6A),
+            CodeTokenKind.Operator => Windows.UI.Color.FromArgb(0xFF, 0x0A, 0x5C, 0x7A),
+            CodeTokenKind.Preprocessor => Windows.UI.Color.FromArgb(0xFF, 0xB3, 0x2A, 0x20),
+            CodeTokenKind.Tag => Windows.UI.Color.FromArgb(0xFF, 0xB3, 0x2A, 0x20),
+            CodeTokenKind.Attribute => Windows.UI.Color.FromArgb(0xFF, 0x7A, 0x4F, 0x00),
+            CodeTokenKind.Property => Windows.UI.Color.FromArgb(0xFF, 0x1F, 0x4F, 0xC0),
+            CodeTokenKind.Constant => Windows.UI.Color.FromArgb(0xFF, 0x05, 0x50, 0xAE),
+            CodeTokenKind.Variable => Windows.UI.Color.FromArgb(0xFF, 0xB3, 0x2A, 0x20),
+            CodeTokenKind.Heading => Windows.UI.Color.FromArgb(0xFF, 0x1F, 0x4F, 0xC0),
             _ => Windows.UI.Color.FromArgb(0, 0, 0, 0), // plain text keeps the theme foreground
         }
         : kind switch

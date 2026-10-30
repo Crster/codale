@@ -1,3 +1,6 @@
+using Codale.App.Controls;
+using Codale.Core.Syntax;
+
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
@@ -20,11 +23,18 @@ namespace Codale.App.Views;
 /// </remarks>
 public static class KeywordHighlight
 {
-    // An amber that reads on the dark card and the light one; text keeps its colour.
-    private static readonly Brush MarkBrush = new SolidColorBrush(Color.FromArgb(0x66, 0xE5, 0xB2, 0x3C));
+    // A solid amber with near-black text: a translucent mark dragged the text toward grey on the
+    // dark card, and light text on amber does not read. This pair reads on both themes.
+    private static readonly Brush MarkBrush = new SolidColorBrush(Color.FromArgb(0xFF, 0xF2, 0xC1, 0x4E));
+    private static readonly Brush MarkTextBrush = new SolidColorBrush(Color.FromArgb(0xFF, 0x14, 0x14, 0x14));
 
     // The same amber, faint enough that the keyword marks still stand out on top of it.
-    private static readonly Brush LineBrush = new SolidColorBrush(Color.FromArgb(0x24, 0xE5, 0xB2, 0x3C));
+    private static readonly Brush LineBrush = new SolidColorBrush(Color.FromArgb(0x30, 0xE5, 0xB2, 0x3C));
+
+    private static readonly Dictionary<(Color, bool), Brush> TokenBrushes = [];
+
+    // TextHighlighter paints yellow unless told otherwise; token colouring must not paint at all.
+    private static readonly Brush Transparent = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
 
     public static readonly DependencyProperty TermsProperty = DependencyProperty.RegisterAttached(
         "Terms",
@@ -34,6 +44,13 @@ public static class KeywordHighlight
 
     public static readonly DependencyProperty LinesProperty = DependencyProperty.RegisterAttached(
         "Lines",
+        typeof(string),
+        typeof(KeywordHighlight),
+        new PropertyMetadata(null, OnChanged));
+
+    /// <summary>The file the snippet came from; its extension picks the syntax colouring.</summary>
+    public static readonly DependencyProperty PathProperty = DependencyProperty.RegisterAttached(
+        "Path",
         typeof(string),
         typeof(KeywordHighlight),
         new PropertyMetadata(null, OnChanged));
@@ -52,6 +69,10 @@ public static class KeywordHighlight
     public static string? GetLines(TextBlock text) => (string?)text.GetValue(LinesProperty);
 
     public static void SetLines(TextBlock text, string? value) => text.SetValue(LinesProperty, value);
+
+    public static string? GetPath(TextBlock text) => (string?)text.GetValue(PathProperty);
+
+    public static void SetPath(TextBlock text, string? value) => text.SetValue(PathProperty, value);
 
     private static void OnChanged(DependencyObject sender, DependencyPropertyChangedEventArgs e)
     {
@@ -88,10 +109,14 @@ public static class KeywordHighlight
 
         if (GetTerms(text) is not { Length: > 0 } terms)
         {
+            AddSyntax(text, content);
             return;
         }
 
-        var highlighter = new TextHighlighter { Background = MarkBrush };
+        // Colour the code first, so the marks below paint over it.
+        AddSyntax(text, content);
+
+        var highlighter = new TextHighlighter { Background = MarkBrush, Foreground = MarkTextBrush };
 
         // Longest first, so "RetryPolicy" wins over "Retry" where both match.
         foreach (var term in terms.Split('\n', StringSplitOptions.RemoveEmptyEntries).OrderByDescending(t => t.Length))
@@ -114,6 +139,67 @@ public static class KeywordHighlight
         }
 
         if (highlighter.Ranges.Count > 0)
+        {
+            text.TextHighlighters.Add(highlighter);
+        }
+    }
+
+    /// <summary>One foreground-only highlighter per token colour, from the same tokenizer the editor uses.</summary>
+    private static void AddSyntax(TextBlock text, string content)
+    {
+        if (!Services.AppSettings.EditorHighlighting || GetPath(text) is not { Length: > 0 } path)
+        {
+            return;
+        }
+
+        var languageId = Services.SyntaxSelection.IdFor(path);
+        var fallback = LegacySyntax.For(languageId);
+        if (languageId is null && fallback == CodeSyntax.None)
+        {
+            return;
+        }
+
+        var light = text.ActualTheme == ElementTheme.Light;
+        var byKind = new Dictionary<CodeTokenKind, TextHighlighter>();
+        var tokens = new List<CodeToken>();
+        var state = new CodeTokenState();
+        var start = 0;
+
+        while (start <= content.Length)
+        {
+            var end = content.IndexOf('\n', start);
+            if (end < 0)
+            {
+                end = content.Length;
+            }
+
+            var line = content[start..end].TrimEnd('\r');
+            state = CodeTokenizer.TokenizeLine(line, languageId, fallback, state, tokens);
+            foreach (var token in tokens)
+            {
+                if (token.Kind == CodeTokenKind.Plain || token.Length <= 0)
+                {
+                    continue;
+                }
+
+                if (!byKind.TryGetValue(token.Kind, out var highlighter))
+                {
+                    var colour = CodePalette.Get(token.Kind, light);
+                    if (!TokenBrushes.TryGetValue((colour, light), out var brush))
+                    {
+                        brush = TokenBrushes[(colour, light)] = new SolidColorBrush(colour);
+                    }
+
+                    highlighter = byKind[token.Kind] = new TextHighlighter { Foreground = brush, Background = Transparent };
+                }
+
+                highlighter.Ranges.Add(new TextRange { StartIndex = start + token.Start, Length = token.Length });
+            }
+
+            start = end + 1;
+        }
+
+        foreach (var highlighter in byKind.Values)
         {
             text.TextHighlighters.Add(highlighter);
         }

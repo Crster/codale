@@ -14,7 +14,11 @@ namespace Codale.App.Controls;
 /// </summary>
 public delegate void WheelHandler(object sender, PointerRoutedEventArgs e);
 
-public readonly record struct ScrollMark(double Start, double End, Windows.UI.Color Color, int Lane);
+/// <summary>
+/// <paramref name="Lane"/> 0 and 1 are the two side-by-side lanes; 2 spans both, for the caret.
+/// <paramref name="Line"/> and <paramref name="Column"/> say where a click on the mark goes; -1 for nowhere.
+/// </summary>
+public readonly record struct ScrollMark(double Start, double End, Windows.UI.Color Color, int Lane, int Line = -1, int Column = 0);
 
 /// <summary>
 /// The scroll position of a surface that draws its own content: offsets, viewport and
@@ -112,8 +116,6 @@ public sealed class OverlayScrollBar : Grid
     {
         _vertical = vertical;
         Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        Opacity = 0;
-        OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(150) };
         Visibility = Visibility.Collapsed;
         HorizontalAlignment = vertical ? HorizontalAlignment.Right : HorizontalAlignment.Stretch;
         VerticalAlignment = vertical ? VerticalAlignment.Stretch : VerticalAlignment.Bottom;
@@ -136,6 +138,10 @@ public sealed class OverlayScrollBar : Grid
             CornerRadius = new CornerRadius(3),
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Top,
+
+            // Only the thumb fades when idle; the colour marks on the track stay put.
+            Opacity = 0,
+            OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(150) },
         };
         Children.Add(_thumb);
 
@@ -165,6 +171,9 @@ public sealed class OverlayScrollBar : Grid
 
     /// <summary>The wheel turned over the bar; the host scrolls as if it had turned over the content.</summary>
     public event WheelHandler? WheelScrolled;
+
+    /// <summary>A click landed on a colour mark rather than on the thumb or bare track.</summary>
+    public event EventHandler<ScrollMark>? MarkClicked;
 
     /// <summary>The stripes drawn on the track; replace the list to repaint.</summary>
     public IReadOnlyList<ScrollMark> Marks
@@ -207,7 +216,7 @@ public sealed class OverlayScrollBar : Grid
         _hideTimer.Start();
     }
 
-    private void Fade(bool visible) => Opacity = visible ? 1 : 0;
+    private void Fade(bool visible) => _thumb.Opacity = visible ? 1 : 0;
 
     private double Track => Math.Max(0, (_vertical ? ActualHeight : ActualWidth));
 
@@ -271,8 +280,9 @@ public sealed class OverlayScrollBar : Grid
         {
             var top = (float)(Inset + Math.Clamp(mark.Start, 0, 1) * track);
             var height = Math.Max(2f, (float)((Math.Clamp(mark.End, 0, 1) - Math.Clamp(mark.Start, 0, 1)) * track));
-            var left = mark.Lane == 0 ? 1.5f : 6.5f;
-            args.DrawingSession.FillRectangle(left, top, laneWidth, height, mark.Color);
+            var left = mark.Lane == 1 ? 6.5f : 1.5f;
+            var width = mark.Lane == 2 ? laneWidth * 2 + 1 : laneWidth;
+            args.DrawingSession.FillRectangle(left, top, width, height, mark.Color);
         }
     }
 
@@ -303,6 +313,49 @@ public sealed class OverlayScrollBar : Grid
         return _vertical ? point.Y : point.X;
     }
 
+    private bool OnThumb(double axis)
+    {
+        var margin = _thumb.Margin;
+        var start = _vertical ? margin.Top : margin.Left;
+        return axis >= start && axis <= start + ThumbLength();
+    }
+
+    /// <summary>The mark under <paramref name="axis"/> that leads somewhere, nearest first; null when none.</summary>
+    private ScrollMark? MarkAt(double axis)
+    {
+        if (!_vertical || _marks.Count == 0)
+        {
+            return null;
+        }
+
+        var track = Math.Max(1, ActualHeight - Inset * 2);
+        ScrollMark? best = null;
+        var bestDistance = double.MaxValue;
+        foreach (var mark in _marks)
+        {
+            if (mark.Line < 0)
+            {
+                continue;
+            }
+
+            var top = Inset + Math.Clamp(mark.Start, 0, 1) * track;
+            var bottom = top + Math.Max(2, (Math.Clamp(mark.End, 0, 1) - Math.Clamp(mark.Start, 0, 1)) * track);
+            if (axis < top - 3 || axis > bottom + 3)
+            {
+                continue;
+            }
+
+            var distance = Math.Abs((top + bottom) / 2 - axis);
+            if (distance <= bestDistance)
+            {
+                best = mark;
+                bestDistance = distance;
+            }
+        }
+
+        return best;
+    }
+
     private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
     {
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
@@ -314,7 +367,15 @@ public sealed class OverlayScrollBar : Grid
         var length = ThumbLength();
         var margin = _thumb.Margin;
         var start = _vertical ? margin.Top : margin.Left;
-        if (axis >= start && axis <= start + length)
+        if (!OnThumb(axis) && MarkAt(axis) is { } mark)
+        {
+            // A mark is a place to go, not a spot on the track to scroll to.
+            MarkClicked?.Invoke(this, mark);
+            e.Handled = true;
+            return;
+        }
+
+        if (OnThumb(axis))
         {
             _grabOffset = axis - start;
         }
@@ -337,7 +398,12 @@ public sealed class OverlayScrollBar : Grid
         {
             MoveTo(AxisOf(e));
             e.Handled = true;
+            return;
         }
+
+        var axis = AxisOf(e);
+        ProtectedCursor = InputSystemCursor.Create(
+            !OnThumb(axis) && MarkAt(axis) is not null ? InputSystemCursorShape.Hand : InputSystemCursorShape.Arrow);
     }
 
     private void OnPointerReleased(object sender, PointerRoutedEventArgs e)

@@ -1316,6 +1316,43 @@
                         StopRequested="OnPeekStopRequested"
                         Visibility="Collapsed" />
 
+                    <!--  Find References: every usage of the word, beside the editor.
+                          Shares the peek's column; opening one closes the other.  -->
+                    <Grid
+                        x:Name="ReferencesPane"
+                        Grid.Column="2"
+                        Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid
+                            Padding="16,6,6,6"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="0,0,0,1"
+                            ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock
+                                x:Name="ReferencesTitle"
+                                VerticalAlignment="Center"
+                                FontWeight="SemiBold"
+                                TextTrimming="CharacterEllipsis" />
+                            <Button
+                                Grid.Column="1"
+                                Padding="6"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Click="OnReferencesCloseClick"
+                                ToolTipService.ToolTip="Close references">
+                                <FontIcon FontSize="12" Glyph="&#xE711;" />
+                            </Button>
+                        </Grid>
+                        <views:SearchTab x:Name="ReferencesList" Grid.Row="1" />
+                    </Grid>
+
                     <!--  TabView's default style pins VerticalAlignment to Top, which
                           collapses the whole centre area to one tab's content height.  -->
                     <TabView

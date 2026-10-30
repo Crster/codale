@@ -143,10 +143,21 @@ public static class AppDialog
             panel.Children.Add(Message(intro));
         }
 
+        // Short lists skip the ScrollViewer so the surface hugs its rows instead of stretching to the dialog's height.
+        UIElement body = items.Count > 5
+            ? new ScrollViewer
+            {
+                MaxHeight = 220,
+                VerticalAlignment = VerticalAlignment.Top,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = rows,
+            }
+            : rows;
         panel.Children.Add(new Border
         {
             Style = Resource<Style>("DialogSurfaceStyle"),
-            Child = new ScrollViewer { MaxHeight = 220, Content = rows },
+            VerticalAlignment = VerticalAlignment.Top,
+            Child = body,
         });
         return panel;
     }

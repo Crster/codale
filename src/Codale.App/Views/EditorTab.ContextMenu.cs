@@ -21,6 +21,9 @@ namespace Codale.App.Views;
 /// </summary>
 public sealed partial class EditorTab
 {
+    /// <summary>True when <paramref name="view"/> is this tab's rendered Markdown preview.</summary>
+    public bool ContainsPreview(MarkdownView view) => ReferenceEquals(view, MarkdownPreview);
+
     /// <summary>Longest stretch of the file sent to the model around the cursor or in a whole-file job.</summary>
     private const int MaxContextChars = 60_000;
 
