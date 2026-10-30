@@ -22,19 +22,19 @@ public sealed record HelperCliEndpoint(
     CodexCustomProvider? CodexProvider = null);
 
 /// <summary>
-/// Answers <see cref="IHelperModel"/> requests with a one-shot run of the Claude CLI
+/// Answers <see cref="IHelperModel"/> requests with a one-shot run of the selected CLI
 /// (or an OpenAI-compatible API endpoint): prompt in on stdin, reply out on stdout, no tools, no saved session.
 /// </summary>
 /// <remarks>
 /// Without the Claude CLI and without an API endpoint, <see cref="IsAvailable"/> is false
 /// and callers fall back to their non-model behaviour.
 /// Runs from the temp folder so no project instructions leak into a commit message.
-/// A Claude CLI takes seconds to start, so <see cref="Prewarm"/> starts one ahead of time
+/// A CLI takes seconds to start, so <see cref="Prewarm"/> starts one ahead of time
 /// that waits for its request; the next matching call then costs only the model's reply.
 /// Each system prompt gets its own spare, so routing and a search's two steps can all be
 /// ready at once.
 /// </remarks>
-public sealed class HelperModel(
+public sealed partial class HelperModel(
     Func<OpenAiEndpoint?>? api = null,
     Func<string?>? provider = null,
     Func<string?>? codexModel = null,
@@ -59,7 +59,7 @@ public sealed class HelperModel(
     private readonly Lock _spareLock = new();
 
     /// <summary>Waiting CLIs by <see cref="SpareKey"/> (model, endpoint and system prompt), and when each was last wanted.</summary>
-    private readonly Dictionary<string, (WarmProcess Process, DateTime Wanted)> _spares = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (IWarmProcess Process, DateTime Wanted)> _spares = new(StringComparer.Ordinal);
 
     /// <summary>When a start was last tried for each prompt, so a burst of keystrokes tries once.</summary>
     private readonly Dictionary<string, DateTime> _attempts = new(StringComparer.Ordinal);
@@ -98,9 +98,13 @@ public sealed class HelperModel(
     private bool IsCodexSelected =>
         string.Equals(provider?.Invoke()?.Trim(), "codex", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Settings picked Off: no prewarm, request or CLI start happens.</summary>
+    private bool IsOff =>
+        string.Equals(provider?.Invoke()?.Trim(), "off", StringComparison.OrdinalIgnoreCase);
+
     public bool IsAvailable =>
-        ApiEndpoint is not null ||
-        (IsCodexSelected ? CodexInstalled : ClaudeInstalled);
+        !IsOff && (ApiEndpoint is not null ||
+        (IsCodexSelected ? CodexInstalled : ClaudeInstalled));
 
     private static bool ClaudeInstalled => CliLocator.IsInstalled();
     private static bool CodexInstalled => CliLocator.Find("codex") is not null;
@@ -110,28 +114,39 @@ public sealed class HelperModel(
 
     public async Task<string> CompleteAsync(string systemPrompt, string prompt, int maxTokens, CancellationToken ct = default)
     {
+        if (IsOff)
+        {
+            throw new HelperModelException("Background tasks are off.");
+        }
+
         if (ApiEndpoint is { } endpoint)
         {
             return ModelOutput.Clean(await OpenAiApiClient.CompleteAsync(endpoint, systemPrompt, prompt, ct, maxTokens, OnApiRequestServed).ConfigureAwait(false));
         }
 
-        if (IsCodexSelected)
+        try
         {
-            if (!CodexInstalled)
+            if (IsCodexSelected)
             {
-                throw new HelperModelException("The Codex CLI is not installed.");
+                if (!CodexInstalled)
+                {
+                    throw new HelperModelException("The Codex CLI is not installed.");
+                }
+
+                return ModelOutput.Clean(await RunCodexAsync(systemPrompt, prompt, ct).ConfigureAwait(false));
             }
 
-            return ModelOutput.Clean(await RunCodexAsync(systemPrompt, prompt, ct).ConfigureAwait(false));
-        }
+            if (!ClaudeInstalled)
+            {
+                throw new HelperModelException("The Claude CLI is not installed.");
+            }
 
-        if (!ClaudeInstalled)
+            return ModelOutput.Clean(await RunAsync(systemPrompt, prompt, ct).ConfigureAwait(false));
+        }
+        finally
         {
-            throw new HelperModelException("The Claude CLI is not installed.");
+            Prewarm(systemPrompt);
         }
-
-        // Leaked reasoning or template tokens are never part of the answer.
-        return ModelOutput.Clean(await RunAsync(systemPrompt, prompt, ct).ConfigureAwait(false));
     }
 
     public async Task<ToolCall?> CallToolAsync(
@@ -140,44 +155,28 @@ public sealed class HelperModel(
         IReadOnlyList<ToolDefinition> tools,
         CancellationToken ct = default)
     {
+        if (IsOff)
+        {
+            return null;
+        }
+
         if (ApiEndpoint is { } endpoint)
         {
             return await OpenAiApiClient.CallToolAsync(endpoint, systemPrompt, conversation, tools, ct, OnApiRequestServed).ConfigureAwait(false);
         }
 
-        if (IsCodexSelected)
-        {
-            if (!CodexInstalled)
-            {
-                throw new HelperModelException("The Codex CLI is not installed.");
-            }
-
-            var codexFullPrompt = HelperToolCalls.BuildSystemPrompt(systemPrompt, tools);
-            var codexReply = await RunCodexAsync(codexFullPrompt, conversation, ct).ConfigureAwait(false);
-            return HelperToolCalls.Parse(codexReply, tools);
-        }
-
-        if (!ClaudeInstalled)
-        {
-            throw new HelperModelException("The Claude CLI is not installed.");
-        }
-
         var fullPrompt = HelperToolCalls.BuildSystemPrompt(systemPrompt, tools);
-        if (TakeSpare(SpareKey(fullPrompt, ClaudeEndpoint)) is { } spare)
+        try
         {
-            try
-            {
-                return HelperToolCalls.Parse(await spare.AskAsync(conversation, ct, CliTimeout, OnApiRequestServed).ConfigureAwait(false), tools);
-            }
-            catch (HelperModelException ex)
-            {
-                // A spare that died while it waited is no reason to fail: a cold run still answers.
-                Trace.WriteLine($"Warm helper failed, running cold: {ex.Message}");
-            }
+            var reply = IsCodexSelected
+                ? await RunCodexAsync(fullPrompt, conversation, ct).ConfigureAwait(false)
+                : await RunAsync(fullPrompt, conversation, ct).ConfigureAwait(false);
+            return HelperToolCalls.Parse(reply, tools);
         }
-
-        var reply = await RunAsync(fullPrompt, conversation, ct).ConfigureAwait(false);
-        return HelperToolCalls.Parse(reply, tools);
+        finally
+        {
+            Prewarm(fullPrompt);
+        }
     }
 
     public async Task<IReadOnlyList<ToolCall>> CallToolsAsync(
@@ -196,21 +195,32 @@ public sealed class HelperModel(
     }
 
     /// <summary>
-    /// Starts a Claude CLI for this system prompt and these tools unless one is already
+    /// Starts the selected CLI for this system prompt and these tools unless one is already
     /// waiting, so the next <see cref="CallToolAsync"/> with them skips the start-up.
     /// Cheap enough for every keystroke: a live spare only has its idle clock reset.
     /// </summary>
-    public void Prewarm(string systemPrompt, IReadOnlyList<ToolDefinition> tools)
+    public void Prewarm(string systemPrompt, IReadOnlyList<ToolDefinition> tools) =>
+        Prewarm(HelperToolCalls.BuildSystemPrompt(systemPrompt, tools));
+
+    /// <summary>Prepares a plain completion, such as a session title, without making a model request.</summary>
+    public void Prewarm(string systemPrompt)
     {
-        // An API call or Codex has no Claude process to prewarm.
-        if (ApiEndpoint is not null || IsCodexSelected)
+        if (IsOff)
+        {
+            DropAllSpares();
+            return;
+        }
+
+        if (ApiEndpoint is not null)
         {
             return;
         }
 
-        var fullPrompt = HelperToolCalls.BuildSystemPrompt(systemPrompt, tools);
-        var endpoint = ClaudeEndpoint;
-        var key = SpareKey(fullPrompt, endpoint);
+        var fullPrompt = systemPrompt;
+        var codex = IsCodexSelected;
+        var endpoint = codex ? CodexEndpoint : ClaudeEndpoint;
+        var model = codex ? CodexModel(endpoint) : endpoint?.Model ?? ClaudeModel;
+        var key = codex ? CodexSpareKey(fullPrompt, model, endpoint) : SpareKey(fullPrompt, endpoint);
         lock (_spareLock)
         {
             if (_disposed)
@@ -241,14 +251,14 @@ public sealed class HelperModel(
         // neither belongs on the thread that is handling a keystroke.
         _ = Task.Run(() =>
         {
-            if (!ClaudeInstalled)
+            if (codex ? !CodexInstalled : !ClaudeInstalled)
             {
                 return;
             }
 
             lock (_spareLock)
             {
-                if (_disposed)
+                if (_disposed || IsOff)
                 {
                     return;
                 }
@@ -272,7 +282,10 @@ public sealed class HelperModel(
                     _spares.Remove(oldest.Key);
                 }
 
-                if (WarmProcess.TryStart(fullPrompt, endpoint) is { } started)
+                IWarmProcess? started = codex
+                    ? WarmCodexProcess.TryStart(fullPrompt, model, endpoint)
+                    : WarmProcess.TryStart(fullPrompt, endpoint);
+                if (started is not null)
                 {
                     _spares[key] = (started, DateTime.UtcNow);
                 }
@@ -281,7 +294,7 @@ public sealed class HelperModel(
     }
 
     /// <summary>The waiting CLI when one was started under this <see cref="SpareKey"/>; it answers one request only.</summary>
-    private WarmProcess? TakeSpare(string key)
+    private IWarmProcess? TakeSpare(string key)
     {
         lock (_spareLock)
         {
@@ -290,6 +303,7 @@ public sealed class HelperModel(
                 return null;
             }
 
+            _attempts.Remove(key);
             if (spare.Process.IsAlive)
             {
                 return spare.Process;
@@ -297,6 +311,19 @@ public sealed class HelperModel(
 
             spare.Process.Dispose();
             return null;
+        }
+    }
+
+    private void DropAllSpares()
+    {
+        lock (_spareLock)
+        {
+            foreach (var spare in _spares.Values)
+            {
+                spare.Process.Dispose();
+            }
+
+            _spares.Clear();
         }
     }
 
@@ -333,6 +360,7 @@ public sealed class HelperModel(
     [
         "-p",
         "--model", model,
+        "--effort", "low",
         "--tools", "",
         "--strict-mcp-config",
         "--no-session-persistence",
@@ -350,6 +378,7 @@ public sealed class HelperModel(
     [
         "-p",
         "--model", model,
+        "--effort", "low",
         "--tools", "",
         "--strict-mcp-config",
         "--no-session-persistence",
@@ -381,7 +410,7 @@ public sealed class HelperModel(
         // Extended thinking took a routing reply from ~1s to ~4s and changed nothing
         // in what came back: these jobs are one-liners.
         startInfo.Environment["MAX_THINKING_TOKENS"] = "0";
-        startInfo.Environment[CodaleAccount.ClaudeVariable] = CodaleAccount.ClaudeHome;
+        startInfo.Environment[CodaleAccount.ClaudeVariable] = CodaleAccount.HelperClaudeHome;
         if (endpoint is not null)
         {
             foreach (var (name, value) in endpoint.Environment)
@@ -395,6 +424,18 @@ public sealed class HelperModel(
 
     private async Task<string> RunAsync(string systemPrompt, string prompt, CancellationToken ct)
     {
+        if (TakeSpare(SpareKey(systemPrompt, ClaudeEndpoint)) is { } spare)
+        {
+            try
+            {
+                return await spare.AskAsync(prompt, ct, CliTimeout, OnApiRequestServed).ConfigureAwait(false);
+            }
+            catch (HelperModelException ex)
+            {
+                Trace.WriteLine($"Warm helper failed, running cold: {ex.Message}");
+            }
+        }
+
         var executable = CliLocator.Find(CliLocator.Executable);
         if (executable is null)
         {
@@ -522,105 +563,29 @@ public sealed class HelperModel(
 
     private async Task<string> RunCodexAsync(string systemPrompt, string prompt, CancellationToken ct)
     {
-        var executable = CliLocator.Find("codex");
-        if (executable is null)
-        {
-            throw new HelperModelException("The Codex CLI is not installed.");
-        }
-
         var endpoint = CodexEndpoint;
-        var startInfo = BuildStartInfo(executable, endpoint);
-        startInfo.ArgumentList.Add("exec");
-        startInfo.ArgumentList.Add("--ephemeral");
-        startInfo.ArgumentList.Add("--skip-git-repo-check");
-        startInfo.ArgumentList.Add("-s");
-        startInfo.ArgumentList.Add("read-only");
-
-        if (endpoint?.CodexProvider is { } provider)
-        {
-            foreach (var arg in CodexSessionOptions.ProviderArguments(provider))
-            {
-                startInfo.ArgumentList.Add(arg);
-            }
-        }
-
-        // A BYOK provider serves only its own models: the login's tier pick and default are not among them.
-        var chosenModel = endpoint?.Model ?? codexModel?.Invoke()?.Trim();
-        if (string.IsNullOrWhiteSpace(chosenModel))
-        {
-            chosenModel = DefaultCodexModel;
-        }
-
-        startInfo.ArgumentList.Add("-c");
-        startInfo.ArgumentList.Add($"model={chosenModel}");
-        startInfo.ArgumentList.Add("-c");
-        startInfo.ArgumentList.Add("model_reasoning_effort=low");
-        startInfo.ArgumentList.Add("-");
-
-        Process process;
+        var model = CodexModel(endpoint);
+        using var spare = TakeSpare(CodexSpareKey(systemPrompt, model, endpoint))
+            ?? await Task.Run(() => WarmCodexProcess.TryStart(systemPrompt, model, endpoint), ct).ConfigureAwait(false)
+            ?? throw new HelperModelException("Could not start the Codex CLI.");
         try
         {
-            process = await ProcessUtil.StartAsync(startInfo).ConfigureAwait(false)
-                ?? throw new HelperModelException("Could not start the Codex CLI.");
+            return await spare.AskAsync(prompt, ct, CliTimeout, OnApiRequestServed).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not HelperModelException)
+        catch (HelperModelException ex) when (
+            // A BYOK provider rejecting its key is not a missing CLI login: signing in would not fix it.
+            endpoint is null && (
+                ex.Message.Contains("Not logged in", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("401 Unauthorized", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("Missing bearer or basic authentication", StringComparison.OrdinalIgnoreCase)))
         {
-            throw new HelperModelException($"Could not start the Codex CLI: {ex.Message}", ex);
-        }
-
-        using (process)
-        {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(CliTimeout);
-            await using var kill = timeout.Token.Register(() => ProcessUtil.TryKillTree(process));
-
-            var output = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
-            var errors = process.StandardError.ReadToEndAsync(CancellationToken.None);
-
-            var fullInput = string.IsNullOrWhiteSpace(systemPrompt)
-                ? prompt
-                : $"{systemPrompt}\n\n{prompt}";
-
-            try
-            {
-                await process.StandardInput.WriteAsync(fullInput).ConfigureAwait(false);
-                process.StandardInput.Close();
-            }
-            catch (IOException)
-            {
-                // The CLI exited before reading its input.
-            }
-
-            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
-            ct.ThrowIfCancellationRequested();
-            if (timeout.IsCancellationRequested)
-            {
-                throw new HelperModelException($"The Codex CLI did not answer within {CliTimeout.TotalSeconds:0} seconds.");
-            }
-
-            var text = await output.ConfigureAwait(false);
-            if (process.ExitCode != 0 || string.IsNullOrWhiteSpace(text))
-            {
-                var detail = (await errors.ConfigureAwait(false)).Trim();
-                if (detail.Contains("Not logged in", StringComparison.OrdinalIgnoreCase) ||
-                    detail.Contains("401 Unauthorized", StringComparison.OrdinalIgnoreCase) ||
-                    detail.Contains("Missing bearer or basic authentication", StringComparison.OrdinalIgnoreCase))
-                {
-                    LoginRequired?.Invoke("Codex");
-                    throw new HelperModelException("The Codex CLI is not logged in. Run 'codex login' to authenticate.");
-                }
-
-                throw new HelperModelException(
-                    $"The Codex CLI returned nothing usable (exit {process.ExitCode})" +
-                    (detail.Length > 0 ? $": {TextClip.Truncate(detail, 300)}" : "."));
-            }
-
-            // Codex reports one total, not a split: it is tallied as input so the call and its size show.
-            var spent = ReadCodexTokens(await errors.ConfigureAwait(false) + " " + text);
-            OnApiRequestServed(new UsageSnapshot { InputTokens = spent });
-            return text;
+            LoginRequired?.Invoke("Codex");
+            throw;
         }
     }
+
+    private string CodexModel(HelperCliEndpoint? endpoint) =>
+        endpoint?.Model ?? (codexModel?.Invoke()?.Trim() is { Length: > 0 } model ? model : DefaultCodexModel);
 
     /// <summary>The stream-json line that asks a warm CLI one question.</summary>
     internal static string BuildStreamRequest(string prompt)
@@ -693,8 +658,14 @@ public sealed class HelperModel(
         }
     }
 
+    internal interface IWarmProcess : IDisposable
+    {
+        bool IsAlive { get; }
+        Task<string> AskAsync(string prompt, CancellationToken ct, TimeSpan timeoutAfter, Action<UsageSnapshot>? onUsage = null);
+    }
+
     /// <summary>A started Claude CLI waiting for one stream-json request.</summary>
-    private sealed class WarmProcess : IDisposable
+    private sealed class WarmProcess : IWarmProcess
     {
         private readonly Process _process;
         private readonly Task<string> _errors;

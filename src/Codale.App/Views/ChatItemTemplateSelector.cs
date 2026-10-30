@@ -20,10 +20,12 @@ public sealed partial class ChatItemTemplateSelector : DataTemplateSelector
     public DataTemplate? BriefingTemplate { get; set; }
     public DataTemplate? HandoffBriefTemplate { get; set; }
     public DataTemplate? FeatureJumpTemplate { get; set; }
+    public DataTemplate? CompactTemplate { get; set; }
 
     protected override DataTemplate? SelectTemplateCore(object item) => item switch
     {
         FeatureJumpItem => FeatureJumpTemplate,
+        CompactItem => CompactTemplate,
         FeatureBriefingItem => BriefingTemplate,
         HandoffBriefItem => HandoffBriefTemplate,
         UserMessageItem => UserTemplate,

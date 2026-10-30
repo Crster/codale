@@ -238,12 +238,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         CrashLog.Trace($"Idle compaction: {_status.ContextTokens} context tokens before the prompt cache expires");
-        Add(new NoticeItem
+        _compactItem = new CompactItem
         {
-            Text = $"Idle for {AppSettings.IdleCompactSeconds / 60.0:0.#} min: compacting {_status.ContextTokens:N0} tokens of context " +
-                "while the prompt cache is still warm, so the next message does not re-send the whole history.",
-            Severity = NoticeSeverity.Info,
-        });
+            Reason = $"Idle for {AppSettings.IdleCompactSeconds / 60.0:0.#} min",
+            BeforeTokens = _status.ContextTokens,
+        };
+        Add(_compactItem);
 
         _idleCompacting = true;
         await CompactAsync();
@@ -251,6 +251,21 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             // Never started (the session went away in between).
             _idleCompacting = false;
+            DropCompactItem();
+        }
+    }
+
+    /// <summary>The transcript entry for the compaction under way, finished by <see cref="ConversationCompacted"/>.</summary>
+    private CompactItem? _compactItem;
+
+    /// <summary>A compaction that never finished leaves no "compacting" entry behind.</summary>
+    private void DropCompactItem()
+    {
+        if (_compactItem is { } item)
+        {
+            _compactItem = null;
+            Items.Remove(item);
+            Reflow();
         }
     }
 
@@ -278,13 +293,17 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public StatusViewModel Status => _status;
 
     /// <summary>
-    /// Labels the custom-provider usage button with the background-task provider, else "Claude".
+    /// Labels the custom-provider usage button with the background-task provider: "Off" when disabled, else "Claude".
     /// Never follows the chat's CLI provider override: the button counts what that provider serves.
     /// </summary>
     public void RefreshCustomProviderName()
     {
         var helperName = AppSettings.HelperApiProvider?.Provider.Name.Trim();
-        if (helperName is { Length: > 0 })
+        if (!AppSettings.HelperEnabled)
+        {
+            _status.CustomProviderName = "Off";
+        }
+        else if (helperName is { Length: > 0 })
         {
             _status.CustomProviderName = helperName;
         }
@@ -766,7 +785,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (task.Header.Length == 0 && command is not null)
         {
             task.Header = RunningTaskItem.CommandHeader(command);
-            DescribeShellTask(task);
         }
         else if (changed.Prompt is { Length: > 0 } prompt && task.Header.Length == 0)
         {
@@ -1234,7 +1252,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private void AddTask(RunningTaskItem task)
     {
         _tasksByToolUse[task.ToolUseId] = task;
-        DescribeShellTask(task);
         RunningTasks.Add(task);
         ResortTasks();
         WatchTask(task);
@@ -1253,67 +1270,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
         _taskCaptureTimer.Start();
         NotifySubagents();
-    }
-
-    /// <summary>
-    /// Populates a shell task's description and safety rating immediately from the deterministic
-    /// analyzer, then refines both with the helper model in the background.
-    /// </summary>
-    private void DescribeShellTask(RunningTaskItem task)
-    {
-        if (!task.IsShell)
-        {
-            return;
-        }
-
-        var command = task.CommandOf();
-        if (command.Length == 0)
-        {
-            return;
-        }
-
-        var cwd = WorktreePath ?? _projectPath;
-        var hint = task.Description;
-        var baseline = ShellCommandAnalyzer.Assess(command, cwd, hint, ExtraRoots);
-        if (task.Description.Length == 0 && baseline.Description.Length > 0)
-        {
-            task.Description = baseline.Description;
-        }
-
-        task.Risk = baseline.Risk;
-        task.RiskReason = baseline.Reason;
-
-        if (Helper is { IsAvailable: true } model)
-        {
-            _ = DescribeShellTaskAsync(model, task, command, cwd, hint);
-        }
-    }
-
-    private async Task DescribeShellTaskAsync(
-        IHelperModel model,
-        RunningTaskItem task,
-        string command,
-        string? cwd,
-        string? hint)
-    {
-        try
-        {
-            var assessment = await ShellCommandAnalyzer.AssessAsync(model, command, cwd, hint, extraRoots: ExtraRoots).ConfigureAwait(false);
-            _dispatcher.TryEnqueue(() =>
-            {
-                if (assessment.Description.Length > 0)
-                {
-                    task.Description = assessment.Description;
-                }
-
-                task.Risk = assessment.Risk;
-                task.RiskReason = assessment.Reason;
-            });
-        }
-        catch (Exception ex)
-        {
-            CrashLog.Debug("tasks", $"shell task assessment failed: {ex.Message}");
-        }
     }
 
     /// <summary>Whatever was still running has lost its process: mark it ended.</summary>
@@ -2728,6 +2684,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 // The reader asked for nothing, so an idle compaction finishing is no reason to call them back.
                 var idleCompaction = _idleCompacting;
                 _idleCompacting = false;
+                DropCompactItem();
                 if (outcome == TurnOutcome.Completed)
                 {
                     ArmIdleCompaction();
@@ -2861,13 +2818,17 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     _status.Apply(new UsageSnapshot { InputTokens = (int)Math.Min(post, int.MaxValue) });
                 }
 
-                Add(new NoticeItem
+                var compactItem = _compactItem;
+                _compactItem = null;
+                if (compactItem is null)
                 {
-                    Text = "Conversation compacted" +
-                        (compacted.Trigger == "auto" ? " automatically" : "") +
-                        (compacted.PreTokens is { } before ? $" (was {before:N0} tokens)." : "."),
-                    Severity = NoticeSeverity.Info,
-                });
+                    compactItem = new CompactItem { Reason = compacted.Trigger == "auto" ? "Compacted automatically" : null };
+                    Add(compactItem);
+                }
+
+                compactItem.BeforeTokens = compacted.PreTokens ?? compactItem.BeforeTokens;
+                compactItem.AfterTokens = compacted.PostTokens;
+                compactItem.IsDone = true;
                 break;
 
             case UnknownEvent unknown:
@@ -4157,7 +4118,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         IsBusy = true;
         _lastUserPrompt = text;
         var sent = new UserMessageItem { Text = text, Attachments = attachments, SentAsPlan = planOnly };
-        Add(sent);
+        var silent = compact && _idleCompacting;
+        if (!silent)
+        {
+            Add(sent);
+        }
 
         // The feature's briefing rides on the first real message; a slash command is the
         // CLI's own syntax and would not survive a prefix. Writing it can take the background
@@ -4184,9 +4149,19 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        RecordUserTurn(text);
+        // "/compact" is housekeeping, not part of the conversation a resumed history replays.
+        if (!compact)
+        {
+            RecordUserTurn(text);
+        }
 
         BeginTurn();
+        if (silent && _activeTurn is { } hidden)
+        {
+            // The compaction has its own entry; the turn behind it needs no timeline of its own.
+            Items.Remove(hidden);
+            Reflow();
+        }
 
         try
         {

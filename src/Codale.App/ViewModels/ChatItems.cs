@@ -1079,6 +1079,9 @@ public sealed partial class ToolCallItem : ChatItem
     /// <summary>True for the tools that run a shell line; their preview is code, not prose.</summary>
     public bool IsShellTool => IsShellName(ToolName);
 
+    /// <summary>True for a subagent launch; its target is a chip that opens the subagent's peek.</summary>
+    public bool IsSubagentCall => Codale.Core.Agents.BackgroundTaskDetector.IsSubagentTool(ToolName);
+
     /// <summary>The shell line this call runs, verbatim - it may be a multi-line script.</summary>
     public string Command { get; init; } = "";
 
@@ -1117,7 +1120,7 @@ public sealed partial class ToolCallItem : ChatItem
     public bool HasFiles => Files.Count > 0;
 
     /// <summary>Columns the row's toggle spans: all the way to the meta text unless a file chip sits beside it.</summary>
-    public int ToggleSpan => HasFiles || IsShellTool ? 1 : 3;
+    public int ToggleSpan => HasFiles || IsShellTool || IsSubagentCall ? 1 : 3;
 
     public ToolFileRef? PrimaryFile => Files.Count > 0 ? Files[0] : null;
 
@@ -1249,7 +1252,7 @@ public sealed partial class ToolCallItem : ChatItem
     /// <summary>A file target is its own link button; everything else rides in the row as text.</summary>
     public bool CodeTargetVisible => !HasFiles && IsCodeTarget && Target.Length > 0;
 
-    public bool ProseTargetVisible => !HasFiles && !IsCodeTarget && Target.Length > 0;
+    public bool ProseTargetVisible => !HasFiles && !IsCodeTarget && !IsSubagentCall && Target.Length > 0;
 
     /// <summary>
     /// The target as one run of the row's single TextBlock. The row used to be separate
@@ -1743,6 +1746,60 @@ public sealed partial class FeatureJumpItem : ChatItem
 
         Chosen = choice;
         _answer.TrySetResult(choice);
+    }
+}
+
+/// <summary>
+/// The one transcript entry for a compaction: "compacting" while the summary is written, then the
+/// result. Replaces the notice, the "/compact" prompt and the turn timeline a compaction used to leave.
+/// </summary>
+public sealed partial class CompactItem : ChatItem
+{
+    public override TranscriptBlock Block => TranscriptBlock.Notice;
+
+    protected override Thickness NaturalMargin => new(0, 4, 40, 4);
+
+    /// <summary>Why it ran, e.g. "Idle for 4 min", or null for a compaction the reader asked for.</summary>
+    public string? Reason { get; init; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsRunning))]
+    [NotifyPropertyChangedFor(nameof(Title))]
+    [NotifyPropertyChangedFor(nameof(Detail))]
+    public partial bool IsDone { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Detail))]
+    public partial long? BeforeTokens { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Detail))]
+    public partial long? AfterTokens { get; set; }
+
+    public bool IsRunning => !IsDone;
+
+    public string Title => IsDone ? "Conversation compacted" : "Compacting conversation";
+
+    public string Detail
+    {
+        get
+        {
+            if (!IsDone)
+            {
+                return Reason is null
+                    ? "Summarizing earlier messages to free up context."
+                    : $"{Reason}: summarizing while the prompt cache is warm.";
+            }
+
+            var tokens = (BeforeTokens, AfterTokens) switch
+            {
+                ({ } before, { } after and > 0) => $"{before:N0} → {after:N0} tokens",
+                ({ } before, _) => $"was {before:N0} tokens",
+                _ => null,
+            };
+
+            return tokens ?? Reason ?? "Earlier messages were summarized.";
+        }
     }
 }
 

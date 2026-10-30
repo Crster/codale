@@ -372,6 +372,23 @@
                                    Text="{x:Bind Target, Mode=OneWay}"
                                    TextTrimming="CharacterEllipsis" />
                     </Button>
+                    <!--  A subagent's description is its own button: it opens the subagent's peek.  -->
+                    <Button
+                        Grid.Column="1"
+                        Grid.ColumnSpan="2"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        Click="OnToolCommandClick"
+                        Style="{StaticResource ToolFileChip}"
+                        Tag="{x:Bind}"
+                        ToolTipService.ToolTip="{x:Bind Target, Mode=OneWay}"
+                        Visibility="{x:Bind IsSubagentCall}">
+                        <TextBlock FontFamily="Cascadia Mono, Consolas"
+                                   FontSize="{x:Bind S12_5, Mode=OneWay}"
+                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                   Text="{x:Bind Target, Mode=OneWay}"
+                                   TextTrimming="CharacterEllipsis" />
+                    </Button>
                     <!--  A file target is its own link: edits open their diff, reads open the file.  -->
                     <Button
                         Grid.Column="1"
@@ -1473,56 +1490,192 @@
 
         <!--  Auto routing wants to move a conversation under way: the question and its three answers,
               folded to the answer once given.  -->
+        <!--  Auto routing wants to move a conversation under way: styled like the
+              AskUserQuestion card - header chip, question, answers as full rows with
+              their descriptions - folded to the answer once given.  -->
         <DataTemplate x:Key="FeatureJumpTemplate" x:DataType="vm:FeatureJumpItem">
             <Border
                 Margin="{x:Bind RowMargin, Mode=OneWay}"
-                Padding="12,8"
-                Background="{StaticResource DetailSurfaceBrush}"
-                BorderBrush="{StaticResource KindPlanBrush}"
-                BorderThickness="2,0,0,0"
-                CornerRadius="0,8,8,0">
-                <StackPanel Spacing="8">
+                Padding="16,14"
+                Background="{StaticResource AskSurfaceBrush}"
+                BorderBrush="{StaticResource AskStrokeBrush}"
+                BorderThickness="1"
+                CornerRadius="10">
+                <StackPanel Spacing="10">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon
-                            FontSize="{x:Bind S12, Mode=OneWay}"
-                            Foreground="{StaticResource KindPlanBrush}"
+                            FontSize="{x:Bind S13, Mode=OneWay}"
+                            Foreground="{StaticResource KindAskBrush}"
                             Glyph="&#xE81C;" />
                         <TextBlock
+                            FontFamily="Cascadia Mono, Consolas"
                             FontSize="{x:Bind S12, Mode=OneWay}"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="{x:Bind Question}"
-                            TextWrapping="Wrap" />
+                            FontWeight="SemiBold"
+                            Foreground="{StaticResource KindAskBrush}"
+                            Text="Switch history?" />
+                    </StackPanel>
+                    <TextBlock
+                        FontSize="{x:Bind S14, Mode=OneWay}"
+                        FontWeight="SemiBold"
+                        Text="{x:Bind Question}"
+                        TextWrapping="Wrap" />
+                    <StackPanel Visibility="{x:Bind IsOpen, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                            <Button
+                                Margin="0,0,0,6"
+                                BorderBrush="{StaticResource DetailStrokeBrush}"
+                                Background="{StaticResource DetailSurfaceBrush}"
+                                Click="OnFeatureJumpClick"
+                                Style="{StaticResource OptionRow}"
+                                Tag="{x:Bind}"
+                                Visibility="{x:Bind HasJump, Converter={StaticResource BoolToVisibility}}">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon
+                                        Margin="0,2,0,0"
+                                        VerticalAlignment="Top"
+                                        FontSize="{x:Bind S14, Mode=OneWay}"
+                                        Foreground="{StaticResource KindAskBrush}"
+                                        Glyph="&#xE111;" />
+                                    <StackPanel Grid.Column="1" Spacing="2">
+                                        <TextBlock
+                                            FontWeight="SemiBold"
+                                            Text="{x:Bind JumpText}"
+                                            TextWrapping="Wrap" />
+                                        <TextBlock
+                                            FontSize="{x:Bind S12, Mode=OneWay}"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Text="Continue this conversation there."
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Grid>
+                            </Button>
+                            <Button
+                                Margin="0,0,0,6"
+                                BorderBrush="{StaticResource DetailStrokeBrush}"
+                                Background="{StaticResource DetailSurfaceBrush}"
+                                Click="OnFeatureJumpNewClick"
+                                Style="{StaticResource OptionRow}"
+                                Tag="{x:Bind}">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon
+                                        Margin="0,2,0,0"
+                                        VerticalAlignment="Top"
+                                        FontSize="{x:Bind S14, Mode=OneWay}"
+                                        Foreground="{StaticResource KindAskBrush}"
+                                        Glyph="&#xE710;" />
+                                    <StackPanel Grid.Column="1" Spacing="2">
+                                        <TextBlock
+                                            FontWeight="SemiBold"
+                                            Text="New history"
+                                            TextWrapping="Wrap" />
+                                        <TextBlock
+                                            FontSize="{x:Bind S12, Mode=OneWay}"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Text="Start a fresh history for this message."
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Grid>
+                            </Button>
+                            <Button
+                                Margin="0,0,0,6"
+                                BorderBrush="{StaticResource DetailStrokeBrush}"
+                                Background="{StaticResource DetailSurfaceBrush}"
+                                Click="OnFeatureJumpStayClick"
+                                Style="{StaticResource OptionRow}"
+                                Tag="{x:Bind}">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon
+                                        Margin="0,2,0,0"
+                                        VerticalAlignment="Top"
+                                        FontSize="{x:Bind S14, Mode=OneWay}"
+                                        Foreground="{StaticResource KindAskBrush}"
+                                        Glyph="&#xE73E;" />
+                                    <StackPanel Grid.Column="1" Spacing="2">
+                                        <TextBlock
+                                            FontWeight="SemiBold"
+                                            Text="Stay"
+                                            TextWrapping="Wrap" />
+                                        <TextBlock
+                                            FontSize="{x:Bind S12, Mode=OneWay}"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Text="Keep going in the current history."
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Grid>
+                            </Button>
                     </StackPanel>
                     <StackPanel
                         Orientation="Horizontal"
                         Spacing="8"
-                        Visibility="{x:Bind IsOpen, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                        <Button
-                            Click="OnFeatureJumpClick"
-                            Content="Jump"
+                        Visibility="{x:Bind IsOpen, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
+                        <FontIcon
                             FontSize="{x:Bind S12, Mode=OneWay}"
-                            Style="{StaticResource AccentButtonStyle}"
-                            Tag="{x:Bind}"
-                            Visibility="{x:Bind HasJump, Converter={StaticResource BoolToVisibility}}" />
-                        <Button
-                            Click="OnFeatureJumpNewClick"
-                            Content="New history"
+                            Foreground="{StaticResource KindAskBrush}"
+                            Glyph="&#xE73E;" />
+                        <TextBlock
                             FontSize="{x:Bind S12, Mode=OneWay}"
-                            Tag="{x:Bind}" />
-                        <Button
-                            Click="OnFeatureJumpStayClick"
-                            Content="Stay"
-                            FontSize="{x:Bind S12, Mode=OneWay}"
-                            Tag="{x:Bind}" />
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind AnswerText, Mode=OneWay}"
+                            TextTrimming="CharacterEllipsis" />
                     </StackPanel>
-                    <TextBlock
-                        FontSize="{x:Bind S12, Mode=OneWay}"
-                        FontWeight="SemiBold"
-                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                        Text="{x:Bind AnswerText, Mode=OneWay}"
-                        TextTrimming="CharacterEllipsis"
-                        Visibility="{x:Bind IsOpen, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}" />
                 </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <!--  One entry for a compaction: a ring while the summary is written, then the token drop.  -->
+        <DataTemplate x:Key="CompactTemplate" x:DataType="vm:CompactItem">
+            <Border
+                Margin="{x:Bind RowMargin, Mode=OneWay}"
+                Padding="14,10"
+                Background="{StaticResource AskSurfaceBrush}"
+                BorderBrush="{StaticResource AskStrokeBrush}"
+                BorderThickness="1"
+                CornerRadius="10">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid
+                        Width="18"
+                        Height="18"
+                        VerticalAlignment="Center">
+                        <ProgressRing
+                            Width="16"
+                            Height="16"
+                            Foreground="{StaticResource KindAskBrush}"
+                            IsActive="{x:Bind IsRunning, Mode=OneWay}"
+                            Visibility="{x:Bind IsRunning, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                        <FontIcon
+                            FontSize="{x:Bind S14, Mode=OneWay}"
+                            Foreground="{StaticResource KindAskBrush}"
+                            Glyph="&#xE73E;"
+                            Visibility="{x:Bind IsDone, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                    </Grid>
+                    <StackPanel Grid.Column="1" Spacing="2">
+                        <TextBlock
+                            FontSize="{x:Bind S13, Mode=OneWay}"
+                            FontWeight="SemiBold"
+                            Text="{x:Bind Title, Mode=OneWay}" />
+                        <TextBlock
+                            FontSize="{x:Bind S12, Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind Detail, Mode=OneWay}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                </Grid>
             </Border>
         </DataTemplate>
 
@@ -1744,6 +1897,7 @@
             ActivityTemplate="{StaticResource ActivityTemplate}"
             AssistantTemplate="{StaticResource AssistantTemplate}"
             BriefingTemplate="{StaticResource BriefingTemplate}"
+            CompactTemplate="{StaticResource CompactTemplate}"
             FeatureJumpTemplate="{StaticResource FeatureJumpTemplate}"
             HandoffBriefTemplate="{StaticResource HandoffBriefTemplate}"
             NoticeTemplate="{StaticResource NoticeTemplate}"
@@ -2044,11 +2198,11 @@
         <Border
             Grid.Row="1"
             Margin="0,6,0,0"
-            Padding="12,0,16,0"
+            Padding="1,0,16,0"
             Visibility="{x:Bind ViewModel.IsBusy, Mode=OneWay}">
-            <Grid ColumnSpacing="10">
+            <Grid ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="22" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
@@ -2057,6 +2211,7 @@
                 <Border
                     Width="18"
                     Height="18"
+                    HorizontalAlignment="Center"
                     VerticalAlignment="Center"
                     CornerRadius="9"
                     Background="{StaticResource StatusRunningTintBrush}"
@@ -2070,6 +2225,7 @@
                 <Border
                     Width="18"
                     Height="18"
+                    HorizontalAlignment="Center"
                     VerticalAlignment="Center"
                     CornerRadius="9"
                     Background="{StaticResource StatusWarnTintBrush}"

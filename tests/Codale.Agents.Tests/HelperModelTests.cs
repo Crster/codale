@@ -1,7 +1,24 @@
+using Codale.Core.Helper;
+
 namespace Codale.Agents.Tests;
 
 public sealed class HelperModelTests
 {
+    [Fact]
+    public async Task Off_makes_the_model_unavailable_and_runs_nothing()
+    {
+        string? choice = "Off";
+        using var model = new HelperModel(provider: () => choice);
+
+        Assert.False(model.IsAvailable);
+        model.Prewarm("Be brief.");
+        Assert.Null(await model.CallToolAsync("s", "c", []));
+        await Assert.ThrowsAsync<HelperModelException>(() => model.CompleteAsync("s", "p"));
+
+        choice = "Claude"; // re-enabling is just a different pick: no longer Off
+        await Assert.ThrowsAnyAsync<Exception>(() => model.CompleteAsync("s", "p", new CancellationToken(true)));
+    }
+
     [Fact]
     public void Claude_runs_tool_less_and_unsaved_with_the_system_prompt_as_a_flag()
     {
@@ -17,6 +34,10 @@ public sealed class HelperModelTests
     {
         Assert.Contains("--strict-mcp-config", HelperModel.BuildArguments("x"));
         Assert.Equal("0", HelperModel.BuildStartInfo("claude").Environment["MAX_THINKING_TOKENS"]);
+        foreach (var args in new[] { HelperModel.BuildArguments("x").ToList(), HelperModel.BuildStreamArguments("x").ToList() })
+        {
+            Assert.Equal("low", args[args.IndexOf("--effort") + 1]);
+        }
     }
 
     [Fact]
@@ -37,6 +58,31 @@ public sealed class HelperModelTests
     public void Codex_background_jobs_default_to_luna()
     {
         Assert.Equal("gpt-5.6-luna", HelperModel.DefaultCodexModel);
+        var args = HelperModel.BuildCodexArguments(HelperModel.DefaultCodexModel);
+        Assert.Contains("model='gpt-5.6-luna'", args);
+        Assert.Contains("model_reasoning_effort='low'", args);
+        Assert.Equal("app-server", args[^1]);
+    }
+
+    [Fact]
+    public void Codex_spares_are_isolated_by_prompt_model_provider_and_credentials()
+    {
+        var endpoint = new HelperCliEndpoint("flash", new Dictionary<string, string> { ["OPENAI_API_KEY"] = "first-key" },
+            new Codex.CodexCustomProvider("Gateway", "https://first.example"));
+        var key = HelperModel.CodexSpareKey("prompt", "flash", endpoint);
+        Assert.DoesNotContain("first-key", key);
+        Assert.NotEqual(key, HelperModel.CodexSpareKey("other prompt", "flash", endpoint));
+        Assert.NotEqual(key, HelperModel.CodexSpareKey("prompt", "other-model", endpoint));
+        Assert.NotEqual(key, HelperModel.CodexSpareKey("prompt", "flash", endpoint with
+        {
+            Environment = new Dictionary<string, string> { ["OPENAI_API_KEY"] = "second-key" },
+        }));
+        Assert.NotEqual(key, HelperModel.CodexSpareKey("prompt", "flash", endpoint with
+        {
+            CodexProvider = endpoint.CodexProvider! with { BaseUrl = "https://second.example" },
+        }));
+        Assert.NotEqual(key, HelperModel.CodexSpareKey("prompt", "flash", null));
+        Assert.Contains("model_provider='custom'", HelperModel.BuildCodexArguments(endpoint.Model, endpoint));
     }
 
     [Fact]

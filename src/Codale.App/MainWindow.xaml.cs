@@ -49,6 +49,7 @@ public sealed partial class MainWindow : Window
         Closed += OnClosed;
 
         SettingsHost.CloseRequested += OnSettingsCloseRequested;
+        SettingsHost.SignInAsync = RunAccountSignInAsync;
         RootGrid.KeyDown += OnRootKeyDown;
 
         // Tunnelling, so a shortcut wins over the focused control (the terminal and
@@ -252,6 +253,31 @@ public sealed partial class MainWindow : Window
     }
 
     private void OnSettingsCloseRequested(object? sender, EventArgs e) => SetSettingsOpen(false);
+
+    private async Task RunAccountSignInAsync(string cliId)
+    {
+        if (RootFrame.Content is WorkspacePage workspace)
+        {
+            SetSettingsOpen(false);
+            await workspace.RunAccountSignInAsync(cliId);
+            return;
+        }
+
+        // The project picker has no embedded terminal. Shell execution gives login
+        // a visible console there, rather than an invisible child of this GUI app.
+        using var login = await Codale.Core.Processes.ProcessUtil.StartAsync(
+            new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c " + Codale.Agents.CodaleAccountCli.LoginCommand(cliId))
+            {
+                UseShellExecute = true,
+                WindowStyle = System.Diagnostics.ProcessWindowStyle.Normal,
+            });
+        if (login is null)
+        {
+            throw new InvalidOperationException("The sign-in console did not start.");
+        }
+
+        await login.WaitForExitAsync();
+    }
 
     /// <summary>A configured keyboard shortcut was pressed; the open workspace runs it.</summary>
     public event EventHandler<ShortcutEventArgs>? ShortcutInvoked;

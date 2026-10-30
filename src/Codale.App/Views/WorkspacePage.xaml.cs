@@ -449,6 +449,25 @@ public sealed partial class WorkspacePage : Page
     /// <summary>Time a fresh shell gets to print its prompt before a command is typed into it.</summary>
     private static readonly TimeSpan ShellPromptDelay = TimeSpan.FromMilliseconds(1500);
 
+    /// <summary>Starts login with the terminal, keeping its output visible after it exits.</summary>
+    public async Task RunAccountSignInAsync(string cliId)
+    {
+        var cli = CliLocator.KnownClis.First(known => known.Id == cliId);
+        var terminal = ViewModel.CreateTerminal(CodaleAccountCli.LoginCommand(cliId), $"{cli.DisplayName} sign in", cliId);
+        AddTerminalTab(terminal);
+        if (terminal.StartupError is { Length: > 0 } error)
+        {
+            throw new InvalidOperationException(error);
+        }
+
+        // A dedicated command exits with login. Closing the tab also ends this wait,
+        // allowing Settings to re-read credentials after either completion or cancellation.
+        while (terminal.IsRunning && IsLoaded)
+        {
+            await Task.Delay(500);
+        }
+    }
+
     private async Task RunInNewTerminalAsync(string command)
     {
         var terminal = ViewModel.CreateTerminal();
@@ -2417,7 +2436,9 @@ public sealed partial class WorkspacePage : Page
         ReferencesPane.Visibility = Visibility.Collapsed;
         OpenSideColumn();
         PeekPane.Visibility = Visibility.Visible;
-        PeekPane.Show(task);
+        var owner = ViewModel.Chats.Concat(ViewModel.TerminalSessions)
+            .FirstOrDefault(chat => chat.RunningTasks.Contains(task)) ?? ViewModel.Panel;
+        PeekPane.Show(task, owner.Helper, owner.WorktreePath ?? ViewModel.ProjectPath, ViewModel.ExtraFolders.Folders);
     }
 
     private void OpenSideColumn()

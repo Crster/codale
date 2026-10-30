@@ -32,6 +32,9 @@ public sealed partial class SettingsPanel : UserControl
     /// <summary>The user asked to dismiss the pane (close button).</summary>
     public event EventHandler? CloseRequested;
 
+    /// <summary>The owning window runs interactive sign-in in its workspace terminal.</summary>
+    public Func<string, Task>? SignInAsync { get; set; }
+
     public SettingsPanel()
     {
         InitializeComponent();
@@ -348,25 +351,33 @@ public sealed partial class SettingsPanel : UserControl
         }
     }
 
-    /// <summary>Opens a console running the CLI's login against Codale's account folder; it is re-read when that console closes.</summary>
+    /// <summary>Runs interactive login visibly and re-reads the account when it finishes.</summary>
     private async void OnSignInClick(object sender, RoutedEventArgs e)
     {
         var cli = (string)((FrameworkElement)sender).Tag;
+        var button = (Button)sender;
+        button.IsEnabled = false;
         try
         {
-            using var login = await Codale.Core.Processes.ProcessUtil.StartAsync(new System.Diagnostics.ProcessStartInfo("cmd.exe", "/k " + CodaleAccountCli.LoginCommand(cli)) { UseShellExecute = false });
-            if (login is not null)
+            if (SignInAsync is not { } signIn)
             {
-                await login.WaitForExitAsync();
+                throw new InvalidOperationException("Sign-in is unavailable in this window.");
             }
+
+            await signIn(cli);
+            await RefreshAccountsAsync();
+            await ReloadCatalogueAfterAccountChangeAsync(cli);
         }
         catch (Exception ex)
         {
             CrashLog.Error("settings", "Account sign-in failed to start", ex);
+            var status = cli == "codex" ? CodexAccountStatus : ClaudeAccountStatus;
+            status.Text = $"Could not start sign-in: {ex.Message}";
         }
-
-        await RefreshAccountsAsync();
-        await ReloadCatalogueAfterAccountChangeAsync(cli);
+        finally
+        {
+            button.IsEnabled = true;
+        }
     }
 
     private async void OnSignOutClick(object sender, RoutedEventArgs e)
@@ -407,6 +418,7 @@ public sealed partial class SettingsPanel : UserControl
             HelperProviderBox.Items.Clear();
             HelperProviderBox.IsEnabled = true;
 
+            HelperProviderBox.Items.Add(AppSettings.OffHelperProvider);
             HelperProviderBox.Items.Add("Claude");
             HelperProviderBox.Items.Add("Codex");
 
@@ -417,9 +429,9 @@ public sealed partial class SettingsPanel : UserControl
             }
 
             var index = wanted.Length == 0
-                ? 0
+                ? 1
                 : HelperProviderBox.Items.ToList().FindIndex(i => string.Equals(i as string, wanted, StringComparison.OrdinalIgnoreCase));
-            HelperProviderBox.SelectedIndex = Math.Max(index, 0);
+            HelperProviderBox.SelectedIndex = Math.Max(index, 0); // a deleted provider falls back to Off
         }
         finally
         {

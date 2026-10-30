@@ -20,6 +20,9 @@ public sealed record FileChange
     public string? OriginalContent { get; init; }
     public bool UserModified { get; init; }
 
+    /// <summary>The CLI's unified diff when it reports patch text instead of structured hunks.</summary>
+    public string? UnifiedDiff { get; init; }
+
     /// <summary>
     /// The edit as the CLI's own patch (<c>structuredPatch</c>): hunks with real line
     /// numbers, so the transcript's diff reads the same as the file does. Null when the

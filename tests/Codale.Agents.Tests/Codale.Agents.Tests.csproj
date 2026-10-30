@@ -21,6 +21,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Codale.Agents\Codale.Agents.csproj" />
     <ProjectReference Include="..\..\src\Codale.Core\Codale.Core.csproj" />
+    <ProjectReference Include="..\..\src\Codale.Git\Codale.Git.csproj" />
+    <Compile Include="..\..\src\Codale.App\ViewModels\ToolDiffs.cs" Link="ToolDiffs.cs" />
   </ItemGroup>
 
 </Project>

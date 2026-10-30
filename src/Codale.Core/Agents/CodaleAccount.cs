@@ -31,6 +31,29 @@ public static class CodaleAccount
             ? configured
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude");
 
+    /// <summary>The default Codex folder a terminal's codex uses: <c>CODEX_HOME</c> if set, else <c>~/.codex</c>. Not created.</summary>
+    public static string UserCodexHome =>
+        Environment.GetEnvironmentVariable(CodexVariable) is { Length: > 0 } configured
+            ? configured
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
+
+    /// <summary>
+    /// The Claude folder a background job runs under: Codale's own account once it is signed in,
+    /// else the terminal's default one when that is, so a helper never prompts for a login the user already has.
+    /// </summary>
+    public static string HelperClaudeHome =>
+        !File.Exists(Path.Combine(ClaudeHome, ".credentials.json")) &&
+        File.Exists(Path.Combine(UserClaudeHome, ".credentials.json"))
+            ? UserClaudeHome
+            : ClaudeHome;
+
+    /// <summary>The Codex counterpart of <see cref="HelperClaudeHome"/>.</summary>
+    public static string HelperCodexHome =>
+        !File.Exists(Path.Combine(CodexHome, "auth.json")) &&
+        File.Exists(Path.Combine(UserCodexHome, "auth.json"))
+            ? UserCodexHome
+            : CodexHome;
+
     public const string ClaudeVariable = "CLAUDE_CONFIG_DIR";
 
     public const string CodexVariable = "CODEX_HOME";

@@ -279,6 +279,13 @@ public static class AppSettings
         get
         {
             var stored = Read("helper.provider", "").Trim();
+
+            // Never picked is Off: background tasks only run once the user chooses a provider.
+            if (stored.Length == 0 || string.Equals(stored, OffHelperProvider, StringComparison.OrdinalIgnoreCase))
+            {
+                return OffHelperProvider;
+            }
+
             if (string.Equals(stored, ClaudeHelperProvider, StringComparison.OrdinalIgnoreCase))
             {
                 return "";
@@ -305,6 +312,11 @@ public static class AppSettings
     /// <summary>What <see cref="HelperProvider"/> stores for an explicit pick of the Claude CLI.</summary>
     private const string ClaudeHelperProvider = "Claude";
 
+    /// <summary>What <see cref="HelperProvider"/> reads for Off, the default: no background task runs.</summary>
+    public const string OffHelperProvider = "Off";
+
+    public static bool HelperEnabled => !string.Equals(HelperProvider, OffHelperProvider, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>
     /// The BYOK provider background jobs call: only the one named by <see cref="HelperProvider"/>,
     /// and only when it has a base URL, key and flash model. Null otherwise - Claude or Codex was
@@ -316,7 +328,7 @@ public static class AppSettings
         get
         {
             var wanted = HelperProvider;
-            if (wanted.Length == 0)
+            if (wanted.Length == 0 || !HelperEnabled)
             {
                 return null;
             }

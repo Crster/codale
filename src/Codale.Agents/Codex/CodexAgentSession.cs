@@ -823,13 +823,23 @@ public sealed class CodexAgentSession : IAgentSession
                 if (string.IsNullOrWhiteSpace(path)) continue;
                 var kind = change.Prop("kind");
                 var name = kind is { ValueKind: JsonValueKind.String } ? kind.Value.GetString() : kind?.Str("type");
-                result.Add(new FileChange { FilePath = path, Kind = FileChangeKindOf(name) });
+                result.Add(new FileChange
+                {
+                    FilePath = path,
+                    Kind = FileChangeKindOf(name),
+                    UnifiedDiff = change.Str("diff"),
+                });
             }
         }
         else if (changes.ValueKind == JsonValueKind.Object)
         {
             foreach (var change in changes.EnumerateObject())
-                result.Add(new FileChange { FilePath = change.Name, Kind = FileChangeKindOf(change.Value.Str("type")) });
+                result.Add(new FileChange
+                {
+                    FilePath = change.Name,
+                    Kind = FileChangeKindOf(change.Value.Str("type")),
+                    UnifiedDiff = change.Value.Str("diff") ?? change.Value.Str("unified_diff"),
+                });
         }
         return result;
     }

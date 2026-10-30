@@ -68,6 +68,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         McpTools = new McpToolsViewModel(_mcp, FolderServers, ProjectPath);
         CliEndpoint = new CliEndpointViewModel();
         _router = new MessageRouter(_helper);
+        PrewarmBackgroundHelper();
         CliEndpoint.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(CliEndpointViewModel.ActiveName))
@@ -205,10 +206,17 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
     private void OnAppSettingsChanged(object? sender, EventArgs e)
     {
+        PrewarmBackgroundHelper();
         foreach (var chat in Chats)
         {
             chat.RefreshCustomProviderName();
         }
+    }
+
+    private void PrewarmBackgroundHelper()
+    {
+        _router.Prewarm(Features);
+        _helper.Prewarm(SessionNamePrompt);
     }
 
     private readonly SynchronizationContext? _uiContext = SynchronizationContext.Current;
@@ -378,14 +386,16 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// A fresh terminal with its own pseudoconsole. The caller owns showing it;
     /// disposing the workspace terminates every remaining shell.
     /// </summary>
-    public TerminalViewModel CreateTerminal()
+    public TerminalViewModel CreateTerminal(string? command = null, string? commandName = null, string? cliId = null)
     {
-        var terminal = new TerminalViewModel(ProjectPath);
+        var terminal = new TerminalViewModel(ProjectPath, command, commandName, cliId);
+        terminal.PropertyChanged += OnCommandTerminalPropertyChanged;
         lock (_terminals)
         {
             _terminals.Add(terminal);
         }
 
+        UpdateRunningCommandCount();
         return terminal;
     }
 
@@ -1011,7 +1021,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             Files.Reload();
 
             // Totals a write burst coalesced away are settled now that the last edit landed.
-            Status.RefreshSessionChanges();
+            (sender is ChatViewModel finishedChat ? finishedChat.Status : Status).RefreshSessionChanges();
 
             // git is the authority on what actually changed, so both panels refresh from it
             // rather than trusting the event stream to have reported every edit.

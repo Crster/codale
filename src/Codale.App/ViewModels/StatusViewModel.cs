@@ -426,6 +426,7 @@ public sealed partial class StatusViewModel : ObservableObject
             row.RefreshCountsIfDirty();
         }
 
+        OnPropertyChanged(nameof(ChangeSummary));
         NotifyChangeBar();
     }
 

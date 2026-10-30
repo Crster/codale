@@ -27,9 +27,21 @@ public sealed class InlineCompleter(IHelperModel model)
         You complete the shell command a developer is typing. You get the shell, the working directory, their
         recent commands, the files in the directory and what they have typed so far in <typed>.
 
-        Output: only the characters that come after <typed> to finish the most likely command - never repeat
-        what is already typed. Prefer commands and paths that fit the recent commands and the listed files.
-        Output nothing when no completion is likely.
+        Complete the entire remaining command line, not just the current word or next token. Infer the most
+        likely intended command from the shell, working directory, recent commands and listed files. Finish
+        any partial word, then include the subcommand, arguments, options and paths needed to make that
+        command complete and ready to run. Do not stop at a word boundary if the intended command needs more.
+
+        Output only the exact suffix to append to <typed>; never repeat or rewrite what is already typed.
+        Preserve any leading space needed to separate the suffix from the typed text. Use quoting and syntax
+        appropriate to the shell. Do not invent unknown values or add placeholders, unnecessary flags or
+        unrelated operations. Output nothing when no useful completion is likely or the command is complete.
+
+        Examples (choose values from the actual context, not these examples):
+        - Typed: `git ch`; intended command: `git checkout main`; output: `eckout main`
+        - Typed: `dotnet `; intended command: `dotnet test tests/App.Tests.csproj`; output: `test tests/App.Tests.csproj`
+        - Typed: `git log`; intended command: `git log --oneline -10`; output: ` --oneline -10`
+        The backticks delimit example text only; do not include them in your output.
 
         Rules:
         - One line only. Never add a second command the developer did not start.
@@ -78,7 +90,7 @@ public sealed class InlineCompleter(IHelperModel model)
             ShellSystem,
             $"<shell>\n{shell}\n</shell>\n<cwd>\n{cwd}\n</cwd>\n<recent>\n{string.Join('\n', recent)}\n</recent>\n" +
             $"<files>\n{string.Join('\n', files)}\n</files>\n<typed>\n{typed}\n</typed>{RejectedBlock(rejected)}",
-            64, ct).ConfigureAwait(false);
+            256, ct).ConfigureAwait(false);
 
         var line = StripFence(reply).TrimEnd();
         var newline = line.IndexOf('\n');

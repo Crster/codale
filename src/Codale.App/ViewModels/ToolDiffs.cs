@@ -65,6 +65,12 @@ public static class ToolDiffs
             return TextDiff.FromPatch(change.FilePath, patch, isNew: change.Kind == FileChangeKind.Create);
         }
 
+        if (!string.IsNullOrWhiteSpace(change.UnifiedDiff))
+        {
+            return TextDiff.FromUnified(change.FilePath, change.UnifiedDiff,
+                isNew: change.Kind == FileChangeKind.Create, isDeleted: change.Kind == FileChangeKind.Delete);
+        }
+
         if (change.Kind == FileChangeKind.Create && change.NewContent is { } created)
         {
             return TextDiff.Compute(change.FilePath, null, created);
