@@ -3124,17 +3124,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Screenshots and other images a tool returned are kept on disk and listed with the session artifacts.</summary>
     private void RecordImageArtifacts(ToolCallItem call, IReadOnlyList<ResultImage> images)
     {
-        var toolUseId = call.ToolUseId;
         var title = call.ToolName.Contains("screenshot", StringComparison.OrdinalIgnoreCase)
             || call.ToolName.Contains("responsive", StringComparison.OrdinalIgnoreCase)
             ? "Browser screenshot"
             : "Image";
 
-        _ = SaveImageArtifactsAsync(toolUseId, title, images.ToList());
+        _ = SaveImageArtifactsAsync(call, title, images.ToList());
     }
 
     /// <summary>Decodes and writes the images off the UI thread (a full-page screenshot is megabytes), then lists them.</summary>
-    private async Task SaveImageArtifactsAsync(string toolUseId, string title, List<ResultImage> images)
+    private async Task SaveImageArtifactsAsync(ToolCallItem call, string title, List<ResultImage> images)
     {
         try
         {
@@ -3158,11 +3157,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             foreach (var path in paths)
             {
+                call.AddImage(path);
                 Artifacts.Insert(0, new SessionArtifact
                 {
                     Kind = SessionArtifactKind.Image,
                     SourcePath = path,
-                    ToolUseId = toolUseId,
+                    ToolUseId = call.ToolUseId,
                     Title = title,
                     Status = SessionArtifactStatus.Saved,
                 });

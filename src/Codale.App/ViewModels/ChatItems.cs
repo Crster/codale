@@ -1355,6 +1355,18 @@ public sealed partial class ToolCallItem : ChatItem
 
     public bool HasOutput => Output is { Length: > 0 };
 
+    /// <summary>Screenshots and other images the call returned, as files on disk; filled once they are saved.</summary>
+    public ObservableCollection<string> ImagePaths { get; } = [];
+
+    public bool HasImages => ImagePaths.Count > 0;
+
+    public void AddImage(string path)
+    {
+        // A file:// URI, which is what an Image's Source binding can load.
+        ImagePaths.Add(new Uri(path).AbsoluteUri);
+        OnPropertyChanged(nameof(HasImages));
+    }
+
     /// <summary>
     /// An edit's result text ("The file … has been updated") says less than its diff,
     /// so the diff replaces it - unless the edit failed, when the error is the story.

@@ -203,6 +203,61 @@ public sealed class CodexAgentSession : IAgentSession
         }
     }
 
+    /// <summary>
+    /// The text of an mcpToolCall item's outcome. Codex reports <c>result</c> as an object
+    /// (<c>{content:[{type:"text",text}]}</c>) and a failure as <c>error.message</c>; older
+    /// builds sent a bare string.
+    /// </summary>
+    private static string? McpResultText(JsonElement item)
+    {
+        if (item.Prop("result") is { } result)
+        {
+            if (result.ValueKind == JsonValueKind.String)
+            {
+                return result.GetString();
+            }
+
+            if (result.ValueKind == JsonValueKind.Object)
+            {
+                if (result.Prop("content") is { ValueKind: JsonValueKind.Array } content)
+                {
+                    var text = string.Join(
+                        "\n",
+                        content.EnumerateArray()
+                            .Where(b => b.Str("type") == "text" && !string.IsNullOrEmpty(b.Str("text")))
+                            .Select(b => b.Str("text")));
+                    if (text.Length > 0)
+                    {
+                        return text;
+                    }
+                }
+
+                if (result.Prop("structuredContent") is { ValueKind: not JsonValueKind.Null and not JsonValueKind.Undefined } structured)
+                {
+                    return structured.GetRawText();
+                }
+            }
+        }
+
+        return item.Prop("error") is { ValueKind: JsonValueKind.Object } error ? error.Str("message") : null;
+    }
+
+    /// <summary>The image blocks (<c>{type:"image",data,mimeType}</c>) of an mcpToolCall result, e.g. a browser screenshot.</summary>
+    private static IReadOnlyList<ResultImage>? McpResultImages(JsonElement item)
+    {
+        if (item.Prop("result")?.Prop("content") is not { ValueKind: JsonValueKind.Array } content)
+        {
+            return null;
+        }
+
+        var images = content.EnumerateArray()
+            .Where(b => b.Str("type") == "image" && b.Str("data") is { Length: > 0 })
+            .Select(b => new ResultImage(b.Str("mimeType") ?? "image/png", b.Str("data")!))
+            .ToList();
+
+        return images.Count > 0 ? images : null;
+    }
+
     /// <summary>Merges the given parameters into a JSON-RPC request object under construction.</summary>
     private static void CopyParams(Dictionary<string, object?> request, Dictionary<string, object?> parameters)
     {
@@ -1180,7 +1235,8 @@ public sealed class CodexAgentSession : IAgentSession
                     {
                         ToolUseId = itemId,
                         IsError = string.Equals(item.Str("status"), "failed", StringComparison.OrdinalIgnoreCase),
-                        ResultText = item.Str("result"),
+                        ResultText = McpResultText(item),
+                        Images = McpResultImages(item),
                     }).ConfigureAwait(false);
                 }
 

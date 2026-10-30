@@ -846,6 +846,28 @@
                             </ScrollViewer>
                         </StackPanel>
                     </Border>
+
+                    <!--  Screenshots the tool returned.  -->
+                    <ItemsControl
+                        ItemsSource="{x:Bind ImagePaths}"
+                        Visibility="{x:Bind HasImages, Mode=OneWay}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                                <Border
+                                    Margin="0,0,0,6"
+                                    HorizontalAlignment="Left"
+                                    BorderBrush="{StaticResource DetailStrokeBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="8">
+                                    <Image
+                                        MaxWidth="560"
+                                        MaxHeight="360"
+                                        Source="{x:Bind}"
+                                        Stretch="Uniform" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </StackPanel>
             </StackPanel>
         </DataTemplate>
@@ -1636,47 +1658,44 @@
 
         <!--  One entry for a compaction: a ring while the summary is written, then the token drop.  -->
         <DataTemplate x:Key="CompactTemplate" x:DataType="vm:CompactItem">
-            <Border
+            <StackPanel
                 Margin="{x:Bind RowMargin, Mode=OneWay}"
-                Padding="14,10"
-                Background="{StaticResource AskSurfaceBrush}"
-                BorderBrush="{StaticResource AskStrokeBrush}"
-                BorderThickness="1"
-                CornerRadius="10">
-                <Grid ColumnSpacing="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Grid
-                        Width="18"
-                        Height="18"
-                        VerticalAlignment="Center">
-                        <ProgressRing
-                            Width="16"
-                            Height="16"
-                            Foreground="{StaticResource KindAskBrush}"
-                            IsActive="{x:Bind IsRunning, Mode=OneWay}"
-                            Visibility="{x:Bind IsRunning, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
-                        <FontIcon
-                            FontSize="{x:Bind S14, Mode=OneWay}"
-                            Foreground="{StaticResource KindAskBrush}"
-                            Glyph="&#xE73E;"
-                            Visibility="{x:Bind IsDone, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
-                    </Grid>
-                    <StackPanel Grid.Column="1" Spacing="2">
-                        <TextBlock
-                            FontSize="{x:Bind S13, Mode=OneWay}"
-                            FontWeight="SemiBold"
-                            Text="{x:Bind Title, Mode=OneWay}" />
-                        <TextBlock
-                            FontSize="{x:Bind S12, Mode=OneWay}"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="{x:Bind Detail, Mode=OneWay}"
-                            TextWrapping="Wrap" />
-                    </StackPanel>
+                Orientation="Horizontal"
+                Spacing="8"
+                ToolTipService.ToolTip="{x:Bind Detail, Mode=OneWay}">
+                <Grid
+                    Width="20"
+                    Height="20"
+                    Margin="1,3,1,3"
+                    VerticalAlignment="Center">
+                    <Border Background="{StaticResource KindAskTintBrush}" CornerRadius="10" />
+                    <ProgressRing
+                        Width="12"
+                        Height="12"
+                        Foreground="{StaticResource KindAskBrush}"
+                        IsActive="{x:Bind IsRunning, Mode=OneWay}"
+                        Visibility="{x:Bind IsRunning, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                    <FontIcon
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        FontSize="{x:Bind S10, Mode=OneWay}"
+                        Foreground="{StaticResource KindAskBrush}"
+                        Glyph="&#xE73E;"
+                        Visibility="{x:Bind IsDone, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                 </Grid>
-            </Border>
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="{x:Bind S12, Mode=OneWay}"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    Text="{x:Bind Title, Mode=OneWay}" />
+                <TextBlock
+                    MaxWidth="420"
+                    VerticalAlignment="Center"
+                    FontSize="{x:Bind S12, Mode=OneWay}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="{x:Bind Detail, Mode=OneWay}"
+                    TextTrimming="CharacterEllipsis" />
+            </StackPanel>
         </DataTemplate>
 
         <DataTemplate x:Key="ComposerNoticeTemplate" x:DataType="vm:NoticeItem">
