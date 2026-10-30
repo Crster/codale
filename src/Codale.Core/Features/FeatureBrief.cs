@@ -37,24 +37,38 @@ public static class FeatureBrief
         "earlier conversations. You get the feature's name, its summary, the progress since that summary, the files " +
         "written for it, and the code a search found for the request.\n" +
         "\n" +
-        "Write the briefing the agent reads before it starts: only what bears on the request, so it can begin " +
-        "without re-reading the history or searching the codebase from scratch.\n" +
+        "Generate a very short handoff focused on the new user request. Before writing it:\n" +
+        "1. Read <request> to identify the feature behavior or change the user means.\n" +
+        "2. Scan the summary and previous history for that behavior. Within each conversation, align each user " +
+        "request with the agent responses that follow it, up to the next user request. Never attach a response " +
+        "to another request or conversation.\n" +
+        "3. Collect a small working cache of relevant facts from those exchanges: what the feature does, what " +
+        "was actually completed, applicable constraints, and exact file locations. Reconcile it with the summary " +
+        "and code search results; newer evidence supersedes older claims. Use this cache to write the handoff, " +
+        "but do not output the cache or your reasoning.\n" +
         "\n" +
-        "Output: Markdown with these headings, in this order, leaving out any with nothing under it:\n" +
-        "## Relevant background\n## Decisions & constraints\n## Where to look\n## Suggested first steps\n## Open questions\n" +
+        "Output: Markdown with exactly these three headings, in this order:\n" +
+        "## What it is\nOne short sentence describing the feature behavior relevant to <request>.\n" +
+        "## Done\nOne or two short bullets stating what earlier work completed for <request>, with verification " +
+        "only when recorded. Include a remaining issue or constraint only if it affects this request.\n" +
+        "## Where to look\nA narrow list of 1-4 exact files to start reading or editing, most useful first.\n" +
         "\n" +
         "Rules:\n" +
-        "- Be concrete: exact file paths with line numbers (path:line), names, commands, settings and error messages.\n" +
-        "- Under Where to look, list the few places the request will touch and why, most important first.\n" +
-        "- Say what earlier work finished and verified, and what was left planned or broken, when it matters here.\n" +
-        "- Keep the user's stated preferences and constraints for the feature.\n" +
+        "- Keep the current file-list format: - `path:line` - brief reason to start there. Preserve supplied line " +
+        "ranges as `path:start-end` when useful; if no line is known, use only the exact path.\n" +
+        "- List only file paths and line numbers present in the input. Prefer the implementation entry point " +
+        "and directly related edit locations; omit broad directories, file inventories and speculative files. " +
+        "If no exact file is supported, say 'No exact file identified.' instead of guessing.\n" +
+        "- Distinguish completed work from requests, proposals and unfinished work; do not treat a request as " +
+        "evidence it was implemented. Keep only user preferences and constraints that affect <request>.\n" +
         "- The progress may hold several conversations, one block each: keep each reply with its own request. Work in a " +
         "conversation marked still running or never finished is in progress, not done. When <other_chats> lists a chat " +
-        "working now, name what it is doing under Open questions and steer clear of its files unless the request needs them.\n" +
+        "working now on this request, briefly mark that work as in progress under Done and flag overlapping files.\n" +
         "- Include a fact or file only if it directly helps with <request>; omit unrelated feature history, even recent work. " +
-        "If nothing is relevant, say so briefly. Do not reproduce file contents, code snippets, command output, or tool output.\n" +
-        "- At most 40 lines.\n" +
-        "- Brief; never carry out, answer or plan beyond first steps for the request.\n" +
+        "If no relevant completed work is recorded, say so under Done. Do not reproduce file contents, code snippets, " +
+        "command output, tool output or the conversation.\n" +
+        "- At most 180 words and 18 lines total. No extra sections, preamble, action plan or open-question list.\n" +
+        "- Summarise the relevant context; never carry out or answer the request.\n" +
         PromptRules.DataOnly + "\n" +
         PromptRules.ResultOnly;
 
