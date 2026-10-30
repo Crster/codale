@@ -289,72 +289,87 @@ public sealed partial class CodeEditor : UserControl
 
     public CodeEditor()
     {
-        InitializeComponent();
-
-        _vBar = new OverlayScrollBar(vertical: true);
-        _hBar = new OverlayScrollBar(vertical: false);
-        RootGrid.Children.Add(_vBar);
-        RootGrid.Children.Add(_hBar);
-        _vBar.ValueChanged += (_, value) => _scroll.ChangeView(null, value);
-        _hBar.ValueChanged += (_, value) => _scroll.ChangeView(value, null);
-        _vBar.WheelScrolled += OnPointerWheelChanged;
-        _vBar.MarkClicked += OnScrollMarkClicked;
-        _hBar.WheelScrolled += OnPointerWheelChanged;
-        _scroll.Changed += OnViewChanged;
-
-        RefreshThemeColors();
-        ActualThemeChanged += (_, _) =>
+        var phase = "XAML content";
+        try
         {
+            InitializeComponent();
+
+            phase = "scrollbars";
+            _vBar = new OverlayScrollBar(vertical: true);
+            _hBar = new OverlayScrollBar(vertical: false);
+            RootGrid.Children.Add(_vBar);
+            RootGrid.Children.Add(_hBar);
+            _vBar.ValueChanged += (_, value) => _scroll.ChangeView(null, value);
+            _hBar.ValueChanged += (_, value) => _scroll.ChangeView(value, null);
+            _vBar.WheelScrolled += OnPointerWheelChanged;
+            _vBar.MarkClicked += OnScrollMarkClicked;
+            _hBar.WheelScrolled += OnPointerWheelChanged;
+            _scroll.Changed += OnViewChanged;
+
+            phase = "theme resources";
             RefreshThemeColors();
-            if (_caretBrush is { } caret)
+            ActualThemeChanged += (_, _) =>
             {
-                caret.Color = _caretColor;
-            }
+                RefreshThemeColors();
+                if (_caretBrush is { } caret)
+                {
+                    caret.Color = _caretColor;
+                }
 
-            ClearLayouts();
-            InvalidateAll();
-        };
+                ClearLayouts();
+                InvalidateAll();
+            };
 
-        _caretTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
-        _caretTimer.Interval = TimeSpan.FromMilliseconds(530);
-        _caretTimer.Tick += (_, _) =>
+            _caretTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
+            _caretTimer.Interval = TimeSpan.FromMilliseconds(530);
+            _caretTimer.Tick += (_, _) =>
+            {
+                // The blink redraws the caret layer only: a full viewport repaint twice a
+                // second while the editor sits idle was pure burn.
+                _caretVisible = !_caretVisible;
+                CaretCanvas.Invalidate();
+            };
+
+            GotFocus += (_, _) =>
+            {
+                _caretVisible = true;
+                InvalidateAll();
+                _caretTimer.Start();
+            };
+            LostFocus += (_, _) =>
+            {
+                _caretTimer.Stop();
+                _caretVisible = false;
+                InvalidateAll();
+            };
+            LosingFocus += OnEditorLosingFocus;
+
+            // Tunnelling: the focus system takes Tab before a bubbling KeyDown fires.
+            PreviewKeyDown += OnEditorKeyDown;
+            CharacterReceived += OnEditorCharacterReceived;
+            phase = "completion";
+            InitCompletion();
+
+            // FontSize changes (zoom, or XAML styling) re-measure everything.
+            RegisterPropertyChangedCallback(FontSizeProperty, (_, _) => OnFontMetricsChanged());
+
+            // Settings own the defaults; zoom still overrides per tab until the next
+            // ApplyAppSettings. EditorTab must not set FontSize in XAML, or it would
+            // overwrite this.
+            phase = "font and settings";
+            _settingsFontSize = Math.Clamp(AppSettings.EditorFontSize, MinFontSize, MaxFontSize);
+            FontSize = _settingsFontSize;
+            ShowLineNumbers = AppSettings.EditorLineNumbers;
+            EnableSyntaxHighlighting = AppSettings.EditorHighlighting;
+            WordWrap = AppSettings.EditorWordWrap;
+        }
+        catch (Exception ex)
         {
-            // The blink redraws the caret layer only: a full viewport repaint twice a
-            // second while the editor sits idle was pure burn.
-            _caretVisible = !_caretVisible;
-            CaretCanvas.Invalidate();
-        };
-
-        GotFocus += (_, _) =>
-        {
-            _caretVisible = true;
-            InvalidateAll();
-            _caretTimer.Start();
-        };
-        LostFocus += (_, _) =>
-        {
-            _caretTimer.Stop();
-            _caretVisible = false;
-            InvalidateAll();
-        };
-        LosingFocus += OnEditorLosingFocus;
-
-        // Tunnelling: the focus system takes Tab before a bubbling KeyDown fires.
-        PreviewKeyDown += OnEditorKeyDown;
-        CharacterReceived += OnEditorCharacterReceived;
-        InitCompletion();
-
-        // FontSize changes (zoom, or XAML styling) re-measure everything.
-        RegisterPropertyChangedCallback(FontSizeProperty, (_, _) => OnFontMetricsChanged());
-
-        // Settings own the defaults; zoom still overrides per tab until the next
-        // ApplyAppSettings. EditorTab must not set FontSize in XAML, or it would
-        // overwrite this.
-        _settingsFontSize = Math.Clamp(AppSettings.EditorFontSize, MinFontSize, MaxFontSize);
-        FontSize = _settingsFontSize;
-        ShowLineNumbers = AppSettings.EditorLineNumbers;
-        EnableSyntaxHighlighting = AppSettings.EditorHighlighting;
-        WordWrap = AppSettings.EditorWordWrap;
+            // LoadComponent replaces constructor failures with a generic XamlParseException.
+            // Preserve the original exception before it crosses that WinRT boundary.
+            CrashLog.Error("editor", $"CodeEditor initialization failed during {phase}", ex);
+            throw;
+        }
     }
 
     // ------------------------------------------------------------------ public surface
@@ -1605,60 +1620,13 @@ public sealed partial class CodeEditor : UserControl
         }
         else
         {
-            // Three lines per notch, the classic amount - eased toward rather than jumped to,
-            // so a notch glides over a few frames instead of snapping a whole step in one.
-            var from = _wheelTarget ?? _verticalOffset;
-            _wheelTarget = Math.Clamp(from - delta * 3 * _lineHeight / 120, 0, _scroll.ScrollableHeight);
-            StartWheelGlide();
+            // Apply the full delta immediately. CanvasControl coalesces invalidations;
+            // animating each notch instead added latency and repainted the viewport
+            // (and its overlays) repeatedly after input had already stopped.
+            _scroll.ChangeView(null, _verticalOffset - delta * 3 * _lineHeight / 120);
         }
 
         e.Handled = true;
-    }
-
-    private double? _wheelTarget;
-    private double _wheelLast;
-    private bool _wheelGliding;
-
-    private void StartWheelGlide()
-    {
-        if (_wheelGliding)
-        {
-            return;
-        }
-
-        _wheelGliding = true;
-        _wheelLast = _verticalOffset;
-        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnWheelGlideFrame;
-    }
-
-    private void StopWheelGlide()
-    {
-        _wheelTarget = null;
-        if (_wheelGliding)
-        {
-            _wheelGliding = false;
-            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnWheelGlideFrame;
-        }
-    }
-
-    private void OnWheelGlideFrame(object? sender, object e)
-    {
-        // Something else moved the view (scrollbar, go-to-line, search): let it win.
-        if (_wheelTarget is not { } target || Math.Abs(_scroll.VerticalOffset - _wheelLast) > 0.01)
-        {
-            StopWheelGlide();
-            return;
-        }
-
-        var gap = target - _scroll.VerticalOffset;
-        var next = Math.Abs(gap) < 0.5 ? target : _scroll.VerticalOffset + gap * 0.32;
-        _scroll.ChangeView(null, next);
-        _wheelLast = _scroll.VerticalOffset;
-
-        if (next == target || _scroll.VerticalOffset == _wheelLast && Math.Abs(target - _wheelLast) < 0.5)
-        {
-            StopWheelGlide();
-        }
     }
 
     private DocumentPosition PointToDocumentPosition(Windows.Foundation.Point point)

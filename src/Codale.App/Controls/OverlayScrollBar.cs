@@ -15,7 +15,7 @@ namespace Codale.App.Controls;
 public delegate void WheelHandler(object sender, PointerRoutedEventArgs e);
 
 /// <summary>
-/// <paramref name="Lane"/> 0 and 1 are the two side-by-side lanes; 2 spans both, for the caret.
+/// <paramref name="Lane"/> 0 and 1 are the two side-by-side lanes; 2 is a small caret bar across their centre.
 /// <paramref name="Line"/> and <paramref name="Column"/> say where a click on the mark goes; -1 for nowhere.
 /// </summary>
 public readonly record struct ScrollMark(double Start, double End, Windows.UI.Color Color, int Lane, int Line = -1, int Column = 0);
@@ -86,10 +86,10 @@ internal sealed class ScrollModel
 }
 
 /// <summary>
-/// A thin scrollbar drawn on top of its content. It stays invisible until the pointer
-/// reaches it or the content scrolls, then fades out again a moment later. It owns no
+/// A viewport bar drawn on top of its content. It stays visible at rest and brightens
+/// when hovered or scrolled. The bare track never changes the view. It owns no
 /// scroll state: the host feeds it <see cref="Update"/> and listens for
-/// <see cref="ValueChanged"/> when the user drags or clicks the track.
+/// <see cref="ValueChanged"/> when the user drags the viewport bar.
 /// </summary>
 public sealed class OverlayScrollBar : Grid
 {
@@ -101,6 +101,7 @@ public sealed class OverlayScrollBar : Grid
 
     private readonly bool _vertical;
     private readonly Border _thumb;
+    private readonly TranslateTransform _thumbPosition = new();
     private readonly CanvasControl _marksCanvas;
     private readonly DispatcherQueueTimer _hideTimer;
     private IReadOnlyList<ScrollMark> _marks = [];
@@ -111,6 +112,10 @@ public sealed class OverlayScrollBar : Grid
     private bool _hovering;
     private bool _dragging;
     private double _grabOffset;
+    private ScrollMark? _pressMark;
+    private double _pressAxis;
+
+    private const double ClickSlop = 3;
 
     public OverlayScrollBar(bool vertical)
     {
@@ -130,20 +135,23 @@ public sealed class OverlayScrollBar : Grid
 
         _marksCanvas = new CanvasControl { IsHitTestVisible = false };
         _marksCanvas.Draw += OnMarksDraw;
-        Children.Add(_marksCanvas);
 
         _thumb = new Border
         {
             IsHitTestVisible = false,
-            CornerRadius = new CornerRadius(3),
+            CornerRadius = new CornerRadius(1),
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Top,
 
-            // Only the thumb fades when idle; the colour marks on the track stay put.
+            RenderTransform = _thumbPosition,
+            // Hidden at rest; shown on hover or scroll.
+            // No OpacityTransition: WinUI forbids it on an element that already uses RenderTransform.
             Opacity = 0,
-            OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(150) },
         };
         Children.Add(_thumb);
+
+        // Added last so the marks draw over the viewport bar instead of being dimmed by it.
+        Children.Add(_marksCanvas);
 
         _hideTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
         _hideTimer.Interval = HideDelay;
@@ -237,18 +245,20 @@ public sealed class OverlayScrollBar : Grid
         var length = ThumbLength();
         var travel = Math.Max(0, Track - Inset * 2 - length);
         var position = Inset + (_maximum > 0 ? Math.Clamp(_value / _maximum, 0, 1) * travel : 0);
-        var across = Thickness - Inset * 2 - 2;
+        var across = Thickness - Inset * 2;
         if (_vertical)
         {
-            _thumb.Width = across;
-            _thumb.Height = length;
-            _thumb.Margin = new Thickness(Inset + 1, position, 0, 0);
+            if (_thumb.Width != across) _thumb.Width = across;
+            if (_thumb.Height != length) _thumb.Height = length;
+            _thumbPosition.X = Inset;
+            _thumbPosition.Y = position;
         }
         else
         {
-            _thumb.Width = length;
-            _thumb.Height = across;
-            _thumb.Margin = new Thickness(position, Inset + 1, 0, 0);
+            if (_thumb.Width != length) _thumb.Width = length;
+            if (_thumb.Height != across) _thumb.Height = across;
+            _thumbPosition.X = position;
+            _thumbPosition.Y = Inset;
         }
     }
 
@@ -279,9 +289,9 @@ public sealed class OverlayScrollBar : Grid
         foreach (var mark in _marks)
         {
             var top = (float)(Inset + Math.Clamp(mark.Start, 0, 1) * track);
-            var height = Math.Max(2f, (float)((Math.Clamp(mark.End, 0, 1) - Math.Clamp(mark.Start, 0, 1)) * track));
-            var left = mark.Lane == 1 ? 6.5f : 1.5f;
-            var width = mark.Lane == 2 ? laneWidth * 2 + 1 : laneWidth;
+            var height = mark.Lane == 2 ? 2f : Math.Max(2f, (float)((Math.Clamp(mark.End, 0, 1) - Math.Clamp(mark.Start, 0, 1)) * track));
+            var left = mark.Lane == 2 ? 3f : mark.Lane == 1 ? 6.5f : 1.5f;
+            var width = mark.Lane == 2 ? 6f : laneWidth;
             args.DrawingSession.FillRectangle(left, top, width, height, mark.Color);
         }
     }
@@ -315,8 +325,7 @@ public sealed class OverlayScrollBar : Grid
 
     private bool OnThumb(double axis)
     {
-        var margin = _thumb.Margin;
-        var start = _vertical ? margin.Top : margin.Left;
+        var start = _vertical ? _thumbPosition.Y : _thumbPosition.X;
         return axis >= start && axis <= start + ThumbLength();
     }
 
@@ -339,7 +348,7 @@ public sealed class OverlayScrollBar : Grid
             }
 
             var top = Inset + Math.Clamp(mark.Start, 0, 1) * track;
-            var bottom = top + Math.Max(2, (Math.Clamp(mark.End, 0, 1) - Math.Clamp(mark.Start, 0, 1)) * track);
+            var bottom = top + (mark.Lane == 2 ? 2 : Math.Max(2, (Math.Clamp(mark.End, 0, 1) - Math.Clamp(mark.Start, 0, 1)) * track));
             if (axis < top - 3 || axis > bottom + 3)
             {
                 continue;
@@ -364,31 +373,34 @@ public sealed class OverlayScrollBar : Grid
         }
 
         var axis = AxisOf(e);
-        var length = ThumbLength();
-        var margin = _thumb.Margin;
-        var start = _vertical ? margin.Top : margin.Left;
-        if (!OnThumb(axis) && MarkAt(axis) is { } mark)
+        if (!OnThumb(axis))
         {
-            // A mark is a place to go, not a spot on the track to scroll to.
-            MarkClicked?.Invoke(this, mark);
+            if (MarkAt(axis) is { } mark)
+            {
+                MarkClicked?.Invoke(this, mark);
+                e.Handled = true;
+                return;
+            }
+
+            // Empty track: jump so the thumb centres on the click, then keep dragging from there.
+            _grabOffset = ThumbLength() / 2;
+            _pressMark = null;
+            _dragging = CapturePointer(e.Pointer);
+            ApplyThumbColor();
+            MoveTo(axis);
             e.Handled = true;
             return;
         }
 
-        if (OnThumb(axis))
-        {
-            _grabOffset = axis - start;
-        }
-        else
-        {
-            // A click on the track centres the thumb there, then carries on as a drag.
-            _grabOffset = length / 2;
-        }
+        var start = _vertical ? _thumbPosition.Y : _thumbPosition.X;
+        _grabOffset = axis - start;
 
-        _dragging = true;
-        CapturePointer(e.Pointer);
+        // A mark under the thumb (the caret, usually) is a click target too: it fires on
+        // release unless the pointer moves, in which case this was a thumb drag after all.
+        _pressMark = MarkAt(axis);
+        _pressAxis = axis;
+        _dragging = CapturePointer(e.Pointer);
         ApplyThumbColor();
-        MoveTo(axis);
         e.Handled = true;
     }
 
@@ -396,7 +408,17 @@ public sealed class OverlayScrollBar : Grid
     {
         if (_dragging)
         {
-            MoveTo(AxisOf(e));
+            var current = AxisOf(e);
+            if (_pressMark is not null && Math.Abs(current - _pressAxis) > ClickSlop)
+            {
+                _pressMark = null;
+            }
+
+            if (_pressMark is null)
+            {
+                MoveTo(current);
+            }
+
             e.Handled = true;
             return;
         }
@@ -408,8 +430,19 @@ public sealed class OverlayScrollBar : Grid
 
     private void OnPointerReleased(object sender, PointerRoutedEventArgs e)
     {
+        if (!_dragging)
+        {
+            return;
+        }
+
+        var clicked = _pressMark;
         ReleasePointerCapture(e.Pointer);
         EndDrag();
+        if (clicked is { } mark)
+        {
+            MarkClicked?.Invoke(this, mark);
+        }
+
         e.Handled = true;
     }
 
@@ -423,6 +456,7 @@ public sealed class OverlayScrollBar : Grid
         }
 
         _dragging = false;
+        _pressMark = null;
         ApplyThumbColor();
         _hideTimer.Stop();
         _hideTimer.Start();
