@@ -382,8 +382,7 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
     {
         // Spaces carry no meaning in a fuzzy pattern; the characters just have to follow in order.
         var pattern = query.Replace('\\', '/').ToLowerInvariant().Replace(" ", "");
-        var whole = pattern;
-        var matches = new List<(string Path, string Directory, bool NameHit)>();
+        var matches = new List<(string Path, string Directory, int Rank)>();
         var options = new EnumerationOptions
         {
             AttributesToSkip = 0,
@@ -434,21 +433,28 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
                     }
 
                     var relative = Path.GetRelativePath(root, entry.FullName).Replace('\\', '/');
-                    var lower = relative.ToLowerInvariant();
-                    if (!IsFuzzyMatch(lower, pattern))
+                    var name = entry.Name.ToLowerInvariant();
+
+                    // Scattered characters only count inside the file name; across a whole
+                    // path they match nearly anything ("cartoon" in a long folder chain).
+                    var rank = ContainsWild(name, pattern) ? 0
+                        : IsFuzzyMatch(name, pattern) ? 1
+                        : ContainsWild(relative.ToLowerInvariant(), pattern) ? 2
+                        : -1;
+                    if (rank < 0)
                     {
                         continue;
                     }
 
                     var slash = relative.LastIndexOf('/');
                     var directory = slash > 0 ? relative[..slash] : "";
-                    matches.Add((entry.FullName, directory, IsFuzzyMatch(entry.Name.ToLowerInvariant(), whole)));
+                    matches.Add((entry.FullName, directory, rank));
                 }
             }
         }
 
         return matches
-            .OrderBy(m => m.NameHit ? 0 : 1)
+            .OrderBy(m => m.Rank)
             .ThenBy(m => Path.GetFileName(m.Path), StringComparer.OrdinalIgnoreCase)
             .ThenBy(m => m.Path, StringComparer.OrdinalIgnoreCase)
             .Take(MaxSearchResults)
@@ -456,12 +462,24 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
             .ToList();
     }
 
-    /// <summary>Sublime-style: every pattern character appears in the text, in order, not necessarily adjacent.</summary>
+    /// <summary>Every pattern character appears in the text, in order, not necessarily adjacent; used on file names only. '?' matches any single character.</summary>
     private static bool IsFuzzyMatch(string text, string pattern)
     {
         var at = 0;
         foreach (var c in pattern)
         {
+            if (c == '?')
+            {
+                // Any single character.
+                if (at >= text.Length)
+                {
+                    return false;
+                }
+
+                at++;
+                continue;
+            }
+
             at = text.IndexOf(c, at);
             if (at < 0)
             {
@@ -472,6 +490,31 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
         }
 
         return true;
+    }
+
+    /// <summary>True when the pattern appears in the text as one unbroken run, where '?' stands for any single character.</summary>
+    private static bool ContainsWild(string text, string pattern)
+    {
+        if (!pattern.Contains('?'))
+        {
+            return text.Contains(pattern, StringComparison.Ordinal);
+        }
+
+        for (var start = 0; start + pattern.Length <= text.Length; start++)
+        {
+            var i = 0;
+            while (i < pattern.Length && (pattern[i] == '?' || pattern[i] == text[start + i]))
+            {
+                i++;
+            }
+
+            if (i == pattern.Length)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsIgnoredDirectory(string fullPath, GitStatusMap? map, string? mapRoot)

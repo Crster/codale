@@ -109,7 +109,7 @@ public static class ShellCommandAnalyzer
         RegexOptions.Compiled);
 
     /// <summary>Every rule the command matches, most severe first.</summary>
-    public static IReadOnlyList<ShellFinding> Analyze(string command, string? cwd = null)
+    public static IReadOnlyList<ShellFinding> Analyze(string command, string? cwd = null, IReadOnlyList<string>? extraRoots = null)
     {
         var findings = new List<ShellFinding>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -122,7 +122,7 @@ public static class ShellCommandAnalyzer
                     continue;
                 }
 
-                if (rule.RequiresOutsideCwd && !IsOutside(segment, cwd))
+                if (rule.RequiresOutsideCwd && !IsOutside(segment, cwd, extraRoots))
                 {
                     continue;
                 }
@@ -146,17 +146,17 @@ public static class ShellCommandAnalyzer
     /// uses <paramref name="hint"/> when it is a real description (not a raw command or program list),
     /// otherwise synthesizes a concise human-readable description from the command's segments.
     /// </summary>
-    public static ShellAssessment Assess(string command, string? cwd = null, string? hint = null)
+    public static ShellAssessment Assess(string command, string? cwd = null, string? hint = null, IReadOnlyList<string>? extraRoots = null)
     {
         var trimmed = command.Trim();
-        if (Cache.TryGetValue((trimmed, cwd ?? ""), out var cached))
+        if (Cache.TryGetValue((trimmed, CacheScope(cwd, extraRoots)), out var cached))
         {
             return !string.IsNullOrWhiteSpace(hint) && IsMeaningfulHint(hint, trimmed) && string.IsNullOrWhiteSpace(cached.Description)
                 ? cached with { Description = CleanSentence(hint, MaxDescriptionChars) }
                 : cached;
         }
 
-        var findings = Analyze(trimmed, cwd);
+        var findings = Analyze(trimmed, cwd, extraRoots);
         var risk = Verdict(findings);
         var reason = findings.Count > 0
             ? string.Join("; ", findings.Select(f => f.Reason).Distinct())
@@ -178,16 +178,17 @@ public static class ShellCommandAnalyzer
         string command,
         string? cwd = null,
         string? hint = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        IReadOnlyList<string>? extraRoots = null)
     {
         var trimmed = command.Trim();
-        var baseline = Assess(trimmed, cwd, hint);
+        var baseline = Assess(trimmed, cwd, hint, extraRoots);
         if (trimmed.Length == 0 || model is not { IsAvailable: true })
         {
             return baseline;
         }
 
-        var key = (trimmed, cwd ?? "");
+        var key = (trimmed, CacheScope(cwd, extraRoots));
         if (Cache.TryGetValue(key, out var cached))
         {
             return cached;
@@ -195,7 +196,7 @@ public static class ShellCommandAnalyzer
 
         try
         {
-            var findings = Analyze(trimmed, cwd);
+            var findings = Analyze(trimmed, cwd, extraRoots);
             var conversation = BuildConversation(trimmed, cwd, hint, findings);
             var call = await model.CallToolAsync(AssessSystemPrompt, conversation, [AssessTool], ct).ConfigureAwait(false);
             if (call is not { Tool: "assess_command" })
@@ -382,8 +383,8 @@ public static class ShellCommandAnalyzer
         return [.. segments.Select(s => s.Trim()).Where(s => s.Length > 0)];
     }
 
-    /// <summary>True when the segment names a path that is not inside <paramref name="cwd"/> (or any absolute path when there is none).</summary>
-    private static bool IsOutside(string segment, string? cwd)
+    /// <summary>True when the segment names a path that is not inside <paramref name="cwd"/> or an extra root (or any absolute path when there is no cwd).</summary>
+    private static bool IsOutside(string segment, string? cwd, IReadOnlyList<string>? extraRoots = null)
     {
         foreach (Match match in AbsolutePath.Matches(segment))
         {
@@ -393,7 +394,8 @@ public static class ShellCommandAnalyzer
                 return true;
             }
 
-            if (!IsInside(Normalize(path), Normalize(cwd)))
+            var normalized = Normalize(path);
+            if (!IsInside(normalized, Normalize(cwd)) && !(extraRoots?.Any(root => IsInside(normalized, Normalize(root))) ?? false))
             {
                 return true;
             }
@@ -413,6 +415,10 @@ public static class ShellCommandAnalyzer
 
         return text;
     }
+
+    /// <summary>Verdicts depend on the folders the agent may work in, so they are cached per folder set.</summary>
+    private static string CacheScope(string? cwd, IReadOnlyList<string>? extraRoots) =>
+        extraRoots is { Count: > 0 } ? $"{cwd}|{string.Join('|', extraRoots)}" : cwd ?? "";
 
     private static bool IsInside(string path, string root) =>
         path.Equals(root, StringComparison.OrdinalIgnoreCase) ||

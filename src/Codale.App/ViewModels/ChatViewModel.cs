@@ -103,6 +103,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Extra folders granted to the agent next to the project; null grants none.</summary>
     public WorkspaceFolders? ExtraFolders { get; init; }
 
+    /// <summary>The added folders as shell-risk roots: commands there are not "outside the working directory".</summary>
+    private IReadOnlyList<string> ExtraRoots => ExtraFolders?.Folders ?? [];
+
+    /// <summary>The added folders the running Claude CLI was started with; it only reads --add-dir at spawn.</summary>
+    private IReadOnlyList<string> _connectedFolders = [];
+
     /// <summary>
     /// The CLI this chat's panel session runs: "claude" (the default) or "codex",
     /// picked by the button that opened the chat ("Claude chat" / "Codex chat").
@@ -1237,7 +1243,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         var cwd = WorktreePath ?? _projectPath;
         var hint = task.Description;
-        var baseline = ShellCommandAnalyzer.Assess(command, cwd, hint);
+        var baseline = ShellCommandAnalyzer.Assess(command, cwd, hint, ExtraRoots);
         if (task.Description.Length == 0 && baseline.Description.Length > 0)
         {
             task.Description = baseline.Description;
@@ -1261,7 +1267,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         try
         {
-            var assessment = await ShellCommandAnalyzer.AssessAsync(model, command, cwd, hint).ConfigureAwait(false);
+            var assessment = await ShellCommandAnalyzer.AssessAsync(model, command, cwd, hint, extraRoots: ExtraRoots).ConfigureAwait(false);
             _dispatcher.TryEnqueue(() =>
             {
                 if (assessment.Description.Length > 0)
@@ -2070,6 +2076,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 CrashLog.Trace($"Connect: endpoint override active for {ProviderName}");
             }
 
+            _connectedFolders = ExtraRoots;
+
             var activeCli = SessionCli;
             var cliExecutable = activeCli.ResolvedPath ?? activeCli.Executable;
             var cliName = $"{activeCli.DisplayName} CLI";
@@ -2092,6 +2100,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     Effort = effort,
                     PermissionMode = permissionMode,
                     McpServers = mcpServers,
+                    // Read per turn, so a folder added mid-session is writable from the next turn.
+                    AdditionalDirectoriesSource = () => ExtraRoots,
                     SystemPromptAppend = mcpServers.Count > 0 ? WithMcpDirective("", mcpServers).Trim() : null,
                     ResumeSessionId = ResumeSessionId,
                     RawLogPath = CrashLog.NewRawLogPath($"{activeCli.Id}-{ResumeSessionId?[..8] ?? "new"}"),
@@ -2102,7 +2112,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 {
                     WorkingDirectory = workingDirectory,
                     Executable = cliExecutable,
-                    AdditionalDirectories = ExtraFolders?.Folders ?? [],
+                    AdditionalDirectories = _connectedFolders,
                     Model = model,
                     Effort = effort,
                     PermissionMode = permissionMode,
@@ -3399,7 +3409,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return new ShellAssessment("", ShellRisk.Caution, "");
         }
 
-        return ShellCommandAnalyzer.Assess(command, WorktreePath ?? _projectPath, hint);
+        return ShellCommandAnalyzer.Assess(command, WorktreePath ?? _projectPath, hint, ExtraRoots);
     }
 
     private async Task UpdateShellApprovalAsync(
@@ -3411,7 +3421,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         try
         {
-            var assessment = await ShellCommandAnalyzer.AssessAsync(model, command, cwd, hint).ConfigureAwait(false);
+            var assessment = await ShellCommandAnalyzer.AssessAsync(model, command, cwd, hint, extraRoots: ExtraRoots).ConfigureAwait(false);
             _dispatcher.TryEnqueue(() =>
             {
                 if (assessment.Description.Length > 0)
@@ -4068,6 +4078,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             SetAsidePendingPlan();
             await SteerTurnAsync(running, text, attachments);
             return;
+        }
+
+        // Claude reads --add-dir only at spawn, so a folder added or removed since then
+        // restarts the CLI (resuming the same conversation) before this turn goes out.
+        // Codex takes its folders with every turn and needs no restart.
+        if (!IsCodexSession && _session is not null && !_connectedFolders.SequenceEqual(ExtraRoots, StringComparer.OrdinalIgnoreCase))
+        {
+            await RestartWithCurrentConfigAsync();
         }
 
         // Plan setup can restart the session (for the effort change), so it runs before

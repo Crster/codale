@@ -8,12 +8,14 @@ namespace Codale.App.Services;
 /// <summary>
 /// Folders added to a project beyond its root - a backend next to the frontend that is
 /// open. They show in the Files panel and are granted to the agent with --add-dir, so
-/// its permissions treat them as part of the workspace. Persisted per project and
-/// re-read on every access; a change applies to the next session start.
+/// its permissions treat them as part of the workspace. Deliberately not persisted: they
+/// live for this window only and have to be attached again after Codale reopens. A change
+/// reaches a Claude chat on its next turn (the CLI restarts) and a Codex chat on its next turn.
 /// </summary>
 public sealed class WorkspaceFolders
 {
-    private const string Key = "workspace.extra-folders";
+    private readonly object _gate = new();
+    private readonly List<string> _folders = [];
 
     private readonly CodaleStore _store;
     private readonly string _projectPath;
@@ -27,35 +29,51 @@ public sealed class WorkspaceFolders
     public event EventHandler? Changed;
 
     /// <summary>The added folders that still exist on disk, in the order they were added.</summary>
-    public IReadOnlyList<string> Folders => Read().Where(Directory.Exists).ToList();
+    public IReadOnlyList<string> Folders
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _folders.Where(Directory.Exists).ToList();
+            }
+        }
+    }
 
     /// <summary>False for a folder that is missing, already covered by the project root or another added folder.</summary>
     public bool Add(string path)
     {
         var folder = ProjectPaths.Normalize(path);
-        var current = Read();
 
-        if (!Directory.Exists(folder) || IsCovered(folder, current.Prepend(_projectPath)))
+        lock (_gate)
         {
-            return false;
+            if (!Directory.Exists(folder) || IsCovered(folder, _folders.Prepend(_projectPath)))
+            {
+                return false;
+            }
+
+            // Adding a parent absorbs the folders beneath it.
+            _folders.RemoveAll(existing => IsWithin(existing, folder));
+            _folders.Add(folder);
         }
 
-        // Adding a parent absorbs the folders beneath it.
-        current.RemoveAll(existing => IsWithin(existing, folder));
-        current.Add(folder);
-        Write(current);
+        Changed?.Invoke(this, EventArgs.Empty);
         return true;
     }
 
     public void Remove(string path)
     {
         var folder = ProjectPaths.Normalize(path);
-        var current = Read();
 
-        if (current.RemoveAll(existing => string.Equals(existing, folder, StringComparison.OrdinalIgnoreCase)) > 0)
+        lock (_gate)
         {
-            Write(current);
+            if (_folders.RemoveAll(existing => string.Equals(existing, folder, StringComparison.OrdinalIgnoreCase)) == 0)
+            {
+                return;
+            }
         }
+
+        Changed?.Invoke(this, EventArgs.Empty);
     }
 
     private const string RecentKey = "workspace.recent-cwds";
@@ -93,25 +111,5 @@ public sealed class WorkspaceFolders
     {
         var relative = Path.GetRelativePath(root, path);
         return relative == "." || !(relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative));
-    }
-
-    private List<string> Read()
-    {
-        try
-        {
-            return _store.GetUiState(_projectPath, Key) is { Length: > 0 } json
-                ? JsonSerializer.Deserialize<List<string>>(json) ?? []
-                : [];
-        }
-        catch (JsonException)
-        {
-            return [];
-        }
-    }
-
-    private void Write(List<string> folders)
-    {
-        _store.SetUiState(_projectPath, Key, JsonSerializer.Serialize(folders));
-        Changed?.Invoke(this, EventArgs.Empty);
     }
 }

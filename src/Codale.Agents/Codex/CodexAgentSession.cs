@@ -142,7 +142,7 @@ public sealed class CodexAgentSession : IAgentSession
 
             var (approvalPolicy, sandbox) = CodexSessionOptions.PermissionPolicy(_permissionMode);
             threadParams["approvalPolicy"] = approvalPolicy;
-            threadParams["sandboxPolicy"] = new { type = sandbox };
+            threadParams["sandboxPolicy"] = CodexSessionOptions.SandboxPolicy(sandbox, ExtraFolders());
 
             if (_options.SystemPromptAppend is { Length: > 0 } instructions)
             {
@@ -217,6 +217,22 @@ public sealed class CodexAgentSession : IAgentSession
         var threadId = RequireThread();
 
         var input = new List<object>();
+
+        // codex only knows its working directory; say when other folders are in play.
+        var folders = ExtraFolders();
+        var folderKey = string.Join('|', folders);
+        if (folderKey != _announcedFolders && (folders.Count > 0 || _announcedFolders.Length > 0))
+        {
+            _announcedFolders = folderKey;
+            input.Add(new
+            {
+                type = "text",
+                text = folders.Count > 0
+                    ? $"[Workspace folders you can read and write besides the working directory: {string.Join("; ", folders)}]"
+                    : "[The extra workspace folders mentioned earlier are no longer available.]",
+            });
+        }
+
         if (turn.ProviderText.Length > 0)
         {
             input.Add(new { type = "text", text = turn.ProviderText });
@@ -261,8 +277,13 @@ public sealed class CodexAgentSession : IAgentSession
             ? CodexSessionOptions.AskPolicy
             : CodexSessionOptions.PermissionPolicy(_permissionMode);
         parameters["approvalPolicy"] = approvalPolicy;
-        parameters["sandboxPolicy"] = new { type = sandbox };
+        parameters["sandboxPolicy"] = CodexSessionOptions.SandboxPolicy(sandbox, ExtraFolders());
     }
+
+    private IReadOnlyList<string> ExtraFolders() => _options.AdditionalDirectoriesSource?.Invoke() ?? [];
+
+    /// <summary>The folder set the thread was last told about, so a change is announced once.</summary>
+    private string _announcedFolders = "";
 
     public async Task InterruptAsync(CancellationToken ct = default)
     {

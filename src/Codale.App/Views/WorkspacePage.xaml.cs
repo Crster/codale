@@ -2857,6 +2857,43 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>Rescans the disk, re-reads git, and re-runs the filter if one is up.</summary>
+    /// <summary>
+    /// Adds a folder next to the project: shown in the tree and granted to the Claude and
+    /// Codex agents to read and write. Held in memory only - it is gone when Codale closes.
+    /// </summary>
+    private async void OnFilesAddFolderClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
+            picker.FileTypeFilter.Add("*");
+
+            if (App.Current.MainWindowHandle is { } hwnd)
+            {
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+            }
+
+            if (await picker.PickSingleFolderAsync() is { } folder && ViewModel is { } vm)
+            {
+                if (!vm.ExtraFolders.Add(folder.Path))
+                {
+                    var note = AppDialog.Apply(new ContentDialog
+                    {
+                        XamlRoot = XamlRoot,
+                        Title = "Folder not added",
+                        Content = $"{folder.Path} is already part of the workspace, or no longer exists.",
+                        CloseButtonText = "Close",
+                    }, DialogTone.Warning, AppDialog.Glyphs.Warning);
+                    await note.ShowAsync();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("AddWorkspaceFolder", ex.Message, ex);
+        }
+    }
+
     private async void OnFilesRefreshClick(object sender, RoutedEventArgs e)
     {
         ViewModel.Files.Reload();

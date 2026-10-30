@@ -57,6 +57,22 @@ public sealed record CodexSessionOptions
     /// </summary>
     public static (string ApprovalPolicy, string SandboxType) AskPolicy => ("on-request", "readOnly");
 
+    /// <summary>
+    /// The extra folders the agent may work in next to <see cref="WorkingDirectory"/>, read
+    /// again for every turn - so a folder added mid-session applies without a restart.
+    /// Null means none.
+    /// </summary>
+    public Func<IReadOnlyList<string>>? AdditionalDirectoriesSource { get; init; }
+
+    /// <summary>
+    /// The sandbox policy for a turn. workspaceWrite also lists the extra folders as writable
+    /// roots; read-only already reads the whole disk and full access needs no list.
+    /// </summary>
+    public static object SandboxPolicy(string sandbox, IReadOnlyList<string> writableRoots) =>
+        sandbox == "workspaceWrite" && writableRoots.Count > 0
+            ? new { type = sandbox, writableRoots }
+            : new { type = sandbox };
+
     /// <summary>Standing instructions for the thread (developer instructions), such as how to use the host's MCP tools.</summary>
     public string? SystemPromptAppend { get; init; }
 
