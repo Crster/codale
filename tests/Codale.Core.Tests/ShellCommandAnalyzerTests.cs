@@ -51,6 +51,14 @@ public sealed class ShellCommandAnalyzerTests
             "cd && grep && head && dotnet",
             ShellCommandSummary.Summarize("cd /x/CrsterSite/codale && grep -n \"ViewModel\" src/a.xaml.cs | head -3; dotnet build src/App -p:Platform=x64"));
 
+    [Theory]
+    [InlineData("\"C:\\Users\\test\\pwsh.exe\" -Command 'rg -n pattern src'", "rg")]
+    [InlineData("pwsh -Command \"dotnet test project\"", "dotnet test project")]
+    [InlineData("powershell.exe -c 'Get-Content a | Select-Object -First 5'", "Get-Content && Select-Object")]
+    [InlineData("other.exe -Command 'rg x'", "other.exe -Command 'rg x'")]
+    public void Shell_wrappers_are_removed_from_compact_summaries(string command, string expected) =>
+        Assert.Equal(expected, ShellCommandSummary.Shorten(command));
+
     [Fact]
     public void A_long_chain_is_cut_short() =>
         Assert.Equal("a && b && c && d && e …", ShellCommandSummary.Summarize("a; b; c; d; e; f"));

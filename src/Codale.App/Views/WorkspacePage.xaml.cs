@@ -1473,6 +1473,21 @@ public sealed partial class WorkspacePage : Page
                     ? chat.RunningTasks.LastOrDefault(t => t.Hosted is not null)
                     : null);
 
+            if (task is null && call.IsShellTool)
+            {
+                task = new RunningTaskItem
+                {
+                    ToolUseId = call.ToolUseId,
+                    Kind = RunningTaskKind.Shell,
+                    Title = call.Command,
+                    Header = RunningTaskItem.CommandHeader(call.Command),
+                    Status = call.IsWorking ? RunningTaskStatus.Running
+                        : call.Status == ToolCallStatus.Succeeded ? RunningTaskStatus.Completed : RunningTaskStatus.Failed,
+                };
+                if (call.Output is { Length: > 0 } output)
+                    task.AppendOutput(output);
+            }
+
             if (task is not null)
             {
                 SetPeek(task);

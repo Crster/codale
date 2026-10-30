@@ -112,7 +112,7 @@ public sealed class FeatureLog(string directory, string? chatId = null)
                 break;
 
             case ToolCallCompleted done when _tools.Contains(done.ToolUseId):
-                Append(new { type = "toolDone", id = done.ToolUseId, error = done.IsError, change = done.FileChange, at = DateTimeOffset.Now });
+                Append(new { type = "toolDone", id = done.ToolUseId, error = done.IsError, change = done.FileChange, changes = done.FileChanges, at = DateTimeOffset.Now });
                 break;
         }
     }
@@ -395,6 +395,9 @@ public sealed class FeatureLog(string directory, string? chatId = null)
             IsError = record.Bool("error"),
             FileChange = record.Prop("change") is { ValueKind: JsonValueKind.Object } change
                 ? change.Deserialize<FileChange>(ChangeJson)
+                : null,
+            FileChanges = record.Prop("changes") is { ValueKind: JsonValueKind.Array } changes
+                ? changes.Deserialize<List<FileChange>>(ChangeJson)
                 : null,
         },
         _ => null,

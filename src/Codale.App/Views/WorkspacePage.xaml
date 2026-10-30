@@ -565,6 +565,7 @@
                     <TreeView
                         x:Name="FileTree"
                         Grid.Row="2"
+                        Margin="16,0,0,0"
                         Visibility="{x:Bind ViewModel.Files.IsSearching, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}"
                         CanDragItems="False"
                         Expanding="OnTreeExpanding"
@@ -604,6 +605,15 @@
                             </DataTemplate>
                         </TreeView.ItemTemplate>
                     </TreeView>
+                    <!-- Keep a root-menu target available even when the tree is full. -->
+                    <Border
+                        Grid.Row="2"
+                        Width="24"
+                        Margin="-8,0,0,0"
+                        HorizontalAlignment="Left"
+                        Background="Transparent"
+                        RightTapped="OnTreeRightTapped"
+                        Visibility="{x:Bind ViewModel.Files.IsSearching, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}" />
                     </Grid>
                 </PivotItem>
 

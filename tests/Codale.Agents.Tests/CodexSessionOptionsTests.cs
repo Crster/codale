@@ -19,11 +19,12 @@ public sealed class CodexSessionOptionsTests
     }
 
     [Fact]
-    public void Windows_gets_the_unelevated_sandbox()
+    public void Codex_defaults_to_no_sandbox()
     {
         var tail = string.Join(' ', new CodexSessionOptions { WorkingDirectory = "." }.BuildArguments());
 
-        Assert.Equal(OperatingSystem.IsWindows(), tail.Contains("-c windows.sandbox='unelevated'"));
+        Assert.Contains("-c sandbox_mode='danger-full-access'", tail);
+        Assert.DoesNotContain("windows.sandbox", tail);
     }
 
     [Fact]
@@ -99,13 +100,13 @@ public sealed class CodexSessionOptionsTests
     [Fact]
     public void Permission_modes_map_onto_approval_and_sandbox_policies()
     {
-        Assert.Equal(("untrusted", "workspaceWrite"), CodexSessionOptions.PermissionPolicy("manual"));
-        Assert.Equal(("on-request", "readOnly"), CodexSessionOptions.PermissionPolicy("plan"));
-        Assert.Equal(("on-request", "workspaceWrite"), CodexSessionOptions.PermissionPolicy("acceptEdits"));
-        Assert.Equal(("on-request", "workspaceWrite"), CodexSessionOptions.PermissionPolicy("auto"));
+        Assert.Equal(("untrusted", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("manual"));
+        Assert.Equal(("untrusted", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("plan"));
+        Assert.Equal(("on-request", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("acceptEdits"));
+        Assert.Equal(("on-request", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("auto"));
         Assert.Equal(("never", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("dontAsk"));
         Assert.Equal(("never", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("bypassPermissions"));
-        Assert.Equal(("on-request", "readOnly"), CodexSessionOptions.AskPolicy);
+        Assert.Equal(("untrusted", "dangerFullAccess"), CodexSessionOptions.AskPolicy);
     }
 
     [Fact]
@@ -159,7 +160,7 @@ public sealed class CodexSessionOptionsTests
     [Fact]
     public void Foreign_modes_and_efforts_fall_back_to_the_defaults()
     {
-        Assert.Equal(("on-request", "workspaceWrite"), CodexSessionOptions.PermissionPolicy("yolo"));
+        Assert.Equal(("on-request", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("yolo"));
         Assert.Null(CodexSessionOptions.ClampEffort("max")); // codex has no "max"
         Assert.Equal("high", CodexSessionOptions.ClampEffort("high"));
         Assert.Null(CodexSessionOptions.ClampEffort(null));

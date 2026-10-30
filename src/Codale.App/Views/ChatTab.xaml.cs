@@ -485,11 +485,18 @@ public sealed partial class ChatTab : UserControl
 
             // A subagent, background shell, or started task in the session panel: show its peek.
             if (BackgroundTaskDetector.IsSubagentTool(call.ToolName) ||
-                BackgroundTaskDetector.IsShellTool(call.ToolName) ||
                 call.ToolName.Contains("start_task", StringComparison.OrdinalIgnoreCase))
             {
                 TaskPeekRequested?.Invoke(this, call);
             }
+        }
+    }
+
+    private void OnToolCommandClick(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).Tag is ToolCallItem call)
+        {
+            TaskPeekRequested?.Invoke(this, call);
         }
     }
 

@@ -70,6 +70,8 @@ public sealed record ToolCallStarted : AgentEvent
     public required string ToolName { get; init; }
     public JsonElement Input { get; init; }
     public string? ParentToolUseId { get; init; }
+    /// <summary>Show this foreground command in the session task panel.</summary>
+    public bool TrackAsSessionTask { get; init; }
 }
 
 public sealed record ToolCallCompleted : AgentEvent
@@ -80,6 +82,9 @@ public sealed record ToolCallCompleted : AgentEvent
 
     /// <summary>Present when the tool touched a file — drives the session changes panel.</summary>
     public FileChange? FileChange { get; init; }
+
+    /// <summary>All files touched by a multi-file tool call.</summary>
+    public IReadOnlyList<FileChange>? FileChanges { get; init; }
 
     /// <summary>Images the tool returned (a browser screenshot); the session panel keeps them as artifacts.</summary>
     public IReadOnlyList<ResultImage>? Images { get; init; }

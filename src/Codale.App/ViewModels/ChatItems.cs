@@ -1052,7 +1052,7 @@ public sealed partial class SuggestionOption
 /// One tool call as a timeline step: a tinted icon disc in the kind's colour, a verb
 /// ("Edited", "Ran"), the target (a file, a command, a pattern) and - once it lands -
 /// a diff stat and duration. The body opens for the detail that matters for its kind:
-/// the diff for edits, command and output for shell lines, the question for asks.
+/// the diff for edits, the command for shell approvals, the question for asks.
 /// </summary>
 public sealed partial class ToolCallItem : ChatItem
 {
@@ -1100,6 +1100,8 @@ public sealed partial class ToolCallItem : ChatItem
         }
     }
 
+    public bool ShowShellCommand => ShellCommand is not null && Status == ToolCallStatus.AwaitingApproval;
+
     /// <summary>
     /// The plan an ExitPlanMode call submits for approval, shown in full in the body -
     /// in plan mode this text is the turn's whole deliverable. Null for every other tool.
@@ -1115,7 +1117,7 @@ public sealed partial class ToolCallItem : ChatItem
     public bool HasFiles => Files.Count > 0;
 
     /// <summary>Columns the row's toggle spans: all the way to the meta text unless a file chip sits beside it.</summary>
-    public int ToggleSpan => HasFiles ? 1 : 3;
+    public int ToggleSpan => HasFiles || IsShellTool ? 1 : 3;
 
     public ToolFileRef? PrimaryFile => Files.Count > 0 ? Files[0] : null;
 
@@ -1136,6 +1138,7 @@ public sealed partial class ToolCallItem : ChatItem
     [NotifyPropertyChangedFor(nameof(MetaStatus))]
     [NotifyPropertyChangedFor(nameof(MetaDuration))]
     [NotifyPropertyChangedFor(nameof(ShowOutput))]
+    [NotifyPropertyChangedFor(nameof(ShowShellCommand))]
     public partial ToolCallStatus Status { get; set; } = ToolCallStatus.Running;
 
     /// <summary>True while the call still needs attention: running, or awaiting approval.</summary>
@@ -1255,7 +1258,7 @@ public sealed partial class ToolCallItem : ChatItem
     /// baseline, so the verb and its target stay on the same optical line. The leading
     /// en-space is the gap the old StackPanel spacing provided; empty when not shown.
     /// </summary>
-    public string CodeTarget => CodeTargetVisible ? "\u2002" + Target : "";
+    public string CodeTarget => CodeTargetVisible && !IsShellTool ? "\u2002" + Target : "";
 
     public string ProseTarget => ProseTargetVisible ? "\u2002" + Target : "";
 

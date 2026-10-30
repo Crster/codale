@@ -76,6 +76,29 @@ public sealed class CodexSubagentTests
     }
 
     [Fact]
+    public async Task Collaboration_items_report_spawn_and_completion_without_foreign_notifications()
+    {
+        var session = Session();
+        await session.HandleNotificationAsync("item/completed", Json("""{"threadId":"main","item":{"type":"collabAgentToolCall","id":"spawn","tool":"spawnAgent","prompt":"Inspect tests","receiverThreadIds":["sub-1"],"agentsStates":{"sub-1":{"status":"running"}}}}"""));
+        var events = Drain(session);
+        var agent = Assert.Single(events.OfType<ToolCallStarted>());
+        Assert.Equal(("Agent", "sub-1"), (agent.ToolName, agent.ToolUseId));
+        Assert.Contains(events.OfType<BackgroundTaskChanged>(), e => e.TaskId == "sub-1" && e.Status == null);
+        await session.HandleNotificationAsync("item/completed", Json("""{"threadId":"main","item":{"type":"collabAgentToolCall","id":"wait","tool":"wait","receiverThreadIds":["sub-1"],"agentsStates":{"sub-1":{"status":"completed"}}}}"""));
+        events = Drain(session);
+        Assert.Contains(events.OfType<BackgroundTaskChanged>(), e => e.TaskId == "sub-1" && e.Status == "completed");
+        Assert.Single(events.OfType<ToolCallCompleted>());
+    }
+
+    [Fact]
+    public async Task Main_thread_commands_are_marked_for_the_session_panel()
+    {
+        var session = Session();
+        await session.HandleNotificationAsync("item/started", Json("""{"threadId":"main","item":{"type":"commandExecution","id":"c1","command":"dotnet test"}}"""));
+        Assert.True(Assert.Single(Drain(session).OfType<ToolCallStarted>()).TrackAsSessionTask);
+    }
+
+    [Fact]
     public async Task Stopping_a_subagent_is_refused_for_an_unknown_thread()
     {
         var session = Session();

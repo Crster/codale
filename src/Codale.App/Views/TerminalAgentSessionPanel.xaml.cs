@@ -179,7 +179,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     public bool IsLiveEmpty =>
         Session is not { } s ||
-        s.Todos.Count == 0 && s.RunningTasks.Count == 0 && s.Artifacts.Count == 0 && s.Status.ChangeCount == 0;
+        s.Todos.Count == 0 && s.SortedTasks.Count == 0 && s.Artifacts.Count == 0 && s.Status.ChangeCount == 0;
 
     private CliDescriptor Cli => Session?.TerminalCli ?? CliLocator.ActiveCli;
 
@@ -190,6 +190,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
     // A task starting or finishing reorders the list: keep the running ones in view at the top.
     private void OnSortedTasksChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
     {
+        DispatcherQueue.TryEnqueue(RaiseLive);
         if (Session?.SortedTasks.FirstOrDefault() is { } first)
         {
             DispatcherQueue.TryEnqueue(() => RunningTasksList.ScrollIntoView(first, ScrollIntoViewAlignment.Leading));

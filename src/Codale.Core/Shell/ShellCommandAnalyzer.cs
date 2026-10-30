@@ -484,12 +484,32 @@ public static class ShellCommandSummary
     /// </summary>
     public static string Shorten(string command)
     {
+        command = UnwrapShellCommand(command);
         if (ShellCommandAnalyzer.SplitSegments(command).Count > 1 || IsEveryday(command))
         {
             return Summarize(command);
         }
 
         return command.Trim().ReplaceLineEndings("\n").Split('\n')[0];
+    }
+
+    // Codex reports the shell executable and its -Command argument as the command.
+    // Remove that transport wrapper only for the compact row; the detail retains the original.
+    private static string UnwrapShellCommand(string command)
+    {
+        var match = Regex.Match(command.Trim(),
+            "^(?:\"(?<exe>[^\"]+)\"|(?<exe>\\S+))\\s+-(?:command|c)\\s+(?<body>.*)$",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        if (!match.Success) return command;
+        var executable = match.Groups["exe"].Value.Replace('\\', '/').Split('/').Last();
+        if (!executable.Equals("pwsh.exe", StringComparison.OrdinalIgnoreCase) &&
+            !executable.Equals("pwsh", StringComparison.OrdinalIgnoreCase) &&
+            !executable.Equals("powershell.exe", StringComparison.OrdinalIgnoreCase) &&
+            !executable.Equals("powershell", StringComparison.OrdinalIgnoreCase)) return command;
+        var body = match.Groups["body"].Value.Trim();
+        if (body.Length >= 2 && (body[0] == '\'' && body[^1] == '\'' || body[0] == '\"' && body[^1] == '\"'))
+            body = body[1..^1];
+        return body;
     }
 
     /// <summary>True when every program the command runs is in the everyday <see cref="Vocabulary"/>.</summary>

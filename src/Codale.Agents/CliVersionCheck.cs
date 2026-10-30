@@ -55,10 +55,13 @@ public static partial class CliVersionCheck
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            await using var kill = timeout.Token.Register(() => ProcessUtil.TryKillTree(process));
 
-            var output = await process.StandardOutput.ReadToEndAsync(timeout.Token);
+            var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+            var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
             await process.WaitForExitAsync(timeout.Token);
-            return Parse(output);
+            await errorTask;
+            return Parse(await outputTask);
         }
         catch (Exception ex) when (ex is OperationCanceledException or System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
         {

@@ -167,7 +167,7 @@ public sealed class FeatureService : IDisposable
     {
         var (progress, _) = LogOf(feature.Id).ReadSince(feature.SummaryOffset);
         var seed = FeatureContext.Build(
-            feature, progress, _store.FilesOf(feature.Id, SeedFiles), RelevantCode(feature, message), maxProgressChars,
+            feature, progress.Where(e => e.Role != HandoffRole.Tool).ToList(), _store.FilesOf(feature.Id, SeedFiles), [], maxProgressChars,
             _activity.RunningOn(feature.Id));
 
         return FeatureBrief.OtherChatsSection(OtherChatsOn(feature.Id, chatId)) is { Length: > 0 } others

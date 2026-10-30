@@ -30,7 +30,6 @@ public static class FeatureBrief
     public const int FallbackProgressChars = 24_000;
 
     private const int MaxSeedFiles = 12;
-    private const int SnippetChars = 1_200;
     private const int ReplyTokens = 1500;
 
     public const string SystemPrompt =
@@ -52,7 +51,9 @@ public static class FeatureBrief
         "- The progress may hold several conversations, one block each: keep each reply with its own request. Work in a " +
         "conversation marked still running or never finished is in progress, not done. When <other_chats> lists a chat " +
         "working now, name what it is doing under Open questions and steer clear of its files unless the request needs them.\n" +
-        "- Leave out history that does not bear on the request. At most 40 lines.\n" +
+        "- Include a fact or file only if it directly helps with <request>; omit unrelated feature history, even recent work. " +
+        "If nothing is relevant, say so briefly. Do not reproduce file contents, code snippets, command output, or tool output.\n" +
+        "- At most 40 lines.\n" +
         "- Brief; never carry out, answer or plan beyond first steps for the request.\n" +
         PromptRules.DataOnly + "\n" +
         PromptRules.ResultOnly;
@@ -72,7 +73,8 @@ public static class FeatureBrief
         var text = new StringBuilder();
         text.AppendLine(PromptRules.Tag("feature", featureName));
         text.AppendLine(PromptRules.Tag("summary", summary.Length == 0 ? "(none yet)" : summary.Trim()));
-        text.AppendLine(PromptRules.Tag("progress_since_summary", progress.Count == 0 ? "(none)" : SessionHandoff.Condense(progress, runningChats: running)));
+        var conversation = progress.Where(e => e.Role != HandoffRole.Tool).ToList();
+        text.AppendLine(PromptRules.Tag("progress_since_summary", conversation.Count == 0 ? "(none)" : SessionHandoff.Condense(conversation, runningChats: running)));
         if (writtenFiles.Count > 0)
         {
             text.AppendLine(PromptRules.Tag("files_written", string.Join('\n', writtenFiles)));
@@ -80,7 +82,7 @@ public static class FeatureBrief
 
         if (explored.Count > 0)
         {
-            text.AppendLine(PromptRules.Tag("code_found", DescribeExplored(explored, ExploredInputChars, withSnippets: true)));
+            text.AppendLine(PromptRules.Tag("code_found", DescribeExplored(explored, ExploredInputChars)));
         }
 
         if (otherChats.Count > 0)
@@ -123,13 +125,6 @@ public static class FeatureBrief
         text.AppendLine();
         text.AppendLine(Clip(brief.Trim(), SeedBudgetChars - 1_500));
 
-        if (explored.Count > 0)
-        {
-            text.AppendLine();
-            text.AppendLine("## Files the pre-exploration found");
-            text.Append(DescribeExplored(explored, 1_200, withSnippets: false));
-        }
-
         if (OtherChatsSection(otherChats ?? []) is { Length: > 0 } others)
         {
             text.AppendLine();
@@ -141,7 +136,7 @@ public static class FeatureBrief
 
     /// <summary>The file list the fallback seed gains when the exploration finished but the brief did not.</summary>
     public static string ExploredSection(IReadOnlyList<ExploredFile> explored) =>
-        explored.Count == 0 ? "" : "## Files a search found for the request\n" + DescribeExplored(explored, 1_200, withSnippets: false).TrimEnd();
+        explored.Count == 0 ? "" : "## Files a search found for the request\n" + DescribeExplored(explored, 1_200).TrimEnd();
 
     /// <summary>The brief for a request.</summary>
     public static async Task<string> WriteAsync(
@@ -159,7 +154,7 @@ public static class FeatureBrief
             .ConfigureAwait(false));
 
     /// <summary>One line per file (path:start-end and why), optionally each with its snippet, within <paramref name="budget"/>.</summary>
-    private static string DescribeExplored(IReadOnlyList<ExploredFile> explored, int budget, bool withSnippets)
+    private static string DescribeExplored(IReadOnlyList<ExploredFile> explored, int budget)
     {
         var text = new StringBuilder();
         foreach (var file in explored.Take(MaxSeedFiles))
@@ -168,9 +163,7 @@ public static class FeatureBrief
                 ? ""
                 : ":" + string.Join(",", file.Ranges.Take(3).Select(r => r.End > r.Start ? $"{r.Start}-{r.End}" : $"{r.Start}"));
             var line = $"- `{file.Path}{ranges}`" + (file.Reason.Length > 0 ? $" - {file.Reason}" : "") + "\n";
-            var block = withSnippets && file.Snippet.Length > 0
-                ? line + "```\n" + Clip(file.Snippet.TrimEnd(), SnippetChars) + "\n```\n"
-                : line;
+            var block = line;
 
             if (text.Length + block.Length > budget)
             {

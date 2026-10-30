@@ -356,6 +356,22 @@
                             </TextBlock>
                         </Grid>
                     </Button>
+                    <Button
+                        Grid.Column="1"
+                        Grid.ColumnSpan="2"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        Click="OnToolCommandClick"
+                        Style="{StaticResource ToolFileChip}"
+                        Tag="{x:Bind}"
+                        ToolTipService.ToolTip="{x:Bind Command}"
+                        Visibility="{x:Bind IsShellTool}">
+                        <TextBlock FontFamily="Cascadia Mono, Consolas"
+                                   FontSize="{x:Bind S12_5, Mode=OneWay}"
+                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                   Text="{x:Bind Target, Mode=OneWay}"
+                                   TextTrimming="CharacterEllipsis" />
+                    </Button>
                     <!--  A file target is its own link: edits open their diff, reads open the file.  -->
                     <Button
                         Grid.Column="1"
@@ -414,7 +430,7 @@
                         BorderBrush="{StaticResource DetailStrokeBrush}"
                         BorderThickness="1"
                         CornerRadius="8"
-                        Visibility="{x:Bind ShellCommand, Converter={StaticResource NullToVisibility}}">
+                        Visibility="{x:Bind ShowShellCommand, Mode=OneWay}">
                         <StackPanel>
                             <Grid
                                 Padding="12,6"
@@ -2028,7 +2044,7 @@
         <Border
             Grid.Row="1"
             Margin="0,6,0,0"
-            Padding="14,0,12,0"
+            Padding="12,0,16,0"
             Visibility="{x:Bind ViewModel.IsBusy, Mode=OneWay}">
             <Grid ColumnSpacing="10">
                 <Grid.ColumnDefinitions>

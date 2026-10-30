@@ -316,7 +316,7 @@
                         </Border>
 
                         <!--  Running tasks  -->
-                        <Border Padding="4,4,4,2" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10" Visibility="{x:Bind Session.RunningTasks.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                        <Border Padding="4,4,4,2" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10" Visibility="{x:Bind Session.SortedTasks.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
                             <StackPanel Spacing="2">
                                 <ToggleButton x:Name="RunningTasksSection" IsChecked="True" Style="{StaticResource SectionHeader}">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
@@ -329,7 +329,7 @@
                                             <TextBlock
                                                 FontSize="10"
                                                 Foreground="{StaticResource StatusRunningBrush}"
-                                                Text="{x:Bind Session.RunningTasks.Count, Mode=OneWay}" />
+                                                Text="{x:Bind Session.SortedTasks.Count, Mode=OneWay}" />
                                         </Border>
                                     </StackPanel>
                                 </ToggleButton>

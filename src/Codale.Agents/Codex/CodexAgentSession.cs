@@ -811,6 +811,37 @@ public sealed class CodexAgentSession : IAgentSession
         return (type, JsonSerializer.SerializeToElement(new { type }, WireJson));
     }
 
+    private static List<FileChange> ParseFileChanges(JsonElement? raw)
+    {
+        var result = new List<FileChange>();
+        if (raw is not { } changes) return result;
+        if (changes.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var change in changes.EnumerateArray())
+            {
+                var path = change.Str("path");
+                if (string.IsNullOrWhiteSpace(path)) continue;
+                var kind = change.Prop("kind");
+                var name = kind is { ValueKind: JsonValueKind.String } ? kind.Value.GetString() : kind?.Str("type");
+                result.Add(new FileChange { FilePath = path, Kind = FileChangeKindOf(name) });
+            }
+        }
+        else if (changes.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var change in changes.EnumerateObject())
+                result.Add(new FileChange { FilePath = change.Name, Kind = FileChangeKindOf(change.Value.Str("type")) });
+        }
+        return result;
+    }
+
+    private static FileChangeKind FileChangeKindOf(string? kind) => kind?.ToLowerInvariant() switch
+    {
+        "add" or "create" => FileChangeKind.Create,
+        "delete" or "remove" => FileChangeKind.Delete,
+        "update" or "modify" => FileChangeKind.Update,
+        _ => FileChangeKind.Unknown,
+    };
+
     /// <summary>Projects one app-server notification onto the normalised event stream.</summary>
     internal async Task HandleNotificationAsync(string method, JsonElement message)
     {
@@ -1047,7 +1078,7 @@ public sealed class CodexAgentSession : IAgentSession
                         ? string.Join(' ', parts.EnumerateArray().Select(part => part.GetString() ?? ""))
                         : item.Str("command") ?? "";
                     var input = JsonSerializer.SerializeToElement(new { command, cwd = item.Str("cwd") }, WireJson);
-                    await EmitAsync(parent, new ToolCallStarted { ToolUseId = itemId, ToolName = "Bash", Input = input })
+                    await EmitAsync(parent, new ToolCallStarted { ToolUseId = itemId, ToolName = "Bash", Input = input, TrackAsSessionTask = parent is null })
                         .ConfigureAwait(false);
                 }
                 else
@@ -1067,13 +1098,40 @@ public sealed class CodexAgentSession : IAgentSession
 
                 return;
 
+            case "collabAgentToolCall":
+                if (completed && item.Prop("receiverThreadIds") is { ValueKind: JsonValueKind.Array } receivers)
+                {
+                    var tool = item.Str("tool");
+                    var states = item.Prop("agentsStates");
+                    foreach (var receiver in receivers.EnumerateArray())
+                    {
+                        if (receiver.ValueKind != JsonValueKind.String || receiver.GetString() is not { Length: > 0 } id) continue;
+                        var state = states?.Prop(id);
+                        var status = state?.Str("status");
+                        if (tool == "spawnAgent" || _subagentThreads.Contains(id))
+                        {
+                            var thread = JsonSerializer.SerializeToElement(new { thread = new { name = item.Str("prompt") } }, WireJson);
+                            await ReportSubagentThreadAsync("thread/started", id, thread).ConfigureAwait(false);
+                            if (status is "completed" or "errored" or "interrupted" or "shutdown" or "notFound")
+                            {
+                                var finalStatus = status == "completed" ? "completed" : status is "interrupted" or "shutdown" ? "interrupted" : "failed";
+                                var turn = JsonSerializer.SerializeToElement(new { turn = new { status = finalStatus } }, WireJson);
+                                await ReportSubagentThreadAsync("turn/completed", id, turn).ConfigureAwait(false);
+                            }
+                            else if (status == "running" || status == "pendingInit")
+                            {
+                                await _events.Writer.WriteAsync(new BackgroundTaskChanged(id, id, null)).ConfigureAwait(false);
+                            }
+                        }
+                    }
+                }
+                return;
+
             case "fileChange":
                 if (!completed)
                 {
-                    var paths = item.Prop("changes") is { ValueKind: JsonValueKind.Object } changes
-                        ? changes.EnumerateObject().Select(property => property.Name).ToList()
-                        : [];
-                    var input = JsonSerializer.SerializeToElement(new { paths }, WireJson);
+                    var changes = ParseFileChanges(item.Prop("changes"));
+                    var input = JsonSerializer.SerializeToElement(new { file_path = changes.FirstOrDefault()?.FilePath, paths = changes.Select(c => c.FilePath).ToArray() }, WireJson);
                     await EmitAsync(parent, new ToolCallStarted { ToolUseId = itemId, ToolName = "Edit", Input = input })
                         .ConfigureAwait(false);
                 }
@@ -1082,7 +1140,9 @@ public sealed class CodexAgentSession : IAgentSession
                     await EmitAsync(parent, new ToolCallCompleted
                     {
                         ToolUseId = itemId,
-                        IsError = string.Equals(item.Str("status"), "failed", StringComparison.OrdinalIgnoreCase),
+                        IsError = !string.Equals(item.Str("status"), "completed", StringComparison.OrdinalIgnoreCase),
+                        FileChanges = string.Equals(item.Str("status"), "completed", StringComparison.OrdinalIgnoreCase)
+                            ? ParseFileChanges(item.Prop("changes")) : null,
                     }).ConfigureAwait(false);
                 }
 

@@ -163,6 +163,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     // A task starting or finishing reorders the list: keep the running ones in view at the top.
     private void OnSortedTasksChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
     {
+        OnSessionCollectionChanged(sender, e);
         if (Session?.SortedTasks.FirstOrDefault() is { } first)
         {
             DispatcherQueue.TryEnqueue(() => RunningTasksList.ScrollIntoView(first, ScrollIntoViewAlignment.Leading));
@@ -558,7 +559,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
         var sessions = Workspace.Sessions;
         var conversation = Session.HasConversation;
-        var live = conversation || Session.IsTerminalSession || Session.RunningTasks.Count > 0 || Session.Todos.Count > 0;
+        var live = conversation || Session.IsTerminalSession || Session.SortedTasks.Count > 0 || Session.Todos.Count > 0;
 
         if (conversation != _hadConversation)
         {

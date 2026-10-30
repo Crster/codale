@@ -357,9 +357,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>The same tasks for the session panels: running ones first, newest first within each group.</summary>
     public ObservableCollection<RunningTaskItem> SortedTasks { get; } = [];
 
+    private static readonly TimeSpan TaskCaptureDelay = TimeSpan.FromSeconds(10);
+    private DispatcherQueueTimer? _taskCaptureTimer;
+
     private void ResortTasks()
     {
-        var wanted = RunningTasks.OrderByDescending(t => t.IsRunning).ThenByDescending(t => t.StartedAt).ToList();
+        var now = DateTimeOffset.Now;
+        var wanted = RunningTasks.Where(t => SortedTasks.Contains(t) ||
+                (t.IsRunning && now - t.StartedAt >= TaskCaptureDelay))
+            .OrderByDescending(t => t.IsRunning).ThenByDescending(t => t.StartedAt).ToList();
         for (var i = SortedTasks.Count - 1; i >= 0; i--)
         {
             if (!wanted.Contains(SortedTasks[i]))
@@ -582,6 +588,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             if (e.PropertyName is nameof(RunningTaskItem.Status) or nameof(RunningTaskItem.IsRunning))
             {
+                // A task may finish between timer ticks after crossing the threshold.
+                if (!task.IsRunning && DateTimeOffset.Now - task.StartedAt >= TaskCaptureDelay && !SortedTasks.Contains(task))
+                {
+                    SortedTasks.Add(task);
+                }
                 ResortTasks();
                 NotifySubagents();
                 RefreshTaskStatusLine(task);
@@ -659,7 +670,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 Prompt = prompt.Trim(),
             });
         }
-        else if (BackgroundTaskDetector.IsBackgroundLaunch(started.ToolName, started.Input))
+        else if (started.TrackAsSessionTask || BackgroundTaskDetector.IsBackgroundLaunch(started.ToolName, started.Input))
         {
             AddTask(new RunningTaskItem
             {
@@ -807,7 +818,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 return;
             }
 
-            if (task.IsShell)
+            if (task.IsShell && IsCodexSession && !task.LaunchedInBackground)
+            {
+                task.Status = completed.IsError ? RunningTaskStatus.Failed : RunningTaskStatus.Completed;
+                if (completed.ResultText is { Length: > 0 } output)
+                    task.AppendOutput(output);
+            }
+            else if (task.IsShell)
             {
                 // Completion of a background launch only means it started.
                 var (id, path) = BackgroundTaskDetector.ParseLaunchResult(completed.ResultText);
@@ -1221,6 +1238,20 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         RunningTasks.Add(task);
         ResortTasks();
         WatchTask(task);
+        if (_taskCaptureTimer is null)
+        {
+            _taskCaptureTimer = _dispatcher.CreateTimer();
+            _taskCaptureTimer.Interval = TimeSpan.FromSeconds(1);
+            _taskCaptureTimer.Tick += (_, _) =>
+            {
+                ResortTasks();
+                if (!RunningTasks.Any(t => t.IsRunning && !SortedTasks.Contains(t)))
+                {
+                    _taskCaptureTimer.Stop();
+                }
+            };
+        }
+        _taskCaptureTimer.Start();
         NotifySubagents();
     }
 
@@ -2538,15 +2569,18 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                         RecordImageArtifacts(call, images);
                     }
 
-                    if (completed.FileChange is { } change)
+                    var changes = completed.FileChanges ?? (completed.FileChange is { } single ? [single] : []);
+                    foreach (var change in changes)
                     {
                         // The CLI's own patch beats the input preview: real line numbers.
-                        call.Diff = ToolDiffs.FromChange(change, call.Diff) ?? call.Diff;
+                        var diff = ToolDiffs.FromChange(change, call.Diff);
+                        if (diff is not null && (call.Diff is null || changes.Count == 1))
+                            call.Diff = diff;
 
                         var resolved = change with { FilePath = ResolvePath(change.FilePath) };
                         TrackPlanFile(resolved);
 
-                        _status.RecordFileChange(resolved, call.Diff);
+                        _status.RecordFileChange(resolved, diff);
                         IndexWrittenFile(resolved.FilePath);
                         FilesChanged?.Invoke(this, EventArgs.Empty);
                     }
@@ -3939,6 +3973,20 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        // Codex's app-server does not interpret the interactive CLI's /clear command.
+        // Start a new thread locally so its context and the visible transcript agree.
+        if (IsCodexSession && !IsBusy && attachments.Count == 0 &&
+            text.Equals("/clear", StringComparison.OrdinalIgnoreCase))
+        {
+            Draft = "";
+            var worktreePath = WorktreePath;
+            await DisposeSessionAsync();
+            ResetForNewSession();
+            WorktreePath = worktreePath;
+            await ConnectAsync();
+            return;
+        }
+
         // A mid-turn message belongs to the running prompt; only a fresh one starts a new segment.
         if (!IsBusy)
         {
@@ -4888,6 +4936,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
+        _taskCaptureTimer?.Stop();
         StopTaskHost();
 
         // The session goes first, so a turn cut off by the close is marked as ended before the summary reads the log.

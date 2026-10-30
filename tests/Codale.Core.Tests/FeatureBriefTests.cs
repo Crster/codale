@@ -12,7 +12,7 @@ public sealed class FeatureBriefTests
     public void The_input_fences_everything_as_data_with_the_request_last()
     {
         var input = FeatureBrief.BuildInput(
-            "Uploads", "## Done\nchunked upload works", [new HandoffEntry(HandoffRole.User, "add retries")],
+            "Uploads", "## Done\nchunked upload works", [new HandoffEntry(HandoffRole.User, "add retries"), new HandoffEntry(HandoffRole.Tool, "raw file output")],
             ["src/Upload/Uploader.cs"], [Uploader], "make the retry back off");
 
         Assert.Contains("<feature>\nUploads\n</feature>", input);
@@ -20,7 +20,8 @@ public sealed class FeatureBriefTests
         Assert.Contains("User: add retries", input);
         Assert.Contains("<files_written>", input);
         Assert.Contains("<code_found>", input);
-        Assert.Contains("// retry loop", input);
+        Assert.DoesNotContain("// retry loop", input);
+        Assert.DoesNotContain("raw file output", input);
         Assert.EndsWith("<request>\nmake the retry back off\n</request>", input);
     }
 
@@ -38,8 +39,7 @@ public sealed class FeatureBriefTests
         var seed = FeatureBrief.BuildSeed("Uploads", "## Where to look\n- src/Upload/Uploader.cs:12", [Uploader]);
 
         Assert.StartsWith("# Feature: Uploads", seed);
-        Assert.Contains("## Files the pre-exploration found", seed);
-        Assert.Contains("`src/Upload/Uploader.cs:10-40` - retries the upload", seed);
+        Assert.DoesNotContain("## Files the pre-exploration found", seed);
         Assert.DoesNotContain("// retry loop", seed);
     }
 

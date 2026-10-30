@@ -34,28 +34,18 @@ public sealed record CodexSessionOptions
     public static string ClampPermissionMode(string mode) => Claude.ClaudeSessionOptions.ClampPermissionMode(mode);
 
     /// <summary>
-    /// Codale's permission mode in codex's own vocabulary: an approval policy plus a
-    /// sandbox policy, applied per turn. Manual asks before anything untrusted with
-    /// workspace write access; plan reads only; acceptEdits and auto operate in
-    /// workspaceWrite asking on request; dontAsk and bypassPermissions run without
-    /// asking with dangerFullAccess.
+    /// Codale runs Codex without a sandbox. Manual and plan modes still ask before
+    /// commands; unrestricted modes retain their existing no-approval behavior.
     /// </summary>
     public static (string ApprovalPolicy, string SandboxType) PermissionPolicy(string? mode) => ClampPermissionMode(mode ?? "") switch
     {
-        "manual" => ("untrusted", "workspaceWrite"),
-        "plan" => ("on-request", "readOnly"),
-        "acceptEdits" => ("on-request", "workspaceWrite"),
-        "bypassPermissions" => ("never", "dangerFullAccess"),
-        "dontAsk" => ("never", "dangerFullAccess"),
-        _ => ("on-request", "workspaceWrite"), // auto
+        "manual" or "plan" => ("untrusted", "dangerFullAccess"),
+        "bypassPermissions" or "dontAsk" => ("never", "dangerFullAccess"),
+        _ => ("on-request", "dangerFullAccess"),
     };
 
-    /// <summary>
-    /// An ask turn: the read-only sandbox lets codex read the project unasked (every shell
-    /// command needs approval under "untrusted", and the host denies all of them in ask
-    /// mode), while anything that would write still has to ask - and is denied.
-    /// </summary>
-    public static (string ApprovalPolicy, string SandboxType) AskPolicy => ("on-request", "readOnly");
+    /// <summary>Ask turns request approval for commands, which the host denies in ask mode.</summary>
+    public static (string ApprovalPolicy, string SandboxType) AskPolicy => ("untrusted", "dangerFullAccess");
 
     /// <summary>
     /// The extra folders the agent may work in next to <see cref="WorkingDirectory"/>, read
@@ -143,13 +133,10 @@ public sealed record CodexSessionOptions
             args.Add($"model_context_window={ContextWindow}");
         }
 
-        // Without a Windows sandbox codex cannot enforce readOnly, so it asks before every
-        // command - which ask mode denies. The unelevated one needs no admin setup.
-        if (OperatingSystem.IsWindows())
-        {
-            args.Add("-c");
-            args.Add("windows.sandbox='unelevated'");
-        }
+        // Set the default as well as per-turn policies so new and resumed threads
+        // cannot silently fall back to Codex's configured sandbox.
+        args.Add("-c");
+        args.Add("sandbox_mode='danger-full-access'");
 
         foreach (var (key, value) in McpOverrides(McpServers))
         {

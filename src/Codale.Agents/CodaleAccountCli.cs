@@ -126,6 +126,7 @@ public static class CodaleAccountCli
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(Timeout);
+            await using var kill = timeout.Token.Register(() => ProcessUtil.TryKillTree(process));
 
             // Both pipes are drained while waiting, so a chatty CLI never blocks on a full buffer.
             var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
