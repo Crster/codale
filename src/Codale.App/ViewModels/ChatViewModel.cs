@@ -3472,8 +3472,33 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _ => null,
     };
 
+    /// <summary>Files the user attached this session (picked ones live anywhere on disk); the agent may read them.</summary>
+    private readonly HashSet<string> _attachedPaths = new(StringComparer.OrdinalIgnoreCase);
+
+    private bool IsReadOfAttachedFile(ApprovalRequested approval) =>
+        approval.ToolName == "Read" &&
+        approval.Input.ValueKind == JsonValueKind.Object &&
+        approval.Input.TryGetProperty("file_path", out var path) &&
+        path.ValueKind == JsonValueKind.String &&
+        path.GetString() is { Length: > 0 } file &&
+        _attachedPaths.Contains(Path.GetFullPath(file));
+
     private async Task HandleApprovalCoreAsync(ApprovalRequested approval)
     {
+        // Reading a file the user attached is what they asked for, wherever it lives and
+        // in every mode - it is not an excursion outside the workspace.
+        if (IsReadOfAttachedFile(approval))
+        {
+            CrashLog.Trace($"allowed Read of attached file unasked");
+
+            if (_session is { } reading)
+            {
+                await reading.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
+            }
+
+            return;
+        }
+
         // Codale's own sandboxed tools (explore, the task list...) are essential
         // and harmless; the CLI still asks for them in plan mode, so the host answers yes
         // itself in every mode but Manual, where the user wants to see each call.
@@ -4393,6 +4418,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         Attachments.Add(new ComposerAttachment { Kind = kind.Value, Name = Path.GetFileName(path), Path = path });
+        _attachedPaths.Add(Path.GetFullPath(path));
         return true;
     }
 

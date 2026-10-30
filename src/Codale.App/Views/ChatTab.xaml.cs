@@ -1092,7 +1092,7 @@ public sealed partial class ChatTab : UserControl
         else
         {
             var at = draft.LastIndexOf('@');
-            ViewModel.Draft = at < 0 ? draft : draft[..at] + suggestion.Insert + " ";
+            ViewModel.Draft = at < 0 ? draft : draft[..at] + "@" + suggestion.Insert + " ";
         }
 
         DraftBox.Focus(FocusState.Programmatic);
@@ -1242,9 +1242,18 @@ public sealed partial class ChatTab : UserControl
             WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
         }
 
+        var mentions = new List<string>();
         foreach (var file in await picker.PickMultipleFilesAsync())
         {
-            ViewModel.TryAddAttachment(file.Path);
+            if (ViewModel.TryAddAttachment(file.Path))
+            {
+                mentions.Add(AttachmentMention(file.Path));
+            }
+        }
+
+        if (mentions.Count > 0)
+        {
+            InsertAtCaret(string.Join(" ", mentions) + " ");
         }
     }
 
@@ -1363,7 +1372,10 @@ public sealed partial class ChatTab : UserControl
             {
                 if (item is Windows.Storage.IStorageFile file && TurnAttachment.KindOf(file.Path) is not null)
                 {
-                    ViewModel.TryAddAttachment(file.Path);
+                    if (ViewModel.TryAddAttachment(file.Path))
+                    {
+                        mentions.Add(AttachmentMention(file.Path));
+                    }
                 }
                 else
                 {
@@ -1373,7 +1385,7 @@ public sealed partial class ChatTab : UserControl
 
             if (mentions.Count > 0)
             {
-                InsertAtCaret(string.Join(" ", mentions));
+                InsertAtCaret(string.Join(" ", mentions) + " ");
             }
         }
         catch (Exception ex)
@@ -1388,7 +1400,10 @@ public sealed partial class ChatTab : UserControl
         {
             if (await SaveClipboardImageAsync(content) is { } path)
             {
-                ViewModel.TryAddAttachment(path);
+                if (ViewModel.TryAddAttachment(path))
+                {
+                    InsertAtCaret(AttachmentMention(path) + " ");
+                }
             }
             else
             {
@@ -1403,6 +1418,13 @@ public sealed partial class ChatTab : UserControl
         {
             CrashLog.Error("chat", "paste of image failed", ex);
         }
+    }
+
+    /// <summary>The "@filename.ext" mention that accompanies an attachment chip in the composer.</summary>
+    private static string AttachmentMention(string path)
+    {
+        var name = Path.GetFileName(path);
+        return "@" + (name.Contains(' ') ? $"\"{name}\"" : name);
     }
 
     private void InsertAtCaret(string text)
