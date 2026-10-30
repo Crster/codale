@@ -65,9 +65,28 @@ public sealed partial class ChatViewModel
                 return true;
 
             case FeatureAction.Switch when decision.FeatureId is { } id && features.Get(id) is { } target:
-                return await SwitchFeatureAsync(target, created: false);
+                switch (await AskJumpAsync(target.Id, target.Name, text))
+                {
+                    case FeatureJumpChoice.Stay:
+                        _recording = FeatureId is not null;
+                        return true;
+
+                    case FeatureJumpChoice.New:
+                        var (fresh, freshCreated) = features.FindOrCreate(
+                            FeatureRouting.CleanNames(null, text, seed: false)[0], FeatureRouting.DescribeFrom(text));
+                        return await SwitchFeatureAsync(fresh, created: freshCreated);
+
+                    default:
+                        return await SwitchFeatureAsync(target, created: false);
+                }
 
             case FeatureAction.Create when decision.NewNames is { Count: > 0 } names:
+                if (await AskJumpAsync(null, names[0], text) == FeatureJumpChoice.Stay)
+                {
+                    _recording = FeatureId is not null;
+                    return true;
+                }
+
                 // Another chat may have started the same topic a moment ago: that feature is joined, not doubled.
                 var created = names
                     .Select(name => features.FindOrCreate(name, FeatureRouting.DescribeFrom(text)))
@@ -99,6 +118,35 @@ public sealed partial class ChatViewModel
 
                 _recording = FeatureId is not null;
                 return true;
+        }
+    }
+
+    /// <summary>The question on screen while Auto routing waits to move this conversation; null when none is.</summary>
+    private FeatureJumpItem? _pendingJump;
+
+    /// <summary>
+    /// A jump mid-conversation restarts the session, so Auto asks in the transcript first: jump to the
+    /// history the router picked (<paramref name="targetId"/>; null when it wants a new one), start a new
+    /// one, or stay. No question when the chat has said nothing yet or is already on that history -
+    /// the router's pick (Jump) stands.
+    /// </summary>
+    private async Task<FeatureJumpChoice> AskJumpAsync(string? targetId, string name, string text)
+    {
+        if (!IsAutomaticMode || !HasConversation || (targetId is not null && targetId == FeatureId))
+        {
+            return FeatureJumpChoice.Jump;
+        }
+
+        var item = new FeatureJumpItem { TargetName = targetId is null ? null : name };
+        _pendingJump = item;
+        Add(item);
+        try
+        {
+            return await item.Answer;
+        }
+        finally
+        {
+            _pendingJump = null;
         }
     }
 
@@ -221,8 +269,26 @@ public sealed partial class ChatViewModel
         return (text.ToString().Trim(), hasMore);
     }
 
+    private bool _watchingFeatures;
+
+    /// <summary>A history entry was renamed (or removed): the tab and header follow the feature's current name.</summary>
+    private void OnFeaturesChanged(object? sender, EventArgs e) => _dispatcher.TryEnqueue(() =>
+    {
+        if (FeatureId is { } id && Features?.Get(id) is { } feature && feature.Name != FeatureName)
+        {
+            FeatureName = feature.Name;
+            Title = feature.Name;
+        }
+    });
+
     private void SetFeature(FeatureInfo feature, bool seed)
     {
+        if (!_watchingFeatures && Features is not null)
+        {
+            Features.Changed += OnFeaturesChanged;
+            _watchingFeatures = true;
+        }
+
         FeatureId = feature.Id;
         FeatureName = feature.Name;
         _featureLog = Features!.LogOf(feature.Id, _chatId);

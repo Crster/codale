@@ -1678,6 +1678,71 @@ public enum NoticeSeverity
     Error,
 }
 
+/// <summary>What the reader decided when Auto routing wanted to move a conversation under way.</summary>
+public enum FeatureJumpChoice
+{
+    /// <summary>Go to the history the router picked.</summary>
+    Jump,
+
+    /// <summary>Start a history of its own for this message.</summary>
+    New,
+
+    /// <summary>Carry on in the history the chat is on.</summary>
+    Stay,
+}
+
+/// <summary>
+/// The question in the transcript when Auto routing wants to move a conversation already under way to
+/// another history: jump there, start a new one, or carry on here. The send waits on <see cref="Answer"/>.
+/// </summary>
+public sealed partial class FeatureJumpItem : ChatItem
+{
+    private readonly TaskCompletionSource<FeatureJumpChoice> _answer = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public override TranscriptBlock Block => TranscriptBlock.Notice;
+
+    protected override Thickness NaturalMargin => new(0, 4, 40, 4);
+
+    /// <summary>The history the router picked, or null when it wants a new one (there is nothing to jump to).</summary>
+    public string? TargetName { get; init; }
+
+    public string Question => TargetName is null
+        ? "This message looks like a new topic."
+        : $"This message looks like it belongs to \"{TargetName}\".";
+
+    public bool HasJump => TargetName is not null;
+
+    public string JumpText => $"Jump to {TargetName}";
+
+    public Task<FeatureJumpChoice> Answer => _answer.Task;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsOpen))]
+    [NotifyPropertyChangedFor(nameof(AnswerText))]
+    public partial FeatureJumpChoice? Chosen { get; set; }
+
+    public bool IsOpen => Chosen is null;
+
+    public string AnswerText => Chosen switch
+    {
+        FeatureJumpChoice.Jump => $"Jumped to {TargetName}",
+        FeatureJumpChoice.New => "Started a new history",
+        FeatureJumpChoice.Stay => "Staying in this history",
+        _ => "",
+    };
+
+    public void Choose(FeatureJumpChoice choice)
+    {
+        if (Chosen is not null)
+        {
+            return;
+        }
+
+        Chosen = choice;
+        _answer.TrySetResult(choice);
+    }
+}
+
 /// <summary>Out-of-band information: session ended, a tool was denied, protocol drift.</summary>
 public sealed partial class NoticeItem : ChatItem
 {

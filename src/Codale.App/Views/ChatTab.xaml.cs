@@ -212,6 +212,20 @@ public sealed partial class ChatTab : UserControl
         }
     }
 
+    private static void AnswerFeatureJump(object sender, FeatureJumpChoice choice)
+    {
+        if (((FrameworkElement)sender).Tag is FeatureJumpItem item)
+        {
+            item.Choose(choice);
+        }
+    }
+
+    private void OnFeatureJumpClick(object sender, RoutedEventArgs e) => AnswerFeatureJump(sender, FeatureJumpChoice.Jump);
+
+    private void OnFeatureJumpNewClick(object sender, RoutedEventArgs e) => AnswerFeatureJump(sender, FeatureJumpChoice.New);
+
+    private void OnFeatureJumpStayClick(object sender, RoutedEventArgs e) => AnswerFeatureJump(sender, FeatureJumpChoice.Stay);
+
     private Storyboard? _stopPulse;
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

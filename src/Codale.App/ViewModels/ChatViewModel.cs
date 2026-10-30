@@ -303,14 +303,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         string.Equals(byok.Name.Trim(), helper.Name.Trim(), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// A name for the conversation's tab: the session's title when it came from history,
-    /// else the opening prompt. Null until there is one - the tab shows the provider.
+    /// A name for the conversation's tab: the history entry's title. Null until the chat
+    /// is on one - the tab shows "{provider}: New session".
     /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(TabTitle))]
     public partial string? Title { get; set; }
 
-    public string TabTitle => Title is { Length: > 0 } title ? title : ProviderName;
+    public string TabTitle => Title is { Length: > 0 } title ? title : $"{ProviderName}: New session";
 
     /// <summary>
     /// True once the chat holds a conversation worth keeping - a prompt was sent, a
@@ -4120,12 +4120,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         RecordUserTurn(text);
 
-        // The first prompt names the tab - its gist, not a copy - until something better
-        // (the helper model's name, a history title) does.
-        if (Title is null && text.Length > 0 && !SessionTitles.IsResetCommand(text))
-        {
-            Title = SessionTitles.FromPrompt(text);
-        }
         BeginTurn();
 
         try
@@ -4879,7 +4873,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         StopTaskHost();
 
         // The session goes first, so a turn cut off by the close is marked as ended before the summary reads the log.
+        _pendingJump?.Choose(FeatureJumpChoice.Stay);
         await DisposeSessionAsync();
+        if (_watchingFeatures && Features is not null)
+        {
+            Features.Changed -= OnFeaturesChanged;
+            _watchingFeatures = false;
+        }
+
         Features?.ClearChatActivity(_chatId);
         if (SmartHistory && _recording && FeatureId is { } featureId)
         {
