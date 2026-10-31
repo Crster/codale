@@ -84,7 +84,7 @@ public sealed partial class SessionsViewModel : ObservableObject
     public partial bool IsOptimizing { get; set; }
 
     /// <summary>Maintains all history in this project, then realigns the displayed list.</summary>
-    public async Task RebuildAndOptimizeAsync()
+    public async Task RebuildAndOptimizeAsync(string? featureId = null)
     {
         if (IsOptimizing)
         {
@@ -94,7 +94,7 @@ public sealed partial class SessionsViewModel : ObservableObject
         IsOptimizing = true;
         try
         {
-            await _features.RebuildAndOptimizeAsync();
+            await _features.RebuildAndOptimizeAsync(featureId);
             await RefreshAsync();
         }
         finally
@@ -231,15 +231,11 @@ public sealed partial class SessionsViewModel : ObservableObject
         }
     }
 
-    /// <summary>Removes a feature: its summary, its log and what was indexed of its files. An open feature is refused - its chat would keep writing to it.</summary>
+    /// <summary>Removes a feature: its summary, its log and what was indexed of its files. Open chats detach through the feature change notification.</summary>
     public void Delete(SessionListItem item)
     {
-        if (item.IsOpen)
-        {
-            throw new InvalidOperationException("Close the feature's tab before deleting it.");
-        }
-
         _features.Delete(item.SessionId);
         Sessions.Remove(item);
+        SyncOpenSessions();
     }
 }

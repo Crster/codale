@@ -721,12 +721,15 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
         try
         {
-            await sessions.RebuildAndOptimizeAsync();
+            var item = (sender as FrameworkElement)?.DataContext as SessionListItem;
+            await sessions.RebuildAndOptimizeAsync(item?.SessionId);
             await AppDialog.Apply(new ContentDialog
             {
                 XamlRoot = XamlRoot,
                 Title = "History optimized",
-                Content = "Search indexes for all history in this project have been rebuilt and the database compacted.",
+                Content = item is null
+                    ? "Project history has been reevaluated and compacted, titles refreshed, and search indexes rebuilt."
+                    : "This history has been reevaluated and compacted, its title refreshed, and search indexes rebuilt.",
                 CloseButtonText = "OK",
             }, DialogTone.Success).ShowAsync();
         }
@@ -743,17 +746,11 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             return;
         }
 
-        if (session.IsOpen)
-        {
-            await ShowErrorAsync("History is open", "Close its tab before deleting it.");
-            return;
-        }
-
         var dialog = AppDialog.Apply(new ContentDialog
         {
             XamlRoot = XamlRoot,
             Title = $"Delete \"{session.Title}\"?",
-            Content = "This removes this history's summary, turns and file index. The work it did in your workspace is kept.",
+            Content = "This removes this history's summary, turns and file index. The work it did in your workspace is kept. Open chats stay open and are detached from this history.",
             PrimaryButtonText = "Delete",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,

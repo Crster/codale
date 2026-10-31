@@ -18,6 +18,24 @@ internal sealed class FeatureActivity
     private readonly ConcurrentDictionary<string, FeatureChat> _chats = new(StringComparer.Ordinal);
     private readonly Lock _summaryLock = new();
     private readonly HashSet<string> _summarizing = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _summaryGates = new(StringComparer.Ordinal);
+
+    /// <summary>Serializes manual rebuilds with automatic summaries across project windows.</summary>
+    public SemaphoreSlim SummaryGate(string featureId) =>
+        _summaryGates.GetOrAdd(featureId, _ => new SemaphoreSlim(1, 1));
+
+    /// <summary>Notifies every window on the project so its open chats detach from deleted history.</summary>
+    public event EventHandler? HistoryDeleted;
+
+    public void NotifyHistoryDeleted(string featureId)
+    {
+        foreach (var chat in _chats.Values.Where(c => c.FeatureId == featureId))
+        {
+            _chats.TryRemove(chat.ChatId, out _);
+        }
+
+        HistoryDeleted?.Invoke(this, EventArgs.Empty);
+    }
 
     /// <summary>Summaries asked for while one was running, with whether any of those asks was forced.</summary>
     private readonly Dictionary<string, bool> _summaryAgain = new(StringComparer.Ordinal);

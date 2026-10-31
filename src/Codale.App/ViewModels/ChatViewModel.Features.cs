@@ -274,7 +274,18 @@ public sealed partial class ChatViewModel
     /// <summary>A history entry was renamed (or removed): the tab and header follow the feature's current name.</summary>
     private void OnFeaturesChanged(object? sender, EventArgs e) => _dispatcher.TryEnqueue(() =>
     {
-        if (FeatureId is { } id && Features?.Get(id) is { } feature && feature.Name != FeatureName)
+        if (FeatureId is not { } id || Features is not { } features)
+        {
+            return;
+        }
+
+        if (features.Get(id) is not { } feature)
+        {
+            ClearFeature();
+            return;
+        }
+
+        if (feature.Name != FeatureName)
         {
             FeatureName = feature.Name;
             Title = feature.Name;
@@ -312,6 +323,8 @@ public sealed partial class ChatViewModel
         _seedFeatureId = null;
         _skipBuffer.Clear();
         _skipPrompt = null;
+        _featureRequest = null;
+        _logSeen = default;
     }
 
     /// <summary>This chat's id in feature logs and in the list of chats open on a feature.</summary>

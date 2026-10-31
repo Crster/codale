@@ -42,6 +42,7 @@ public sealed class FeatureService : IDisposable
         _helper = helper;
         _store = OpenStore(projectPath);
         _activity = FeatureActivity.For(projectPath);
+        _activity.HistoryDeleted += OnHistoryDeleted;
     }
 
     /// <summary>The project's feature database; a throwaway one when it cannot be opened (a path too long, a locked file), so history never keeps the window from opening.</summary>
@@ -61,16 +62,58 @@ public sealed class FeatureService : IDisposable
     /// <summary>The feature list changed: one was created, renamed, deleted or has a new summary.</summary>
     public event EventHandler? Changed;
 
+    private void OnHistoryDeleted(object? sender, EventArgs e) => Changed?.Invoke(this, e);
+
     public IReadOnlyList<FeatureInfo> List() => _store.List();
 
     public FeatureInfo? Get(string id) => _store.Get(id);
 
     public int FileCount(string id) => _store.FileCount(id);
 
-    /// <summary>Rebuilds the project's history search indexes and compacts its database off the UI thread.</summary>
-    public async Task RebuildAndOptimizeAsync()
+    /// <summary>Reevaluates history, compacts its logs, refreshes titles and rebuilds search indexes.</summary>
+    public async Task RebuildAndOptimizeAsync(string? featureId = null)
     {
-        await Task.Run(_store.RebuildAndOptimize);
+        if (!_helper.IsAvailable)
+        {
+            throw new HelperModelException("A background model must be available to rebuild history and generate its title.");
+        }
+
+        await Task.Run(async () =>
+        {
+            var features = featureId is null ? _store.List() : _store.List().Where(f => f.Id == featureId).ToList();
+            foreach (var candidate in features)
+            {
+                var gate = _activity.SummaryGate(candidate.Id);
+                await gate.WaitAsync();
+                try
+                {
+                    if (_store.Get(candidate.Id) is not { } feature)
+                    {
+                        continue;
+                    }
+
+                    var log = LogOf(feature.Id);
+                    var (entries, length) = log.ReadAllSnapshot();
+                    using var budget = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+                    var (summary, title) = await FeatureHistoryRebuilder.RebuildAsync(
+                        _helper, feature, entries, _activity.RunningOn(feature.Id), budget.Token);
+                    // Commit only after both model results succeed; retain concurrent appends as progress.
+                    if (length > 0)
+                    {
+                        log.ArchiveUpTo(length);
+                    }
+                    _store.SetSummary(feature.Id, summary, logOffset: 0, logBytes: log.Length);
+                    _store.Rename(feature.Id, title);
+                    Changed?.Invoke(this, EventArgs.Empty);
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            }
+
+            _store.RebuildAndOptimize();
+        });
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -153,7 +196,7 @@ public sealed class FeatureService : IDisposable
     {
         _store.Delete(id);
         LogOf(id).Delete();
-        Changed?.Invoke(this, EventArgs.Empty);
+        _activity.NotifyHistoryDeleted(id);
     }
 
     /// <summary>A feature's log; <paramref name="chatId"/> is the chat its appends are written as (null for a reader).</summary>
@@ -371,6 +414,8 @@ public sealed class FeatureService : IDisposable
 
         _ = Task.Run(async () =>
         {
+            var gate = _activity.SummaryGate(featureId);
+            await gate.WaitAsync();
             try
             {
                 if (_store.Get(featureId) is not { } feature)
@@ -415,6 +460,7 @@ public sealed class FeatureService : IDisposable
             }
             finally
             {
+                gate.Release();
                 // A chat's turn that ended while this one was being written asked for its own: run it now.
                 if (_activity.EndSummary(featureId) is { Again: true } again)
                 {
@@ -424,7 +470,11 @@ public sealed class FeatureService : IDisposable
         });
     }
 
-    public void Dispose() => _store.Dispose();
+    public void Dispose()
+    {
+        _activity.HistoryDeleted -= OnHistoryDeleted;
+        _store.Dispose();
+    }
 }
 
 /// <summary>

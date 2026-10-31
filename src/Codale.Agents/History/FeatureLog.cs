@@ -27,11 +27,18 @@ public sealed class FeatureLog(string directory, string? chatId = null)
     private static readonly JsonSerializerOptions ChangeJson = new() { PropertyNameCaseInsensitive = true };
 
     /// <summary>One gate per log folder, whichever chat or background job holds a <see cref="FeatureLog"/> on it.</summary>
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, object> Gates = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, LogState> States = new(StringComparer.OrdinalIgnoreCase);
+
+    private sealed class LogState
+    {
+        public object Gate { get; } = new();
+        public bool Deleted { get; set; }
+    }
 
     private readonly HashSet<string> _tools = new(StringComparer.Ordinal);
 
-    private object Gate => Gates.GetOrAdd(Path.GetFullPath(directory), _ => new object());
+    private LogState State => States.GetOrAdd(Path.GetFullPath(directory), _ => new LogState());
+    private object Gate => State.Gate;
 
     private string LogPath => Path.Combine(directory, "log.jsonl");
 
@@ -53,6 +60,15 @@ public sealed class FeatureLog(string directory, string? chatId = null)
             {
                 return new LogPosition(Generation, Length);
             }
+        }
+    }
+
+    /// <summary>All archived and current progress with the exact current-log boundary it covers.</summary>
+    public (IReadOnlyList<HandoffEntry> Entries, long Length) ReadAllSnapshot()
+    {
+        lock (Gate)
+        {
+            return (ReadSince(new LogPosition(0, 0)).Entries, Length);
         }
     }
 
@@ -297,9 +313,15 @@ public sealed class FeatureLog(string directory, string? chatId = null)
     /// <summary>Removes the feature's whole log folder.</summary>
     public void Delete()
     {
-        if (Directory.Exists(directory))
+        lock (Gate)
         {
-            Directory.Delete(directory, recursive: true);
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+
+            // Open chats may still hold writers while their UI handles the deletion notification.
+            State.Deleted = true;
         }
     }
 
@@ -331,6 +353,11 @@ public sealed class FeatureLog(string directory, string? chatId = null)
             {
                 lock (Gate)
                 {
+                    if (State.Deleted)
+                    {
+                        return;
+                    }
+
                     Directory.CreateDirectory(directory);
                     File.AppendAllText(LogPath, line + Environment.NewLine);
                 }

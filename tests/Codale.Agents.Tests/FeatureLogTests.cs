@@ -20,6 +20,40 @@ public sealed class FeatureLogTests : IDisposable
 
     private static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement.Clone();
 
+    [Fact]
+    public void Deleting_history_prevents_open_and_late_writers_from_recreating_its_log()
+    {
+        var first = new FeatureLog(_directory, "first");
+        var second = new FeatureLog(_directory, "second");
+        first.AppendUser("saved request");
+
+        first.Delete();
+        second.AppendUser("in-flight request");
+        first.EndTurn("success");
+        new FeatureLog(_directory, "late").Attach("codex");
+
+        Assert.False(Directory.Exists(_directory));
+        Assert.Empty(second.ReadAllSnapshot().Entries);
+    }
+
+    [Fact]
+    public void Rebuild_snapshot_includes_archives_and_preserves_new_progress_when_compacted()
+    {
+        var log = new FeatureLog(_directory, "chat");
+        log.AppendUser("archived request");
+        log.EndTurn("success");
+        log.Archive();
+        log.AppendUser("current request");
+        var snapshot = log.ReadAllSnapshot();
+
+        Assert.Equal(["archived request", "success", "current request"], snapshot.Entries.Select(e => e.Text));
+        log.AppendUser("arrived during rebuild");
+        log.ArchiveUpTo(snapshot.Length);
+
+        Assert.Equal("arrived during rebuild", Assert.Single(log.ReadSince(0).Entries).Text);
+        Assert.Equal(4, log.ReadAllSnapshot().Entries.Count);
+    }
+
     private FeatureLog Recorded()
     {
         var log = new FeatureLog(_directory);
