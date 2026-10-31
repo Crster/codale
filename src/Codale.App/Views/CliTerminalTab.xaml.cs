@@ -130,7 +130,10 @@ public sealed partial class CliTerminalTab : UserControl, ITerminalHost
         Terminal.Write("\r\n\x1b[90m[session ended]\x1b[0m\r\n");
 
     private void OnTerminalContextRequested(UIElement sender, ContextRequestedEventArgs args) =>
-        TerminalContextMenu.Show(Terminal, args);
+        ShowContextMenu(Terminal, args);
+
+    public void ShowContextMenu(UIElement anchor, ContextRequestedEventArgs args) =>
+        TerminalContextMenu.Show(Terminal, args, anchor: anchor);
 
     private void UnsubscribeFromViewModel()
     {

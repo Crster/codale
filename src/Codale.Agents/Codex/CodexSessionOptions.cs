@@ -34,12 +34,13 @@ public sealed record CodexSessionOptions
     public static string ClampPermissionMode(string mode) => Claude.ClaudeSessionOptions.ClampPermissionMode(mode);
 
     /// <summary>
-    /// Codale runs Codex without a sandbox. Manual and plan modes still ask before
-    /// commands; unrestricted modes retain their existing no-approval behavior.
+    /// Planning allows inspection in a read-only sandbox. Work modes retain their
+    /// existing approval policy and full filesystem access.
     /// </summary>
     public static (string ApprovalPolicy, string SandboxType) PermissionPolicy(string? mode) => ClampPermissionMode(mode ?? "") switch
     {
-        "manual" or "plan" => ("untrusted", "dangerFullAccess"),
+        "manual" => ("untrusted", "dangerFullAccess"),
+        "plan" => ("on-request", "readOnly"),
         "bypassPermissions" or "dontAsk" => ("never", "dangerFullAccess"),
         _ => ("on-request", "dangerFullAccess"),
     };

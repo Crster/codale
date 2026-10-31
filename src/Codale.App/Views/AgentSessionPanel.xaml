@@ -1065,7 +1065,7 @@
                             Style="{StaticResource SectionHeader}">
                             <ToggleButton.ContextFlyout>
                                 <MenuFlyout>
-                                    <MenuFlyoutItem Click="OnRebuildHistoryClick" Text="Rebuild and optimize history database">
+                                    <MenuFlyoutItem Click="OnRebuildHistoryClick" Text="Rebuild &amp; Optimize">
                                         <MenuFlyoutItem.Icon>
                                             <FontIcon Glyph="&#xE895;" />
                                         </MenuFlyoutItem.Icon>
@@ -1144,7 +1144,7 @@
                                                     <FontIcon Glyph="&#xE70F;" />
                                                 </MenuFlyoutItem.Icon>
                                             </MenuFlyoutItem>
-                                            <MenuFlyoutItem Click="OnRebuildHistoryClick" Text="Rebuild and optimize history database">
+                                            <MenuFlyoutItem Click="OnRebuildHistoryClick" Text="Rebuild &amp; Optimize">
                                                 <MenuFlyoutItem.Icon>
                                                     <FontIcon Glyph="&#xE895;" />
                                                 </MenuFlyoutItem.Icon>

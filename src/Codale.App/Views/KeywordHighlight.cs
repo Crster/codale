@@ -12,9 +12,8 @@ namespace Codale.App.Views;
 
 /// <summary>
 /// Marks every occurrence of the search keywords in a TextBlock's plain Text, case
-/// insensitively, with TextHighlighters - so the text stays one run, selectable and
-/// cheap, instead of being split into styled inlines. Whole matched lines can be given
-/// a fainter band underneath, so the area that matched reads at a glance.
+/// insensitively, on a background canvas beneath the selectable text. Matching rows
+/// get a thin underline; syntax highlighters change only the foreground.
 /// </summary>
 /// <remarks>
 /// Terms arrive as one newline-separated string and lines as a comma-separated list of
@@ -23,14 +22,6 @@ namespace Codale.App.Views;
 /// </remarks>
 public static class KeywordHighlight
 {
-    // A solid amber with near-black text: a translucent mark dragged the text toward grey on the
-    // dark card, and light text on amber does not read. This pair reads on both themes.
-    private static readonly Brush MarkBrush = new SolidColorBrush(Color.FromArgb(0xFF, 0xF2, 0xC1, 0x4E));
-    private static readonly Brush MarkTextBrush = new SolidColorBrush(Color.FromArgb(0xFF, 0x14, 0x14, 0x14));
-
-    // The same amber, faint enough that the keyword marks still stand out on top of it.
-    private static readonly Brush LineBrush = new SolidColorBrush(Color.FromArgb(0x30, 0xE5, 0xB2, 0x3C));
-
     private static readonly Dictionary<(Color, bool), Brush> TokenBrushes = [];
 
     // TextHighlighter paints yellow unless told otherwise; token colouring must not paint at all.
@@ -86,6 +77,9 @@ public static class KeywordHighlight
         {
             text.SetValue(WatchedProperty, true);
             text.RegisterPropertyChangedCallback(TextBlock.TextProperty, (s, _) => Apply((TextBlock)s));
+            text.Loaded += (_, _) => Apply(text);
+            text.SizeChanged += (_, _) => DrawBackground(text);
+            text.ActualThemeChanged += (_, _) => Apply(text);
         }
 
         Apply(text);
@@ -98,49 +92,80 @@ public static class KeywordHighlight
         var content = text.Text;
         if (string.IsNullOrEmpty(content))
         {
+            DrawBackground(text);
             return;
         }
 
-        // The band goes first so the keyword marks paint over it.
-        if (GetLines(text) is { Length: > 0 } lines && LineBand(content, lines) is { } band)
-        {
-            text.TextHighlighters.Add(band);
-        }
-
-        if (GetTerms(text) is not { Length: > 0 } terms)
-        {
-            AddSyntax(text, content);
-            return;
-        }
-
-        // Colour the code first, so the marks below paint over it.
         AddSyntax(text, content);
+        DrawBackground(text);
+        // Text changes of the same size may not raise SizeChanged. Re-read glyph
+        // positions after the pending text layout has settled as well.
+        text.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => DrawBackground(text));
+    }
 
-        var highlighter = new TextHighlighter { Background = MarkBrush, Foreground = MarkTextBrush };
-
-        // Longest first, so "RetryPolicy" wins over "Retry" where both match.
-        foreach (var term in terms.Split('\n', StringSplitOptions.RemoveEmptyEntries).OrderByDescending(t => t.Length))
+    // Background shapes are siblings below the text, so syntax foregrounds stay intact.
+    private static void DrawBackground(TextBlock text)
+    {
+        if (text.Parent is not Grid host || host.Children.OfType<Canvas>().FirstOrDefault() is not { } canvas)
+            return;
+        canvas.Children.Clear();
+        var content = text.Text;
+        if (string.IsNullOrEmpty(content) || text.ActualWidth <= 0 || text.ActualHeight <= 0)
+            return;
+        canvas.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, text.ActualWidth, text.ActualHeight) };
+        var light = text.ActualTheme == ElementTheme.Light;
+        var matchBrush = new SolidColorBrush(SearchHighlightStyle.Match(light));
+        var rowBrush = new SolidColorBrush(SearchHighlightStyle.Row(light));
+        var wanted = (GetLines(text) ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(value => int.TryParse(value, out var line) ? line : -1).ToHashSet();
+        var start = 0;
+        var lineNo = 0;
+        while (start < content.Length)
         {
-            // Short words must start a word, as the search matched them: "run" is not in "truncate".
-            var wordStart = term.Length <= 5 && char.IsLetterOrDigit(term[0]);
+            var end = content.IndexOf('\n', start);
+            if (end < 0) end = content.Length;
+            if (wanted.Contains(lineNo))
+            {
+                var rect = CharacterRect(start);
+                Add(rect.X, rect.Bottom - 1, Math.Max(0, text.ActualWidth - rect.X), 1, rowBrush);
+            }
+            start = end + 1;
+            lineNo++;
+        }
 
+        var claimed = new bool[content.Length];
+        foreach (var term in (GetTerms(text) ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries).OrderByDescending(term => term.Length))
+        {
+            var wordStart = term.Length <= 5 && char.IsLetterOrDigit(term[0]);
             var index = 0;
             while ((index = content.IndexOf(term, index, StringComparison.OrdinalIgnoreCase)) >= 0)
             {
-                var overlaps = highlighter.Ranges.Any(r => index < r.StartIndex + r.Length && r.StartIndex < index + term.Length);
                 var midWord = wordStart && index > 0 && (char.IsLetterOrDigit(content[index - 1]) || content[index - 1] == '_');
-                if (!overlaps && !midWord)
+                if (!midWord && !claimed.AsSpan(index, term.Length).Contains(true))
                 {
-                    highlighter.Ranges.Add(new TextRange { StartIndex = index, Length = term.Length });
+                    Array.Fill(claimed, true, index, term.Length);
+                    var first = CharacterRect(index);
+                    var last = CharacterRect(index + term.Length, LogicalDirection.Backward);
+                    Add(first.X, first.Y, Math.Max(0, last.Right - first.X), first.Height, matchBrush);
                 }
-
                 index += term.Length;
             }
         }
 
-        if (highlighter.Ranges.Count > 0)
+        Windows.Foundation.Rect CharacterRect(int offset, LogicalDirection direction = LogicalDirection.Forward)
         {
-            text.TextHighlighters.Add(highlighter);
+            // Text is a single Run. Start within it to exclude inline boundary symbols.
+            var origin = text.Inlines.OfType<Run>().FirstOrDefault()?.ContentStart ?? text.ContentStart;
+            return origin.GetPositionAtOffset(offset, direction)?
+                .GetCharacterRect(direction) ?? default;
+        }
+
+        void Add(double x, double y, double width, double height, Brush brush)
+        {
+            var mark = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = width, Height = height, Fill = brush };
+            Canvas.SetLeft(mark, x);
+            Canvas.SetTop(mark, y);
+            canvas.Children.Add(mark);
         }
     }
 
@@ -205,38 +230,4 @@ public static class KeywordHighlight
         }
     }
 
-    private static TextHighlighter? LineBand(string content, string lines)
-    {
-        var wanted = lines
-            .Split(',', StringSplitOptions.RemoveEmptyEntries)
-            .Select(s => int.TryParse(s, out var n) ? n : -1)
-            .Where(n => n >= 0)
-            .ToHashSet();
-
-        if (wanted.Count == 0)
-        {
-            return null;
-        }
-
-        var band = new TextHighlighter { Background = LineBrush };
-        var (line, start) = (0, 0);
-
-        while (start <= content.Length)
-        {
-            var end = content.IndexOf('\n', start);
-            if (end < 0)
-            {
-                end = content.Length;
-            }
-
-            if (wanted.Contains(line) && end > start)
-            {
-                band.Ranges.Add(new TextRange { StartIndex = start, Length = end - start });
-            }
-
-            (line, start) = (line + 1, end + 1);
-        }
-
-        return band.Ranges.Count > 0 ? band : null;
-    }
 }

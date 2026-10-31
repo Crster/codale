@@ -5,6 +5,46 @@ namespace Codale.Core.Tests;
 public class LinkFinderTests
 {
     [Theory]
+    [InlineData("TerminalView.xaml:1-7,30-40", "TerminalView.xaml", 1, 7, 30, 40)]
+    [InlineData("CodeEditor.xaml:1–11,26–43", "CodeEditor.xaml", 1, 11, 26, 43)]
+    [InlineData("src/CodeEditor.xaml:1-11, 26-43", "src/CodeEditor.xaml", 1, 11, 26, 43)]
+    [InlineData("X:/src/CodeEditor.xaml:1—11,26—43", "X:/src/CodeEditor.xaml", 1, 11, 26, 43)]
+    public void FindsCompleteDisjointRanges(string input, string path, int start, int end, int nextStart, int nextEnd)
+    {
+        var link = Assert.Single(LinkFinder.Find($"See {input}."));
+        Assert.Equal(4, link.Index);
+        Assert.Equal(input.Length, link.Length);
+        Assert.Equal(input, link.Text);
+        Assert.Equal(path, link.Path);
+        Assert.Equal(start, link.Line);
+        Assert.Equal(end, link.EndLine);
+        Assert.Equal(new[] { new FileLineRange(start, end), new FileLineRange(nextStart, nextEnd) }, link.LineRanges);
+        Assert.Equal(link.LineRanges, LinkFinder.AsFileReference(input)!.LineRanges);
+        Assert.NotNull(LinkFinder.At($"See {input}.", 4 + input.Length - 1));
+    }
+
+    [Theory]
+    [InlineData("CodeEditor.xaml:1–11", 1, 11)]
+    [InlineData("src/CodeEditor.xaml:26—43", 26, 43)]
+    public void FindsUnicodeLineRanges(string input, int start, int end)
+    {
+        var link = LinkFinder.AsFileReference(input);
+        Assert.NotNull(link);
+        Assert.Equal(start, link.Line);
+        Assert.Equal(end, link.EndLine);
+    }
+
+    [Fact]
+    public void CodeSpanAllowsCustomExtensionAndSeveralRanges()
+    {
+        var link = LinkFinder.AsFileReference("shader.frag:1-7,30,40-50");
+        Assert.NotNull(link);
+        Assert.Equal("shader.frag", link.Path);
+        Assert.Equal(new[] { new FileLineRange(1, 7), new FileLineRange(30, 30), new FileLineRange(40, 50) }, link.LineRanges);
+        Assert.Null(LinkFinder.AsFileReference("shader.frag:1-7,30-40 extra"));
+    }
+
+    [Theory]
     [InlineData("X:/test.js:10-5", "X:/test.js", 10, 5, 0, 0)]
     [InlineData("X:/test.js:10:5", "X:/test.js", 10, 5, 0, 0)]
     [InlineData("X:/test.js:10-25", "X:/test.js", 10, 0, 25, 0)]

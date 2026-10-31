@@ -1158,6 +1158,7 @@ public sealed partial class CodeEditor : UserControl
             }
         }
 
+        DrawResultHighlights(session, firstLine, lastLine);
         DrawOccurrences(session, firstLine, lastLine);
 
         // Selection spans, one rectangle per folded row.

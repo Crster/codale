@@ -14,7 +14,13 @@ public sealed record LinkMatch(
     int Line = 0,
     int Column = 0,
     int EndLine = 0,
-    int EndColumn = 0);
+    int EndColumn = 0)
+{
+    /// <summary>All disjoint line ranges when a reference names more than one.</summary>
+    public IReadOnlyList<FileLineRange>? LineRanges { get; init; }
+}
+
+public sealed record FileLineRange(int Start, int End);
 
 /// <summary>
 /// Finds what a reader would click in terminal output or a chat message: web URLs, and
@@ -42,6 +48,10 @@ public static partial class LinkFinder
         RegexOptions.None,
         matchTimeoutMilliseconds: MatchTimeoutMs)]
     private static partial Regex BareFilePattern();
+
+    [GeneratedRegex(@"\G:(?<range>\d+(?:[-–—]\d+)?)(?:,[ \t]*(?<range>\d+(?:[-–—]\d+)?))*(?![\d:\-–—])",
+        RegexOptions.None, matchTimeoutMilliseconds: MatchTimeoutMs)]
+    private static partial Regex LineRangesPattern();
 
     [GeneratedRegex(@"^v?\d+(\.\d+)+$", RegexOptions.None, matchTimeoutMilliseconds: MatchTimeoutMs)]
     private static partial Regex VersionPattern();
@@ -108,7 +118,7 @@ public static partial class LinkFinder
                 }
 
                 var (line, col, endLine, endCol) = ParseLocation(m);
-                Add(new LinkMatch(m.Index, m.Length, m.Value, null, path, line, col, endLine, endCol));
+                Add(WithLineRanges(text, new LinkMatch(m.Index, m.Length, m.Value, null, path, line, col, endLine, endCol)));
             }
 
             foreach (Match m in ProseFilePattern().Matches(text))
@@ -119,7 +129,7 @@ public static partial class LinkFinder
                 }
 
                 var (line, col, endLine, endCol) = ParseLocation(m);
-                Add(new LinkMatch(m.Index, m.Length, m.Value, null, m.Groups["path"].Value, line, col, endLine, endCol));
+                Add(WithLineRanges(text, new LinkMatch(m.Index, m.Length, m.Value, null, m.Groups["path"].Value, line, col, endLine, endCol)));
             }
         }
         catch (RegexMatchTimeoutException)
@@ -149,6 +159,16 @@ public static partial class LinkFinder
         }
 
         var bare = BareFilePattern().Match(text);
+        var colon = text.IndexOf(':');
+        if (!bare.Success && colon > 0)
+        {
+            bare = BareFilePattern().Match(text[..colon]);
+            if (bare.Success && !LooksLikeVersion(bare.Groups["path"].Value))
+            {
+                var reference = WithLineRanges(text, new LinkMatch(0, colon, text[..colon], null, bare.Groups["path"].Value));
+                return reference.Length == text.Length ? reference : null;
+            }
+        }
         if (!bare.Success || LooksLikeVersion(bare.Groups["path"].Value))
         {
             return null;
@@ -156,6 +176,40 @@ public static partial class LinkFinder
 
         var (line, col, endLine, endCol) = ParseLocation(bare);
         return new LinkMatch(0, text.Length, text, null, bare.Groups["path"].Value, line, col, endLine, endCol);
+    }
+
+    private static LinkMatch WithLineRanges(string text, LinkMatch reference)
+    {
+        var suffix = LineRangesPattern().Match(text, reference.Index + reference.Path!.Length);
+        if (!suffix.Success)
+        {
+            return reference;
+        }
+
+        var ranges = new List<FileLineRange>();
+        foreach (Capture capture in suffix.Groups["range"].Captures)
+        {
+            var parts = capture.Value.Split(['-', '–', '—']);
+            if (!int.TryParse(parts[0], out var start) || start <= 0 ||
+                !int.TryParse(parts[^1], out var end) || end < start)
+            {
+                // Keep the existing line-column interpretation of e.g. :10-5.
+                return reference;
+            }
+            ranges.Add(new FileLineRange(start, end));
+        }
+
+        var length = reference.Path.Length + suffix.Length;
+        return reference with
+        {
+            Length = length,
+            Text = text.Substring(reference.Index, length),
+            Line = ranges[0].Start,
+            Column = 0,
+            EndLine = ranges[0].End == ranges[0].Start ? 0 : ranges[0].End,
+            EndColumn = 0,
+            LineRanges = ranges.Count > 1 ? ranges : null,
+        };
     }
 
     /// <summary>Parses location parts from a URL hash fragment (e.g. #L10-L25, #L10C5, #10-5, #10:5).</summary>

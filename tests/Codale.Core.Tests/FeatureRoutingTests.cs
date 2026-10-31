@@ -9,6 +9,17 @@ public sealed class FeatureRoutingTests
     private static readonly FeatureInfo Dashboard = new() { Id = "dash1", Name = "Dashboard" };
     private static readonly FeatureInfo[] Both = [Login, Dashboard];
 
+    [Fact]
+    public void Plan_intent_is_preserved_when_smart_history_is_enabled()
+    {
+        var decision = FeatureRouting.Interpret(Call("dash1", intent: "plan"),
+            "redesign the dashboard architecture across all files", Both, "login1");
+
+        Assert.Equal(RouteIntent.Plan, decision.Route.Intent);
+        Assert.Equal(FeatureAction.Switch, decision.Action);
+        Assert.Equal("dash1", decision.FeatureId);
+    }
+
     private static ToolCall Call(string feature, string? name = null, string intent = "act")
     {
         var nameArgument = name is null ? "" : $",\"name\":\"{name}\"";

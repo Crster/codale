@@ -478,12 +478,18 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
         try
         {
             var cli = CliUpdate.Cli;
-            if (CliVersionCheck.UpdateCommand(cli) is not { } command)
+            if (cli != Cli || !CliUpdate.UpdateAvailable ||
+                CliVersionCheck.UpdateCommand(cli) is not { } command)
             {
                 return;
             }
 
             UpdateCliRequested?.Invoke(this, command);
+
+            if (cli.Id == "codex")
+            {
+                return;
+            }
 
             for (var i = 0; i < 36 && CliUpdate.UpdateAvailable && CliUpdate.Cli == cli; i++)
             {

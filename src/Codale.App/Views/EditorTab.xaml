@@ -65,12 +65,6 @@
                 x:Name="FileEditor"
                 VerticalAlignment="Stretch" />
 
-            <!--  Bands over the lines a search found; drawn here because the control
-                  itself can only highlight one selection or one search word.  -->
-            <Canvas
-                x:Name="HighlightLayer"
-                IsHitTestVisible="False" />
-
             <!--  Where the highlights are and how to move between them  -->
             <Border
                 x:Name="HighlightBar"

@@ -36,7 +36,10 @@ public sealed partial class CliUpdateViewModel : ObservableObject
     public bool UpdateAvailable => Installed is { } installed && Latest is { } latest && latest > installed;
 
     public string UpdateTip => UpdateAvailable
-        ? $"{_cli.DisplayName} CLI {Latest} is available (you have {Installed}). Click to update."
+        ? $"{_cli.DisplayName} CLI {Latest} is available (you have {Installed}). " +
+          (_cli.Id == "codex"
+              ? "Click to close Codale and update. Results are saved in Codale/codex-update.log."
+              : "Click to update.")
         : "";
 
     public async Task RefreshAsync(CliDescriptor cli, bool forceLatest = false)

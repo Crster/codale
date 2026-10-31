@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8" ?>
+﻿<?xml version="1.0" encoding="utf-8" ?>
 <UserControl
     x:Class="Codale.App.Views.ChatTab"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -41,7 +41,7 @@
 
         <!--  ===== Styles =====  -->
 
-        <!--  A step's row as a button: disc, verb and target are one click target for
+        <!--  A step's row as a button: disc and kind are one click target for
               folding the step's body. Flush left so the disc sits on the rail.  -->
         <Style x:Key="ToolToggle" TargetType="Button">
             <Setter Property="Background" Value="Transparent" />
@@ -284,7 +284,7 @@
               the question or permission prompt, and the output.  -->
         <DataTemplate x:Key="ToolCoreTemplate" x:DataType="vm:ToolCallItem">
             <StackPanel>
-                <Grid ColumnSpacing="6">
+                <Grid ColumnSpacing="6" views:TextBaseline.IsAligned="True">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
@@ -292,12 +292,11 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Button
-                        Grid.ColumnSpan="{x:Bind ToggleSpan}"
                         HorizontalAlignment="Left"
                         Click="OnToolToggleClick"
                         Style="{StaticResource ToolToggle}"
                         Tag="{x:Bind}"
-                        ToolTipService.ToolTip="{x:Bind Summary, Mode=OneWay}">
+                        ToolTipService.ToolTip="Expand or collapse output">
                         <Grid ColumnSpacing="8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
@@ -329,60 +328,28 @@
                                         Visibility="{Binding IsWorking, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                                 </Grid>
                             </Border>
-                            <!--  Verb and target are runs of ONE TextBlock: separate
-                                  TextBlocks of different fonts, each centred in its own
-                                  line box, put their baselines a couple of pixels apart.  -->
                             <TextBlock
                                 Grid.Column="1"
-                                FontFamily="Cascadia Mono, Consolas"
                                 VerticalAlignment="Center"
-                                TextTrimming="CharacterEllipsis">
-                                <Run
-                                    FontFamily="Cascadia Mono, Consolas"
-                                    FontSize="{x:Bind S12_5, Mode=OneWay}"
-                                    FontWeight="SemiBold"
-                                    Foreground="{x:Bind Kind, Converter={StaticResource ToolKindBrush}}"
-                                    Text="{x:Bind Verb, Mode=OneWay}" />
-                                <Run
-                                    FontFamily="Cascadia Mono, Consolas"
-                                    FontSize="{x:Bind S12_5, Mode=OneWay}"
-                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                    Text="{x:Bind CodeTarget, Mode=OneWay}" />
-                                <Run
-                                    FontFamily="Cascadia Mono, Consolas"
-                                    FontSize="{x:Bind S12_5, Mode=OneWay}"
-                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                    Text="{x:Bind ProseTarget, Mode=OneWay}" />
-                            </TextBlock>
+                                FontFamily="Cascadia Mono, Consolas"
+                                FontSize="{x:Bind S12_5, Mode=OneWay}"
+                                FontWeight="SemiBold"
+                                Foreground="{x:Bind Kind, Converter={StaticResource ToolKindBrush}}"
+                                Text="{x:Bind Verb, Mode=OneWay}" />
                         </Grid>
                     </Button>
+                    <!--  Parameters have their own click target; task parameters open TaskPeek.  -->
                     <Button
                         Grid.Column="1"
                         Grid.ColumnSpan="2"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
-                        Click="OnToolCommandClick"
+                        Click="OnToolParameterClick"
+                        IsEnabled="{x:Bind CanPeekParameter}"
                         Style="{StaticResource ToolFileChip}"
                         Tag="{x:Bind}"
-                        ToolTipService.ToolTip="{x:Bind Command}"
-                        Visibility="{x:Bind IsShellTool}">
-                        <TextBlock FontFamily="Cascadia Mono, Consolas"
-                                   FontSize="{x:Bind S12_5, Mode=OneWay}"
-                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                   Text="{x:Bind Target, Mode=OneWay}"
-                                   TextTrimming="CharacterEllipsis" />
-                    </Button>
-                    <!--  A subagent's description is its own button: it opens the subagent's peek.  -->
-                    <Button
-                        Grid.Column="1"
-                        Grid.ColumnSpan="2"
-                        HorizontalAlignment="Left"
-                        VerticalAlignment="Center"
-                        Click="OnToolCommandClick"
-                        Style="{StaticResource ToolFileChip}"
-                        Tag="{x:Bind}"
-                        ToolTipService.ToolTip="{x:Bind Target, Mode=OneWay}"
-                        Visibility="{x:Bind IsSubagentCall}">
+                        ToolTipService.ToolTip="{x:Bind ParameterToolTip, Mode=OneWay}"
+                        Visibility="{x:Bind HasParameter, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                         <TextBlock FontFamily="Cascadia Mono, Consolas"
                                    FontSize="{x:Bind S12_5, Mode=OneWay}"
                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
@@ -970,7 +937,7 @@
                     Margin="0,23,0,0"
                     Fill="{StaticResource TimelineRailBrush}" />
                 <StackPanel Grid.ColumnSpan="2" Margin="1,0,0,0">
-                    <Grid ColumnSpacing="8">
+                    <Grid ColumnSpacing="8" views:TextBaseline.IsAligned="True">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
@@ -1076,6 +1043,7 @@
                     Margin="0,23,0,0"
                     Fill="{StaticResource TimelineRailBrush}" />
                 <StackPanel
+                    views:TextBaseline.IsAligned="True"
                     Grid.ColumnSpan="2"
                     Margin="1,3,0,3"
                     Orientation="Horizontal"
@@ -1135,7 +1103,7 @@
                 HorizontalAlignment="Right"
                 Spacing="5">
                 <!-- User message header with You badge, mode tags, timestamp and copy button -->
-                <Grid Margin="0,0,2,0" HorizontalAlignment="Right" ColumnSpacing="6">
+                <Grid views:TextBaseline.IsAligned="True" Margin="0,0,2,0" HorizontalAlignment="Right" ColumnSpacing="6">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
@@ -1286,7 +1254,7 @@
                         BorderBrush="{StaticResource DetailStrokeBrush}"
                         BorderThickness="1"
                         CornerRadius="10">
-                        <StackPanel Orientation="Horizontal" Spacing="10">
+                        <StackPanel Orientation="Horizontal" Spacing="10" views:TextBaseline.IsAligned="True">
                             <!-- Status disc with outcome -->
                             <Border
                                 Width="22"
@@ -1380,7 +1348,7 @@
         <DataTemplate x:Key="AssistantTemplate" x:DataType="vm:AssistantMessageItem">
             <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="6">
                 <!-- Assistant Header -->
-                <Grid Margin="2,0,0,0" HorizontalAlignment="Left" ColumnSpacing="6">
+                <Grid views:TextBaseline.IsAligned="True" Margin="2,0,0,0" HorizontalAlignment="Left" ColumnSpacing="6">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
@@ -1659,6 +1627,7 @@
         <!--  One entry for a compaction: a ring while the summary is written, then the token drop.  -->
         <DataTemplate x:Key="CompactTemplate" x:DataType="vm:CompactItem">
             <StackPanel
+                views:TextBaseline.IsAligned="True"
                 Margin="{x:Bind RowMargin, Mode=OneWay}"
                 Orientation="Horizontal"
                 Spacing="8"
@@ -1754,7 +1723,7 @@
                         Style="{StaticResource ToolToggle}"
                         Tag="{x:Bind}"
                         ToolTipService.ToolTip="Show or hide what this session carries over">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
+                        <StackPanel Orientation="Horizontal" Spacing="8" views:TextBaseline.IsAligned="True">
                             <Border
                                 Width="20"
                                 Height="20"
@@ -1830,7 +1799,7 @@
                     Style="{StaticResource ToolToggle}"
                     Tag="{x:Bind}"
                     ToolTipService.ToolTip="Show or hide the handoff the background model wrote for this message">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
+                    <StackPanel Orientation="Horizontal" Spacing="8" views:TextBaseline.IsAligned="True">
                         <Border
                             Width="20"
                             Height="20"
@@ -2222,8 +2191,6 @@
             <Grid ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="22" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
@@ -2256,36 +2223,33 @@
                         views:Pulse.IsActive="{x:Bind ViewModel.IsWaitingForYou, Mode=OneWay}" />
                 </Border>
 
-                <Grid Grid.Column="1" VerticalAlignment="Center">
-                    <TextBlock
-                        FontSize="12.5"
+                <!--  Inline runs share a baseline across the label, mono timer and detail.  -->
+                <TextBlock
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    FontSize="12.5"
+                    TextTrimming="CharacterEllipsis"
+                    TextWrapping="NoWrap">
+                    <Run
                         FontWeight="Bold"
                         Foreground="{StaticResource StatusRunningBrush}"
-                        Text="{x:Bind ViewModel.WorkingMessage, Mode=OneWay}"
-                        Visibility="{x:Bind ViewModel.IsWorkingOnItsOwn, Mode=OneWay}" />
-                    <TextBlock
-                        FontSize="12.5"
+                        Text="{x:Bind ViewModel.WorkingStatusMessage, Mode=OneWay}" />
+                    <Run
                         FontWeight="Bold"
                         Foreground="{StaticResource StatusWarnBrush}"
-                        Text="Action required"
-                        Visibility="{x:Bind ViewModel.IsWaitingForYou, Mode=OneWay}" />
-                </Grid>
-
-                <TextBlock
-                    Grid.Column="2"
-                    VerticalAlignment="Center"
-                    FontFamily="Cascadia Mono, Consolas"
-                    FontSize="11"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Text="{x:Bind ViewModel.WorkingElapsed, Mode=OneWay}" />
-
-                <TextBlock
-                    Grid.Column="3"
-                    VerticalAlignment="Center"
-                    FontSize="12"
-                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                    Text="{x:Bind ViewModel.StatusDetail, Mode=OneWay}"
-                    TextTrimming="CharacterEllipsis" />
+                        Text="{x:Bind ViewModel.WaitingStatusMessage, Mode=OneWay}" />
+                    <Run Text="&#x2002;" />
+                    <Run
+                        FontFamily="Cascadia Mono, Consolas"
+                        FontSize="11"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{x:Bind ViewModel.WorkingElapsed, Mode=OneWay}" />
+                    <Run Text="&#x2002;" />
+                    <Run
+                        FontSize="12"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Text="{x:Bind ViewModel.StatusDetail, Mode=OneWay}" />
+                </TextBlock>
             </Grid>
         </Border>
 
@@ -2471,6 +2435,7 @@
                         Style="{StaticResource ComposerTextBox}"
                         Text="{x:Bind ViewModel.Draft, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                         TextChanged="OnDraftTextChanged"
+                        SelectionChanged="OnDraftSelectionChanged"
                         TextWrapping="Wrap">
                         <!--  Accelerators, not KeyDown: a multiline TextBox handles Enter
                               before the KeyDown event reaches user handlers, so Enter-to-

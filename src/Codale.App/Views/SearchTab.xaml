@@ -159,8 +159,9 @@
                                                                 Opacity="0.6"
                                                                 Text="{x:Bind Gutter}"
                                                                 TextAlignment="Right" />
+                                                            <Grid Grid.Column="1">
+                                                                <Canvas IsHitTestVisible="False" />
                                                             <TextBlock
-                                                                Grid.Column="1"
                                                                 FontFamily="Cascadia Mono, Consolas"
                                                                 FontSize="12"
                                                                 IsTextSelectionEnabled="True"
@@ -168,6 +169,7 @@
                                                                 views:KeywordHighlight.Lines="{x:Bind MatchLines}"
                                                                 views:KeywordHighlight.Path="{x:Bind FilePath}"
                                                                 views:KeywordHighlight.Terms="{x:Bind Terms}" />
+                                                            </Grid>
                                                         </Grid>
                                                     </ScrollViewer>
                                                 </Border>

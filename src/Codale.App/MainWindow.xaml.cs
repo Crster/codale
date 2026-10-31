@@ -463,6 +463,9 @@ public sealed partial class MainWindow : Window
 
     /// <summary>True once the close was confirmed and the workspace torn down; the next Closing passes through.</summary>
     private bool _closeConfirmed;
+    private bool _isClosing;
+
+    public Task UpdateCodexAsync() => CloseAfterCleanupAsync(updateCodex: true);
 
     private void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
@@ -479,13 +482,45 @@ public sealed partial class MainWindow : Window
     /// Asks about unsaved edits, then stops every agent process and terminal before the
     /// window really closes: doing it in Closed raced the process exit, so a CLI could outlive the app.
     /// </summary>
-    private async Task CloseAfterCleanupAsync()
+    private async Task CloseAfterCleanupAsync(bool updateCodex = false)
     {
+        if (_isClosing)
+        {
+            return;
+        }
+
+        _isClosing = true;
         try
         {
-            if (!await ConfirmUnsavedEditsAsync() || !await ConfirmRunningWorkAsync("Closing Codale"))
+            if (!await ConfirmUnsavedEditsAsync() ||
+                !await ConfirmRunningWorkAsync(updateCodex ? "Closing Codale to update Codex" : "Closing Codale"))
             {
                 return;
+            }
+
+            if (updateCodex)
+            {
+                try
+                {
+                    // Use an explicit package path: a shell-launched updater may not share
+                    // the app's redirected LocalAppData view.
+                    var logPath = Path.Combine(Windows.Storage.ApplicationData.Current.LocalCacheFolder.Path,
+                        "Codale", "codex-update.log");
+                    await Codale.Agents.Codex.CodexUpdater.StartAfterExitAsync(logPath);
+                    CrashLog.Info("Codex update", $"Updater started; results: {logPath}");
+                }
+                catch (Exception ex)
+                {
+                    CrashLog.Error("Codex update", "could not start updater", ex);
+                    await AppDialog.Apply(new ContentDialog
+                    {
+                        XamlRoot = RootGrid.XamlRoot,
+                        Title = "Could not start Codex update",
+                        Content = ex.Message,
+                        CloseButtonText = "OK",
+                    }, DialogTone.Danger).ShowAsync();
+                    return;
+                }
             }
 
             // The decision is made: the window goes away at once, the cleanup finishes behind it.
@@ -500,6 +535,10 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             CrashLog.Error("MainWindow", "close cleanup failed", ex);
+        }
+        finally
+        {
+            _isClosing = false;
         }
 
         _closeConfirmed = true;

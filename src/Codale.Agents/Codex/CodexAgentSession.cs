@@ -53,6 +53,8 @@ public sealed class CodexAgentSession : IAgentSession
 
     private string? _threadId;
     private string? _currentTurnId;
+    private (string Id, string Text)? _proposedPlan;
+    private (string Id, string Text, TurnCompleted Completion)? _planReview;
 
     /// <summary>The model codex reported for the thread; null until it says, so the CLI default is never guessed.</summary>
     private string? _threadModel;
@@ -127,7 +129,10 @@ public sealed class CodexAgentSession : IAgentSession
             // Declare ourselves as the host, then open the conversation. The CLI gates
             // everything else on the initialize handshake.
             await SendRequestAsync("initialize", request =>
-                request["clientInfo"] = new { name = "codale", title = "Codale", version = typeof(CodexAgentSession).Assembly.GetName().Version?.ToString(3) ?? "0.0.0" },
+            {
+                request["clientInfo"] = new { name = "codale", title = "Codale", version = typeof(CodexAgentSession).Assembly.GetName().Version?.ToString(3) ?? "0.0.0" };
+                request["capabilities"] = new { experimentalApi = true };
+            },
                 startTimeout.Token).ConfigureAwait(false);
             await WriteNotificationAsync("initialized", new { }, startTimeout.Token).ConfigureAwait(false);
 
@@ -171,7 +176,7 @@ public sealed class CodexAgentSession : IAgentSession
             // a config default, or the CLI's own); when it does, the status bar shows
             // the real thing instead of the "codex default" placeholder.
             var threadBody = thread.Prop("thread") ?? thread;
-            _threadModel = threadBody.Str("model") is { Length: > 0 } reported ? reported : null;
+            _threadModel = (thread.Str("model") ?? threadBody.Str("model")) is { Length: > 0 } reported ? reported : null;
 
             await _events.Writer.WriteAsync(new SessionInitialized
             {
@@ -309,7 +314,8 @@ public sealed class CodexAgentSession : IAgentSession
         }
 
         var parameters = new Dictionary<string, object?> { ["threadId"] = threadId, ["input"] = input };
-        ApplyTurnOverrides(parameters, turn.AskOnly);
+        _proposedPlan = null;
+        ApplyTurnOverrides(parameters, turn.AskOnly, turn.PlanOnly);
 
         var started = await SendRequestAsync("turn/start", request => CopyParams(request, parameters), ct)
             .ConfigureAwait(false);
@@ -317,7 +323,7 @@ public sealed class CodexAgentSession : IAgentSession
     }
 
     /// <summary>Folds the live model, effort and permission mode into a turn's parameters.</summary>
-    private void ApplyTurnOverrides(Dictionary<string, object?> parameters, bool askOnly)
+    internal void ApplyTurnOverrides(Dictionary<string, object?> parameters, bool askOnly, bool planOnly = false)
     {
         if (_liveModel is { Length: > 0 } model)
         {
@@ -329,11 +335,32 @@ public sealed class CodexAgentSession : IAgentSession
             parameters["effort"] = effort;
         }
 
+        var planning = !askOnly && (planOnly || _permissionMode == "plan");
         var (approvalPolicy, sandbox) = askOnly
             ? CodexSessionOptions.AskPolicy
-            : CodexSessionOptions.PermissionPolicy(_permissionMode);
+            : CodexSessionOptions.PermissionPolicy(planning ? "plan" : _permissionMode);
         parameters["approvalPolicy"] = approvalPolicy;
         parameters["sandboxPolicy"] = CodexSessionOptions.SandboxPolicy(sandbox, ExtraFolders());
+
+        // Collaboration mode persists on the thread, so explicitly leave it on work turns.
+        // Null developer_instructions selects Codex's built-in planning instructions.
+        if ((_liveModel ?? _threadModel) is { Length: > 0 })
+        {
+            parameters["collaborationMode"] = new
+            {
+                mode = planning ? "plan" : "default",
+                settings = new
+                {
+                    model = _liveModel ?? _threadModel,
+                    reasoning_effort = _liveEffort,
+                    developer_instructions = (string?)null,
+                },
+            };
+        }
+        else if (planning)
+        {
+            throw new InvalidOperationException("Codex did not report its model. Select a model before starting a plan turn.");
+        }
     }
 
     private IReadOnlyList<string> ExtraFolders() => _options.AdditionalDirectoriesSource?.Invoke() ?? [];
@@ -343,6 +370,17 @@ public sealed class CodexAgentSession : IAgentSession
 
     public async Task InterruptAsync(CancellationToken ct = default)
     {
+        if (_planReview is { } review)
+        {
+            _planReview = null;
+            await _events.Writer.WriteAsync(new ToolCallCompleted
+            {
+                ToolUseId = review.Id, IsError = true, ResultText = "Plan review stopped.",
+            }, ct).ConfigureAwait(false);
+            await _events.Writer.WriteAsync(review.Completion with { Subtype = "interrupted" }, ct).ConfigureAwait(false);
+            return;
+        }
+
         var threadId = RequireThread();
         var parameters = new Dictionary<string, object?> { ["threadId"] = threadId };
         if (_currentTurnId is { Length: > 0 } turnId)
@@ -405,6 +443,34 @@ public sealed class CodexAgentSession : IAgentSession
 
     public async Task RespondToApprovalAsync(string requestId, ApprovalDecision decision, CancellationToken ct = default)
     {
+        // Codex finishes a planning turn instead of issuing Claude's ExitPlanMode request.
+        // Keep the host turn open for review, then start implementation or revision only
+        // after the user answers. Never send this local approval id to the app server.
+        if (_planReview is { } review && requestId == review.Id)
+        {
+            _planReview = null;
+            await _events.Writer.WriteAsync(new ToolCallCompleted
+            {
+                ToolUseId = review.Id,
+                IsError = decision.Behavior != ApprovalBehavior.Allow,
+                ResultText = decision.Message ?? (decision.Behavior == ApprovalBehavior.Allow ? "Plan approved." : "Plan declined."),
+            }, ct).ConfigureAwait(false);
+            if (decision.Behavior == ApprovalBehavior.Allow)
+            {
+                await TrySetPermissionModeAsync(decision.SwitchToMode ?? "acceptEdits", ct).ConfigureAwait(false);
+                await SendAsync(new UserTurn("Implement the approved plan:\n\n" + review.Text), ct).ConfigureAwait(false);
+            }
+            else if (decision.Message?.Contains("revis", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                await SendAsync(new UserTurn(decision.Message) { PlanOnly = true }, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                await _events.Writer.WriteAsync(review.Completion, ct).ConfigureAwait(false);
+            }
+            return;
+        }
+
         if (!int.TryParse(requestId, out var id) || !_pendingApprovals.Remove(id, out var pending))
         {
             return;
@@ -1152,6 +1218,13 @@ public sealed class CodexAgentSession : IAgentSession
 
         switch (item.Str("type"))
         {
+            case "plan":
+                if (completed && parent is null && item.Str("text") is { Length: > 0 } plan)
+                {
+                    _proposedPlan = ($"codale-plan:{itemId}", plan);
+                }
+                return;
+
             case "agentMessage":
                 if (completed)
                 {
@@ -1317,8 +1390,25 @@ public sealed class CodexAgentSession : IAgentSession
         };
 
         UsageSnapshot? usage = turn.Prop("usage") is { } rawUsage ? ReadUsage(rawUsage) : null;
-        await _events.Writer.WriteAsync(new TurnCompleted { Subtype = subtype, Usage = usage }).ConfigureAwait(false);
         _currentTurnId = null;
+        var completion = new TurnCompleted { Subtype = subtype, Usage = usage };
+        var proposal = _proposedPlan;
+        _proposedPlan = null;
+        if (status == "completed" && proposal is { } plan)
+        {
+            _planReview = (plan.Id, plan.Text, completion);
+            var input = JsonSerializer.SerializeToElement(new { plan = plan.Text }, WireJson);
+            await _events.Writer.WriteAsync(new ToolCallStarted
+            {
+                ToolUseId = plan.Id, ToolName = "ExitPlanMode", Input = input,
+            }).ConfigureAwait(false);
+            await _events.Writer.WriteAsync(new ApprovalRequested
+            {
+                RequestId = plan.Id, ToolUseId = plan.Id, ToolName = "ExitPlanMode", Input = input,
+            }).ConfigureAwait(false);
+            return;
+        }
+        await _events.Writer.WriteAsync(completion).ConfigureAwait(false);
     }
 
     /// <summary>Reads codex usage figures, tolerating snake_case and camelCase field names.</summary>

@@ -256,7 +256,14 @@ public enum ToolKind
 
 public static class ToolKinds
 {
-    public static ToolKind Of(string toolName) => toolName switch
+    /// <summary>Canonical action names for Codale's namespaced task tools.</summary>
+    public static string ActionName(string toolName)
+    {
+        var parts = toolName.Split("__", StringSplitOptions.RemoveEmptyEntries);
+        return parts is ["mcp", "codale-tasks" or "codale_tasks", var action] ? action : toolName;
+    }
+
+    public static ToolKind Of(string toolName) => ActionName(toolName) switch
     {
         "Read" or "NotebookRead" => ToolKind.Read,
         "Grep" or "Glob" or "LS" => ToolKind.Search,
@@ -267,6 +274,11 @@ public static class ToolKinds
         "Task" or "Agent" => ToolKind.Agent,
         "AskUserQuestion" => ToolKind.Ask,
         "ExitPlanMode" => ToolKind.Plan,
+        "start_task" or "run_command" or "stop_task" => ToolKind.Shell,
+        "read_task" or "read_terminal" or "list_tasks" or "list_terminals" or "list_commands" or "list_served" => ToolKind.Read,
+        "add_command" => ToolKind.Write,
+        "serve_folder" or "stop_serving" => ToolKind.Web,
+        _ when TodoParser.IsArtifactTool(toolName) => ToolKind.Write,
         _ when TodoParser.IsTodosTool(toolName) => ToolKind.Todo,
         _ => ToolKind.Other,
     };
@@ -1119,17 +1131,23 @@ public sealed partial class ToolCallItem : ChatItem
 
     public bool HasFiles => Files.Count > 0;
 
-    /// <summary>Columns the row's toggle spans: all the way to the meta text unless a file chip sits beside it.</summary>
-    public int ToggleSpan => HasFiles || IsShellTool || IsSubagentCall ? 1 : 3;
+    /// <summary>The referenced task id, retained after the raw input is released.</summary>
+    public string? ParameterTaskId { get; init; }
+
+    public bool CanPeekParameter => IsShellTool || IsSubagentCall || ParameterTaskId is not null ||
+        ToolName.EndsWith("__start_task", StringComparison.OrdinalIgnoreCase) ||
+        ToolName.EndsWith("__run_command", StringComparison.OrdinalIgnoreCase);
+
+    public bool HasParameter => !HasFiles && Target.Length > 0;
+
+    public string ParameterToolTip => IsShellTool ? Command : Target;
 
     public ToolFileRef? PrimaryFile => Files.Count > 0 ? Files[0] : null;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(Target))]
-    [NotifyPropertyChangedFor(nameof(CodeTarget))]
-    [NotifyPropertyChangedFor(nameof(ProseTarget))]
-    [NotifyPropertyChangedFor(nameof(CodeTargetVisible))]
-    [NotifyPropertyChangedFor(nameof(ProseTargetVisible))]
+    [NotifyPropertyChangedFor(nameof(HasParameter))]
+    [NotifyPropertyChangedFor(nameof(ParameterToolTip))]
     public partial string Summary { get; set; } = "";
 
     [ObservableProperty]
@@ -1176,7 +1194,7 @@ public sealed partial class ToolCallItem : ChatItem
     {
         get
         {
-            var (present, past, imperative) = ToolName switch
+            var (present, past, imperative) = ToolKinds.ActionName(ToolName) switch
             {
                 "Read" or "NotebookRead" => ("Reading", "Read", "Read"),
                 "Grep" => ("Searching", "Searched", "Search"),
@@ -1192,12 +1210,24 @@ public sealed partial class ToolCallItem : ChatItem
                 "Task" or "Agent" => ("Running agent", "Ran agent", "Run agent"),
                 "AskUserQuestion" => ("Asking you", "Asked you", "Ask you"),
                 "ExitPlanMode" => ("Proposing a plan", "Proposed a plan", "Propose a plan"),
+                "start_task" => ("Starting Task", "Started Task", "Start Task"),
+                "run_command" => ("Running Command", "Ran Command", "Run Command"),
+                "stop_task" => ("Stopping Task", "Stopped Task", "Stop Task"),
+                "read_task" => ("Reading Task Output", "Read Task Output", "Read Task Output"),
+                "read_terminal" => ("Reading Terminal", "Read Terminal", "Read Terminal"),
+                "list_tasks" => ("Listing Tasks", "Listed Tasks", "List Tasks"),
+                "list_terminals" => ("Listing Terminals", "Listed Terminals", "List Terminals"),
+                "list_commands" => ("Listing Commands", "Listed Commands", "List Commands"),
+                "add_command" => ("Saving Command", "Saved Command", "Save Command"),
+                "serve_folder" => ("Serving Folder", "Served Folder", "Serve Folder"),
+                "list_served" => ("Listing Served Folders", "Listed Served Folders", "List Served Folders"),
+                "stop_serving" => ("Stopping Server", "Stopped Server", "Stop Server"),
                 _ when TodoParser.IsTodosTool(ToolName) => ("Updating tasks", "Updated tasks", "Update tasks"),
                 _ when TodoParser.IsArtifactTool(ToolName) => ("Adding artifact", "Added artifact", "Add artifact"),
                 _ => (PrettyName(ToolName), PrettyName(ToolName), PrettyName(ToolName)),
             };
 
-            return Status switch
+            var title = Status switch
             {
                 ToolCallStatus.Running => present,
                 ToolCallStatus.Succeeded => past,
@@ -1205,17 +1235,21 @@ public sealed partial class ToolCallItem : ChatItem
                 ToolCallStatus.AwaitingApproval => "Wants to " + char.ToLowerInvariant(imperative[0]) + imperative[1..],
                 _ => imperative,
             };
+            return ProperTitle(title);
         }
     }
 
-    /// <summary>"mcp__github__create_issue" reads as "github · create issue".</summary>
+    /// <summary>"mcp__github__create_issue" reads as "Create Issue".</summary>
     private static string PrettyName(string toolName)
     {
         var parts = toolName.Split("__", StringSplitOptions.RemoveEmptyEntries);
-        return parts is ["mcp", var server, var tool]
-            ? $"{server} · {tool.Replace('_', ' ')}"
-            : toolName;
+        var name = parts.Length > 1 ? parts[^1] : toolName;
+        name = System.Text.RegularExpressions.Regex.Replace(name, @"([a-z0-9])([A-Z])", "$1 $2");
+        return ProperTitle(name.Replace('_', ' ').Replace('-', ' '));
     }
+
+    private static string ProperTitle(string title) =>
+        System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(title);
 
     /// <summary>
     /// What the step acts on, beside the verb: the file name, the command's first line,
@@ -1245,25 +1279,6 @@ public sealed partial class ToolCallItem : ChatItem
             return Summary == ToolName ? "" : Summary;
         }
     }
-
-    /// <summary>Code-ish targets (paths, commands, patterns) set in mono; prose targets are not.</summary>
-    public bool IsCodeTarget => AnswerSummary is null && Kind is ToolKind.Shell or ToolKind.Search or ToolKind.Read or ToolKind.Edit or ToolKind.Write;
-
-    /// <summary>A file target is its own link button; everything else rides in the row as text.</summary>
-    public bool CodeTargetVisible => !HasFiles && IsCodeTarget && Target.Length > 0;
-
-    public bool ProseTargetVisible => !HasFiles && !IsCodeTarget && !IsSubagentCall && Target.Length > 0;
-
-    /// <summary>
-    /// The target as one run of the row's single TextBlock. The row used to be separate
-    /// TextBlocks per font, each centred in its own line box - and the different font
-    /// metrics put their baselines a couple of pixels apart. Runs share one line and one
-    /// baseline, so the verb and its target stay on the same optical line. The leading
-    /// en-space is the gap the old StackPanel spacing provided; empty when not shown.
-    /// </summary>
-    public string CodeTarget => CodeTargetVisible && !IsShellTool ? "\u2002" + Target : "";
-
-    public string ProseTarget => ProseTargetVisible ? "\u2002" + Target : "";
 
     /// <summary>The directory hint that follows a file chip's name, same run trick.</summary>
     public string FileDirectoryHint
@@ -1443,11 +1458,8 @@ public sealed partial class ToolCallItem : ChatItem
     /// <summary>What the reader answered, once they have: "Auth method → OAuth".</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(Target))]
-    [NotifyPropertyChangedFor(nameof(CodeTarget))]
-    [NotifyPropertyChangedFor(nameof(ProseTarget))]
-    [NotifyPropertyChangedFor(nameof(IsCodeTarget))]
-    [NotifyPropertyChangedFor(nameof(CodeTargetVisible))]
-    [NotifyPropertyChangedFor(nameof(ProseTargetVisible))]
+    [NotifyPropertyChangedFor(nameof(HasParameter))]
+    [NotifyPropertyChangedFor(nameof(ParameterToolTip))]
     public partial string? AnswerSummary { get; set; }
 
     /// <summary>

@@ -101,7 +101,7 @@ public sealed class CodexSessionOptionsTests
     public void Permission_modes_map_onto_approval_and_sandbox_policies()
     {
         Assert.Equal(("untrusted", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("manual"));
-        Assert.Equal(("untrusted", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("plan"));
+        Assert.Equal(("on-request", "readOnly"), CodexSessionOptions.PermissionPolicy("plan"));
         Assert.Equal(("on-request", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("acceptEdits"));
         Assert.Equal(("on-request", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("auto"));
         Assert.Equal(("never", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("dontAsk"));

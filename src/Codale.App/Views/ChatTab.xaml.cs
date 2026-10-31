@@ -4,6 +4,7 @@ using Codale.App.Controls;
 using Codale.App.Services;
 using Codale.App.ViewModels;
 using Codale.Core.Agents;
+using Codale.Core.Text;
 
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -202,10 +203,12 @@ public sealed partial class ChatTab : UserControl
             if (_viewModel is not null)
             {
                 _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+                _viewModel.Suggestions.CollectionChanged -= OnSuggestionsChanged;
             }
 
             _viewModel = value;
             _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+            _viewModel.Suggestions.CollectionChanged += OnSuggestionsChanged;
             SessionPanel.Session = value;
             Bindings.Update();
             UpdateStopPulse();
@@ -482,25 +485,18 @@ public sealed partial class ChatTab : UserControl
         if (((FrameworkElement)sender).Tag is ToolCallItem call)
         {
             call.ToggleExpanded();
-
-            // A subagent, background shell, or started task in the session panel: show its peek.
-            if (BackgroundTaskDetector.IsSubagentTool(call.ToolName) ||
-                call.ToolName.Contains("start_task", StringComparison.OrdinalIgnoreCase))
-            {
-                TaskPeekRequested?.Invoke(this, call);
-            }
         }
     }
 
-    private void OnToolCommandClick(object sender, RoutedEventArgs e)
+    private void OnToolParameterClick(object sender, RoutedEventArgs e)
     {
-        if (((FrameworkElement)sender).Tag is ToolCallItem call)
+        if (((FrameworkElement)sender).Tag is ToolCallItem { CanPeekParameter: true } call)
         {
             TaskPeekRequested?.Invoke(this, call);
         }
     }
 
-    /// <summary>An explore or subagent row was clicked: the workspace opens its peek pane.</summary>
+    /// <summary>A task parameter was clicked: the workspace opens its peek pane.</summary>
     public event EventHandler<ToolCallItem>? TaskPeekRequested;
 
     /// <summary>A turn's header: opens the folded timeline, or folds it again.</summary>
@@ -881,13 +877,7 @@ public sealed partial class ChatTab : UserControl
         if (e.Key is VirtualKey.Tab && IsSuggestOpen && SuggestList.SelectedItem is SuggestionItem picked)
         {
             e.Handled = true;
-            var isCommand = picked.IsCommand;
             ApplySuggestion(picked);
-
-            if (isCommand)
-            {
-                CloseSuggestions();
-            }
 
             return;
         }
@@ -929,18 +919,10 @@ public sealed partial class ChatTab : UserControl
     {
         args.Handled = true;
 
-        // With the popup up, Enter first acts on the highlighted row; a slash command
-        // completes and sends in one step, a file reference just completes.
+        // With the popup up, Enter completes the selected row for review before sending.
         if (IsSuggestOpen && SuggestList.SelectedItem is SuggestionItem suggestion)
         {
-            var isCommand = suggestion.IsCommand;
             ApplySuggestion(suggestion);
-
-            if (isCommand)
-            {
-                CloseSuggestions();
-                ExecuteIfCan(ViewModel.SendCommand);
-            }
 
             return;
         }
@@ -1062,8 +1044,25 @@ public sealed partial class ChatTab : UserControl
     private void OnDraftTextChanged(object sender, TextChangedEventArgs e)
     {
         RecordDraftChange();
-        ViewModel.UpdateSuggestions();
+        RefreshSuggestions();
+    }
 
+    private void OnDraftSelectionChanged(object sender, RoutedEventArgs e) => RefreshSuggestions();
+
+    private void RefreshSuggestions()
+    {
+        if (_viewModel is null || SuggestPopup is null) return;
+        ViewModel.Draft = DraftBox.Text;
+        ViewModel.UpdateSuggestions(DraftBox.SelectionStart);
+        ShowSuggestions();
+    }
+
+    private void OnSuggestionsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>
+        ShowSuggestions();
+
+    private void ShowSuggestions()
+    {
+        if (_viewModel is null || SuggestPopup is null) return;
         if (ViewModel.Suggestions.Count > 0)
         {
             SuggestHeader.Text = ViewModel.Suggestions[0].IsCommand ? "Commands" : "Files";
@@ -1091,34 +1090,25 @@ public sealed partial class ChatTab : UserControl
             return;
         }
 
-        var isCommand = suggestion.IsCommand;
         ApplySuggestion(suggestion);
-
-        if (isCommand)
-        {
-            CloseSuggestions();
-            ExecuteIfCan(ViewModel.SendCommand);
-        }
     }
 
-    /// <summary>Drops the suggestion into the draft: commands replace it, files replace the @token.</summary>
+    /// <summary>Completes the active token, preserving the rest of the prompt.</summary>
     private void ApplySuggestion(SuggestionItem suggestion)
     {
-        var draft = ViewModel.Draft ?? "";
+        var edit = ComposerCompletion.Apply(DraftBox.Text, DraftBox.SelectionStart, suggestion.Insert, suggestion.IsCommand);
+        ApplyDraftEdit(edit);
+        CloseSuggestions();
+    }
 
-        if (suggestion.IsCommand)
-        {
-            ViewModel.Draft = suggestion.Insert + " ";
-        }
-        else
-        {
-            var at = draft.LastIndexOf('@');
-            ViewModel.Draft = at < 0 ? draft : draft[..at] + "@" + suggestion.Insert + " ";
-        }
-
+    private void ApplyDraftEdit(ComposerCompletion.Edit edit)
+    {
+        DraftBox.Text = edit.Text;
+        ViewModel.Draft = edit.Text;
         DraftBox.Focus(FocusState.Programmatic);
-        DraftBox.SelectionStart = DraftBox.Text.Length;
+        DraftBox.SelectionStart = edit.Caret;
         DraftBox.SelectionLength = 0;
+        RefreshSuggestions();
     }
 
     private void MoveSuggestion(int delta)
@@ -1161,20 +1151,8 @@ public sealed partial class ChatTab : UserControl
             return;
         }
 
-        var draft = ViewModel.Draft ?? "";
-        if (trigger == "/")
-        {
-            // Commands only count at the start of an otherwise empty draft.
-            ViewModel.Draft = "/";
-        }
-        else
-        {
-            ViewModel.Draft = draft.Length == 0 || char.IsWhiteSpace(draft[^1]) ? draft + "@" : draft + " @";
-        }
-
-        DraftBox.Focus(FocusState.Programmatic);
-        DraftBox.SelectionStart = DraftBox.Text.Length;
-        DraftBox.SelectionLength = 0;
+        ApplyDraftEdit(ComposerCompletion.InsertTrigger(
+            DraftBox.Text, DraftBox.SelectionStart, DraftBox.SelectionLength, trigger[0]));
     }
 
     /// <summary>Puts the caret at the end of the prompt box; waits for the tab to load when it was only just shown.</summary>

@@ -115,9 +115,12 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
         Terminal.Write("\r\n\x1b[90m[shell exited]\x1b[0m\r\n");
 
     private void OnTerminalContextRequested(UIElement sender, ContextRequestedEventArgs args) =>
+        ShowContextMenu(Terminal, args);
+
+    public void ShowContextMenu(UIElement anchor, ContextRequestedEventArgs args) =>
         TerminalContextMenu.Show(Terminal, args,
             _viewModel is { IsCommandTerminal: true, IsCliTerminal: false } viewModel
-                ? viewModel.RefreshAsync : null);
+                ? viewModel.RefreshAsync : null, anchor);
 
     private void UnsubscribeFromViewModel()
     {

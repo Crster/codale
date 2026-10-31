@@ -468,6 +468,17 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
+    private Task UpdateCliAsync(string command)
+    {
+        var codex = CliLocator.KnownClis.Single(cli => cli.Id == "codex");
+        if (command == CliVersionCheck.UpdateCommand(codex))
+        {
+            return App.Current.MainWindow?.UpdateCodexAsync() ?? Task.CompletedTask;
+        }
+
+        return RunInNewTerminalAsync(command);
+    }
+
     private async Task RunInNewTerminalAsync(string command)
     {
         var terminal = ViewModel.CreateTerminal();
@@ -646,7 +657,7 @@ public sealed partial class WorkspacePage : Page
             tab.PlanOpenRequested += OnChatPlanOpenRequested;
             tab.TaskPeekRequested += OnChatTaskPeekRequested;
             tab.ArtifactRequested += (_, artifact) => ShowArtifact(artifact);
-            tab.UpdateCliRequested += (_, cmd) => _ = RunInNewTerminalAsync(cmd);
+            tab.UpdateCliRequested += (_, cmd) => _ = UpdateCliAsync(cmd);
             tab.RunningTaskPeekRequested += (_, task) => SetPeek(ReferenceEquals(PeekPane.Task, task) && PeekPane.Visibility == Visibility.Visible ? null : task);
             chat.LoginRequired += OnChatLoginRequired;
             chat.AttentionNeeded += OnChatAttentionNeeded;
@@ -843,7 +854,7 @@ public sealed partial class WorkspacePage : Page
                 var cli = new CliTerminalTab { ViewModel = terminal, Workspace = ViewModel };
                 cli.FileDiffRequested += (_, path) => OnChatToolFileRequested(cli, new ToolFileRequestEventArgs(path, isEdit: true));
                 cli.ArtifactRequested += (_, artifact) => ShowArtifact(artifact);
-                cli.UpdateCliRequested += (_, cmd) => _ = RunInNewTerminalAsync(cmd);
+                cli.UpdateCliRequested += (_, cmd) => _ = UpdateCliAsync(cmd);
                 cli.TaskPeekRequested += (_, task) => SetPeek(ReferenceEquals(PeekPane.Task, task) && PeekPane.Visibility == Visibility.Visible ? null : task);
                 cli.ResumeRequested += (_, resume) =>
                 {
@@ -863,6 +874,7 @@ public sealed partial class WorkspacePage : Page
 
             tab.LinkActivated += OnTerminalLinkActivated;
             var item = new TabViewItem { IsClosable = true, Header = BuildTerminalHeader(terminal) };
+            item.ContextRequested += (_, args) => tab.ShowContextMenu(item, args);
             item.Content = (UIElement)tab;
 
             var entry = new TerminalTabEntry(item, tab, terminal);
@@ -1318,7 +1330,7 @@ public sealed partial class WorkspacePage : Page
             PromoteEditorTab(host);
         }
 
-        await OpenFileAtAsync(link.Path, link.Line, link.Column, link.EndLine, link.EndColumn, source.BasePath);
+        await OpenFileAtAsync(link.Path, link.Line, link.Column, link.EndLine, link.EndColumn, source.BasePath, link.LineRanges);
     }
 
     private bool IsAncestorOf(DependencyObject node)
@@ -1344,7 +1356,7 @@ public sealed partial class WorkspacePage : Page
         }
         else if (link.Path is { } path)
         {
-            await OpenFileAtAsync(path, link.Line, link.Column, link.EndLine, link.EndColumn);
+            await OpenFileAtAsync(path, link.Line, link.Column, link.EndLine, link.EndColumn, lineRanges: link.LineRanges);
         }
     }
 
@@ -1368,7 +1380,8 @@ public sealed partial class WorkspacePage : Page
         int column = 0,
         int endLine = 0,
         int endColumn = 0,
-        string? basePath = null)
+        string? basePath = null,
+        IReadOnlyList<Codale.Core.Text.FileLineRange>? lineRanges = null)
     {
         var normalized = path.Replace('/', '\\');
         string resolved;
@@ -1403,8 +1416,16 @@ public sealed partial class WorkspacePage : Page
                     ? (endColumn > column ? $"line {line}:{column}–{endColumn}" : $"line {line}:{column}")
                     : $"line {line}";
 
+            var spans = lineRanges is { Count: > 0 }
+                ? lineRanges.Select(range => new Codale.Search.LineSpan(range.Start, range.End)).ToList()
+                : new List<Codale.Search.LineSpan> { new(line, end) };
+            if (spans.Count > 1)
+            {
+                label = "lines " + string.Join(", ", spans.Select(span => span.Start == span.End ? $"{span.Start}" : $"{span.Start}–{span.End}"));
+            }
+
             entry.Tab.ShowHighlights(
-                [new Codale.Search.LineSpan(line, end)],
+                spans,
                 label,
                 reveal: true,
                 busy: false,
@@ -1487,10 +1508,7 @@ public sealed partial class WorkspacePage : Page
     {
         if (sender is ChatTab { ViewModel: { } chat })
         {
-            var task = chat.RunningTasks.FirstOrDefault(t => t.ToolUseId == call.ToolUseId)
-                ?? (call.ToolName.Contains("start_task", StringComparison.OrdinalIgnoreCase)
-                    ? chat.RunningTasks.LastOrDefault(t => t.Hosted is not null)
-                    : null);
+            var task = chat.TaskForCall(call);
 
             if (task is null && call.IsShellTool)
             {

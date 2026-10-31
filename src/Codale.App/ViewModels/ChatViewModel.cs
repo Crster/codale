@@ -351,6 +351,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>The playful line in the bottom status while a turn runs; it changes every few seconds.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WorkingStatusMessage))]
     public partial string WorkingMessage { get; set; } = "";
 
     /// <summary>How long the running turn has taken so far, e.g. "1m 04s".</summary>
@@ -362,10 +363,17 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     public bool IsWorkingOnItsOwn => !IsWaitingForYou;
 
+    // Separate runs keep the two status colors while sharing the timer/detail baseline.
+    public string WorkingStatusMessage => IsWorkingOnItsOwn ? WorkingMessage : "";
+
+    public string WaitingStatusMessage => IsWaitingForYou ? "Action required" : "";
+
     private void OnApprovalsChanged()
     {
         OnPropertyChanged(nameof(IsWaitingForYou));
         OnPropertyChanged(nameof(IsWorkingOnItsOwn));
+        OnPropertyChanged(nameof(WorkingStatusMessage));
+        OnPropertyChanged(nameof(WaitingStatusMessage));
         OnPropertyChanged(nameof(IsBusyWorking));
     }
 
@@ -521,7 +529,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         };
         AddTask(item);
 
-        if (_toolCalls.Values.LastOrDefault(c => c.ToolName.Contains("start_task", StringComparison.OrdinalIgnoreCase)) is { } activeCall)
+        if (_toolCalls.Values.LastOrDefault(c => c.ToolName.Contains("start_task", StringComparison.OrdinalIgnoreCase) ||
+            c.ToolName.EndsWith("__run_command", StringComparison.OrdinalIgnoreCase)) is { } activeCall)
         {
             _tasksByToolUse[activeCall.ToolUseId] = item;
         }
@@ -2862,6 +2871,30 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    private static string? TaskParameterId(string toolName, JsonElement input)
+    {
+        if (toolName.Contains("codale-tasks__", StringComparison.OrdinalIgnoreCase) &&
+            input.ValueKind == JsonValueKind.Object &&
+            input.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
+        {
+            return id.GetString();
+        }
+
+        return BackgroundTaskDetector.ShellIdOf(input);
+    }
+
+    /// <summary>Finds the task owned or referenced by a history entry.</summary>
+    public RunningTaskItem? TaskForCall(ToolCallItem call)
+    {
+        if (call.ParameterTaskId is { } id)
+        {
+            return RunningTasks.FirstOrDefault(t => t.Hosted?.Id == id || t.RuntimeId == id || t.ShellId == id);
+        }
+
+        return _tasksByToolUse.GetValueOrDefault(call.ToolUseId)
+            ?? RunningTasks.FirstOrDefault(t => t.ToolUseId == call.ToolUseId);
+    }
+
     /// <summary>
     /// Builds a tool call's step. What opens by default depends on what the body shows:
     /// a command about to run, a diff being made, a question or a plan are worth seeing
@@ -2877,6 +2910,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             ToolUseId = toolUseId,
             ToolName = toolName,
             Input = input.ValueKind == JsonValueKind.Undefined ? default : input.Clone(),
+            ParameterTaskId = TaskParameterId(toolName, input),
             Summary = ToolCallItem.Describe(toolName, input),
             Command = ToolCallItem.CommandInput(toolName, input) ?? "",
             PlanText = plan,
@@ -3560,7 +3594,20 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // A shell command that trips no risk rule runs without asking; one that does is shown with
         // why, so the reader decides it knowing what it touches.
         var shellAssessment = ShellApprovalAssessment(approval, out var shellCommand, out var shellHint);
-        if (shellAssessment.Risk == ShellRisk.Safe && AppSettings.AutoApproveSafeShell && PermissionMode != "plan")
+        // A request to escape Codex's planning sandbox must never enable writes.
+        // Normal inspection commands already run inside its read-only sandbox.
+        if (IsCodexSession && PermissionMode == "plan" &&
+            approval.ToolName is "Edit" or "Write" or "MultiEdit" or "NotebookEdit" or "Bash" or "Permissions")
+        {
+            if (_session is { } planning)
+            {
+                await planning.RespondToApprovalAsync(approval.RequestId,
+                    ApprovalDecision.Deny("Plan mode permits inspection only. Present the plan for approval before making changes."));
+            }
+            return;
+        }
+
+        if (shellAssessment.Risk == ShellRisk.Safe && AppSettings.AutoApproveSafeShell)
         {
             CrashLog.Trace($"{ModeDisplay(PermissionMode)} mode: allowed safe {approval.ToolName} command unasked");
 
@@ -4469,20 +4516,19 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     public void RemoveAttachment(ComposerAttachment attachment) => Attachments.Remove(attachment);
 
+    private int _suggestionCaret = int.MaxValue;
+
     /// <summary>
-    /// Recomputes the autocomplete rows from the draft: a leading "/token" matches the
+    /// Recomputes autocomplete rows from the token at the caret: "/token" matches the
     /// CLI's slash commands, an "@token" matches workspace files. The view owns the
     /// popup itself - open while rows exist.
     /// </summary>
-    public void UpdateSuggestions()
+    public void UpdateSuggestions(int? caret = null)
     {
         var draft = Draft ?? "";
-
-        // Same token, same rows: keystrokes inside an unchanged query token (or none)
-        // used to clear and rebuild the popup per keystroke.
-        var key = draft.Length > 0 && draft[0] == '/' && !draft.Contains(' ')
-            ? $"cmd:{draft}"
-            : draft.LastIndexOf('@') is var atIndex && atIndex >= 0 ? $"file:{draft[(atIndex + 1)..]}" : "";
+        if (caret.HasValue) _suggestionCaret = caret.Value;
+        var token = ComposerCompletion.FindToken(draft, Math.Min(_suggestionCaret, draft.Length));
+        var key = token is { } active ? $"{active.Trigger}:{active.Query}" : "";
         if (key == _lastSuggestionKey && Suggestions.Count > 0)
         {
             return;
@@ -4491,10 +4537,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         Suggestions.Clear();
 
-        if (draft.Length > 0 && draft[0] == '/' && !draft.Contains(' '))
+        if (token is { Trigger: '/' } command)
         {
             // "/" alone lists everything; from the second character on it filters.
-            var typed = draft[1..];
+            var typed = command.Query;
 
             foreach (var (name, description) in SlashCommands.Where(c => c.Name.StartsWith(typed, StringComparison.OrdinalIgnoreCase)))
             {
@@ -4510,17 +4556,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        var at = draft.LastIndexOf('@');
-        if (at < 0)
+        if (token is not { Trigger: '@' } reference || reference.Query.Length > 260)
         {
             return;
         }
 
-        var query = draft[(at + 1)..];
-        if (query.Contains(' ') || query.Length > 260)
-        {
-            return;
-        }
+        var query = reference.Query;
 
         // The index is built in the background on first use; rows appear once it lands.
         _ = EnsureWorkspaceFilesAsync();
