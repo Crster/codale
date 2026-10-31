@@ -11,6 +11,7 @@ public sealed partial class ChatViewModel
     /// </summary>
     private void EndTurn(TurnOutcome outcome)
     {
+        RestoreBrowserViewport();
         _turnTimer.Stop();
         SetActivity(null, toolUseId: null);
 

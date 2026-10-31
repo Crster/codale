@@ -80,6 +80,29 @@ public sealed partial class SessionsViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsLoading { get; set; }
 
+    [ObservableProperty]
+    public partial bool IsOptimizing { get; set; }
+
+    /// <summary>Maintains all history in this project, then realigns the displayed list.</summary>
+    public async Task RebuildAndOptimizeAsync()
+    {
+        if (IsOptimizing)
+        {
+            return;
+        }
+
+        IsOptimizing = true;
+        try
+        {
+            await _features.RebuildAndOptimizeAsync();
+            await RefreshAsync();
+        }
+        finally
+        {
+            IsOptimizing = false;
+        }
+    }
+
     /// <summary>Raised when the user picks a row: a feature to work on, or a terminal CLI's conversation to read.</summary>
     public event EventHandler<TranscriptSummary>? SessionOpened;
 

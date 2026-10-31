@@ -124,6 +124,18 @@ public static class OpenAiApiClient
         return trimmed.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase) ? trimmed : trimmed + "/chat/completions";
     }
 
+    /// <summary>Identify Codale in OpenRouter's activity logs and app analytics.</summary>
+    internal static void AddAppAttribution(HttpRequestMessage request)
+    {
+        if (!string.Equals(request.RequestUri?.Host, "openrouter.ai", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        request.Headers.Add("HTTP-Referer", "https://github.com/Crster/codale");
+        request.Headers.Add("X-OpenRouter-Title", "Codale");
+    }
+
     /// <summary>
     /// The request body. <paramref name="tuned"/> adds <c>temperature: 0</c>: these jobs want the
     /// same answer every time, not a creative one. A model that rejects it (a reasoning model
@@ -375,6 +387,8 @@ public static class OpenAiApiClient
             {
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", endpoint.ApiKey);
             }
+
+            AddAppAttribution(request);
 
             using var response = await Http.SendAsync(request, ct).ConfigureAwait(false);
             var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);

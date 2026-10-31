@@ -34,6 +34,9 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     private readonly string _workingDirectory;
     private TerminalSession? _session;
     private bool _disposed;
+    private bool _refreshing;
+    private short _columns = 120;
+    private short _rows = 30;
 
     /// <summary>
     /// A plain shell tab, or one running a project command - the commands menu opens
@@ -144,8 +147,53 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     {
         IsOpen = false;
         IsRunning = false;
-        _session?.Dispose();
+        var session = _session;
         _session = null;
+        session?.Dispose();
+    }
+
+    /// <summary>Ends a project command's shell and reruns its original command in the same tab.</summary>
+    public async Task RefreshAsync()
+    {
+        if (!IsCommandTerminal || IsCliTerminal || _disposed || !IsOpen || _refreshing)
+        {
+            return;
+        }
+
+        _refreshing = true;
+        try
+        {
+            var previous = _session;
+            _session = null;
+            IsRunning = false;
+            if (previous is not null)
+            {
+                await previous.DisposeAsync();
+            }
+
+            // Closing the tab while teardown is pending must not launch another process.
+            if (_disposed || !IsOpen)
+            {
+                return;
+            }
+
+            ExitCode = null;
+            Activity = TerminalActivity.Busy;
+            const string marker = "\r\n\x1b[0m\x1b[90m[restarting command]\x1b[0m\r\n";
+            Transcript.Append(marker);
+            OutputReceived?.Invoke(this, marker);
+            Start();
+            if (StartupError.Length > 0)
+            {
+                var error = $"\x1b[31m{StartupError}\x1b[0m\r\n";
+                Transcript.Append(error);
+                OutputReceived?.Invoke(this, error);
+            }
+        }
+        finally
+        {
+            _refreshing = false;
+        }
     }
 
     private void Start()
@@ -163,20 +211,29 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
             CrashLog.Trace($"terminal: shell = {command}");
 
             // Created on the UI thread, so the session delivers output there.
-            _session = new TerminalSession();
-            _session.OutputReceived += (_, text) =>
+            var session = new TerminalSession();
+            _session = session;
+            session.OutputReceived += (_, text) =>
             {
+                if (!ReferenceEquals(_session, session))
+                {
+                    return;
+                }
                 Transcript.Append(text);
                 OutputReceived?.Invoke(this, text);
             };
-            _session.Exited += (_, exitCode) =>
+            session.Exited += (_, exitCode) =>
             {
+                if (!ReferenceEquals(_session, session))
+                {
+                    return;
+                }
                 ExitCode = exitCode;
                 IsRunning = false;
                 Activity = exitCode == 0 ? TerminalActivity.Terminated : TerminalActivity.Error;
                 Exited?.Invoke(this, EventArgs.Empty);
             };
-            _session.Start(_workingDirectory, command);
+            session.Start(_workingDirectory, command, _columns, _rows);
             IsRunning = true;
             CrashLog.Trace($"terminal: session started, pid = {_session.ProcessId}");
         }
@@ -204,7 +261,12 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Resizes the pseudoconsole to the view's cell grid.</summary>
-    public void Resize(short columns, short rows) => _session?.Resize(columns, rows);
+    public void Resize(short columns, short rows)
+    {
+        _columns = columns;
+        _rows = rows;
+        _session?.Resize(columns, rows);
+    }
 
     public void Dispose()
     {
@@ -214,7 +276,8 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
         }
 
         _disposed = true;
-        _session?.Dispose();
+        var session = _session;
         _session = null;
+        session?.Dispose();
     }
 }

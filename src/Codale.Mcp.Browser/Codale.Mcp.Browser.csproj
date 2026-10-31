@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Codale.Mcp.Common\Codale.Mcp.Common.csproj" />
+    <ProjectReference Include="..\Codale.Core\Codale.Core.csproj" />
     <!--
       Pinned: the App copies this project's bin tree (including the .playwright driver)
       with wildcard Content globs, so a floating version could silently change what ships.
@@ -18,5 +19,9 @@
     <!-- Drivers are installed by the package; browsers come from the installed Edge/Chrome. -->
     <PlaywrightPlatform>win32;win64</PlaywrightPlatform>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Codale.Mcp.Tests" />
+  </ItemGroup>
 
 </Project>

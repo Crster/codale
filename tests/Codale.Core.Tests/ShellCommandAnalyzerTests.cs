@@ -53,11 +53,34 @@ public sealed class ShellCommandAnalyzerTests
 
     [Theory]
     [InlineData("\"C:\\Users\\test\\pwsh.exe\" -Command 'rg -n pattern src'", "rg")]
-    [InlineData("pwsh -Command \"dotnet test project\"", "dotnet test project")]
+    [InlineData("pwsh -Command \"dotnet test project\"", "dotnet test")]
     [InlineData("powershell.exe -c 'Get-Content a | Select-Object -First 5'", "Get-Content && Select-Object")]
     [InlineData("other.exe -Command 'rg x'", "other.exe -Command 'rg x'")]
     public void Shell_wrappers_are_removed_from_compact_summaries(string command, string expected) =>
         Assert.Equal(expected, ShellCommandSummary.Shorten(command));
+
+    [Theory]
+    [InlineData("dotnet test tests/Codale.Agents.Tests/Codale.Agents.Tests.csproj --no-restore --filter FullyQualifiedName~OpenAiApiClientTests -v minimal", "dotnet test")]
+    [InlineData("dotnet build src/Codale.App/Codale.App.csproj -p:Platform=x64 --no-restore -v minimal", "dotnet build")]
+    [InlineData("pwsh -Command 'dotnet build src/App.csproj --no-restore'", "dotnet build")]
+    [InlineData("git diff -- src/Codale.App/ViewModels/ChatViewModel.cs", "git diff")]
+    [InlineData("npm run build -- --mode production", "npm run build")]
+    [InlineData("cargo test --package app --release", "cargo test")]
+    [InlineData("dotnet --info", "dotnet --info")]
+    public void Developer_command_rows_keep_the_action_without_verbose_arguments(string command, string expected) =>
+        Assert.Equal(expected, ShellCommandSummary.Shorten(command));
+
+    [Fact]
+    public void Unknown_long_commands_have_a_bounded_row_summary()
+    {
+        var command = "custom-tool --input " + new string('x', 150);
+
+        var summary = ShellCommandSummary.Shorten(command);
+
+        Assert.True(summary.Length <= 72);
+        Assert.StartsWith("custom-tool --input ", summary);
+        Assert.EndsWith("…", summary);
+    }
 
     [Fact]
     public void A_long_chain_is_cut_short() =>

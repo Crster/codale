@@ -115,6 +115,36 @@ public sealed class ConPtySmokeTests
     }
 
     [Fact]
+    public async Task Async_disposal_ends_the_old_shell_before_reexecuting_a_command()
+    {
+        const string command = "cmd.exe /k echo codale-refresh";
+        using var first = new OutputCollector(command);
+        using var oldProcess = System.Diagnostics.Process.GetProcessById(first.Session.ProcessId);
+
+        await first.Session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.True(oldProcess.HasExited);
+        Assert.False(first.Session.IsRunning);
+
+        using var replacement = new TerminalSession();
+        var text = new StringBuilder();
+        var output = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        replacement.OutputReceived += (_, chunk) =>
+        {
+            text.Append(chunk);
+            if (text.ToString().Contains("codale-refresh"))
+            {
+                output.TrySetResult();
+            }
+        };
+        replacement.Start(Path.GetTempPath(), command);
+        await output.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.True(replacement.IsRunning);
+        await replacement.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
     public async Task Coloured_output_arrives_as_vt_sequences()
     {
         // ConPTY renders the VT itself; the emitted text carries whatever escape

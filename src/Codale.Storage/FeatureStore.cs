@@ -247,6 +247,44 @@ public sealed class FeatureStore : IDisposable
         }
     }
 
+    /// <summary>Realigns both search indexes with their source rows and repacks the database.</summary>
+    public void RebuildAndOptimize()
+    {
+        lock (_gate)
+        {
+            // Replace the derived entries atomically: readers in other windows see either
+            // the old complete index or the rebuilt one. Never renumber file_chunks IDs;
+            // chunks_fts refers to those IDs even after VACUUM redistributes pages.
+            using (var transaction = _connection.BeginTransaction())
+            {
+                Execute("DELETE FROM features_fts; DELETE FROM chunks_fts;");
+                foreach (var id in Query("SELECT id FROM features", r => r.GetString(0)))
+                {
+                    RefreshSearch(id);
+                }
+
+                foreach (var chunk in Query(
+                    "SELECT id, path, text FROM file_chunks",
+                    r => (Id: r.GetInt64(0), Path: r.GetString(1), Text: r.GetString(2))))
+                {
+                    Execute("INSERT INTO chunks_fts (chunk_id, tokens) VALUES ($id, $tokens)",
+                        ("$id", chunk.Id), ("$tokens", SearchText.ForIndex(chunk.Path + " " + chunk.Text)));
+                }
+
+                Execute("INSERT INTO features_fts(features_fts) VALUES ('optimize');");
+                Execute("INSERT INTO chunks_fts(chunks_fts) VALUES ('optimize');");
+                transaction.Commit();
+            }
+
+            // VACUUM must run outside a transaction. It reclaims deleted pages and
+            // redistributes the remaining records without changing history metadata.
+            Execute("REINDEX;");
+            Execute("VACUUM;");
+            Execute("ANALYZE;");
+            Execute("PRAGMA optimize;");
+        }
+    }
+
     public void Dispose()
     {
         lock (_gate)

@@ -17,6 +17,7 @@ public sealed partial class CliUpdateViewModel : ObservableObject
     private static readonly Dictionary<string, (Version Version, DateTimeOffset Checked)> LatestByCli = new();
 
     private CliDescriptor _cli = CliLocator.ActiveCli;
+    private int _refreshGeneration;
 
     public CliDescriptor Cli => _cli;
 
@@ -40,12 +41,13 @@ public sealed partial class CliUpdateViewModel : ObservableObject
 
     public async Task RefreshAsync(CliDescriptor cli, bool forceLatest = false)
     {
+        var generation = ++_refreshGeneration;
         _cli = cli;
         Installed = null;
         Latest = null;
 
         var installed = await CliVersionCheck.InstalledAsync(cli);
-        if (_cli != cli)
+        if (generation != _refreshGeneration)
         {
             return;
         }
@@ -74,7 +76,7 @@ public sealed partial class CliUpdateViewModel : ObservableObject
             }
         }
 
-        if (_cli == cli)
+        if (generation == _refreshGeneration)
         {
             Latest = cached.Version;
         }

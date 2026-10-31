@@ -38,6 +38,7 @@ public sealed class CodexAgentSession : IAgentSession
 
     /// <summary>The app server's requests awaiting our answer, keyed by its id: pending approvals.</summary>
     private readonly Dictionary<int, PendingApproval> _pendingApprovals = [];
+    private readonly Dictionary<string, (string ThreadId, string? TurnId, JsonElement Item)> _mcpCalls = [];
 
     private Process? _process;
     private Task? _readLoop;
@@ -431,11 +432,22 @@ public sealed class CodexAgentSession : IAgentSession
             return;
         }
 
+        if (pending.Method == "mcpServer/elicitation/request")
+        {
+            await WriteResponseAsync(id, BuildElicitationResult(decision), ct).ConfigureAwait(false);
+            return;
+        }
+
         var approvalResult = decision.Behavior == ApprovalBehavior.Allow
             ? (object)new { decision = "accept" }
             : new { decision = "decline" };
         await WriteResponseAsync(id, approvalResult, ct).ConfigureAwait(false);
     }
+
+    internal static object BuildElicitationResult(ApprovalDecision decision) =>
+        decision.Behavior == ApprovalBehavior.Allow
+            ? (object)new { action = "accept", content = new { } }
+            : new { action = "decline" };
 
     /// <summary>
     /// Builds the result payload for an <c>item/tool/requestUserInput</c> server request matching
@@ -778,7 +790,7 @@ public sealed class CodexAgentSession : IAgentSession
     /// A server-initiated request. Approvals and input requests become <see cref="ApprovalRequested"/>;
     /// anything else is declined with a JSON-RPC error so the server never blocks on us.
     /// </summary>
-    private async Task HandleServerRequestAsync(JsonElement id, string method, JsonElement message)
+    internal async Task HandleServerRequestAsync(JsonElement id, string method, JsonElement message)
     {
         if (message.Prop("params") is not { } parameters || !IsSupportedServerRequest(method))
         {
@@ -788,7 +800,7 @@ public sealed class CodexAgentSession : IAgentSession
         }
 
         var threadId = parameters.Str("threadId") ?? _threadId ?? "";
-        var item = parameters.Prop("item");
+        var item = parameters.Prop("item") ?? FindMcpApprovalItem(method, parameters, threadId);
         var (toolName, input) = DescribeApproval(method, parameters, item);
 
         var approvalId = id.GetInt32();
@@ -803,6 +815,37 @@ public sealed class CodexAgentSession : IAgentSession
             Input = input,
         }).ConfigureAwait(false);
     }
+
+    private JsonElement? FindMcpApprovalItem(string method, JsonElement parameters, string threadId)
+    {
+        if (parameters.Str("itemId") is { } itemId && _mcpCalls.TryGetValue(itemId, out var known))
+        {
+            return known.Item;
+        }
+
+        // Codex sends MCP tool approvals as elicitation requests without an itemId.
+        // Correlate their metadata with an active call, never just the latest tool row:
+        // parallel calls and subagent threads can be awaiting different decisions.
+        if (method != "mcpServer/elicitation/request" ||
+            parameters.Prop("_meta") is not { } meta ||
+            meta.Str("codex_approval_kind") != "mcp_tool_call" ||
+            meta.Prop("tool_params") is not { } arguments)
+        {
+            return null;
+        }
+
+        var matches = _mcpCalls.Values.Where(call =>
+            call.ThreadId == threadId && call.TurnId == parameters.Str("turnId") &&
+            call.Item.Str("server") == parameters.Str("serverName") &&
+            (parameters.Str("message") is not { Length: > 0 } prompt ||
+                prompt.Contains($"\"{call.Item.Str("tool")}\"", StringComparison.Ordinal)) &&
+            McpArguments(call.Item) is { } input && JsonElement.DeepEquals(input, arguments)).ToArray();
+        return matches.Length == 1 ? matches[0].Item : null;
+    }
+
+    private static JsonElement? McpArguments(JsonElement item) =>
+        item.Prop("arguments") is { ValueKind: JsonValueKind.String } raw
+            ? ParseObject(raw.GetString()) : item.Prop("arguments");
 
     private static bool IsSupportedServerRequest(string method) =>
         method.Contains("requestApproval", StringComparison.Ordinal) ||
@@ -828,7 +871,7 @@ public sealed class CodexAgentSession : IAgentSession
         {
             var server = source.Str("server") ?? parameters.Str("server") ?? "";
             var tool = source.Str("tool") ?? parameters.Str("tool") ?? "";
-            var arguments = source.Prop("arguments") ?? parameters.Prop("arguments");
+            var arguments = McpArguments(source) ?? parameters.Prop("arguments");
             var input = arguments is { ValueKind: JsonValueKind.Object } args
                 ? args
                 : JsonSerializer.SerializeToElement(new { server, tool }, WireJson);
@@ -1216,13 +1259,12 @@ public sealed class CodexAgentSession : IAgentSession
             case "mcpToolCall":
                 if (!completed)
                 {
+                    _mcpCalls[itemId] = (parameters.Str("threadId") ?? _threadId ?? "", parameters.Str("turnId"), item.Clone());
                     // Named as Claude names MCP tools (mcp__server__tool), with the call's own arguments as
                     // its input: the panel recognizes Codale's todos_set and artifact_add by exactly that.
                     var tool = item.Str("tool") ?? "";
                     var server = item.Str("server") ?? "";
-                    var arguments = item.Prop("arguments") is { } raw && raw.ValueKind == JsonValueKind.String
-                        ? ParseObject(raw.GetString())
-                        : item.Prop("arguments");
+                    var arguments = McpArguments(item);
                     var input = arguments is { ValueKind: JsonValueKind.Object } given
                         ? given
                         : JsonSerializer.SerializeToElement(new { tool, server }, WireJson);
@@ -1231,6 +1273,7 @@ public sealed class CodexAgentSession : IAgentSession
                 }
                 else
                 {
+                    _mcpCalls.Remove(itemId);
                     await EmitAsync(parent, new ToolCallCompleted
                     {
                         ToolUseId = itemId,

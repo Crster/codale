@@ -8,7 +8,7 @@ namespace Codale.Terminal;
 /// Rendering is somebody else's job - the app pipes the chunks into the native
 /// TerminalEmulator, which does the VT parsing.
 /// </summary>
-public sealed class TerminalSession : IDisposable
+public sealed class TerminalSession : IDisposable, IAsyncDisposable
 {
     private readonly ConPty _pty = new();
     private readonly CancellationTokenSource _cancellation = new();
@@ -28,6 +28,7 @@ public sealed class TerminalSession : IDisposable
     private Task? _writer;
     private Task? _watcher;
     private bool _disposed;
+    private Task _shutdown = Task.CompletedTask;
 
     /// <summary>How long Dispose waits for the pseudoconsole teardown before leaving it to finish in the background.</summary>
     private static readonly TimeSpan TeardownWait = TimeSpan.FromSeconds(1);
@@ -379,7 +380,14 @@ public sealed class TerminalSession : IDisposable
 
         // The loops read the token until they unwind, so it can only be disposed after them.
         var loops = new[] { teardown, _reader, _writer, _watcher }.OfType<Task>().ToArray();
-        _ = Task.WhenAll(loops).ContinueWith(
+        _shutdown = Task.WhenAll(loops).ContinueWith(
             _ => _cancellation.Dispose(), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+    }
+
+    /// <summary>Ends the session and waits for teardown before a replacement command starts.</summary>
+    public async ValueTask DisposeAsync()
+    {
+        Dispose();
+        await _shutdown.ConfigureAwait(false);
     }
 }

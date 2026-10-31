@@ -100,7 +100,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     public CliUpdateViewModel CliUpdate { get; } = new();
 
-    private CliDescriptor PanelCli => Session?.TerminalCli ?? CliLocator.ActiveCli;
+    private CliDescriptor PanelCli => Session?.TerminalCli ?? Session?.SessionCli ?? CliLocator.ActiveCli;
 
     public string EndpointLabel =>
         Session?.TerminalCli is { } cli
@@ -137,6 +137,11 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             nameof(ChatViewModel.TerminalCli))
         {
             NotifySessionProperties();
+        }
+
+        if (e.PropertyName is nameof(ChatViewModel.SessionCli) or nameof(ChatViewModel.TerminalCli))
+        {
+            _ = CliUpdate.RefreshAsync(PanelCli);
         }
 
         if (e.PropertyName == nameof(ChatViewModel.HasConversation))
@@ -242,16 +247,22 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         try
         {
             var cli = CliUpdate.Cli;
-            if (CliVersionCheck.UpdateCommand(cli) is not { } command || Workspace is null)
+            if (cli != PanelCli || !CliUpdate.UpdateAvailable ||
+                CliVersionCheck.UpdateCommand(cli) is not { } command || Workspace is null)
             {
                 return;
             }
 
             UpdateCliRequested?.Invoke(this, command);
 
-            for (var i = 0; i < 36 && CliUpdate.UpdateAvailable && CliUpdate.Cli == cli; i++)
+            for (var i = 0; i < 36 && CliUpdate.UpdateAvailable && CliUpdate.Cli == cli && PanelCli == cli; i++)
             {
                 await Task.Delay(TimeSpan.FromSeconds(5));
+                if (PanelCli != cli || CliUpdate.Cli != cli)
+                {
+                    break;
+                }
+
                 await CliUpdate.RefreshAsync(cli);
             }
         }
@@ -693,6 +704,30 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         catch (Exception ex)
         {
             await ShowErrorAsync("Could not rename history", ex.Message);
+        }
+    }
+
+    private async void OnRebuildHistoryClick(object sender, RoutedEventArgs e)
+    {
+        if (Workspace?.Sessions is not { } sessions || sessions.IsOptimizing)
+        {
+            return;
+        }
+
+        try
+        {
+            await sessions.RebuildAndOptimizeAsync();
+            await AppDialog.Apply(new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "History optimized",
+                Content = "Search indexes for all history in this project have been rebuilt and the database compacted.",
+                CloseButtonText = "OK",
+            }, DialogTone.Success).ShowAsync();
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync("Could not rebuild and optimize history", ex.Message);
         }
     }
 

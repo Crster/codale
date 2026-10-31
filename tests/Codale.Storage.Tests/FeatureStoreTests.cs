@@ -105,4 +105,55 @@ public sealed class FeatureStoreTests : IDisposable
 
         Assert.Equal(f.Id, _store.Search("authentication", 3).Single().Id);
     }
+
+    [Fact]
+    public void Rebuild_repairs_derived_indexes_without_changing_history_or_chunk_links()
+    {
+        var removed = _store.Create("Removed", "");
+        var login = _store.Create("Login", "Sign in flow");
+        _store.ReplaceFile(removed.Id, "old.cs", [(1, "deleted chunk")]);
+        _store.ReplaceFile(login.Id, "src/Auth.cs", [(12, "refresh token logic")]);
+        _store.RecordProgress(login.Id, 500, "repair redirects");
+        _store.SetSummary(login.Id, "Keychain credentials", 400);
+        _store.Delete(removed.Id); // Leave a gap in chunk IDs before VACUUM.
+        var before = _store.Get(login.Id);
+
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(_directory, "features.db")}"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                DELETE FROM features_fts;
+                DELETE FROM chunks_fts;
+                INSERT INTO features_fts(id, tokens) VALUES ('orphan', 'obsolete');
+                INSERT INTO chunks_fts(chunk_id, tokens) VALUES (999, 'obsolete');
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        _store.RebuildAndOptimize();
+        _store.RebuildAndOptimize(); // A second pass must be safe, too.
+
+        Assert.Equal(before, Assert.Single(_store.List()));
+        Assert.Equal(login.Id, Assert.Single(_store.Search("credentials", 5)).Id);
+        Assert.Equal(login.Id, Assert.Single(_store.Search("redirects", 5)).Id);
+        Assert.Equal(login.Id, Assert.Single(_store.Search("Auth", 5)).Id);
+        Assert.DoesNotContain(_store.Documents(), d => d.Feature.Id == "orphan");
+        Assert.Empty(_store.Search("obsolete", 5));
+        var hit = Assert.Single(_store.SearchFiles("refresh token", login.Id, 5));
+        Assert.Equal("src/Auth.cs", hit.Path);
+        Assert.Equal(12, hit.StartLine);
+        Assert.Equal(1, _store.FileCount(login.Id));
+        _store.ReplaceFile(login.Id, "src/Auth.cs", [(3, "renew session")]);
+        Assert.Empty(_store.SearchFiles("refresh", null, 5));
+        Assert.Single(_store.SearchFiles("renew", null, 5));
+    }
+
+    [Fact]
+    public void Empty_history_can_be_rebuilt()
+    {
+        _store.RebuildAndOptimize();
+        Assert.Empty(_store.List());
+        Assert.Empty(_store.Search("anything", 5));
+    }
 }

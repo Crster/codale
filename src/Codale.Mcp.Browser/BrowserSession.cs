@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 
 using Microsoft.Playwright;
 
@@ -50,10 +51,17 @@ public sealed class BrowserSession : IAsyncDisposable
     /// </summary>
     public const int AttachPort = McpDefaults.BrowserAttachPort;
 
+    public int DebuggingPort { get; init; } = AttachPort;
+
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly List<IPage> _pages = [];
     private readonly Dictionary<IPage, List<string>> _console = [];
     private readonly Dictionary<IPage, List<string>> _network = [];
+    private sealed record ViewportState((int Width, int Height)? Size, int WindowId, JsonElement Bounds);
+    private readonly Dictionary<IPage, ViewportState> _originalViewports = [];
+    private readonly HashSet<IPage> _windowSizedPages = [];
+    private readonly Dictionary<IPage, ICDPSession> _viewportSessions = [];
+    private readonly Dictionary<IPage, (int Width, int Height)> _attachedSizes = [];
     private IPlaywright? _playwright;
     private IBrowser? _browser;
     private IBrowserContext? _context;
@@ -84,13 +92,13 @@ public sealed class BrowserSession : IAsyncDisposable
     private static string DownloadDirectory =>
         Path.Combine(Path.GetTempPath(), "codale-downloads");
 
-    private static async Task<bool> AttachAvailableAsync()
+    private async Task<bool> AttachAvailableAsync()
     {
         try
         {
             using var tcp = new System.Net.Sockets.TcpClient();
             using var cts = new CancellationTokenSource(300);
-            await tcp.ConnectAsync(System.Net.IPAddress.Loopback, AttachPort, cts.Token).ConfigureAwait(false);
+            await tcp.ConnectAsync(System.Net.IPAddress.Loopback, DebuggingPort, cts.Token).ConfigureAwait(false);
             return true;
         }
         catch (Exception ex) when (ex is System.Net.Sockets.SocketException or OperationCanceledException or IOException)
@@ -135,7 +143,7 @@ public sealed class BrowserSession : IAsyncDisposable
     {
         try
         {
-            _browser = await _playwright!.Chromium.ConnectOverCDPAsync($"http://127.0.0.1:{AttachPort}");
+            _browser = await _playwright!.Chromium.ConnectOverCDPAsync($"http://127.0.0.1:{DebuggingPort}");
             _attached = true;
             _context = _browser.Contexts.Count > 0
                 ? _browser.Contexts[0]
@@ -234,6 +242,10 @@ public sealed class BrowserSession : IAsyncDisposable
         _pages.Clear();
         _console.Clear();
         _network.Clear();
+        _originalViewports.Clear();
+        _windowSizedPages.Clear();
+        _viewportSessions.Clear();
+        _attachedSizes.Clear();
         _current = 0;
     }
 
@@ -247,6 +259,11 @@ public sealed class BrowserSession : IAsyncDisposable
 
         if (_browser is not null)
         {
+            if (_attached)
+            {
+                await RestoreAttachedViewportsAsync();
+            }
+
             try { await _browser.CloseAsync(); }
             catch (Exception ex) when (ex is PlaywrightException or IOException or InvalidOperationException or ObjectDisposedException)
             {
@@ -287,6 +304,7 @@ public sealed class BrowserSession : IAsyncDisposable
     private void Track(IPage page)
     {
         _pages.Add(page);
+        if (page.ViewportSize is null) _windowSizedPages.Add(page);
         var console = _console[page] = [];
         var network = _network[page] = [];
         page.Console += (_, m) => Append(console, $"[{m.Type}] {m.Text}");
@@ -322,6 +340,10 @@ public sealed class BrowserSession : IAsyncDisposable
             _pages.Remove(page);
             _console.Remove(page);
             _network.Remove(page);
+            _originalViewports.Remove(page);
+            _windowSizedPages.Remove(page);
+            _viewportSessions.Remove(page);
+            _attachedSizes.Remove(page);
             if (idx >= 0 && _current >= idx && _current > 0) _current--;
         };
     }
@@ -510,8 +532,20 @@ public sealed class BrowserSession : IAsyncDisposable
             {
                 foreach (var page in _pages)
                 {
-                    await page.SetViewportSizeAsync(t.Item1, t.Item2);
+                    if (!_originalViewports.ContainsKey(page))
+                    {
+                        _originalViewports[page] = await CaptureViewportAsync(page);
+                    }
                 }
+
+                foreach (var page in _pages)
+                {
+                    await RestoreViewportAsync(page, t);
+                }
+            }
+            else
+            {
+                await RestoreAttachedViewportsAsync();
             }
 
             return;
@@ -532,6 +566,107 @@ public sealed class BrowserSession : IAsyncDisposable
         }
 
         await RecreateContextAsync();
+    }
+
+    private (int Width, int Height)? ReadViewport(IPage page) =>
+        _attachedSizes.TryGetValue(page, out var attachedSize) ? attachedSize :
+        !_windowSizedPages.Contains(page) && page.ViewportSize is { } size ? (size.Width, size.Height) : null;
+
+    private async Task<ViewportState> CaptureViewportAsync(IPage page)
+    {
+        var cdp = await page.Context.NewCDPSessionAsync(page);
+        try
+        {
+            var window = (await cdp.SendAsync("Browser.getWindowForTarget"))!.Value;
+            return new ViewportState(ReadViewport(page), window.GetProperty("windowId").GetInt32(), window.GetProperty("bounds").Clone());
+        }
+        finally { await cdp.DetachAsync(); }
+    }
+
+    private async Task RestoreViewportAsync(IPage page, ViewportState state)
+    {
+        await RestoreViewportAsync(page, state.Size);
+        var cdp = await page.Context.NewCDPSessionAsync(page);
+        try
+        {
+            // Playwright can resize the actual Chromium window as part of emulation.
+            // Preserve maximized/fullscreen state as well as a normal window's bounds.
+            var windowState = state.Bounds.GetProperty("windowState").GetString();
+            var bounds = windowState == "normal"
+                ? JsonSerializer.Deserialize<Dictionary<string, object>>(state.Bounds.GetRawText())!
+                : new Dictionary<string, object> { ["windowState"] = windowState! };
+            await cdp.SendAsync("Browser.setWindowBounds", new Dictionary<string, object>
+            {
+                ["windowId"] = state.WindowId, ["bounds"] = bounds,
+            });
+        }
+        finally { await cdp.DetachAsync(); }
+    }
+
+    private async Task RestoreViewportAsync(IPage page, (int Width, int Height)? size)
+    {
+        // Keep emulation on our own CDP session, so clearing it also releases the
+        // override. Playwright's SetViewportSize leaves an override on its session.
+        if (!_viewportSessions.TryGetValue(page, out var cdp))
+        {
+            cdp = await page.Context.NewCDPSessionAsync(page);
+            _viewportSessions[page] = cdp;
+        }
+
+        if (size is { } fixedSize)
+        {
+            await cdp.SendAsync("Emulation.setDeviceMetricsOverride", new Dictionary<string, object>
+            {
+                ["width"] = fixedSize.Width, ["height"] = fixedSize.Height,
+                ["deviceScaleFactor"] = 0, ["mobile"] = false,
+            });
+            _attachedSizes[page] = fixedSize;
+            _windowSizedPages.Remove(page);
+            return;
+        }
+
+        // A null viewport follows the actual browser window. Setting the old pixel
+        // dimensions would leave another fixed override, so clear Chromium's emulation.
+        try { await cdp.SendAsync("Emulation.clearDeviceMetricsOverride"); }
+        finally { await cdp.DetachAsync(); }
+        _viewportSessions.Remove(page);
+        _attachedSizes.Remove(page);
+        _windowSizedPages.Add(page);
+    }
+
+    private async Task RestoreAttachedViewportsAsync()
+    {
+        foreach (var (page, size) in _originalViewports.ToArray())
+        {
+            if (!page.IsClosed)
+            {
+                try { await RestoreViewportAsync(page, size); }
+                catch (PlaywrightException) { /* a tab can close during cleanup */ }
+            }
+        }
+
+        _originalViewports.Clear();
+    }
+
+    /// <summary>Releases the agent's viewport overrides without opening an unused browser.</summary>
+    public async Task RestoreViewportAsync()
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            if (!IsAlive) return;
+            if (_attached)
+            {
+                await RestoreAttachedViewportsAsync();
+                _device = null;
+                _customSize = null;
+            }
+            else if (_device is not null || _customSize is not null)
+            {
+                await ApplyDeviceAsync(null, null);
+            }
+        }
+        finally { _gate.Release(); }
     }
 
     /// <summary>A fresh context (same browser, same logins) with its tabs reopened where they were.</summary>
@@ -623,7 +758,11 @@ public sealed class BrowserSession : IAsyncDisposable
         var results = new List<McpContent>();
 
         // The user's own browser cannot be reset by "no device", so put each tab's size back by hand.
-        var originalSizes = _attached ? _pages.Select(p => p.ViewportSize).ToList() : [];
+        var originalSizes = new Dictionary<IPage, ViewportState>();
+        if (_attached)
+        {
+            foreach (var page in _pages) originalSizes[page] = await CaptureViewportAsync(page);
+        }
         try
         {
             foreach (var preset in presets)
@@ -645,11 +784,11 @@ public sealed class BrowserSession : IAsyncDisposable
         {
             await ApplyDeviceAsync(previousDevice, previousSize);
 
-            for (var i = 0; i < originalSizes.Count && i < _pages.Count; i++)
+            foreach (var (page, size) in originalSizes)
             {
-                if (originalSizes[i] is { } size && previousDevice is null && previousSize is null)
+                if (!page.IsClosed)
                 {
-                    await _pages[i].SetViewportSizeAsync(size.Width, size.Height);
+                    await RestoreViewportAsync(page, size);
                 }
             }
         }

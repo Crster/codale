@@ -10,8 +10,8 @@ namespace Codale.App.Views;
 /// <summary>The terminal's own right-click menu, shared by every tab that hosts a <see cref="TerminalView"/>.</summary>
 internal static class TerminalContextMenu
 {
-    /// <summary>Copy and Paste against the shell, plus Select All and Clear.</summary>
-    public static void Show(TerminalView terminal, ContextRequestedEventArgs args)
+    /// <summary>Copy, Paste, Select All and Clear, with Refresh for a project command.</summary>
+    public static void Show(TerminalView terminal, ContextRequestedEventArgs args, Func<Task>? refresh = null)
     {
         args.Handled = true;
 
@@ -43,6 +43,14 @@ internal static class TerminalContextMenu
         menu.Items.Add(selectAll);
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(clear);
+
+        if (refresh is not null)
+        {
+            var refreshItem = new MenuFlyoutItem { Text = "Refresh", Icon = new SymbolIcon(Symbol.Refresh) };
+            refreshItem.Click += async (_, _) => await refresh();
+            menu.Items.Add(new MenuFlyoutSeparator());
+            menu.Items.Add(refreshItem);
+        }
 
         menu.ShowAt(terminal, new FlyoutShowOptions { Position = args.TryGetPosition(terminal, out var position) ? position : default });
     }

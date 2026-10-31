@@ -9,6 +9,34 @@ namespace Codale.Agents.Tests;
 
 public sealed class OpenAiApiClientTests
 {
+    [Theory]
+    [InlineData("https://openrouter.ai/api/v1/chat/completions")]
+    [InlineData("https://OPENROUTER.AI/api/v1/chat/completions")]
+    public void OpenRouter_requests_identify_codale(string url)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, url);
+
+        OpenAiApiClient.AddAppAttribution(request);
+
+        Assert.Equal("https://github.com/Crster/codale", Assert.Single(request.Headers.GetValues("HTTP-Referer")));
+        Assert.Equal("Codale", Assert.Single(request.Headers.GetValues("X-OpenRouter-Title")));
+    }
+
+    [Theory]
+    [InlineData("https://api.openai.com/v1/chat/completions")]
+    [InlineData("http://localhost:1234/v1/chat/completions")]
+    [InlineData("https://openrouter.ai.example.com/v1/chat/completions")]
+    [InlineData("https://gateway.example/openrouter.ai/chat/completions")]
+    public void Other_providers_do_not_receive_openrouter_attribution(string url)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, url);
+
+        OpenAiApiClient.AddAppAttribution(request);
+
+        Assert.False(request.Headers.Contains("HTTP-Referer"));
+        Assert.False(request.Headers.Contains("X-OpenRouter-Title"));
+    }
+
     private static readonly OpenAiEndpoint Endpoint = new("https://gateway.example/v1", "sk-test", "deepseek-chat");
 
     [Theory]

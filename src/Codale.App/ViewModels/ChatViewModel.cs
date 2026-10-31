@@ -124,6 +124,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             if (_cliId != value)
             {
                 _cliId = value;
+                OnPropertyChanged(nameof(CliId));
+                OnPropertyChanged(nameof(SessionCli));
                 OnPropertyChanged(nameof(ProviderName));
 
                 // Provider and tier are per CLI: the constructor read them for the default CLI.
@@ -473,7 +475,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return [];
         }
 
-        var servers = _mcpSettings.Servers();
+        var servers = WithBrowserControl(_mcpSettings.Servers());
         var workingDirectory = WorktreePath ?? _projectPath;
         if (_mcpSettings.TasksAvailable &&
             EnsureTaskHost(workingDirectory) is { } host &&
@@ -2056,6 +2058,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 shellGuard = _mcpSettings.TasksGuardCommand();
             }
 
+            mcpServers = WithBrowserControl(mcpServers);
             _sessionMcpServers = mcpServers;
 
             if (endpointEnv is not null)
@@ -2337,6 +2340,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private void Handle(AgentEvent e)
     {
+        TrackBrowserViewport(e);
         ResumeUnpromptedTurn(e);
 
         RecordFeatureEvent(e);
@@ -4092,6 +4096,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // Claude reads --add-dir only at spawn, so a folder added or removed since then
         // restarts the CLI (resuming the same conversation) before this turn goes out.
         // Codex takes its folders with every turn and needs no restart.
+        await _browserViewportRestore;
         if (!IsCodexSession && _session is not null && !_connectedFolders.SequenceEqual(ExtraRoots, StringComparer.OrdinalIgnoreCase))
         {
             await RestartWithCurrentConfigAsync();
@@ -4957,6 +4962,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (_session is { } session)
         {
             CrashLog.Trace($"Dispose session: session={session.SessionId ?? "unknown"}");
+            RestoreBrowserViewport();
+            await _browserViewportRestore;
 
             // Detach first: the dying process's SessionEnded (and its stderr, e.g. a failed
             // default-login connect) then reaches a pump that no longer owns it and is dropped.

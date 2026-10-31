@@ -448,6 +448,13 @@ public static class ShellCommandAnalyzer
 public static class ShellCommandSummary
 {
     private const int MaxPrograms = 5;
+    private const int MaxSummaryLength = 72;
+
+    // Keep the action, but omit project paths, filters and other invocation details.
+    private static readonly HashSet<string> SubcommandPrograms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "dotnet", "git", "npm", "pnpm", "yarn", "bun", "cargo", "go", "docker", "kubectl",
+    };
 
     private static readonly Regex Assignment = new(@"^(\$env:)?[A-Za-z_][A-Za-z0-9_]*=", RegexOptions.Compiled);
 
@@ -480,17 +487,35 @@ public static class ShellCommandSummary
 
     /// <summary>
     /// The short form a row shows: a chain, a script or an everyday tool reads as the programs it
-    /// runs (<see cref="Summarize"/>); anything else keeps its first line, since its arguments matter.
+    /// runs (<see cref="Summarize"/>). Developer CLIs keep their action; other commands keep a
+    /// bounded first line. The complete invocation remains in the expanded row.
     /// </summary>
     public static string Shorten(string command)
     {
         command = UnwrapShellCommand(command);
+        string summary;
         if (ShellCommandAnalyzer.SplitSegments(command).Count > 1 || IsEveryday(command))
         {
-            return Summarize(command);
+            summary = Summarize(command);
+        }
+        else
+        {
+            var program = ProgramOf(command);
+            var words = Tokenize(command).SkipWhile(word => Assignment.IsMatch(word)).ToList();
+            if (SubcommandPrograms.Contains(program) && words.Count > 1 && !words[1].StartsWith('-'))
+            {
+                // A script name distinguishes npm run build from npm run test.
+                var count = words[1].Equals("run", StringComparison.OrdinalIgnoreCase) &&
+                    program.ToLowerInvariant() is "npm" or "pnpm" or "yarn" or "bun" ? 3 : 2;
+                summary = string.Join(" ", new[] { program }.Concat(words.Skip(1).Take(count - 1)));
+            }
+            else
+            {
+                summary = command.Trim().ReplaceLineEndings("\n").Split('\n')[0];
+            }
         }
 
-        return command.Trim().ReplaceLineEndings("\n").Split('\n')[0];
+        return summary.Length > MaxSummaryLength ? summary[..(MaxSummaryLength - 1)].TrimEnd() + "…" : summary;
     }
 
     // Codex reports the shell executable and its -Command argument as the command.
