@@ -662,6 +662,13 @@
                                     Tag="{x:Bind Approval, Mode=OneWay}"
                                     ToolTipService.ToolTip="Build it without asking" />
                                 <Button
+                                    Click="OnApprovalPlanAccept"
+                                    CommandParameter="auto"
+                                    Content="Accept · full"
+                                    Style="{StaticResource QuietButton}"
+                                    Tag="{x:Bind Approval, Mode=OneWay}"
+                                    ToolTipService.ToolTip="Build it with full access, no approval prompts" />
+                                <Button
                                     Click="OnApprovalStartRevise"
                                     Content="Revise…"
                                     Style="{StaticResource QuietButton}"

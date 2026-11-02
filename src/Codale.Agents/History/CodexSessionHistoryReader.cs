@@ -37,16 +37,60 @@ public sealed class CodexSessionHistoryReader(string projectPath) : ICliHistoryR
             .OrderByDescending(f => f.LastWriteTimeUtc)
             .Take(MaxFiles);
 
+        var names = ThreadNames();
         var rows = new List<TranscriptSummary>();
         foreach (var file in files)
         {
             if (Summarize(file) is { UserTurns: > 0 } summary)
             {
-                rows.Add(summary);
+                rows.Add(names.TryGetValue(summary.SessionId, out var name) ? summary with { CustomTitle = name } : summary);
             }
         }
 
         return rows;
+    }
+
+    /// <summary>The names Codex gave its threads, from <c>~/.codex/session_index.jsonl</c> (last entry per id wins).</summary>
+    private Dictionary<string, string> ThreadNames()
+    {
+        var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var index = Path.Combine(Path.GetDirectoryName(_root)!, "session_index.jsonl");
+            if (!File.Exists(index))
+            {
+                return names;
+            }
+
+            using var stream = new FileStream(index, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            while (reader.ReadLine() is { } line)
+            {
+                if (line.Length == 0 || line[0] != '{')
+                {
+                    continue;
+                }
+
+                try
+                {
+                    using var doc = JsonDocument.Parse(line);
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("id", out var id) && root.TryGetProperty("thread_name", out var name) &&
+                        id.GetString() is { Length: > 0 } key && name.GetString() is { Length: > 0 } value)
+                    {
+                        names[key] = value;
+                    }
+                }
+                catch (JsonException)
+                {
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+
+        return names;
     }
 
     private TranscriptSummary? Summarize(FileInfo info)
