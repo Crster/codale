@@ -308,7 +308,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         chat.FilesChanged += OnChatFilesChanged;
         chat.SessionStateChanged += OnSessionStateChanged;
         chat.TodosChanged += OnTodosChanged;
-        chat.NewTopicRequested += OnNewTopicRequested;
         chat.PropertyChanged += OnChatPropertyChanged;
         Chats.Add(chat);
         return chat;
@@ -344,7 +343,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         chat.FilesChanged -= OnChatFilesChanged;
         chat.SessionStateChanged -= OnSessionStateChanged;
         chat.TodosChanged -= OnTodosChanged;
-        chat.NewTopicRequested -= OnNewTopicRequested;
         chat.PropertyChanged -= OnChatPropertyChanged;
         Chats.Remove(chat);
 
@@ -970,48 +968,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         }
     }
 
-    /// <summary>
-    /// Automatic mode read a message as a new subject: it goes to a fresh session of
-    /// its own, with the same model, effort and mode, and the conversation
-    /// it came from stays as it was.
-    /// </summary>
-    private async void OnNewTopicRequested(object? sender, RoutedMessage message)
-    {
-        if (sender is not ChatViewModel source)
-        {
-            return;
-        }
-
-        try
-        {
-            var chat = FreshChat();
-            if (ReferenceEquals(chat, source))
-            {
-                await source.SendRoutedAsync(message.Text, message.Attachments, message.Intent);
-                return;
-            }
-
-            chat.RequestedModel = source.RequestedModel;
-            chat.RequestedEffort = source.RequestedEffort;
-            chat.PermissionMode = ChatViewModel.AutomaticMode;
-            ChatActivationRequested?.Invoke(this, chat);
-
-            if (!chat.IsConnected)
-            {
-                await chat.ConnectAsync();
-            }
-
-            CrashLog.Trace("Automatic mode: new topic, sent to a fresh session");
-            await chat.SendRoutedAsync(message.Text, message.Attachments, message.Intent);
-        }
-        catch (Exception ex)
-        {
-            // The message must not vanish: it goes back where it was typed.
-            CrashLog.Trace($"New-topic session failed: {ex.Message}");
-            source.Draft = message.Text;
-        }
-    }
-
     private async void OnTurnFinished(object? sender, EventArgs e)
     {
         try
@@ -1317,11 +1273,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             return null;
         }
 
-        var chat = FreshChat();
+        var chat = FreshChat(Features.ProviderSession(feature.Id)?.Provider);
         IsViewingHistory = false;
         HistoryTitle = null;
-        ChatActivationRequested?.Invoke(this, chat);
         await chat.AttachFeatureAsync(feature);
+        ChatActivationRequested?.Invoke(this, chat);
         await Diff.RefreshAsync();
         return chat;
     }
@@ -1378,7 +1334,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             chat.FilesChanged -= OnChatFilesChanged;
             chat.SessionStateChanged -= OnSessionStateChanged;
             chat.TodosChanged -= OnTodosChanged;
-            chat.NewTopicRequested -= OnNewTopicRequested;
             chat.PropertyChanged -= OnChatPropertyChanged;
         }
 

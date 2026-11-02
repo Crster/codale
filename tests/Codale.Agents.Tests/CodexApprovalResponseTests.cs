@@ -14,6 +14,96 @@ public sealed class CodexApprovalResponseTests
     private static JsonElement Serialize(object obj) =>
         JsonDocument.Parse(JsonSerializer.Serialize(obj)).RootElement;
 
+    [Theory]
+    [InlineData("question-item", true)]
+    [InlineData(null, true)]
+    [InlineData("question-item", false)]
+    [InlineData(null, false)]
+    public async Task Answering_a_question_completes_its_transcript_row_once(string? itemId, bool allow)
+    {
+        var frames = new List<JsonElement>();
+        await using var session = new CodexAgentSession(new CodexSessionOptions { WorkingDirectory = "." })
+        {
+            MessageWriter = (frame, _) =>
+            {
+                frames.Add(Serialize(frame));
+                return Task.CompletedTask;
+            },
+        };
+        await session.HandleServerRequestAsync(Serialize(7), "item/tool/requestUserInput", Serialize(new
+        {
+            @params = new
+            {
+                threadId = "main", itemId,
+                questions = new[] { new { id = "choice", question = "Which option?" } },
+            },
+        }));
+        Assert.True(session.Events.TryRead(out var requested));
+        var approval = Assert.IsType<ApprovalRequested>(requested);
+        Assert.Equal(itemId ?? "7", approval.ToolUseId);
+        Assert.False(session.Events.TryRead(out _));
+
+        var decision = allow
+            ? new ApprovalDecision
+            {
+                Behavior = ApprovalBehavior.Allow,
+                UpdatedInput = Serialize(new { answers = new { choice = "Selected" } }),
+            }
+            : ApprovalDecision.Deny();
+        await session.RespondToApprovalAsync(approval.RequestId, decision);
+
+        var response = Assert.Single(frames);
+        Assert.Equal(7, response.GetProperty("id").GetInt32());
+        var answers = response.GetProperty("result").GetProperty("answers");
+        if (allow)
+            Assert.Equal("Selected", answers.GetProperty("choice").GetProperty("answers")[0].GetString());
+        else
+            Assert.Empty(answers.EnumerateObject());
+        Assert.True(session.Events.TryRead(out var ended));
+        var completed = Assert.IsType<ToolCallCompleted>(ended);
+        Assert.Equal(approval.ToolUseId, completed.ToolUseId);
+        Assert.Equal(!allow, completed.IsError);
+        Assert.False(session.Events.TryRead(out _));
+
+        await session.RespondToApprovalAsync(approval.RequestId, decision);
+        Assert.Single(frames);
+        Assert.False(session.Events.TryRead(out _));
+    }
+
+    [Fact]
+    public async Task Failed_answer_delivery_does_not_report_question_completion()
+    {
+        await using var session = new CodexAgentSession(new CodexSessionOptions { WorkingDirectory = "." })
+        {
+            MessageWriter = (_, _) => Task.FromException(new IOException("Connection closed")),
+        };
+        await session.HandleServerRequestAsync(Serialize(7), "item/tool/requestUserInput", Serialize(new
+        {
+            @params = new { itemId = "question-item", questions = Array.Empty<object>() },
+        }));
+        Assert.True(session.Events.TryRead(out _));
+
+        await Assert.ThrowsAsync<IOException>(() => session.RespondToApprovalAsync("7", ApprovalDecision.Allow()));
+        Assert.False(session.Events.TryRead(out _));
+    }
+
+    [Fact]
+    public async Task Allowing_a_command_waits_for_its_actual_completion()
+    {
+        await using var session = new CodexAgentSession(new CodexSessionOptions { WorkingDirectory = "." })
+        {
+            MessageWriter = (_, _) => Task.CompletedTask,
+        };
+        await session.HandleServerRequestAsync(Serialize(7), "item/commandExecution/requestApproval", Serialize(new
+        {
+            @params = new { itemId = "command-item", command = "dotnet build" },
+        }));
+        Assert.True(session.Events.TryRead(out _));
+
+        await session.RespondToApprovalAsync("7", ApprovalDecision.Allow());
+        Assert.False(session.Events.TryRead(out _));
+    }
+
     [Fact]
     public void RequestUserInput_with_answers_maps_to_question_id_with_answers_array()
     {

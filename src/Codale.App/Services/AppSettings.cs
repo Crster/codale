@@ -170,13 +170,13 @@ public static class AppSettings
     }
 
     /// <summary>
-    /// Whether chats keep a history per feature of the project: each message is routed to a feature
-    /// (or to none, when it is no project work), and a session starts from that feature's summary.
+    /// Whether prompts retrieve shared project knowledge. Session history is always recorded
+    /// and never routed by topic. New installations and fresh project knowledge default to enabled.
     /// </summary>
-    public static bool SmartHistory
+    public static bool ProjectKnowledge
     {
-        get => Get("chat.smartHistory", () => ReadFlag("chat.smartHistory", true));
-        set => Set("chat.smartHistory", value, FormatFlag);
+        get => Get("chat.projectKnowledge", () => ReadFlag("chat.projectKnowledge", true));
+        set => Set("chat.projectKnowledge", value, FormatFlag);
     }
 
     /// <summary>Whether the editor draws the gutter with line numbers.</summary>

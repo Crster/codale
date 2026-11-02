@@ -70,7 +70,7 @@ public sealed class OpenAiApiClientTests
         Assert.Equal("object", schema.GetProperty("type").GetString());
         Assert.Equal(["ask", "plan", "act"],
             schema.GetProperty("properties").GetProperty("intent").GetProperty("enum").EnumerateArray().Select(e => e.GetString()));
-        Assert.Equal(["intent", "related"],
+        Assert.Equal(["intent"],
             schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()));
     }
 

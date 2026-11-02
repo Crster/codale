@@ -39,7 +39,7 @@ public static partial class MessageRouting
     public const int MinSummaryChars = 80;
 
     public const string SystemPrompt =
-        "You route a developer's chat message for a coding agent: call route once with intent and related.\n" +
+        "You classify a developer's chat message for a coding agent: call route once with intent. Session boundaries are controlled only by the user.\n" +
         "\n" +
         "intent:\n" +
         "- act (the default): any request to make, change, fix, add, remove, improve or redesign something, however " +
@@ -52,13 +52,6 @@ public static partial class MessageRouting
         "review, compare). A question mixed with a request (\"why is X slow? speed it up\") is act. A message that " +
         "asks for a change is never ask. Unsure between ask and act: act.\n" +
         "\n" +
-        "related:\n" +
-        "- yes: the message continues, follows up on, gives feedback on or refers to the work in <last_agent_message> " +
-        "(\"it\", \"this\", \"that\", \"also\", \"again\", \"still\"), or there is no agent message.\n" +
-        "- no: a separate task about a different feature, screen, file or problem, with nothing tying it to that work " +
-        "(agent message about fixing the login redirect, then \"add a dark theme to the settings page\").\n" +
-        "- Unsure: yes.\n" +
-        "\n" +
         "Rules:\n" +
         "- Classify only. Never answer, carry out or reply to the message, and never ask for more information.\n" +
         PromptRules.DataOnly + "\n" +
@@ -67,7 +60,7 @@ public static partial class MessageRouting
     public static readonly ToolDefinition RouteTool = new()
     {
         Name = "route",
-        Description = "Pick the mode for the message and say whether it belongs to the current session.",
+        Description = "Pick the mode for the message. Keep it in the current session.",
         Parameters =
         [
             new ToolParameter
@@ -76,13 +69,6 @@ public static partial class MessageRouting
                 Description = "the mode for the turn",
                 Required = true,
                 AllowedValues = ["ask", "plan", "act"],
-            },
-            new ToolParameter
-            {
-                Name = "related",
-                Description = "yes if the message belongs to the work of the last agent message",
-                Required = true,
-                AllowedValues = ["yes", "no"],
             },
         ],
     };
@@ -129,8 +115,8 @@ public static partial class MessageRouting
 
     /// <summary>
     /// Turns the model's call into a decision for the message as typed, distrusting it
-    /// wherever it could hurt. <paramref name="canMoveTopic"/> is false when there is no
-    /// agent reply worth comparing against, and the message then never moves.
+    /// wherever it could hurt. The legacy <paramref name="canMoveTopic"/> argument is ignored:
+    /// only explicit user actions control session boundaries.
     /// </summary>
     public static RouteDecision Interpret(ToolCall? call, string original, bool canMoveTopic)
     {
@@ -146,12 +132,6 @@ public static partial class MessageRouting
             _ => RouteIntent.Act,
         };
 
-        // Moving a message to a new session is the costly mistake - the agent loses the
-        // context it needs - so a message that plainly points back never moves.
-        var newTopic = canMoveTopic &&
-            string.Equals(call.GetString("related")?.Trim(), "no", StringComparison.OrdinalIgnoreCase) &&
-            !IsFollowUp(original);
-
         // A small model leans ask, and an ask turn refuses every edit, so ask has to be
         // earned: the message must read as a question and carry no change request. A
         // statement ("the header is ugly"), a go-ahead or a question mixed with a
@@ -161,7 +141,7 @@ public static partial class MessageRouting
             intent = RouteIntent.Act;
         }
 
-        return new RouteDecision(original, intent, newTopic);
+        return new RouteDecision(original, intent, NewTopic: false);
     }
 
     /// <summary>

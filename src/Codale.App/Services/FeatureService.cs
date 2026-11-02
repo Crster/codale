@@ -8,30 +8,19 @@ using Codale.Storage;
 namespace Codale.App.Services;
 
 /// <summary>
-/// One project's feature history: which features exist, the log each keeps, the summary a fresh
-/// session starts from, and the index of the files the agent wrote for it. Owns the project's
+/// One repository's session history and shared knowledge. Each entry keeps its own log and provider
+/// mapping; project context is retrieved independently of those session boundaries. Owns the project's
 /// <see cref="FeatureStore"/>; every call is safe from any thread, and indexing and summaries
 /// run in the background so the chat never waits for them.
 /// </summary>
 public sealed class FeatureService : IDisposable
 {
-    /// <summary>Up to this many features the router is shown them all; past it, the best matches.</summary>
-    private const int ListAllUpTo = 12;
-    private const int Candidates = 8;
-    private const int RecentCandidates = 3;
-    private const int SeedFiles = 30;
-
-    /// <summary>The whole brief - search and write-up - before the message goes out on the plain seed instead.</summary>
-    private static readonly TimeSpan BriefTimeout = TimeSpan.FromSeconds(60);
-
-    private static readonly TimeSpan ExploreTimeout = TimeSpan.FromSeconds(30);
-
-    /// <summary>A catch-up on other chats' work before the message goes out without one.</summary>
-    private static readonly TimeSpan CatchUpTimeout = TimeSpan.FromSeconds(30);
-
     private readonly string _projectPath;
     private readonly IHelperModel _helper;
     private readonly FeatureStore _store;
+    private readonly ProjectKnowledgeIndex _knowledge;
+    private readonly FileSystemWatcher? _databaseWatcher;
+    private readonly Timer _historyRefresh;
 
     /// <summary>Shared with every other window on the project: open chats, running summaries, the create gate.</summary>
     private readonly FeatureActivity _activity;
@@ -41,8 +30,28 @@ public sealed class FeatureService : IDisposable
         _projectPath = projectPath;
         _helper = helper;
         _store = OpenStore(projectPath);
+        _knowledge = new ProjectKnowledgeIndex(_store);
+        _knowledge.Warm(projectPath);
         _activity = FeatureActivity.For(projectPath);
         _activity.HistoryDeleted += OnHistoryDeleted;
+        _historyRefresh = new Timer(_ => Changed?.Invoke(this, EventArgs.Empty));
+        try
+        {
+            _databaseWatcher = new FileSystemWatcher(ProjectPaths.KnowledgeDirectory(projectPath), "project.db*");
+            _databaseWatcher.Changed += (_, _) => ScheduleHistoryRefresh();
+            _databaseWatcher.Created += (_, _) => ScheduleHistoryRefresh();
+            _databaseWatcher.EnableRaisingEvents = true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            CrashLog.Warn("history", $"Shared history notifications unavailable: {ex.Message}");
+        }
+    }
+
+    private void ScheduleHistoryRefresh()
+    {
+        try { _historyRefresh.Change(TimeSpan.FromMilliseconds(300), Timeout.InfiniteTimeSpan); }
+        catch (ObjectDisposedException) { }
     }
 
     /// <summary>The project's feature database; a throwaway one when it cannot be opened (a path too long, a locked file), so history never keeps the window from opening.</summary>
@@ -103,6 +112,7 @@ public sealed class FeatureService : IDisposable
                         log.ArchiveUpTo(length);
                     }
                     _store.SetSummary(feature.Id, summary, logOffset: 0, logBytes: log.Length);
+                    SaveSummaryKnowledge(feature.Id, summary);
                     _store.Rename(feature.Id, title);
                     Changed?.Invoke(this, EventArgs.Empty);
                 }
@@ -119,63 +129,12 @@ public sealed class FeatureService : IDisposable
 
     public IReadOnlyList<FeatureInfo> Search(string text, int limit) => _store.Search(text, limit);
 
-    /// <summary>The features the router is shown for a message: all of them while there are few, else the best matches plus the current one.</summary>
-    public IReadOnlyList<FeatureInfo> CandidatesFor(string message, string? currentId)
-    {
-        var all = _store.List();
-        if (all.Count <= ListAllUpTo)
-        {
-            return all;
-        }
-
-        // Ranked by how much of the message each feature accounts for, not by any one shared word;
-        // the most recently active features ride along, since the next prompt is usually about those.
-        var documents = _store.Documents();
-        var picked = FeatureMatcher.Rank(message, documents).Take(Candidates).Select(m => m.Feature).ToList();
-        foreach (var recent in all.Take(RecentCandidates).Where(r => picked.All(p => p.Id != r.Id)))
-        {
-            picked.Add(recent);
-        }
-
-        if (currentId is not null && picked.All(f => f.Id != currentId) && all.FirstOrDefault(f => f.Id == currentId) is { } current)
-        {
-            picked.Add(current);
-        }
-
-        return picked;
-    }
-
-    /// <summary>The feature a message is plainly about by its words, or null when none clearly is (see <see cref="FeatureMatcher.Confident"/>).</summary>
-    public FeatureInfo? ConfidentMatch(string message) => FeatureMatcher.Confident(message, _store.Documents());
-
     public FeatureInfo Create(string name, string description)
     {
-        var feature = _store.Create(name, description);
+        var session = _store.Create(name, description);
         Changed?.Invoke(this, EventArgs.Empty);
-        return feature;
+        return session;
     }
-
-    /// <summary>
-    /// The feature called <paramref name="name"/> - ignoring case, spacing and punctuation - or a new
-    /// one. Two chats that start the same topic at once (each routed before the other created it) end
-    /// on one feature instead of splitting its history; every window on the project shares the gate.
-    /// </summary>
-    public (FeatureInfo Feature, bool Created) FindOrCreate(string name, string description)
-    {
-        lock (_activity.CreateGate)
-        {
-            var key = NameKey(name);
-            if (key.Length > 0 && _store.List().FirstOrDefault(f => NameKey(f.Name) == key) is { } existing)
-            {
-                return (existing, false);
-            }
-
-            return (Create(name, description), true);
-        }
-    }
-
-    private static string NameKey(string name) =>
-        new string(name.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
     /// <summary>Records where a chat is and what it is doing, so the other chats on its feature can be told.</summary>
     public void SetChatActivity(FeatureChat chat) => _activity.SetChat(chat);
@@ -209,194 +168,51 @@ public sealed class FeatureService : IDisposable
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>
-    /// What a fresh session starts the feature from: its summary, the progress since, the files
-    /// written for it, and the stretches of them that bear on <paramref name="message"/>.
-    /// </summary>
-    public string BuildSeed(FeatureInfo feature, string message, int maxProgressChars = SessionHandoff.MaxChars, string? chatId = null)
-    {
-        var (progress, _) = LogOf(feature.Id).ReadSince(feature.SummaryOffset);
-        var seed = FeatureContext.Build(
-            feature, progress.Where(e => e.Role != HandoffRole.Tool).ToList(), _store.FilesOf(feature.Id, SeedFiles), [], maxProgressChars,
-            _activity.RunningOn(feature.Id));
+    public ProviderSession? ProviderSession(string id) => _store.GetProviderSession(id);
 
-        return FeatureBrief.OtherChatsSection(OtherChatsOn(feature.Id, chatId)) is { Length: > 0 } others
-            ? seed + "\n\n" + others
-            : seed;
+    public IReadOnlyList<string> DeliveredContext(string nativeId) => _store.DeliveredContext(nativeId);
+    public void MarkContextDelivered(string nativeId, IReadOnlyList<string> keys) => _store.MarkContextDelivered(nativeId, keys);
+    public void ClearDeliveredContext(string nativeId) => _store.ClearDeliveredContext(nativeId);
+
+    public void BindProviderSession(string id, string provider, string nativeId, string worktree, string endpoint)
+    {
+        _store.SetProviderSession(new ProviderSession(id, provider, nativeId, ProjectPaths.Normalize(worktree), endpoint));
     }
 
-    /// <summary>Indexed code from earlier work that bears on the message: the feature's own first, the project's when it has little.</summary>
-    private List<FileHit> RelevantCode(FeatureInfo feature, string message)
+    public Task<RetrievalResult> RetrieveAsync(string worktree, string prompt, string recent, IReadOnlySet<string> delivered, string? currentSessionId) =>
+        Task.Run(() => _knowledge.Retrieve(worktree, prompt, recent, delivered, currentSessionId));
+
+    public void RecordRetrieval(string retrievalId, string sessionId, RetrievalResult result) => _store.RecordRetrieval(retrievalId, sessionId, result);
+    public void RecordExploration(string retrievalId) => _store.RecordExploration(retrievalId);
+    public void RecordUsage(string retrievalId, int inputTokens, int outputTokens) => _store.RecordUsage(retrievalId, inputTokens, outputTokens);
+
+    public void RecordFinding(string sessionId, string provider, string worktree, string text, IReadOnlyList<SourceReference> references)
     {
-        var code = _store.SearchFiles(message, feature.Id, 6).ToList();
-        if (code.Count < 3)
-        {
-            code.AddRange(_store.SearchFiles(message, null, 4)
-                .Where(h => !code.Any(c => c.Path == h.Path && c.StartLine == h.StartLine)));
-        }
-
-        return code;
-    }
-
-    /// <summary>
-    /// The seed for a session's first message, written by the background-task model: it reads the
-    /// feature's history with <paramref name="message"/>, explores the code for it and writes a
-    /// short brief, so the chat model neither re-reads the raw history nor searches from scratch.
-    /// A slow or failed model leaves <see cref="BuildSeed"/> with its progress trimmed; only
-    /// <paramref name="ct"/> (the user stopping) ends it without a seed.
-    /// </summary>
-    public async Task<FeatureBriefResult> PrepareBriefAsync(
-        FeatureInfo feature, string message, string? chatId, IProgress<string>? stage, CancellationToken ct)
-    {
-        // What the session would have started from without the brief: the saving is measured against it.
-        var full = BuildSeed(feature, message, chatId: chatId);
-        var others = OtherChatsOn(feature.Id, chatId);
-        if (!_helper.IsAvailable)
-        {
-            return new FeatureBriefResult(full, "", [], full.Length, IsFallback: true);
-        }
-
-        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        budget.CancelAfter(BriefTimeout);
-
-        IReadOnlyList<ExploredFile> explored = [];
+        if (string.IsNullOrWhiteSpace(text)) return;
         try
         {
-            stage?.Report("Exploring code…");
-            try
-            {
-                explored = await ExploreAsync(message, budget.Token);
-            }
-            catch (Exception ex) when (!budget.IsCancellationRequested && ex is HelperModelException or IOException or UnauthorizedAccessException)
-            {
-                // A search that fails leaves the brief to the history alone.
-                CrashLog.Trace($"Feature brief exploration skipped: {ex.Message}");
-            }
-
-            stage?.Report("Writing handoff…");
-            var (progress, _) = LogOf(feature.Id).ReadSince(feature.SummaryOffset);
-            var brief = await FeatureBrief.WriteAsync(
-                _helper, feature.Name, feature.Summary.Length > 0 ? feature.Summary : feature.Description,
-                progress, _store.FilesOf(feature.Id, SeedFiles), WithIndexedCode(explored, RelevantCode(feature, message)),
-                message, others, budget.Token);
-
-            if (brief.Length > 0)
-            {
-                var seed = FeatureBrief.BuildSeed(feature.Name, brief, explored, others);
-                return new FeatureBriefResult(seed, brief, explored, full.Length, IsFallback: false);
-            }
+            _store.PutKnowledge(new KnowledgeHit(Guid.NewGuid().ToString("N"), sessionId, provider,
+                ProjectPaths.Normalize(worktree), ProjectKnowledgeIndex.Revision(worktree), text.Length > 2400 ? text[..2400] : text, references));
         }
-        catch (Exception ex) when (!ct.IsCancellationRequested &&
-            ex is HelperModelException or OperationCanceledException or IOException or Microsoft.Data.Sqlite.SqliteException)
+        catch (Exception ex) when (ex is IOException or Microsoft.Data.Sqlite.SqliteException)
         {
-            CrashLog.Trace($"Feature brief for {feature.Id} skipped: {ex.Message}");
+            CrashLog.Warn("knowledge", $"Finding not saved: {ex.Message}");
         }
-
-        var fallback = BuildSeed(feature, message, FeatureBrief.FallbackProgressChars, chatId);
-        if (FeatureBrief.ExploredSection(explored) is { Length: > 0 } found)
-        {
-            fallback += "\n\n" + found;
-        }
-
-        return new FeatureBriefResult(fallback, "", explored, full.Length, IsFallback: true);
     }
 
-    /// <summary>
-    /// What other chats did on a feature since <paramref name="since"/> in its log, for a chat
-    /// already in a session there: null when they did nothing. Short histories go across as they are;
-    /// longer ones are condensed by the background-task model, or trimmed when it is slow or absent.
-    /// Only <paramref name="ct"/> (the user stopping) ends it without a result.
-    /// </summary>
-    public async Task<FeatureCatchUpResult?> CatchUpAsync(
-        string featureId, string chatId, LogPosition since, string message, CancellationToken ct)
+    public void IndexFile(string sessionId, string path)
     {
-        var (work, _) = LogOf(featureId).ReadSince(since, excludeChat: chatId);
-        if (!FeatureCatchUp.HasWork(work))
-        {
-            return null;
-        }
-
-        var others = OtherChatsOn(featureId, chatId);
-        var running = _activity.RunningOn(featureId);
-        var verbatim = FeatureCatchUp.Verbatim(work, running, int.MaxValue);
-        if (verbatim.Length <= FeatureCatchUp.VerbatimChars || !_helper.IsAvailable)
-        {
-            var body = verbatim.Length <= FeatureCatchUp.VerbatimChars ? verbatim : FeatureCatchUp.Verbatim(work, running);
-            return new FeatureCatchUpResult(FeatureCatchUp.BuildNote(body, others), body, verbatim.Length, IsCondensed: false);
-        }
-
-        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        budget.CancelAfter(CatchUpTimeout);
-        try
-        {
-            var note = await FeatureCatchUp.WriteAsync(_helper, work, running, message, budget.Token);
-            if (note.Length > 0)
-            {
-                return new FeatureCatchUpResult(FeatureCatchUp.BuildNote(note, others), note, verbatim.Length, IsCondensed: true);
-            }
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested && ex is HelperModelException or OperationCanceledException)
-        {
-            CrashLog.Trace($"Catch-up for feature {featureId} condensed by trimming: {ex.Message}");
-        }
-
-        var trimmed = FeatureCatchUp.Verbatim(work, running);
-        return new FeatureCatchUpResult(FeatureCatchUp.BuildNote(trimmed, others), trimmed, verbatim.Length, IsCondensed: false);
+        var root = _store.GetProviderSession(sessionId)?.Worktree ?? _projectPath;
+        var relative = Path.GetRelativePath(root, Path.GetFullPath(path));
+        if (ProjectPaths.IsInside(root, path) && ProjectKnowledgeIndex.Eligible(relative)) _store.RecordSessionFile(sessionId, relative);
+        _knowledge.Warm(root);
     }
 
-    /// <summary>The source search's pick for the message, as path, line ranges and the code there.</summary>
-    private async Task<IReadOnlyList<ExploredFile>> ExploreAsync(string message, CancellationToken ct)
+    private void SaveSummaryKnowledge(string sessionId, string summary)
     {
-        var explorer = new SourceExplorer(SourceIndex.For(_projectPath), new HelperSearchModel(_helper))
-        {
-            Budget = ExploreTimeout,
-            MaxRelated = 4,
-        };
-
-        var result = await explorer.RunAsync(message, ct);
-        return result.Files
-            .Select(f => new ExploredFile(
-                f.RelativePath.Length > 0 ? f.RelativePath : f.FilePath,
-                f.Ranges.Select(r => (r.StartLine, r.EndLine)).ToList(),
-                f.Reason,
-                string.Join("\n...\n", f.Ranges.Select(r => r.Code))))
-            .ToList();
-    }
-
-    /// <summary>The model's code: what the search found, then earlier work's indexed stretches it missed.</summary>
-    private static IReadOnlyList<ExploredFile> WithIndexedCode(IReadOnlyList<ExploredFile> explored, IReadOnlyList<FileHit> indexed) =>
-    [
-        .. explored,
-        .. indexed
-            .Where(hit => !explored.Any(e => string.Equals(e.Path.Replace('\\', '/'), hit.Path.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase)))
-            .Select(hit => new ExploredFile(hit.Path, [(hit.StartLine, hit.StartLine + hit.Text.Count(c => c == '\n'))], "written in earlier work on this feature", hit.Text)),
-    ];
-
-    /// <summary>Indexes a file the agent just wrote, in the background: the feature's context can quote it later.</summary>
-    public void IndexFile(string featureId, string path)
-    {
-        _ = Task.Run(() =>
-        {
-            try
-            {
-                var info = new FileInfo(path);
-                if (!info.Exists || info.Length > FileChunker.MaxFileBytes || SensitivePaths.IsSensitive(path))
-                {
-                    return;
-                }
-
-                var content = File.ReadAllText(path);
-                if (FileChunker.IsIndexable(content))
-                {
-                    _store.ReplaceFile(featureId, Path.GetRelativePath(_projectPath, path), FileChunker.Chunk(content));
-                    Changed?.Invoke(this, EventArgs.Empty);
-                }
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
-            {
-                CrashLog.Trace($"Indexing {path} skipped: {ex.Message}");
-            }
-        });
+        if (_store.GetProviderSession(sessionId) is not { } mapping) return;
+        _store.PutKnowledge(new KnowledgeHit("summary:" + sessionId, sessionId, mapping.Provider, mapping.Worktree,
+            ProjectKnowledgeIndex.Revision(mapping.Worktree), summary.Length > 2400 ? summary[..2400] : summary, _store.SessionReferences(sessionId)));
     }
 
     /// <summary>
@@ -452,6 +268,7 @@ public sealed class FeatureService : IDisposable
                     _store.SetSummary(featureId, summary, length);
                 }
 
+                SaveSummaryKnowledge(featureId, summary);
                 Changed?.Invoke(this, EventArgs.Empty);
             }
             catch (Exception ex) when (ex is HelperModelException or IOException or UnauthorizedAccessException or OperationCanceledException or Microsoft.Data.Sqlite.SqliteException)
@@ -472,7 +289,10 @@ public sealed class FeatureService : IDisposable
 
     public void Dispose()
     {
+        _databaseWatcher?.Dispose();
+        _historyRefresh.Dispose();
         _activity.HistoryDeleted -= OnHistoryDeleted;
+        _knowledge.Dispose();
         _store.Dispose();
     }
 }

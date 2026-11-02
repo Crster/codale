@@ -10,8 +10,7 @@ using CommunityToolkit.Mvvm.Input;
 namespace Codale.App.ViewModels;
 
 /// <summary>
-/// The history list: the project's features (Login, Downloads...), newest first - not past
-/// conversations. Opening one puts the chat on that feature.
+/// Explicit project sessions, newest first. Opening a row resumes that conversation.
 /// </summary>
 public sealed partial class SessionsViewModel : ObservableObject
 {
@@ -157,7 +156,7 @@ public sealed partial class SessionsViewModel : ObservableObject
                 UpdatedAt = f.UpdatedAt,
                 CustomTitle = f.Name,
                 FirstPrompt = f.Description,
-                Detail = _features.FileCount(f.Id) is var files and > 0 ? (files == 1 ? "1 file" : $"{files} files") : "no files yet",
+                Detail = _features.ProviderSession(f.Id)?.Provider is { } provider ? provider == "codex" ? "Codex" : provider == "claude" ? "Claude" : provider : "Session",
             })
             .ToList();
     }

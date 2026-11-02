@@ -32,12 +32,12 @@ public sealed class MessageRoutingTests
     }
 
     [Fact]
-    public void Plan_intent_and_new_topic_are_read()
+    public void Plan_intent_keeps_the_explicit_session()
     {
         var decision = MessageRouting.Interpret(Call("plan", "no"), "refactor the git panel", canMoveTopic: true);
 
         Assert.Equal(RouteIntent.Plan, decision.Intent);
-        Assert.True(decision.NewTopic);
+        Assert.False(decision.NewTopic);
     }
 
     [Fact]
@@ -148,11 +148,11 @@ public sealed class MessageRoutingTests
     [Theory]
     [InlineData("add a dark theme to the settings page")]
     [InlineData("write unit tests for the git status parser")]
-    public void An_unrelated_task_moves_to_a_new_session(string original)
+    public void An_unrelated_task_keeps_the_explicit_session(string original)
     {
         var decision = MessageRouting.Interpret(Call("act", "no"), original, canMoveTopic: true);
 
-        Assert.True(decision.NewTopic);
+        Assert.False(decision.NewTopic);
     }
 
     [Fact]

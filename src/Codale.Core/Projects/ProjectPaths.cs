@@ -99,11 +99,39 @@ public static class ProjectPaths
 
     /// <summary>The project's feature database: features, summaries and the index of the files written for them.</summary>
     public static string FeatureDatabasePath(string projectPath) =>
-        Path.Combine(ProjectDataDirectory(projectPath), "features.db");
+        Path.Combine(KnowledgeDirectory(projectPath), "project.db");
 
     /// <summary>A feature's log folder: <c>log.jsonl</c> and its archives.</summary>
     public static string FeatureDirectory(string projectPath, string featureId) =>
-        Path.Combine(ProjectDataDirectory(projectPath), "features", featureId);
+        Path.Combine(KnowledgeDirectory(projectPath), "sessions", featureId);
+
+    /// <summary>The common git directory identifies a repository across linked worktrees.</summary>
+    public static string RepositoryIdentity(string projectPath)
+    {
+        for (var dir = new DirectoryInfo(Normalize(projectPath)); dir is not null; dir = dir.Parent)
+        {
+            var git = Path.Combine(dir.FullName, ".git");
+            if (File.Exists(git))
+            {
+                var pointer = File.ReadAllText(git).Trim();
+                if (!pointer.StartsWith("gitdir:", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                git = Path.GetFullPath(pointer[7..].Trim(), dir.FullName);
+            }
+            if (Directory.Exists(git))
+            {
+                var common = Path.Combine(git, "commondir");
+                return Normalize(File.Exists(common) ? Path.GetFullPath(File.ReadAllText(common).Trim(), git) : git);
+            }
+        }
+        return Normalize(projectPath);
+    }
+
+    public static string KnowledgeDirectory(string projectPath) => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale", "knowledge",
+        InstanceKey(RepositoryIdentity(projectPath)));
 
     /// <summary>
     /// True when <paramref name="path"/> is <paramref name="root"/> itself or lies beneath it.

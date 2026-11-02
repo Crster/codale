@@ -41,7 +41,7 @@ internal sealed class FeatureActivity
     private readonly Dictionary<string, bool> _summaryAgain = new(StringComparer.Ordinal);
 
     public static FeatureActivity For(string projectPath) =>
-        Projects.GetOrAdd(ProjectPaths.Normalize(projectPath), _ => new FeatureActivity());
+        Projects.GetOrAdd(ProjectPaths.RepositoryIdentity(projectPath), _ => new FeatureActivity());
 
     /// <summary>Held while a feature is looked up and created, so two chats naming the same topic end on one feature.</summary>
     public Lock CreateGate { get; } = new();

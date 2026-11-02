@@ -1,231 +1,74 @@
-﻿using System.Text;
-
+using System.Text;
 using Codale.Agents.History;
 using Codale.App.Services;
 using Codale.Core.Agents;
 using Codale.Core.Features;
-
+using Codale.Search;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Codale.App.ViewModels;
 
-/// <summary>
-/// The chat's feature: which big area of the project its conversation is work on. Each message is
-/// routed to a feature (or to none, when it is no project work); project work is appended to the
-/// feature's log, and a session that changes feature starts fresh from that feature's summary
-/// rather than loading any earlier message.
-/// </summary>
+/// <summary>Explicit session history and project-wide context, independent of conversation topic.</summary>
 public sealed partial class ChatViewModel
 {
-    /// <summary>Events kept for a turn that is not (yet) project work: enough to save it if it turns out to write files.</summary>
-    private const int SkipBufferLimit = 400;
-
     public FeatureService? Features { get; init; }
 
-    /// <summary>The feature this chat's conversation belongs to; null until a message is routed to one.</summary>
+    // Retain the binding names used by the history panel; these IDs now identify sessions.
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasFeature))]
     public partial string? FeatureId { get; set; }
-
     [ObservableProperty]
     public partial string FeatureName { get; set; } = "";
-
     public bool HasFeature => FeatureId is not null;
 
     private FeatureLog? _featureLog;
-
-    /// <summary>The current turn is project work and goes into the feature's log.</summary>
     private bool _recording;
-
-    /// <summary>The feature whose summary the next session's first message carries.</summary>
-    private string? _seedFeatureId;
-
     private bool _attachLogged;
+    private bool _watchingFeatures;
+    private readonly string _chatId = Guid.NewGuid().ToString("N");
+    private string? _featureRequest;
+    private CancellationTokenSource? _briefing;
+    private readonly HashSet<string> _deliveredContext = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SourceReference> _turnReferences = new(StringComparer.OrdinalIgnoreCase);
+    private readonly StringBuilder _turnFindings = new();
+    private string? _retrievalId;
+    private bool _needsResumeContext;
+    private bool SmartHistory => Features is not null;
 
-    private readonly List<AgentEvent> _skipBuffer = [];
-    private string? _skipPrompt;
-
-    private bool SmartHistory => Features is not null && AppSettings.SmartHistory;
-
-    /// <summary>
-    /// Acts on the router's verdict before the message goes out: a change of feature restarts the
-    /// session on the new one. False when the session could not be restarted - the message then stays in the composer.
-    /// </summary>
-    public async Task<bool> ApplyFeatureDecisionAsync(FeatureDecision decision, string text)
+    /// <summary>Only opening a history row resumes it. Prompts never select a different session.</summary>
+    public async Task<bool> AttachFeatureAsync(FeatureInfo feature)
     {
-        if (Features is not { } features)
+        if (Features is not { } features) return false;
+        await DisposeSessionAsync();
+        ResetForNewSession();
+        var mapping = features.ProviderSession(feature.Id);
+        if (mapping is not null)
         {
-            return true;
+            CliId = mapping.Provider;
+            EndpointName = mapping.Endpoint;
+            WorktreePath = mapping.Worktree;
+            ResumeSessionId = mapping.ProviderSessionId;
+            OnPropertyChanged(nameof(EndpointName));
+            foreach (var key in features.DeliveredContext(mapping.ProviderSessionId)) _deliveredContext.Add(key);
         }
-
-        switch (decision.Action)
-        {
-            case FeatureAction.Skip:
-                _recording = false;
-                return true;
-
-            case FeatureAction.Switch when decision.FeatureId is { } id && features.Get(id) is { } target:
-                switch (await AskJumpAsync(target.Id, target.Name, text))
-                {
-                    case FeatureJumpChoice.Stay:
-                        _recording = FeatureId is not null;
-                        return true;
-
-                    case FeatureJumpChoice.New:
-                        var (fresh, freshCreated) = features.FindOrCreate(
-                            FeatureRouting.CleanNames(null, text, seed: false)[0], FeatureRouting.DescribeFrom(text));
-                        return await SwitchFeatureAsync(fresh, created: freshCreated);
-
-                    default:
-                        return await SwitchFeatureAsync(target, created: false);
-                }
-
-            case FeatureAction.Create when decision.NewNames is { Count: > 0 } names:
-                if (await AskJumpAsync(null, names[0], text) == FeatureJumpChoice.Stay)
-                {
-                    _recording = FeatureId is not null;
-                    return true;
-                }
-
-                // Another chat may have started the same topic a moment ago: that feature is joined, not doubled.
-                var created = names
-                    .Select(name => features.FindOrCreate(name, FeatureRouting.DescribeFrom(text)))
-                    .ToList();
-                return await SwitchFeatureAsync(created[0].Feature, created: created[0].Created);
-
-            default:
-                // No model verdict (none installed, a slow or unparsable reply) and no feature yet: check
-                // whether an existing feature in this project matches the request before creating a new one.
-                if (FeatureId is null && IsRequest(text))
-                {
-                    // Only a feature the request is plainly about: one shared word is not enough to file it there.
-                    if (features.ConfidentMatch(text) is { } match)
-                    {
-                        return await SwitchFeatureAsync(match, created: false);
-                    }
-
-                    var (started, isNew) = features.FindOrCreate(
-                        FeatureRouting.CleanNames(null, text, seed: false)[0], FeatureRouting.DescribeFrom(text));
-                    if (!isNew)
-                    {
-                        // Another chat just started this topic: join it with its briefing like any existing feature.
-                        return await SwitchFeatureAsync(started, created: false);
-                    }
-
-                    SetFeature(started, seed: false);
-                    Title = started.Name;
-                }
-
-                _recording = FeatureId is not null;
-                return true;
-        }
-    }
-
-    /// <summary>The question on screen while Auto routing waits to move this conversation; null when none is.</summary>
-    private FeatureJumpItem? _pendingJump;
-
-    /// <summary>
-    /// A jump mid-conversation restarts the session, so Auto asks in the transcript first: jump to the
-    /// history the router picked (<paramref name="targetId"/>; null when it wants a new one), start a new
-    /// one, or stay. No question when the chat has said nothing yet or is already on that history -
-    /// the router's pick (Jump) stands.
-    /// </summary>
-    private async Task<FeatureJumpChoice> AskJumpAsync(string? targetId, string name, string text)
-    {
-        if (!IsAutomaticMode || !HasConversation || (targetId is not null && targetId == FeatureId))
-        {
-            return FeatureJumpChoice.Jump;
-        }
-
-        var item = new FeatureJumpItem { TargetName = targetId is null ? null : name };
-        _pendingJump = item;
-        Add(item);
-        try
-        {
-            return await item.Answer;
-        }
-        finally
-        {
-            _pendingJump = null;
-        }
-    }
-
-    /// <summary>Long enough to be a request rather than a go-ahead or a greeting.</summary>
-    private static bool IsRequest(string text) =>
-        text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length >= 3;
-
-    /// <summary>Puts the chat on a feature: a fresh session whose first message carries the feature's summary.</summary>
-    public async Task<bool> AttachFeatureAsync(FeatureInfo feature) => await SwitchFeatureAsync(feature, created: false, announce: false);
-
-    private async Task<bool> SwitchFeatureAsync(FeatureInfo feature, bool created, bool announce = true)
-    {
-        if (Features is not { } features)
-        {
-            return true;
-        }
-
-        var previous = FeatureId is { } id ? features.Get(id) : null;
-        if (previous is not null)
-        {
-            features.Summarize(previous.Id, force: true);
-        }
-
-        // A chat that has said nothing yet needs no restart: the briefing rides on its first message.
-        // One that has is left behind - its session and transcript go; an isolated chat keeps its worktree.
-        var hadConversation = HasConversation;
-        if (hadConversation)
-        {
-            var worktree = WorktreePath;
-            await DisposeSessionAsync();
-            ResetForNewSession();
-            WorktreePath = worktree;
-        }
-
-        SetFeature(feature, seed: true);
+        SetFeature(feature);
         Title = feature.Name;
-        // The previous task list belongs to a finished prompt: showing it as current leaves
-        // unfinished steps hanging and hides the list the agent makes for the new one.
-        ShowTodos([]);
-        RestorePendingPlan();
-
-        if (hadConversation)
+        var events = _featureLog!.ReadTail(400, out var more);
+        if (more) Add(new NoticeItem { Text = "Showing recent messages. Earlier messages are available in session history." });
+        foreach (var e in events)
         {
-            await ConnectAsync();
-            if (!IsConnected)
+            if (e is UserMessageRecorded user)
+                Add(new UserMessageItem { Text = user.Text });
+            else if (e is AssistantMessageCompleted reply)
             {
-                return false;
+                var item = new AssistantMessageItem();
+                item.Complete(reply.Text);
+                Add(item);
             }
         }
-
-        // A chat that never spoke keeps its transcript, so the briefing of the feature it left goes.
-        foreach (var stale in Items.Where(i => i is FeatureBriefingItem or HandoffBriefItem).ToList())
-        {
-            Items.Remove(stale);
-            Reflow();
-        }
-
-        if (!created)
-        {
-            // The transcript opens on what the session carries over: the feature and its summary.
-            Add(new FeatureBriefingItem
-            {
-                FeatureName = feature.Name,
-                Summary = FeatureSummary(),
-                BackText = announce && previous is not null ? $"Back to {previous.Name}" : null,
-                BackAction = announce && previous is not null ? () => AttachFeatureAsync(previous) : null,
-            });
-        }
-        else if (announce && hadConversation)
-        {
-            Add(new NoticeItem
-            {
-                Text = $"New history: {feature.Name}",
-                ActionText = previous is null ? null : $"Back to {previous.Name}",
-                Action = previous is null ? null : () => AttachFeatureAsync(previous),
-            });
-        }
-
-        return true;
+        RestorePendingPlan();
+        await ConnectAsync();
+        return IsConnected;
     }
 
     /// <summary>The feature's summary, or what it was started for while it has none.</summary>
@@ -269,47 +112,30 @@ public sealed partial class ChatViewModel
         return (text.ToString().Trim(), hasMore);
     }
 
-    private bool _watchingFeatures;
-
-    /// <summary>A history entry was renamed (or removed): the tab and header follow the feature's current name.</summary>
     private void OnFeaturesChanged(object? sender, EventArgs e) => _dispatcher.TryEnqueue(() =>
     {
-        if (FeatureId is not { } id || Features is not { } features)
-        {
-            return;
-        }
-
-        if (features.Get(id) is not { } feature)
+        if (FeatureId is not { } id || Features is not { } features) return;
+        if (features.Get(id) is not { } session)
         {
             ClearFeature();
             return;
         }
-
-        if (feature.Name != FeatureName)
-        {
-            FeatureName = feature.Name;
-            Title = feature.Name;
-        }
+        if (session.Name != FeatureName) Title = FeatureName = session.Name;
     });
 
-    private void SetFeature(FeatureInfo feature, bool seed)
+    private void SetFeature(FeatureInfo session)
     {
         if (!_watchingFeatures && Features is not null)
         {
             Features.Changed += OnFeaturesChanged;
             _watchingFeatures = true;
         }
-
-        FeatureId = feature.Id;
-        FeatureName = feature.Name;
-        _featureLog = Features!.LogOf(feature.Id, _chatId);
-        _logSeen = _featureLog.Position;
+        FeatureId = session.Id;
+        FeatureName = session.Name;
+        _featureLog = Features!.LogOf(session.Id, _chatId);
         _recording = true;
         _attachLogged = false;
-        _seedFeatureId = seed ? feature.Id : null;
-        _skipBuffer.Clear();
-        _skipPrompt = null;
-        PublishFeatureActivity(busy: false);
+        PublishFeatureActivity(false);
     }
 
     private void ClearFeature()
@@ -320,273 +146,165 @@ public sealed partial class ChatViewModel
         _featureLog = null;
         _recording = false;
         _attachLogged = false;
-        _seedFeatureId = null;
-        _skipBuffer.Clear();
-        _skipPrompt = null;
         _featureRequest = null;
-        _logSeen = default;
+        _turnFindings.Clear();
+        _turnReferences.Clear();
+        _deliveredContext.Clear();
+        _retrievalId = null;
+        _needsResumeContext = false;
     }
 
-    /// <summary>This chat's id in feature logs and in the list of chats open on a feature.</summary>
-    private readonly string _chatId = Guid.NewGuid().ToString("N")[..12];
+    private void BindHistoryProvider()
+    {
+        if (FeatureId is { } id && SessionId is { Length: > 0 } native)
+            Features?.BindProviderSession(id, CliId, native, WorktreePath ?? _projectPath, EndpointName);
+    }
 
-    /// <summary>Where this chat last caught up with its feature's log: other chats' records past it are news.</summary>
-    private LogPosition _logSeen;
-
-    /// <summary>What this chat last asked on its feature, for the other chats' notes.</summary>
-    private string? _featureRequest;
-
-    /// <summary>Tells the other chats on this feature that this one is here, and whether it is mid-turn.</summary>
     private void PublishFeatureActivity(bool busy)
     {
         if (FeatureId is { } id && Features is { } features)
-        {
             features.SetChatActivity(new FeatureChat(_chatId, id, Title ?? FeatureName, busy, _featureRequest));
-        }
     }
 
-    /// <summary>
-    /// The turn is over: its end goes into the feature's log, so readers can tell finished work from
-    /// work under way, and the other chats stop seeing this one as busy.
-    /// </summary>
     private void EndFeatureTurn(string outcome)
     {
-        if (SmartHistory && _recording && _featureLog is { } log)
-        {
-            log.EndTurn(outcome);
-        }
-
-        PublishFeatureActivity(busy: false);
+        if (_recording) _featureLog?.EndTurn(outcome);
+        PublishFeatureActivity(false);
     }
 
-    /// <summary>The user's turn: appended to the feature's log when it is project work, else held back in case it turns into some.</summary>
     private void RecordUserTurn(string text)
     {
-        if (!SmartHistory)
+        if (Features is not { } features) return;
+        if (FeatureId is null)
         {
-            return;
+            var title = text.ReplaceLineEndings(" ").Trim();
+            if (title.Length > 90) title = title[..90];
+            SetFeature(features.Create(title.Length > 0 ? title : "Attachments", text));
+            Title = FeatureName;
         }
+        if (_featureLog is not { } log || FeatureId is not { } id) return;
+        if (!_attachLogged) { log.Attach(CliId); _attachLogged = true; }
+        BindHistoryProvider();
+        log.AppendUser(text);
+        features.RecordProgress(id, log, text);
+        _featureRequest = text;
+        PublishFeatureActivity(true);
+    }
 
-        if (_recording && _featureLog is { } log && FeatureId is { } id)
+    private void CaptureReference(string path)
+    {
+        var root = WorktreePath ?? _projectPath;
+        try
         {
-            AttachLog(log);
-            log.AppendUser(text);
-            Features!.RecordProgress(id, log, text);
-            _featureRequest = text;
-            PublishFeatureActivity(busy: true);
-            return;
+            var relative = Path.IsPathRooted(path) ? Path.GetRelativePath(root, path) : path;
+            if (ProjectKnowledgeIndex.ReadSource(root, relative) is { } content)
+                _turnReferences[relative] = new SourceReference(relative, ProjectKnowledgeIndex.Hash(content));
         }
-
-        _recording = false;
-        _skipBuffer.Clear();
-        _skipPrompt = text;
+        catch (ArgumentException) { }
     }
 
     private void RecordFeatureEvent(AgentEvent e)
     {
-        if (!SmartHistory)
+        if (Features is not { } features || !_recording) return;
+        if (e is SessionInitialized) BindHistoryProvider();
+        if (e is ToolCallStarted tool)
         {
-            return;
+            if (_retrievalId is { } retrieval && IsExplorationTool(tool.ToolName)) features.RecordExploration(retrieval);
+            if (tool.Input.ValueKind == System.Text.Json.JsonValueKind.Object)
+                foreach (var property in tool.Input.EnumerateObject())
+                    if (property.Name is "file_path" or "path" or "file" && property.Value.ValueKind == System.Text.Json.JsonValueKind.String &&
+                        property.Value.GetString() is { Length: > 0 } path) CaptureReference(path);
         }
-
-        if (e is TurnCompleted done)
+        if (e is ToolCallCompleted done)
         {
-            EndFeatureTurn(done.Subtype);
-            if (_recording && FeatureId is { } id)
+            if (done.FileChange is { } change) CaptureReference(change.FilePath);
+            foreach (var changed in done.FileChanges ?? []) CaptureReference(changed.FilePath);
+        }
+        if (e is AssistantMessageCompleted { ParentToolUseId: null } reply && _turnFindings.Length < 6000)
+        {
+            _turnFindings.AppendLine(reply.Text);
+        }
+        if (e is TurnCompleted completed)
+        {
+            if (_retrievalId is { } usageId && completed.Usage is { } usage) features.RecordUsage(usageId, usage.ContextTokens, usage.OutputTokens);
+            EndFeatureTurn(completed.Subtype);
+            if (FeatureId is { } id)
             {
-                Features!.Summarize(id);
+                foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
+                    _turnFindings.ToString(), @"(?:[A-Za-z0-9_.-]+[/\\])+[A-Za-z0-9_.-]+")) CaptureReference(match.Value);
+                features.RecordFinding(id, CliId, WorktreePath ?? _projectPath,
+                    _featureRequest + "\n" + _turnFindings, _turnReferences.Values.ToList());
+                features.Summarize(id);
             }
-
+            _turnFindings.Clear();
+            _turnReferences.Clear();
             return;
         }
-
-        if (_recording && _featureLog is { } log)
-        {
-            log.Append(e);
-            return;
-        }
-
-        if (_skipBuffer.Count < SkipBufferLimit)
-        {
-            _skipBuffer.Add(e);
-        }
-
-        // A turn that was no project work but wrote files was work after all.
-        if (e is ToolCallCompleted { FileChange: not null } && _skipPrompt is { } prompt)
-        {
-            PromoteSkippedTurn(prompt);
-        }
+        _featureLog?.Append(e);
     }
 
-    private void PromoteSkippedTurn(string prompt)
-    {
-        var features = Features!;
-        var feature = FeatureId is { } id ? features.Get(id) : null;
-        feature ??= features.FindOrCreate(FeatureRouting.CleanNames(null, prompt, seed: false)[0], FeatureRouting.DescribeFrom(prompt)).Feature;
+    private static bool IsExplorationTool(string name) =>
+        name.Contains("read", StringComparison.OrdinalIgnoreCase) || name.Contains("search", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("grep", StringComparison.OrdinalIgnoreCase) || name.Contains("glob", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("exec", StringComparison.OrdinalIgnoreCase) || name is "Bash" or "Shell";
 
-        if (FeatureId != feature.Id)
-        {
-            _logSeen = features.LogOf(feature.Id).Position;
-        }
-
-        FeatureId = feature.Id;
-        FeatureName = feature.Name;
-        _featureLog = features.LogOf(feature.Id, _chatId);
-        _recording = true;
-        _featureRequest = prompt;
-        PublishFeatureActivity(busy: true);
-
-        AttachLog(_featureLog);
-        _featureLog.AppendUser(prompt);
-        foreach (var held in _skipBuffer)
-        {
-            _featureLog.Append(held);
-        }
-
-        features.RecordProgress(feature.Id, _featureLog, prompt);
-        _skipBuffer.Clear();
-        _skipPrompt = null;
-    }
-
-    private void AttachLog(FeatureLog log)
-    {
-        if (!_attachLogged)
-        {
-            log.Attach(CliId);
-            _attachLogged = true;
-        }
-    }
-
-    /// <summary>A file the agent wrote is indexed under the feature it was written for.</summary>
     private void IndexWrittenFile(string path)
     {
-        if (SmartHistory && _recording && FeatureId is { } id)
-        {
-            Features!.IndexFile(id, path);
-        }
+        if (FeatureId is { } id) Features?.IndexFile(id, path);
     }
 
-    /// <summary>The pre-brief in progress, which Stop cancels; null while none runs.</summary>
-    private CancellationTokenSource? _briefing;
-
-    /// <summary>
-    /// The feature's briefing for a session's first message, once. With the background-task
-    /// model it is a brief written for this message - the history read and the code explored by
-    /// the cheap model, shown as its own transcript section - so the chat model starts from a few
-    /// thousand characters rather than the raw log. Without one it is the summary, the progress
-    /// since and the earlier code that bears on the message. Null for a feature with no history yet.
-    /// </summary>
-    /// <exception cref="OperationCanceledException">Stopped while the brief was being written; the seed stays due.</exception>
-    private async Task<string?> TakeFeatureSeedAsync(string text)
+    private async Task<RetrievalResult?> RetrieveProjectContextAsync(string text)
     {
-        if (_seedFeatureId is not { } id || Features?.Get(id) is not { } feature)
-        {
-            return null;
-        }
-
-        // The seed covers the log as it stands now: other chats' work after this point is news for the next catch-up.
-        var seen = _featureLog?.Position ?? _logSeen;
-        var others = Features.OtherChatsOn(id, _chatId);
-        if (feature.Summary.Length == 0 && feature.LogBytes == 0 && Features.FileCount(id) == 0 && others.Count == 0)
-        {
-            _seedFeatureId = null;
-            _logSeen = seen;
-            return null;
-        }
-
-        if (Helper?.IsAvailable != true)
-        {
-            _seedFeatureId = null;
-            _logSeen = seen;
-            return Features.BuildSeed(feature, text, chatId: _chatId);
-        }
-
-        var item = new HandoffBriefItem { FeatureName = feature.Name };
-        Add(item);
-
+        _retrievalId = null;
+        if (Features is not { } features || !AppSettings.ProjectKnowledge || text.StartsWith('/')) return null;
         using var cts = new CancellationTokenSource();
         _briefing = cts;
+        var session = _session;
         try
         {
-            var stage = new Progress<string>(s => item.Stage = s);
-            var result = await Task.Run(() => Features.PrepareBriefAsync(feature, text, _chatId, stage, cts.Token), cts.Token);
-            _seedFeatureId = null;
-            _logSeen = seen;
-            item.Finish(result);
-            CrashLog.Trace($"Feature brief for {id}: {result.FullChars} chars of history handed off as {result.Seed.Length} (fallback={result.IsFallback})");
-            return result.Seed;
+            var recent = string.Join("\n", Items.OfType<UserMessageItem>().TakeLast(3).Select(i => i.Text));
+            var result = await features.RetrieveAsync(WorktreePath ?? _projectPath, text, recent, new HashSet<string>(_deliveredContext),
+                _needsResumeContext ? null : FeatureId).WaitAsync(TimeSpan.FromSeconds(2), cts.Token);
+            if (!ReferenceEquals(session, _session)) throw new OperationCanceledException();
+            _retrievalId = Guid.NewGuid().ToString("N");
+            if (FeatureId is { } id) features.RecordRetrieval(_retrievalId, id, result);
+            CrashLog.Trace($"Project retrieval: {result.ElapsedMilliseconds}ms, {result.Keys.Count} references, token upper bound={result.Tokens}");
+            return result;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
         {
-            Items.Remove(item);
-            Reflow();
-            throw;
+            CrashLog.Warn("knowledge", $"Context retrieval skipped: {ex.Message}");
+            return null;
         }
-        finally
-        {
-            _briefing = null;
-        }
+        finally { _briefing = null; }
     }
 
-    /// <summary>
-    /// For a chat already in a session on its feature: what other chats did on it since this chat's
-    /// last message, as a note its next message carries - so it neither undoes nor redoes their work.
-    /// Null when nothing happened elsewhere, which is the usual case and costs one read of the log tail.
-    /// </summary>
-    /// <exception cref="OperationCanceledException">Stopped while the catch-up was being written; nothing is marked seen.</exception>
-    private async Task<string?> TakeCatchUpAsync(string text)
+    private void ContextDelivered(RetrievalResult? result)
     {
-        if (!SmartHistory || !_recording || _seedFeatureId is not null || FeatureId is not { } id || _featureLog is not { } log)
-        {
-            return null;
-        }
-
-        var seen = log.Position;
-        var since = _logSeen;
-        if (!FeatureCatchUp.HasWork(log.ReadSince(since, excludeChat: _chatId).Entries))
-        {
-            _logSeen = seen;
-            return null;
-        }
-
-        var item = new HandoffBriefItem { FeatureName = FeatureName, Heading = "Caught up on other chats", Stage = "Reading other chats' work…" };
-        Add(item);
-
-        using var cts = new CancellationTokenSource();
-        _briefing = cts;
+        if (result is null) return;
+        _needsResumeContext = false;
+        foreach (var key in result.Keys) _deliveredContext.Add(key);
         try
         {
-            var result = await Task.Run(() => Features!.CatchUpAsync(id, _chatId, since, text, cts.Token), cts.Token);
-            _logSeen = seen;
-            if (result is null)
-            {
-                Items.Remove(item);
-                Reflow();
-                return null;
-            }
-
-            item.FinishCatchUp(result);
-            CrashLog.Trace($"Feature catch-up for {id}: {result.FullChars} chars of other chats' work handed over as {result.Note.Length}");
-            return result.Note;
+            if (SessionId is { } native) Features?.MarkContextDelivered(native, result.Keys);
         }
-        catch (OperationCanceledException)
-        {
-            Items.Remove(item);
-            Reflow();
-            throw;
-        }
-        finally
-        {
-            _briefing = null;
-        }
+        catch (Exception ex) { CrashLog.Warn("knowledge", $"Context delivery metadata not saved: {ex.Message}"); }
     }
 
-    /// <summary>The session goes mid-turn (the tab closes, a restart): no turn end will come, so one is written for it.</summary>
+    private void ForgetDeliveredContext()
+    {
+        _deliveredContext.Clear();
+        _retrievalId = null;
+        try
+        {
+            if (SessionId is { } native) Features?.ClearDeliveredContext(native);
+        }
+        catch (Exception ex) { CrashLog.Warn("knowledge", $"Context compaction metadata not cleared: {ex.Message}"); }
+    }
+
     private void AbandonFeatureTurn()
     {
-        if (IsBusy)
-        {
-            EndFeatureTurn("stopped");
-        }
+        if (IsBusy) EndFeatureTurn("stopped");
     }
 }

@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Codale.Core\Codale.Core.csproj" />
+    <ProjectReference Include="..\Codale.Storage\Codale.Storage.csproj" />
   </ItemGroup>
 
   <ItemGroup>

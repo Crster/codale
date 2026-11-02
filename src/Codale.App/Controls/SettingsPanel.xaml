@@ -227,8 +227,8 @@
                                 <Rectangle Style="{StaticResource Divider}" />
                                 <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
                                     <StackPanel VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Style="{StaticResource RowTitle}" Text="History by feature" />
-                                        <TextBlock Style="{StaticResource RowDesc}" Text="Groups project conversations into feature summaries for faster resumption." />
+                                        <TextBlock Style="{StaticResource RowTitle}" Text="Project knowledge" />
+                                        <TextBlock Style="{StaticResource RowDesc}" Text="Retrieves relevant project findings and source context before each prompt. History always follows chat sessions." />
                                     </StackPanel>
                                     <ToggleSwitch x:Name="SmartHistoryToggle" Grid.Column="1" MinWidth="0" Toggled="OnSmartHistoryToggled" />
                                 </Grid>

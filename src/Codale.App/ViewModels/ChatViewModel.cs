@@ -1461,7 +1461,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // Automatic mode reads the message on send; starting the reader while the user
         // types takes its few seconds of start-up off the wait. A busy turn counts too:
         // the next message is often typed while the agent works and sent once it is done.
-        if ((IsAutomaticMode || SmartHistory) && value.Length > 0 && !value.StartsWith('/') && Router is { } router)
+        if (IsAutomaticMode && value.Length > 0 && !value.StartsWith('/') && Router is { } router)
         {
             router.Prewarm(Features);
         }
@@ -1550,12 +1550,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>The helper model is reading the message before it goes out.</summary>
     [ObservableProperty]
     public partial bool IsRouting { get; set; }
-
-    /// <summary>
-    /// Automatic mode read the message as a new subject: the workspace opens a fresh
-    /// session and sends it there through <see cref="SendRoutedAsync"/>.
-    /// </summary>
-    public event EventHandler<RoutedMessage>? NewTopicRequested;
 
     /// <summary>The chip label for the raw CLI mode vocabulary.</summary>
     public string ModeDisplayText => ModeDisplay(PermissionMode);
@@ -2190,6 +2184,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             if (resumeLost)
             {
                 ResumeSessionId = null;
+                _deliveredContext.Clear();
+                _needsResumeContext = true;
                 Add(new NoticeItem { Text = "The previous CLI conversation could not be resumed; started a new one.", Severity = NoticeSeverity.Info });
                 await ConnectCoreAsync();
             }
@@ -2357,6 +2353,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         switch (e)
         {
             case SessionInitialized init:
+                BindHistoryProvider();
                 _status.Model = init.Model;
                 if (init.ContextWindow is int contextWindow && contextWindow > 0)
                 {
@@ -2800,6 +2797,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             case ConversationReset:
+                AbandonFeatureTurn();
+                ClearFeature();
                 // A reset is not a turn the CLI finishes - no result event follows it -
                 // so the turn the /clear prompt opened ends here, busy flag included.
                 IsBusy = false;
@@ -3985,9 +3984,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        // Codex's app-server does not interpret the interactive CLI's /clear command.
-        // Start a new thread locally so its context and the visible transcript agree.
-        if (IsCodexSession && !IsBusy && attachments.Count == 0 &&
+        // Both providers use the same explicit boundary: leave the old session intact for resume.
+        // A new history entry is allocated only when the next prompt is submitted.
+        if (attachments.Count == 0 &&
             text.Equals("/clear", StringComparison.OrdinalIgnoreCase))
         {
             Draft = "";
@@ -4005,38 +4004,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             _status.BeginPrompt();
         }
 
-        // Smart history reads the message first: which feature it is work on (or that it is no
-        // project work), and in Automatic mode the mode for the turn. Slash commands are the CLI's
-        // own syntax and go out untouched; so does anything sent mid-turn, which the running turn covers.
-        if (SmartHistory && !planOnly && !IsBusy && text.Length > 0 && !text.StartsWith('/') && Router is { } featureRouter)
-        {
-            FeatureDecision feature;
-            IsRouting = true;
-            try
-            {
-                feature = await featureRouter.RouteFeatureAsync(text, this, Features!);
-                if (!await ApplyFeatureDecisionAsync(feature, text))
-                {
-                    return;
-                }
-            }
-            finally
-            {
-                IsRouting = false;
-            }
-
-            if (IsAutomaticMode)
-            {
-                await SendRoutedAsync(feature.Route.Text, attachments, feature.Route.Intent);
-            }
-            else
-            {
-                await SendTurnAsync(text, attachments, planOnly: false, askOnly: IsAskMode);
-            }
-
-            return;
-        }
-
         // Automatic mode reads the message first. Slash commands are the CLI's own
         // syntax and go out untouched; so does anything sent mid-turn, which the
         // running turn's mode already covers.
@@ -4051,15 +4018,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             finally
             {
                 IsRouting = false;
-            }
-
-            // The draft stays until the routing is done: a message is never lost to a slow model.
-            if (decision.NewTopic && NewTopicRequested is { } handler)
-            {
-                Draft = "";
-                Attachments.Clear();
-                handler(this, new RoutedMessage(decision.Text, attachments, decision.Intent));
-                return;
             }
 
             await SendRoutedAsync(decision.Text, attachments, decision.Intent);
@@ -4176,18 +4134,21 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             Add(sent);
         }
 
-        // The feature's briefing rides on the first real message; a slash command is the
-        // CLI's own syntax and would not survive a prefix. Writing it can take the background
-        // model a while, and is shown as its own section under the prompt.
-        string? seed;
+        if (!compact) RecordUserTurn(text);
+        if (compact) ForgetDeliveredContext();
+
+        // Both providers retrieve local project references before each prompt. Slash commands
+        // retain their provider syntax and do not carry a context prefix.
+        RetrievalResult? retrieved;
         try
         {
-            // A session already under way gets, instead, what other chats on its feature did meanwhile.
-            seed = text.StartsWith('/') ? null : await TakeFeatureSeedAsync(text) ?? await TakeCatchUpAsync(text);
+            retrieved = await RetrieveProjectContextAsync(text);
         }
         catch (OperationCanceledException)
         {
+            if (!ReferenceEquals(session, _session)) return;
             // Stopped before anything went out: the message goes back to the composer.
+            EndFeatureTurn("not sent");
             Items.Remove(sent);
             Reflow();
             IsBusy = false;
@@ -4202,11 +4163,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         // "/compact" is housekeeping, not part of the conversation a resumed history replays.
-        if (!compact)
-        {
-            RecordUserTurn(text);
-        }
-
         BeginTurn();
         if (silent && _activeTurn is { } hidden)
         {
@@ -4217,7 +4173,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            var context = seed is { Length: > 0 } ? SessionBriefing.ContextBlock(seed) : null;
+            var context = retrieved is { Text.Length: > 0 } ? SessionBriefing.ContextBlock(retrieved.Text) : null;
 
             if (compact && await session.TryCompactAsync())
             {
@@ -4231,10 +4187,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             else
             {
                 await session.SendAsync(new UserTurn(text) { Attachments = attachments, PlanOnly = planOnly, AskOnly = askOnly, ContextPrefix = context });
+                if (ReferenceEquals(session, _session)) ContextDelivered(retrieved);
             }
         }
         catch (Exception ex)
         {
+            if (!ReferenceEquals(session, _session)) return;
             EndFeatureTurn("not sent");
             IsBusy = false;
             RestoreAfterPlanTurn();
@@ -4254,23 +4212,41 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         NextPromptSuggestion = null;
         Attachments.Clear();
         ComposerNotice = null;
+        RetrievalResult? retrieved;
+        try
+        {
+            retrieved = await RetrieveProjectContextAsync(text);
+        }
+        catch (OperationCanceledException)
+        {
+            if (ReferenceEquals(session, _session)) Draft = text;
+            return;
+        }
+        if (!ReferenceEquals(session, _session)) return;
+        // A turn may finish while the lookup runs. Send as a fresh turn in that case,
+        // preserving its mode and session rather than leaving a new prompt looking idle.
+        if (!IsBusy || _activeTurn is null)
+        {
+            await SendTurnAsync(text, attachments, planOnly: false, askOnly: IsAskMode);
+            return;
+        }
         _lastUserPrompt = text;
-
         var started = _turnStarted;
         EndTurn(TurnOutcome.Completed);
         Add(new UserMessageItem { Text = text, Attachments = attachments, IsSteer = true });
         RecordUserTurn(text);
         BeginTurn();
         _turnStarted = started;
-
         try
         {
-            await session.SendAsync(new UserTurn(text) { Attachments = attachments });
+            await session.SendAsync(new UserTurn(text) { Attachments = attachments,
+                ContextPrefix = retrieved is { Text.Length: > 0 } ? SessionBriefing.ContextBlock(retrieved.Text) : null });
+            if (ReferenceEquals(session, _session)) ContextDelivered(retrieved);
         }
         catch (Exception ex)
         {
-            // The turn it was meant for is still running; only the message was lost.
-            Add(new NoticeItem { Text = $"Send failed: {ex.Message}", Severity = NoticeSeverity.Error });
+            if (ReferenceEquals(session, _session))
+                Add(new NoticeItem { Text = $"Send failed: {ex.Message}", Severity = NoticeSeverity.Error });
         }
     }
 
@@ -4961,7 +4937,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         StopTaskHost();
 
         // The session goes first, so a turn cut off by the close is marked as ended before the summary reads the log.
-        _pendingJump?.Choose(FeatureJumpChoice.Stay);
         await DisposeSessionAsync();
         if (_watchingFeatures && Features is not null)
         {

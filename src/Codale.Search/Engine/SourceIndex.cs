@@ -50,6 +50,7 @@ public sealed class SourceIndex : IDisposable
     private SourceSnapshot? _current;
     private Task<SourceSnapshot>? _refresh;
     private long _version;
+    private int _reloadAll;
     private bool _disposed;
 
     public SourceIndex(string root, SourceIndexOptions? options = null)
@@ -101,7 +102,11 @@ public sealed class SourceIndex : IDisposable
     }
 
     /// <summary>Marks the snapshot stale, e.g. after the app itself wrote files.</summary>
-    public void Invalidate() => Interlocked.Increment(ref _version);
+    public void Invalidate(bool reloadAll = false)
+    {
+        if (reloadAll) Interlocked.Exchange(ref _reloadAll, 1);
+        Interlocked.Increment(ref _version);
+    }
 
     /// <summary>
     /// A current snapshot: the last one when nothing has changed since, else a refresh -
@@ -155,7 +160,9 @@ public sealed class SourceIndex : IDisposable
         EnsureWatcher();
 
         var version = Interlocked.Read(ref _version);
-        var previous = Current;
+        var reloadAll = Interlocked.Exchange(ref _reloadAll, 0) == 1;
+        var previous = reloadAll ? null : Current;
+        if (reloadAll) _binary.Clear();
 
         var listed = await ListAsync().ConfigureAwait(false);
         var paths = listed

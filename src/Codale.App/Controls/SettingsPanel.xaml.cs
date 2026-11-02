@@ -102,7 +102,7 @@ public sealed partial class SettingsPanel : UserControl
         RefreshSyntaxSection();
         WordWrapToggle.IsOn = AppSettings.EditorWordWrap;
         SuggestNextPromptToggle.IsOn = AppSettings.SuggestNextPrompt;
-        SmartHistoryToggle.IsOn = AppSettings.SmartHistory;
+        SmartHistoryToggle.IsOn = AppSettings.ProjectKnowledge;
 
         ThemeBox.SelectedIndex = AppSettings.Theme switch
         {
@@ -991,7 +991,7 @@ public sealed partial class SettingsPanel : UserControl
     {
         if (!_loading)
         {
-            AppSettings.SmartHistory = SmartHistoryToggle.IsOn;
+            AppSettings.ProjectKnowledge = SmartHistoryToggle.IsOn;
         }
     }
 

@@ -22,8 +22,8 @@ public static class FeatureSummarizer
     private const int ReplyTokens = 1800;
 
     public const string SystemPrompt =
-        "You maintain the summary of one feature of a software project, so a coding agent starting a fresh session " +
-        "can carry on the feature's work without the conversations behind it.\n" +
+        "You maintain the summary of one chat session in a software project, so relevant findings can be retrieved " +
+        "by future sessions. A session may cover unrelated topics: preserve each topic without merging their decisions.\n" +
         "\n" +
         "You get the feature's name, its previous summary (maybe empty) and the new progress since then. Write the " +
         "updated summary: merge the new progress into the previous one, keep what is still true, drop what is " +

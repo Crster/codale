@@ -12,7 +12,7 @@ namespace Codale.Storage;
 /// (<c>features.db</c> beside its logs) rather than <see cref="CodaleStore"/>, so indexing on a
 /// background thread never queues behind the UI thread's writes.
 /// </summary>
-public sealed class FeatureStore : IDisposable
+public sealed partial class FeatureStore : IDisposable
 {
     private const int RecentPromptChars = 2_000;
 
@@ -56,6 +56,7 @@ public sealed class FeatureStore : IDisposable
             CREATE INDEX IF NOT EXISTS ix_chunks_file ON file_chunks (feature_id, path);
             CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(chunk_id UNINDEXED, tokens);
             """);
+        InitializeProjectKnowledge();
     }
 
     public FeatureInfo Create(string name, string description)
@@ -63,7 +64,7 @@ public sealed class FeatureStore : IDisposable
         var now = DateTimeOffset.Now;
         var feature = new FeatureInfo
         {
-            Id = Guid.NewGuid().ToString("N")[..10],
+            Id = Guid.NewGuid().ToString("N"),
             Name = name,
             Description = description,
             CreatedAt = now,
@@ -112,13 +113,20 @@ public sealed class FeatureStore : IDisposable
     {
         lock (_gate)
         {
+            using var transaction = _connection.BeginTransaction();
             Execute("""
                 DELETE FROM chunks_fts WHERE chunk_id IN (SELECT id FROM file_chunks WHERE feature_id = $id);
                 DELETE FROM file_chunks WHERE feature_id = $id;
                 DELETE FROM feature_files WHERE feature_id = $id;
                 DELETE FROM features_fts WHERE id = $id;
                 DELETE FROM features WHERE id = $id;
+                DELETE FROM knowledge_fts WHERE id IN (SELECT id FROM knowledge WHERE session_id = $id);
+                DELETE FROM knowledge WHERE session_id = $id;
+                DELETE FROM retrievals WHERE session_id = $id;
+                DELETE FROM delivered_context WHERE provider_session_id IN (SELECT provider_session_id FROM provider_sessions WHERE session_id = $id);
+                DELETE FROM provider_sessions WHERE session_id = $id;
                 """, ("$id", id));
+            transaction.Commit();
         }
     }
 

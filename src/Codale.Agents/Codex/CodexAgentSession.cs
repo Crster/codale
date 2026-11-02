@@ -59,7 +59,10 @@ public sealed class CodexAgentSession : IAgentSession
     /// <summary>The model codex reported for the thread; null until it says, so the CLI default is never guessed.</summary>
     private string? _threadModel;
 
-    private sealed record PendingApproval(string ThreadId, string Method, string ToolName, JsonElement Input);
+    private sealed record PendingApproval(string ThreadId, string Method, string ToolName, JsonElement Input, string? ToolUseId);
+
+    // Allows protocol tests to capture outgoing frames without launching the CLI.
+    internal Func<object, CancellationToken, Task>? MessageWriter { get; init; }
 
     public CodexAgentSession(CodexSessionOptions options)
     {
@@ -480,6 +483,13 @@ public sealed class CodexAgentSession : IAgentSession
         {
             var response = BuildRequestUserInputResult(pending.Input, decision);
             await WriteResponseAsync(id, response, ct).ConfigureAwait(false);
+            // Input requests have no item/completed notification. Sending the answer
+            // finishes the question itself, unlike permission to start another tool.
+            await _events.Writer.WriteAsync(new ToolCallCompleted
+            {
+                ToolUseId = pending.ToolUseId!,
+                IsError = decision.Behavior != ApprovalBehavior.Allow,
+            }, ct).ConfigureAwait(false);
             return;
         }
 
@@ -695,6 +705,12 @@ public sealed class CodexAgentSession : IAgentSession
 
     private async Task WriteMessageAsync(object message, CancellationToken ct)
     {
+        if (MessageWriter is { } write)
+        {
+            await write(message, ct).ConfigureAwait(false);
+            return;
+        }
+
         var process = _process ?? throw new InvalidOperationException("Session not started.");
         var json = JsonSerializer.Serialize(message, WireJson);
 
@@ -870,14 +886,20 @@ public sealed class CodexAgentSession : IAgentSession
         var (toolName, input) = DescribeApproval(method, parameters, item);
 
         var approvalId = id.GetInt32();
-        _pendingApprovals[approvalId] = new PendingApproval(threadId, method, toolName, input);
+        var requestId = approvalId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var toolUseId = parameters.Str("itemId") ?? item?.Str("id");
+        if (toolName == "AskUserQuestion")
+        {
+            toolUseId ??= requestId;
+        }
+        _pendingApprovals[approvalId] = new PendingApproval(threadId, method, toolName, input, toolUseId);
         await _events.Writer.WriteAsync(new ApprovalRequested
         {
-            RequestId = approvalId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            RequestId = requestId,
             ToolName = toolName,
             DisplayName = toolName,
             // The item the approval is about, so the question lands on its transcript row.
-            ToolUseId = parameters.Str("itemId") ?? item?.Str("id"),
+            ToolUseId = toolUseId,
             Input = input,
         }).ConfigureAwait(false);
     }

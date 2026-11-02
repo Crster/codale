@@ -4,11 +4,7 @@ using Codale.Core.Helper;
 
 namespace Codale.App.Services;
 
-/// <summary>
-/// Automatic mode's front door: one helper-model call that picks a message's mode and
-/// spots a change of subject; the message itself always goes out as typed. No CLI, a
-/// slow one or a timeout never hold a message back: the mode is then read from its wording.
-/// </summary>
+/// <summary>Automatic mode classification. It never selects or changes a history session.</summary>
 public sealed class MessageRouter
 {
     // A warm CLI answers in ~1s and a cold Claude one in ~3.5s; past this the user has waited enough.
@@ -27,55 +23,7 @@ public sealed class MessageRouter
     /// <summary>The user is typing a message this router will read: get the model ready.</summary>
     public void Prewarm(FeatureService? features)
     {
-        if (features is not null && AppSettings.SmartHistory)
-        {
-            _client.Prewarm(FeatureRouting.SystemPrompt, [FeatureRouting.RouteTool(features.List())]);
-        }
-        else
-        {
-            _client.Prewarm(MessageRouting.SystemPrompt, [MessageRouting.RouteTool]);
-        }
-    }
-
-    /// <summary>
-    /// Smart history's single call: the mode for the message and the feature it is work on (or
-    /// none). The message goes out as typed; no CLI, a slow one or a timeout leave it where it
-    /// was typed, in the chat's feature.
-    /// </summary>
-    public async Task<FeatureDecision> RouteFeatureAsync(string text, ChatViewModel chat, FeatureService features, CancellationToken ct = default)
-    {
-        if (MessageRouting.TryRouteLocally(text) is { } local)
-        {
-            CrashLog.Trace("Routed locally: go-ahead");
-            return new FeatureDecision(local, FeatureAction.Stay);
-        }
-
-        if (!IsAvailable)
-        {
-            return new FeatureDecision(MessageRouting.RouteWithoutModel(text), FeatureAction.Stay);
-        }
-
-        var candidates = features.CandidatesFor(text, chat.FeatureId);
-        var lastAssistant = chat.Items.OfType<AssistantMessageItem>().LastOrDefault()?.Text?.Trim();
-        var conversation = FeatureRouting.BuildConversation(text, candidates, chat.FeatureId, lastAssistant);
-        var tool = FeatureRouting.RouteTool(candidates);
-
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(Timeout);
-
-        var started = System.Diagnostics.Stopwatch.StartNew();
-        try
-        {
-            var call = await _client.CallToolAsync(FeatureRouting.SystemPrompt, conversation, [tool], timeout.Token);
-            var decision = FeatureRouting.Interpret(call, text, candidates, chat.FeatureId);
-            CrashLog.Trace($"Feature-routed in {started.ElapsedMilliseconds}ms: intent={decision.Route.Intent} action={decision.Action}");
-            return decision;
-        }
-        catch (Exception ex)
-        {
-            CrashLog.Trace($"Feature routing skipped after {started.ElapsedMilliseconds}ms: {ex.Message}");
-            return new FeatureDecision(MessageRouting.RouteWithoutModel(text), FeatureAction.Stay);
-        }
+        _client.Prewarm(MessageRouting.SystemPrompt, [MessageRouting.RouteTool]);
     }
 
     public async Task<RouteDecision> RouteAsync(string text, ChatViewModel chat, CancellationToken ct = default)
@@ -91,12 +39,7 @@ public sealed class MessageRouter
             return MessageRouting.RouteWithoutModel(text);
         }
 
-        // The agent's last reply sums up what the session did: the only context the model
-        // needs. Without one, or with a bare "Done.", there is nothing to judge a change
-        // of subject against, so the message stays where it was typed.
-        var lastAssistant = chat.Items.OfType<AssistantMessageItem>().LastOrDefault()?.Text?.Trim();
-        var canMoveTopic = lastAssistant is { Length: >= MessageRouting.MinSummaryChars };
-        var conversation = MessageRouting.BuildConversation(text, canMoveTopic ? lastAssistant : null);
+        var conversation = MessageRouting.BuildConversation(text, lastAssistantText: null);
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(Timeout);
@@ -110,7 +53,7 @@ public sealed class MessageRouter
                 [MessageRouting.RouteTool],
                 timeout.Token);
 
-            var decision = MessageRouting.Interpret(call, text, canMoveTopic);
+            var decision = MessageRouting.Interpret(call, text, canMoveTopic: false);
             CrashLog.Trace(
                 $"Routed in {started.ElapsedMilliseconds}ms: intent={decision.Intent} newTopic={decision.NewTopic}");
             return decision;
@@ -123,6 +66,3 @@ public sealed class MessageRouter
         }
     }
 }
-
-/// <summary>A message the router moved to a new session, with the intent it read.</summary>
-public sealed record RoutedMessage(string Text, IReadOnlyList<Codale.Core.Agents.TurnAttachment> Attachments, RouteIntent Intent);
