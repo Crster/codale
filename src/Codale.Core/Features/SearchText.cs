@@ -19,8 +19,53 @@ public static class SearchText
         "to", "of", "in", "is", "it", "on", "at", "as", "be", "by", "do", "if", "or", "so", "we", "an", "my", "me", "no",
     };
 
+    /// <summary>Question filler that says how a prompt asks, not what about ("where is X located?").</summary>
+    private static readonly HashSet<string> QuestionFiller = new(StringComparer.Ordinal)
+    {
+        "does", "did", "done", "doing", "located", "locate", "location", "find", "found", "show", "tell", "explain",
+        "new", "use", "used", "using", "there", "here", "about", "like", "some", "will", "been", "were", "see",
+        "look", "check", "now", "then", "them", "they", "than", "only", "still", "even", "same", "because", "feel",
+        "think", "know", "sure", "yes", "ok", "okay", "thing", "things", "stuff", "code", "file", "files", "work",
+        "works", "working", "currently", "actually", "really", "maybe", "where's", "whats", "who", "your",
+    };
+
     /// <summary>True for a word too common to say what a message is about ("please", "the").</summary>
     public static bool IsStopWord(string token) => Stop.Contains(token);
+
+    /// <summary>
+    /// A light English stem so inflections meet: "connectors" → "connector", "indexing" → "index",
+    /// "located" → "locat". Deliberately conservative: it only has to make forms collide, not be a word.
+    /// </summary>
+    public static string Stem(string token)
+    {
+        if (token.Length <= 4 || !token.All(char.IsLetter)) return token;
+        if (token.EndsWith("ies") && token.Length > 5) return token[..^3] + "y";
+        if (token.EndsWith("ing") && token.Length > 6) return token[..^3];
+        if (token.EndsWith("ed") && token.Length > 5) return token[..^2];
+        if (token.EndsWith("es") && token.Length > 5 && "sxz".Contains(token[^3])) return token[..^2];
+        if (token.EndsWith('s') && !token.EndsWith("ss") && !token.EndsWith("us") && !token.EndsWith("is")) return token[..^1];
+        return token;
+    }
+
+    /// <summary>The meaningful stems of a prompt for project retrieval, most frequent first.</summary>
+    public static IReadOnlyList<string> RetrievalTerms(string text) => Tokens(text)
+        .Where(t => t.Length >= MinTokenLength && !Stop.Contains(t) && !QuestionFiller.Contains(t))
+        .Select(Stem)
+        .GroupBy(t => t)
+        .OrderByDescending(g => g.Count())
+        .Select(g => g.Key)
+        .Take(MaxQueryTokens)
+        .ToList();
+
+    /// <summary>
+    /// A match expression for project retrieval: question filler dropped, and each stem of four or more
+    /// characters matched as a prefix so "connectors" finds "connector" and "ConnectorTable".
+    /// </summary>
+    public static string? ToRetrievalQuery(string text)
+    {
+        var terms = RetrievalTerms(text);
+        return terms.Count == 0 ? null : string.Join(" OR ", terms.Select(t => t.Length >= 4 ? $"\"{t}\"*" : $"\"{t}\""));
+    }
 
     /// <summary>The tokens of <paramref name="text"/> in order: each word whole, then its camelCase / snake_case parts.</summary>
     public static IEnumerable<string> Tokens(string text)

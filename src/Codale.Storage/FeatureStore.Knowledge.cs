@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using Codale.Core.Features;
 
 namespace Codale.Storage;
@@ -24,6 +25,10 @@ public sealed partial class FeatureStore
         );
         CREATE INDEX IF NOT EXISTS ix_source_chunks ON source_chunks(worktree, path);
         CREATE VIRTUAL TABLE IF NOT EXISTS source_fts USING fts5(chunk_id UNINDEXED, tokens);
+        DROP TABLE IF EXISTS source_vectors;
+        CREATE TABLE IF NOT EXISTS chunk_vectors (
+            chunk_id INTEGER NOT NULL, model TEXT NOT NULL, vector BLOB NOT NULL, PRIMARY KEY(chunk_id, model)
+        ) WITHOUT ROWID;
         CREATE TABLE IF NOT EXISTS retrievals (
             id TEXT PRIMARY KEY, session_id TEXT NOT NULL, elapsed_ms INTEGER NOT NULL, tokens INTEGER NOT NULL,
             refs TEXT NOT NULL, exploration_calls INTEGER NOT NULL DEFAULT 0
@@ -90,9 +95,16 @@ public sealed partial class FeatureStore
         }
     }
 
-    public IReadOnlyList<KnowledgeHit> SearchKnowledge(string query, int limit = 8, string? excludeSessionId = null)
+    public IReadOnlyList<KnowledgeHit> SearchKnowledge(string query, int limit = 8, string? excludeSessionId = null) =>
+        SearchKnowledgeMatch(SearchText.ToMatchQuery(query), limit, excludeSessionId);
+
+    /// <summary>Findings for project retrieval: question filler dropped and stems prefix-matched, as for source.</summary>
+    public IReadOnlyList<KnowledgeHit> SearchKnowledgeTerms(string query, int limit = 3, string? excludeSessionId = null) =>
+        SearchKnowledgeMatch(SearchText.ToRetrievalQuery(query), limit, excludeSessionId);
+
+    private IReadOnlyList<KnowledgeHit> SearchKnowledgeMatch(string? match, int limit, string? excludeSessionId)
     {
-        if (SearchText.ToMatchQuery(query) is not { } match) return [];
+        if (match is null) return [];
         lock (_gate)
         {
             return Query("""
@@ -121,6 +133,7 @@ public sealed partial class FeatureStore
             using var tx = _connection.BeginTransaction();
             Execute("""
                 DELETE FROM source_fts WHERE chunk_id IN (SELECT id FROM source_chunks WHERE worktree=$w AND path=$p);
+                DELETE FROM chunk_vectors WHERE chunk_id IN (SELECT id FROM source_chunks WHERE worktree=$w AND path=$p);
                 DELETE FROM source_chunks WHERE worktree=$w AND path=$p;
                 DELETE FROM source_files WHERE worktree=$w AND path=$p;
                 """, ("$w", worktree), ("$p", path));
@@ -138,16 +151,79 @@ public sealed partial class FeatureStore
         }
     }
 
-    public IReadOnlyList<SourceChunk> SearchSource(string query, string worktree, int limit = 12)
+    public IReadOnlyList<SourceChunk> SearchSource(string query, string worktree, int limit = 12) =>
+        SearchSourceMatch(SearchText.ToMatchQuery(query), worktree, limit);
+
+    /// <summary>Lexical leg of hybrid retrieval: filler-free, stemmed prefix terms ranked by BM25.</summary>
+    public IReadOnlyList<SourceChunk> SearchSourceTerms(string query, string worktree, int limit = 40) =>
+        SearchSourceMatch(SearchText.ToRetrievalQuery(query), worktree, limit);
+
+    private IReadOnlyList<SourceChunk> SearchSourceMatch(string? match, string worktree, int limit)
     {
-        if (SearchText.ToMatchQuery(query) is not { } match) return [];
+        if (match is null) return [];
         lock (_gate)
         {
             return Query("""
-                SELECT c.worktree,c.path,c.hash,c.start_line,c.text FROM source_fts f JOIN source_chunks c ON c.id=f.chunk_id
+                SELECT c.worktree,c.path,c.hash,c.start_line,c.text,c.id FROM source_fts f JOIN source_chunks c ON c.id=f.chunk_id
                 WHERE source_fts MATCH $q AND c.worktree=$w ORDER BY bm25(source_fts) LIMIT $n
-                """, r => new SourceChunk(r.GetString(0), r.GetString(1), r.GetString(2), r.GetInt32(3), r.GetString(4)),
-                ("$q", match), ("$w", worktree), ("$n", limit));
+                """, ReadChunk, ("$q", match), ("$w", worktree), ("$n", limit));
+        }
+    }
+
+    private static SourceChunk ReadChunk(SqliteDataReader r) =>
+        new(r.GetString(0), r.GetString(1), r.GetString(2), r.GetInt32(3), r.GetString(4), r.GetInt64(5));
+
+    public IReadOnlyList<SourceChunk> SourceChunks(IReadOnlyCollection<long> ids)
+    {
+        if (ids.Count == 0) return [];
+        lock (_gate)
+        {
+            return Query($"SELECT worktree,path,hash,start_line,text,id FROM source_chunks WHERE id IN ({string.Join(',', ids)})", ReadChunk);
+        }
+    }
+
+    /// <summary>Chunks of a worktree with no vector from <paramref name="model"/> yet, for background embedding.</summary>
+    public IReadOnlyList<(long Id, string Path, string Text)> ChunksMissingVectors(string worktree, string model, int limit)
+    {
+        lock (_gate)
+        {
+            return Query("""
+                SELECT c.id,c.path,c.text FROM source_chunks c LEFT JOIN chunk_vectors v ON v.chunk_id=c.id AND v.model=$m
+                WHERE c.worktree=$w AND v.chunk_id IS NULL LIMIT $n
+                """, r => (r.GetInt64(0), r.GetString(1), r.GetString(2)), ("$w", worktree), ("$m", model), ("$n", limit));
+        }
+    }
+
+    /// <summary>Stores unit vectors as int8 (see <see cref="VectorMath.Quantize"/>).</summary>
+    public void PutVectors(string model, IReadOnlyList<(long ChunkId, float[] Vector)> vectors)
+    {
+        lock (_gate)
+        {
+            using var tx = _connection.BeginTransaction();
+            foreach (var (id, vector) in vectors)
+                Execute("INSERT OR REPLACE INTO chunk_vectors VALUES ($id,$m,$v)", ("$id", id), ("$m", model), ("$v", VectorMath.Quantize(vector)));
+            tx.Commit();
+        }
+    }
+
+    public QuantizedMatrix SourceVectors(string worktree, string model)
+    {
+        lock (_gate)
+        {
+            return QuantizedMatrix.From(Query("""
+                SELECT v.chunk_id,v.vector FROM chunk_vectors v JOIN source_chunks c ON c.id=v.chunk_id
+                WHERE c.worktree=$w AND v.model=$m
+                """, r => (r.GetInt64(0), (byte[])r.GetValue(1)), ("$w", worktree), ("$m", model)));
+        }
+    }
+
+    /// <summary>Drops vectors of models no longer in use, so a model upgrade does not leave the old index behind.</summary>
+    public void DeleteVectorsExcept(IReadOnlyCollection<string> models)
+    {
+        lock (_gate)
+        {
+            var keep = string.Join(",", models.Select((_, i) => "$m" + i));
+            Execute($"DELETE FROM chunk_vectors WHERE model NOT IN ({keep})", models.Select((m, i) => ("$m" + i, (object?)m)).ToArray());
         }
     }
 

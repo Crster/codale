@@ -103,6 +103,9 @@ public sealed class FeatureLog(string directory, string? chatId = null)
 
     public void AppendUser(string text) => Append(new { type = "user", text, at = DateTimeOffset.Now });
 
+    /// <summary>Notes the project context a prompt was enriched with; replayed as its own row, never as conversation.</summary>
+    public void AppendContext(string summary, string details) => Append(new { type = "context", summary, details, at = DateTimeOffset.Now });
+
     /// <summary>Notes that the chat's turn is over, and how it ended ("success", an error subtype, "stopped").</summary>
     public void EndTurn(string outcome) => Append(new { type = "turnEnd", outcome, at = DateTimeOffset.Now });
 
@@ -404,6 +407,7 @@ public sealed class FeatureLog(string directory, string? chatId = null)
     private static AgentEvent? Translate(JsonElement record) => record.Str("type") switch
     {
         "user" when record.Str("text") is { Length: > 0 } text => new UserMessageRecorded(text),
+        "context" when record.Str("summary") is { Length: > 0 } summary => new ContextEnrichmentRecorded(summary, record.Str("details") ?? ""),
         "assistant" => new AssistantMessageCompleted
         {
             MessageId = record.Str("id") ?? "",

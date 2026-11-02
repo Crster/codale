@@ -1111,6 +1111,7 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
                     <Button
@@ -1139,6 +1140,26 @@
                         Grid.Column="3"
                         Padding="7,2"
                         VerticalAlignment="Center"
+                        Background="{StaticResource KindSearchTintBrush}"
+                        BorderBrush="{StaticResource KindSearchBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        ToolTipService.ToolTip="New topic: project context was retrieved for this subject alone"
+                        Visibility="{x:Bind IsNewTopic, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <FontIcon FontSize="9" Foreground="{StaticResource KindSearchBrush}" Glyph="&#xE710;" />
+                            <TextBlock
+                                FontSize="{x:Bind S10, Mode=OneWay}"
+                                FontWeight="Bold"
+                                Foreground="{StaticResource KindSearchBrush}"
+                                Text="NEW" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border
+                        Grid.Column="4"
+                        Padding="7,2"
+                        VerticalAlignment="Center"
                         Background="{StaticResource KindPlanTintBrush}"
                         BorderBrush="{StaticResource KindPlanBrush}"
                         BorderThickness="1"
@@ -1155,7 +1176,7 @@
                     </Border>
 
                     <Border
-                        Grid.Column="4"
+                        Grid.Column="5"
                         Padding="7,2"
                         VerticalAlignment="Center"
                         Background="{StaticResource KindEditTintBrush}"
@@ -1174,7 +1195,7 @@
                     </Border>
 
                     <Border
-                        Grid.Column="5"
+                        Grid.Column="6"
                         Padding="8,2"
                         VerticalAlignment="Center"
                         Background="{StaticResource UserBubbleBrush}"
@@ -1788,6 +1809,64 @@
             </StackPanel>
         </DataTemplate>
 
+        <!--  Project context attached to a prompt: a folded row with its size that opens
+              to the files and the exact briefing the agent received.  -->
+        <DataTemplate x:Key="ContextTemplate" x:DataType="vm:ContextEnrichedItem">
+            <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="2">
+                <Button
+                    Padding="0,3,10,3"
+                    Click="OnContextToggleClick"
+                    Style="{StaticResource ToolToggle}"
+                    Tag="{x:Bind}"
+                    ToolTipService.ToolTip="Show the project context sent with this prompt">
+                    <StackPanel Orientation="Horizontal" Spacing="8" views:TextBaseline.IsAligned="True">
+                        <Border
+                            Width="20"
+                            Height="20"
+                            Margin="1,0,1,0"
+                            VerticalAlignment="Center"
+                            Background="{StaticResource KindPlanTintBrush}"
+                            CornerRadius="10">
+                            <FontIcon
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                FontSize="{x:Bind S10, Mode=OneWay}"
+                                Foreground="{StaticResource KindPlanBrush}"
+                                Glyph="&#xE8FD;" />
+                        </Border>
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind S12, Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Text="Enriched context" />
+                        <TextBlock
+                            MaxWidth="420"
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind S12, Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind Summary}"
+                            TextTrimming="CharacterEllipsis" />
+                        <FontIcon
+                            FontSize="{x:Bind S8, Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Glyph="{x:Bind IsExpanded, Mode=OneWay, Converter={StaticResource ChevronGlyph}}" />
+                    </StackPanel>
+                </Button>
+                <Grid Visibility="{x:Bind IsExpanded, Mode=OneWay}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="22" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Rectangle Width="1" Fill="{StaticResource TimelineRailBrush}" />
+                    <views:MarkdownView
+                        Grid.Column="1"
+                        Margin="6,2,0,4"
+                        BaseFontSize="{x:Bind S12, Mode=OneWay}"
+                        Markdown="{x:Bind Details}" />
+                </Grid>
+            </StackPanel>
+        </DataTemplate>
+
         <!--  The background model's pass over the feature's history before the first message:
               its stage while it runs, then a folded row that opens to the brief and the files.  -->
         <DataTemplate x:Key="HandoffBriefTemplate" x:DataType="vm:HandoffBriefItem">
@@ -1885,6 +1964,7 @@
             ActivityTemplate="{StaticResource ActivityTemplate}"
             AssistantTemplate="{StaticResource AssistantTemplate}"
             BriefingTemplate="{StaticResource BriefingTemplate}"
+            ContextTemplate="{StaticResource ContextTemplate}"
             CompactTemplate="{StaticResource CompactTemplate}"
             FeatureJumpTemplate="{StaticResource FeatureJumpTemplate}"
             HandoffBriefTemplate="{StaticResource HandoffBriefTemplate}"

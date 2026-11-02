@@ -171,6 +171,36 @@ if (-not (Test-Path $rgTarget)) {
 }
 
 # ---------------------------------------------------------------------------
+# Embedding model payload
+# ---------------------------------------------------------------------------
+# Project retrieval and topic detection embed text with minishlab/potion-base-8M
+# (Model2Vec, MIT), shipped beside the app exe under models\potion-base-8M
+# (SemanticModel.BundledDirectory). Like ripgrep it is a payload, not source: cached
+# under tools\models from the pinned Hugging Face revision, each file checked against
+# its SHA-256. The build fails without it.
+$modelRevision = "bf8b056651a2c21b8d2565580b8569da283cab23"
+$modelFiles = [ordered]@{
+    "vocab.txt"         = "1394523A67DDD404A825428018C0582A6998BCFA044ECBCBF1F4D71ADB94C61C"
+    "model.safetensors" = "F65D0F325FAADC1E121C319E2FAA41170D3FA07D8C89ABD48CA5358D9A223DE2"
+}
+$modelDir = Join-Path $PSScriptRoot "tools\models\potion-base-8M"
+New-Item -ItemType Directory -Force -Path $modelDir | Out-Null
+foreach ($name in $modelFiles.Keys) {
+    $target = Join-Path $modelDir $name
+    if ((Test-Path $target) -and (Get-FileHash $target -Algorithm SHA256).Hash -eq $modelFiles[$name]) { continue }
+
+    $download = "$target.download"
+    Write-Host "Downloading embedding model file $name ..."
+    Invoke-WebRequest "https://huggingface.co/minishlab/potion-base-8M/resolve/$modelRevision/$name" -OutFile $download -UseBasicParsing
+    if ((Get-FileHash $download -Algorithm SHA256).Hash -ne $modelFiles[$name]) {
+        Remove-Item $download -Force
+        Write-Error "Embedding model file $name does not match its pinned SHA-256; not using it."
+        exit 1
+    }
+    Move-Item $download $target -Force
+}
+
+# ---------------------------------------------------------------------------
 # Change detection
 # ---------------------------------------------------------------------------
 # Hash the sources that actually go into the package (src\ plus the repo-level build

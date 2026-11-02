@@ -163,6 +163,55 @@ public sealed class ProjectKnowledgeTests : IDisposable
         Assert.DoesNotContain("BranchOneAuthentication", Retrieve("BranchOneAuthentication").Text);
     }
 
+    [Fact]
+    public async Task Natural_location_questions_find_the_file_and_definition_despite_inflections()
+    {
+        Write("db/connectors.ts", "export function createConnectorsTable(db) {\n  db.exec(`CREATE TABLE IF NOT EXISTS connectors (id TEXT PRIMARY KEY, name TEXT)`);\n}\n");
+        Write("db/orders.ts", "export function createOrdersTable(db) {\n  db.exec(`CREATE TABLE IF NOT EXISTS orders (id TEXT)`);\n}\n");
+        Write("README.md", "This project does new things. Where things are located is documented elsewhere.");
+        await _index.RefreshAsync(Root);
+        var result = Retrieve("where does the new connector table located?");
+        Assert.Equal("db/connectors.ts", result.Files.First());
+        Assert.Contains("createConnectorsTable (L1)", result.Text);
+        Assert.Contains("connectors (L2)", result.Text);
+        Assert.DoesNotContain("README.md", result.Files);
+        Assert.Equal("BM25 + n-gram vectors", result.Method);
+    }
+
+    [Fact]
+    public async Task One_large_file_cannot_crowd_out_other_relevant_files()
+    {
+        Write("Connector.cs", string.Join("\n", Enumerable.Range(0, 400).Select(i => $"void Connector{i}() {{ /* connector */ }}")));
+        Write("ConnectorDrawer.tsx", "export function ConnectorDrawer() { return null; }");
+        await _index.RefreshAsync(Root);
+        var result = Retrieve("connector");
+        Assert.Contains("ConnectorDrawer.tsx", result.Files);
+        Assert.InRange(result.Keys.Count(k => k.StartsWith("source:Connector.cs:", StringComparison.Ordinal)), 1, 2);
+        Assert.Contains(result.Keys, k => k.StartsWith("source:ConnectorDrawer.tsx:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Vector_leg_matches_identifier_fragments_lexical_search_misses()
+    {
+        Write("Billing.cs", "class InvoiceReconciliationWorker { void ReconcileInvoices() {} }");
+        Write("Other.cs", "class RevenueChart { void RenderGraph() {} }");
+        await _index.RefreshAsync(Root);
+        // "reconcile" is not a whole token in the file (only "reconciliation", "reconcileinvoices").
+        Assert.Contains("Billing.cs", Retrieve("reconcile").Files);
+    }
+
+    [Fact]
+    public async Task File_map_entries_are_not_repeated_once_delivered()
+    {
+        Write("Auth.cs", "class Authentication { void RefreshToken() {} }");
+        await _index.RefreshAsync(Root);
+        var first = Retrieve("RefreshToken");
+        Assert.Contains("map:Auth.cs:" + ProjectKnowledgeIndex.Hash(File.ReadAllText(Path.Combine(Root, "Auth.cs"))), first.Keys);
+        var second = Retrieve("RefreshToken", first.Keys.ToHashSet());
+        Assert.Empty(second.Files);
+        Assert.Empty(second.Text);
+    }
+
     public void Dispose()
     {
         _index.Dispose();

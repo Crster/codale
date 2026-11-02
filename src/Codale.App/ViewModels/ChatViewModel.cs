@@ -4142,7 +4142,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         RetrievalResult? retrieved;
         try
         {
-            retrieved = await RetrieveProjectContextAsync(text);
+            retrieved = await RetrieveProjectContextAsync(text, compact ? null : sent);
         }
         catch (OperationCanceledException)
         {
@@ -4161,6 +4161,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             return;
         }
+
+        if (!silent) ShowContextEnrichment(retrieved);
 
         // "/compact" is housekeeping, not part of the conversation a resumed history replays.
         BeginTurn();
@@ -4235,6 +4237,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         EndTurn(TurnOutcome.Completed);
         Add(new UserMessageItem { Text = text, Attachments = attachments, IsSteer = true });
         RecordUserTurn(text);
+        ShowContextEnrichment(retrieved);
         BeginTurn();
         _turnStarted = started;
         try

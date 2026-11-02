@@ -36,6 +36,12 @@ public sealed record SessionInitialized : AgentEvent
 /// </summary>
 public sealed record UserMessageRecorded(string Text) : AgentEvent;
 
+/// <summary>
+/// Codale enriched a prompt with retrieved project context, read back from a session's log:
+/// a one-line summary and the markdown of what was sent. Host-side only; no CLI emits it.
+/// </summary>
+public sealed record ContextEnrichmentRecorded(string Summary, string Details) : AgentEvent;
+
 public sealed record AssistantTextDelta(string Text) : AgentEvent
 {
     /// <summary>Set when a subagent, not the main loop, is the one writing.</summary>
