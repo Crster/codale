@@ -112,6 +112,8 @@ public sealed class CodeDiscoveryTests
     [InlineData("where is the RetryPolicy backoff", false)]
     [InlineData("how do I run this project", false)]
     [InlineData("what is this", false)]
+    [InlineData("cancel a running upload", false)]
+    [InlineData("explain `RetryPolicy`", false)]
     [InlineData("retry", false)]
     [InlineData("run build?", false)]
     public void IsShortCompleteThought_identifies_short_commands_and_keywords(string query, bool expected) =>

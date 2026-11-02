@@ -160,6 +160,31 @@ public sealed class SourceExplorerTests : IDisposable
 
     private SourceExplorer Explorer(ISearchModel? model = null) => new(_index, model);
 
+    [Theory]
+    [InlineData("file upload")]
+    [InlineData("how does the app upload a file")]
+    public async Task Keywords_and_sentence_questions_find_the_implementation(string query)
+    {
+        var result = await Explorer().RunAsync(query);
+
+        Assert.Equal(P("src/Uploader.cs"), result.Files[0].RelativePath);
+        Assert.True(result.IsFinal);
+    }
+
+    [Fact]
+    public async Task Literal_keywords_are_not_removed_as_question_filler()
+    {
+        Write("src/FileCode.cs", "public class FileCode { public string File = \"\"; }");
+        Write("src/GetCode.cs", "public class GetCode { public string Get = \"\"; }");
+        Write("src/GetFile.cs", "public class GetFile { public string Get(string file) => file; }");
+
+        var result = await Explorer().RunAsync("get file");
+
+        Assert.Equal(P("src/GetFile.cs"), result.Files[0].RelativePath);
+        Assert.Contains("get", result.Keywords, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("file", result.Keywords, StringComparer.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task The_declaring_file_ranks_first_and_tests_and_docs_rank_below_code()
     {

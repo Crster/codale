@@ -124,10 +124,10 @@ public sealed class SearchFileItem
 }
 
 /// <summary>
-/// Code discovery, driven from the title bar box. The query is a plain description of
-/// what to find; <see cref="SourceExplorer"/> ranks the project's source index for it,
-/// has the background-task model turn it into keywords and pick the files that really
-/// answer it, and adds the code those files use and are used by. The result is files and
+/// Code discovery, driven from the title bar box. Keywords search the source index
+/// directly; questions and descriptions also use the background-task model to pick
+/// the files that answer them and add the code those files use and are used by.
+/// <see cref="SourceExplorer"/> ranks the project's source index. The result is files and
 /// code only - no write-up. Provisional matches stream in first so the list fills while
 /// the model is still working. Without a helper model the ranked pass runs alone, so the
 /// box is never a dead end.
@@ -194,9 +194,10 @@ public sealed partial class SearchViewModel : ObservableObject
 
         try
         {
-            // Without an agent CLI there is no model, and the search stays keyword-only.
-            // A references lookup searches for the text itself, so it never asks the model to reinterpret it.
-            ISearchModel? model = _helper.IsAvailable && !keywordOnly ? new HelperSearchModel(_helper) : null;
+            // Keywords and references return direct matches immediately. Questions and
+            // sentence descriptions use the model to find the implementation behind them.
+            var naturalLanguage = !keywordOnly && SearchQueryIntent.IsNaturalLanguage(Query);
+            ISearchModel? model = _helper.IsAvailable && naturalLanguage ? new HelperSearchModel(_helper) : null;
 
             Status = "Searching…";
 
@@ -204,7 +205,7 @@ public sealed partial class SearchViewModel : ObservableObject
             {
                 // A references lookup lists every user, not the best few.
                 MaxRankedResults = keywordOnly ? 40 : 12,
-                MaxRelated = keywordOnly ? 0 : 4,
+                MaxRelated = naturalLanguage ? 4 : 0,
             };
             discovery.Progress += (_, result) => _dispatcher.TryEnqueue(() =>
             {
@@ -226,7 +227,7 @@ public sealed partial class SearchViewModel : ObservableObject
                 _ => $"{count} files",
             }) +
                      $" · {clock.Elapsed.TotalSeconds:0.0}s" +
-                     (model is null && !keywordOnly ? " · keyword search, no Claude CLI found" : "");
+                     (naturalLanguage && model is null ? " · keyword search, no Claude CLI found" : "");
         }
         catch (OperationCanceledException)
         {

@@ -263,7 +263,7 @@ public sealed class SourceExplorer
     }
 
     /// <summary>
-    /// The question's content words; identifiers written as such (<c>RetryPolicy</c>,
+    /// Literal keywords, or a sentence's content words; identifiers written as such (<c>RetryPolicy</c>,
     /// <c>max_retries</c>) and quoted text count more than plain words. Quoted text is one
     /// term - "public static void main" is not public, static, void and main.
     /// </summary>
@@ -276,7 +276,11 @@ public sealed class SourceExplorer
             terms.Add(new ExploreTerm(quoted, 1.5, Exact: true));
         }
 
-        foreach (var word in CodeDiscovery.QuestionWords(CodeDiscovery.WithoutQuoted(query)))
+        var unquoted = CodeDiscovery.WithoutQuoted(query);
+        var words = SearchQueryIntent.IsNaturalLanguage(query)
+            ? CodeDiscovery.QuestionWords(unquoted)
+            : SearchQueryIntent.Keywords(unquoted);
+        foreach (var word in words)
         {
             if (terms.Any(t => string.Equals(t.Text, word, StringComparison.OrdinalIgnoreCase)))
             {

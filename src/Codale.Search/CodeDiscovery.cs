@@ -443,7 +443,7 @@ internal static class CodeDiscovery
     /// </summary>
     internal static bool IsShortCompleteThought(string query)
     {
-        if (string.IsNullOrWhiteSpace(query) || query.Contains('?'))
+        if (string.IsNullOrWhiteSpace(query) || SearchQueryIntent.IsNaturalLanguage(query))
         {
             return false;
         }
