@@ -101,6 +101,22 @@
   </Target>
 
   <!--
+    Bundled embedding model (minishlab/potion-base-8M), cached by run.ps1 into tools\models.
+    Required: project retrieval and topic detection embed with it (SemanticModel.BundledDirectory).
+  -->
+  <ItemGroup>
+    <Content Include="..\..\tools\models\potion-base-8M\vocab.txt;..\..\tools\models\potion-base-8M\model.safetensors">
+      <Link>models\potion-base-8M\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <Target Name="RequireEmbeddingModel" BeforeTargets="BeforeBuild"
+          Condition="!Exists('..\..\tools\models\potion-base-8M\vocab.txt') Or !Exists('..\..\tools\models\potion-base-8M\model.safetensors')">
+    <Error Text="tools\models\potion-base-8M is missing. Run run.ps1 once (it downloads the pinned embedding model and checks its SHA-256)." />
+  </Target>
+
+  <!--
     Defining the "Msix" ProjectCapability here allows the Single-project MSIX Packaging
     Tools extension to be activated for this project even if the Windows App SDK Nuget
     package has not yet been restored.

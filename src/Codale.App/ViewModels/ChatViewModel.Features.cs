@@ -59,6 +59,8 @@ public sealed partial class ChatViewModel
         {
             if (e is UserMessageRecorded user)
                 Add(new UserMessageItem { Text = user.Text });
+            else if (e is ContextEnrichmentRecorded context)
+                Add(new ContextEnrichedItem { Summary = context.Summary, Details = context.Details });
             else if (e is AssistantMessageCompleted reply)
             {
                 var item = new AssistantMessageItem();
@@ -253,7 +255,12 @@ public sealed partial class ChatViewModel
         if (FeatureId is { } id) Features?.IndexFile(id, path);
     }
 
-    private async Task<RetrievalResult?> RetrieveProjectContextAsync(string text)
+    /// <summary>
+    /// Retrieves project context for a prompt. When <paramref name="sent"/> is given and the prompt changes
+    /// the subject (see <see cref="TopicShift"/>), it is tagged New and the context is retrieved for the new
+    /// subject alone, without the earlier prompts steering the ranking back to the old one.
+    /// </summary>
+    private async Task<RetrievalResult?> RetrieveProjectContextAsync(string text, UserMessageItem? sent = null)
     {
         _retrievalId = null;
         if (Features is not { } features || !AppSettings.ProjectKnowledge || text.StartsWith('/')) return null;
@@ -262,13 +269,19 @@ public sealed partial class ChatViewModel
         var session = _session;
         try
         {
-            var recent = string.Join("\n", Items.OfType<UserMessageItem>().TakeLast(3).Select(i => i.Text));
+            var earlier = Items.OfType<UserMessageItem>().Where(i => !ReferenceEquals(i, sent) && i.Text.Length > 0)
+                .TakeLast(3).Select(i => i.Text).ToList();
+            var newTopic = sent is not null && await Task.Run(() => TopicShift.IsNewTopic(text, earlier, SemanticModel.Best), cts.Token);
+            if (newTopic) sent!.IsNewTopic = true;
+            var recent = newTopic ? "" : string.Join("\n", earlier.TakeLast(2).Append(text));
             var result = await features.RetrieveAsync(WorktreePath ?? _projectPath, text, recent, new HashSet<string>(_deliveredContext),
                 _needsResumeContext ? null : FeatureId).WaitAsync(TimeSpan.FromSeconds(2), cts.Token);
+            if (newTopic) result = result with { NewTopic = true };
             if (!ReferenceEquals(session, _session)) throw new OperationCanceledException();
             _retrievalId = Guid.NewGuid().ToString("N");
             if (FeatureId is { } id) features.RecordRetrieval(_retrievalId, id, result);
-            CrashLog.Trace($"Project retrieval: {result.ElapsedMilliseconds}ms, {result.Keys.Count} references, token upper bound={result.Tokens}");
+            CrashLog.Trace($"Project retrieval ({CliId}, {result.Method}): {result.ElapsedMilliseconds}ms, {result.Files.Count} files, " +
+                $"{result.Snippets} excerpts, {result.Findings} findings, {result.Keys.Count} keys, byte upper bound={result.Tokens}");
             return result;
         }
         catch (OperationCanceledException) { throw; }
@@ -278,6 +291,19 @@ public sealed partial class ChatViewModel
             return null;
         }
         finally { _briefing = null; }
+    }
+
+    /// <summary>A row under the prompt saying what project context went with it, also kept in the session's log.</summary>
+    private void ShowContextEnrichment(RetrievalResult? result)
+    {
+        if (result is not { Text.Length: > 0 }) return;
+        var item = ContextEnrichedItem.From(result);
+        Add(item);
+        if (_recording)
+        {
+            try { _featureLog?.AppendContext(item.Summary, item.Details); }
+            catch (IOException ex) { CrashLog.Warn("knowledge", $"Context entry not logged: {ex.Message}"); }
+        }
     }
 
     private void ContextDelivered(RetrievalResult? result)

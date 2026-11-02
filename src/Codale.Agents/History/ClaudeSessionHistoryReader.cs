@@ -61,6 +61,7 @@ public sealed class ClaudeSessionHistoryReader(string projectPath) : ICliHistory
             }
 
             string? title = null;
+            var hasCustom = false;
             string? first = null;
             string? branch = null;
             var turns = 0;
@@ -84,6 +85,13 @@ public sealed class ClaudeSessionHistoryReader(string projectPath) : ICliHistory
                     if (type == "custom-title" && root.TryGetProperty("customTitle", out var ct))
                     {
                         title = ct.GetString();
+                        hasCustom = !string.IsNullOrWhiteSpace(title);
+                    }
+                    else if (type == "ai-title" && !hasCustom && root.TryGetProperty("aiTitle", out var at) &&
+                        at.GetString() is { Length: > 0 } generated)
+                    {
+                        // The title Claude generated for the conversation; a title the user set wins.
+                        title = generated;
                     }
 
                     if (type != "user" || Flag(root, "isSidechain") || Flag(root, "isMeta"))

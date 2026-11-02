@@ -30,8 +30,20 @@ public sealed class FeatureService : IDisposable
         _projectPath = projectPath;
         _helper = helper;
         _store = OpenStore(projectPath);
-        _knowledge = new ProjectKnowledgeIndex(_store);
+        _knowledge = new ProjectKnowledgeIndex(_store, () => SemanticModel.Current);
         _knowledge.Warm(projectPath);
+        if (AppSettings.ProjectKnowledge)
+        {
+            // Fetched once, then loaded from disk; the index embeds with it on the next refresh.
+            _ = SemanticModel.EnsureLoadedAsync().ContinueWith(t =>
+            {
+                if (t.Result is { } model)
+                {
+                    CrashLog.Trace($"Semantic model ready: {model.Model}");
+                    _knowledge.Warm(projectPath);
+                }
+            }, TaskScheduler.Default);
+        }
         _activity = FeatureActivity.For(projectPath);
         _activity.HistoryDeleted += OnHistoryDeleted;
         _historyRefresh = new Timer(_ => Changed?.Invoke(this, EventArgs.Empty));
