@@ -2275,7 +2275,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private string WithMcpDirective(string directive, IReadOnlyList<McpServerSpec> servers)
     {
         var text = servers.Count > 0 && _mcpSettings?.Directive(servers) is { Length: > 0 } note ? $"{directive} {note}" : directive;
-        return servers.Any(s => s.Name == McpServerSettings.TasksName) ? $"{text} {McpServerSettings.TasksDirective}" : text;
+        var tasks = IsCodexSession ? McpServerSettings.TasksDirectiveGeneric : McpServerSettings.TasksDirective;
+        return servers.Any(s => s.Name == McpServerSettings.TasksName) ? $"{text} {tasks}" : text;
     }
 
     /// <summary>

@@ -130,6 +130,17 @@ public sealed class McpServerSettings
         "Deliverables that are not project source (report, document, image, data) go to mcp__codale-tasks__artifact_add (a path or markdown). " +
         "If these tools are not loaded, load them with one ToolSearch (select:mcp__codale-tasks__todos_set,mcp__codale-tasks__artifact_add).";
 
+    /// <summary>The directive for a CLI with no ToolSearch (Codex): tool names vary by client, and a missing checklist tool must never block the work.</summary>
+    public const string TasksDirectiveGeneric =
+        "Background shells are refused here (run_in_background, &, Start-Job, nohup). For a dev server, watcher or any command " +
+        "that keeps running, call the codale-tasks start_task tool (read_task follows its output, stop_task ends it); quick commands run normally. " +
+        "Saved project commands: list_commands, add_command (saves only), run_command (runs one by name as a task). " +
+        "When the user's own terminal output matters, list_terminals then read_terminal (read-only). " +
+        "To view static files in a browser, serve_folder hosts them on http://localhost:PORT/ until stop_serving. " +
+        "When a request needs tools, report the step list with the codale-tasks todos_set tool (2-6 short steps, one in_progress) as each step starts and when the last finishes. " +
+        "If todos_set is not available, skip it and do the work anyway: never stop or refuse because a checklist tool is missing. " +
+        "Deliverables that are not project source go to the codale-tasks artifact_add tool when available.";
+
     /// <summary>The servers to attach to a session started now; a server whose exe did not ship is left out.</summary>
     public IReadOnlyList<McpServerSpec> Servers()
     {

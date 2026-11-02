@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 
 using Codale.Agents.History;
 using Codale.App.Services;
+using Codale.Core.Features;
 using Codale.Core.Projects;
 
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -147,18 +148,66 @@ public sealed partial class SessionsViewModel : ObservableObject
 
     private List<TranscriptSummary> ReadRows()
     {
+        var readers = new Dictionary<(string, string), Dictionary<string, TranscriptSummary>>();
+
         return _features.List()
-            .Select(f => new TranscriptSummary
+            .Select(f =>
             {
-                SessionId = f.Id,
-                FilePath = ProjectPaths.FeatureDirectory(_projectPath, f.Id),
-                StartedAt = f.CreatedAt,
-                UpdatedAt = f.UpdatedAt,
-                CustomTitle = f.Name,
-                FirstPrompt = f.Description,
-                Detail = _features.ProviderSession(f.Id)?.Provider is { } provider ? provider == "codex" ? "Codex" : provider == "claude" ? "Claude" : provider : "Session",
+                var mapping = _features.ProviderSession(f.Id);
+                var provider = mapping?.Provider;
+                return new TranscriptSummary
+                {
+                    SessionId = f.Id,
+                    FilePath = ProjectPaths.FeatureDirectory(_projectPath, f.Id),
+                    StartedAt = f.CreatedAt,
+                    UpdatedAt = f.UpdatedAt,
+                    CustomTitle = NativeTitle(readers, mapping, f.Name, f.Description) ?? f.Name,
+                    FirstPrompt = f.Description,
+                    Detail = provider is not null ? provider == "codex" ? "Codex" : provider == "claude" ? "Claude" : provider : "Session",
+                };
             })
             .ToList();
+    }
+
+    /// <summary>
+    /// The title the CLI stored for a feature's session, but only while the feature still carries the
+    /// name cut from its prompt: a name the user or the router chose is kept.
+    /// </summary>
+    private static string? NativeTitle(
+        Dictionary<(string, string), Dictionary<string, TranscriptSummary>> readers, ProviderSession? mapping, string name, string description)
+    {
+        if (mapping is null || string.IsNullOrWhiteSpace(mapping.ProviderSessionId))
+        {
+            return null;
+        }
+
+        var stem = name.TrimEnd('…', '.', ' ');
+        if (stem.Length == 0 || !description.Contains(stem, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var key = (mapping.Provider, mapping.Worktree);
+        if (!readers.TryGetValue(key, out var byId))
+        {
+            byId = [];
+            try
+            {
+                foreach (var s in CliResume.CreateReader(mapping.Provider, mapping.Worktree)?.ListSessions() ?? [])
+                {
+                    byId[s.SessionId] = s;
+                }
+            }
+            catch (IOException)
+            {
+            }
+
+            readers[key] = byId;
+        }
+
+        return byId.TryGetValue(mapping.ProviderSessionId, out var hit) && !string.IsNullOrWhiteSpace(hit.CustomTitle)
+            ? hit.CustomTitle
+            : null;
     }
 
     /// <summary>Renames a feature.</summary>
