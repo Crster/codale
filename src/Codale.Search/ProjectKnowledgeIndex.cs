@@ -111,6 +111,61 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
     private QuantizedMatrix Vectors(string worktree, ITextEmbedder embedder) =>
         _vectors.GetOrAdd(worktree + "\n" + embedder.Model, _ => store.SourceVectors(worktree, embedder.Model));
 
+    /// <summary>Shared hybrid retrieval for discovery and prompt enrichment; only fresh source is returned.</summary>
+    public IReadOnlyList<SourceChunk> Search(string worktree, string prompt, string recent = "", int maxFiles = 12)
+    {
+        worktree = ProjectPaths.Normalize(worktree);
+        Warm(worktree);
+        // 1. Hybrid ranking: BM25 over stemmed prefix terms and cosine over chunk vectors, fused by
+        //    reciprocal rank. The latest prompt leads; the recent conversation only tops up.
+        var scores = new Dictionary<long, double>();
+        void Fuse(IEnumerable<long> ranked, double weight)
+        {
+            var rank = 0;
+            foreach (var id in ranked) scores[id] = scores.GetValueOrDefault(id) + weight / (RrfK + ++rank);
+        }
+        Fuse(store.SearchSourceTerms(prompt, worktree).Select(c => c.Id), 1.0);
+        var terms = SearchText.RetrievalTerms(prompt);
+
+        if (terms.Count > 0)
+        {
+            // Embed the topic, not the phrasing: "where does ... located" must not pull in prose that says "located".
+            var topic = string.Join(' ', terms);
+            foreach (var embedder in Embedders())
+            {
+                var vectors = Vectors(worktree, embedder);
+                if (vectors.Count == 0) continue;
+                var similar = vectors.Top(embedder.Embed(topic), 40);
+                // Relative cut: keep near-best neighbours only, so unrelated files never ride in on noise.
+                var floor = similar.Count > 0 ? Math.Max(0.08f, similar[0].Score * 0.5f) : 1f;
+                // The semantic model leads; the hashed one adds fragments and inflections at lower weight.
+                Fuse(similar.Where(v => v.Score >= floor).Select(v => v.Id), embedder is HashedTextEmbedder ? 0.6 : 1.0);
+
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(recent)) Fuse(store.SearchSourceTerms(recent, worktree, 20).Select(c => c.Id), 0.35);
+
+        var chunks = store.SourceChunks(scores.Keys.ToList()).ToDictionary(c => c.Id);
+        // A path naming the topic ("db/connectors.ts" for "connector table") is the strongest locator signal.
+        foreach (var chunk in chunks.Values)
+        {
+            var pathStems = SearchText.Tokens(chunk.Path).Select(SearchText.Stem).ToList();
+            var pathHits = terms.Count(t => t.Length >= 3 && pathStems.Any(p => p.StartsWith(t, StringComparison.Ordinal)));
+            if (pathHits > 0) scores[chunk.Id] += 0.02 * pathHits;
+        }
+
+        var fresh = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        var floorScore = scores.Count == 0 ? 0 : scores.Values.Max() * 0.34;
+        return scores.Where(s => s.Value >= floorScore).OrderByDescending(s => s.Value).Where(s => chunks.ContainsKey(s.Key))
+            .Select(s => chunks[s.Key]).Where(c =>
+            {
+                if (!fresh.TryGetValue(c.Path, out var valid))
+                    fresh[c.Path] = valid = ReadSource(worktree, c.Path) is { } content && Hash(content) == c.Hash;
+                return valid;
+            }).GroupBy(c => c.Path, StringComparer.OrdinalIgnoreCase).Take(Math.Max(0, maxFiles))
+            .Select(g => g.First()).ToList();
+    }
+
     /// <summary>
     /// Builds the context a prompt is enriched with, within <see cref="MaxContextBytes"/>:
     /// a file map (paths and matching definitions), earlier findings whose cited files are unchanged,
@@ -137,60 +192,10 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
             return true;
         }
 
-        // 1. Hybrid ranking: BM25 over stemmed prefix terms and cosine over chunk vectors, fused by
-        //    reciprocal rank. The latest prompt leads; the recent conversation only tops up.
-        var scores = new Dictionary<long, double>();
-        void Fuse(IEnumerable<long> ranked, double weight)
-        {
-            var rank = 0;
-            foreach (var id in ranked) scores[id] = scores.GetValueOrDefault(id) + weight / (RrfK + ++rank);
-        }
-        Fuse(store.SearchSourceTerms(prompt, worktree).Select(c => c.Id), 1.0);
         var terms = SearchText.RetrievalTerms(prompt);
-        var legs = new List<string> { "BM25" };
-        if (terms.Count > 0)
-        {
-            // Embed the topic, not the phrasing: "where does ... located" must not pull in prose that says "located".
-            var topic = string.Join(' ', terms);
-            foreach (var embedder in Embedders())
-            {
-                var vectors = Vectors(worktree, embedder);
-                if (vectors.Count == 0) continue;
-                var similar = vectors.Top(embedder.Embed(topic), 40);
-                // Relative cut: keep near-best neighbours only, so unrelated files never ride in on noise.
-                var floor = similar.Count > 0 ? Math.Max(0.08f, similar[0].Score * 0.5f) : 1f;
-                // The semantic model leads; the hashed one adds fragments and inflections at lower weight.
-                Fuse(similar.Where(v => v.Score >= floor).Select(v => v.Id), embedder is HashedTextEmbedder ? 0.6 : 1.0);
-                legs.Add(embedder is HashedTextEmbedder ? "n-gram vectors" : "semantic vectors");
-            }
-        }
-        if (!string.IsNullOrWhiteSpace(recent)) Fuse(store.SearchSourceTerms(recent, worktree, 20).Select(c => c.Id), 0.35);
-
-        var chunks = store.SourceChunks(scores.Keys.ToList()).ToDictionary(c => c.Id);
-        // A path naming the topic ("db/connectors.ts" for "connector table") is the strongest locator signal.
-        foreach (var chunk in chunks.Values)
-        {
-            var pathStems = SearchText.Tokens(chunk.Path).Select(SearchText.Stem).ToList();
-            var pathHits = terms.Count(t => t.Length >= 3 && pathStems.Any(p => p.StartsWith(t, StringComparison.Ordinal)));
-            if (pathHits > 0) scores[chunk.Id] += 0.02 * pathHits;
-        }
-
-        // 2. Verify every candidate against disk, then group by file.
-        var disk = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        string? Fresh(string path, string hash)
-        {
-            if (!disk.TryGetValue(path, out var content)) disk[path] = content = ReadSource(worktree, path);
-            return content is not null && Hash(content) == hash ? content : null;
-        }
-        var topFiles = scores.Where(s => chunks.ContainsKey(s.Key)).OrderByDescending(s => s.Value).Select(s => chunks[s.Key])
-            .Where(c => Fresh(c.Path, c.Hash) is not null)
-            .GroupBy(c => c.Path, StringComparer.OrdinalIgnoreCase).Take(MaxFiles).ToList();
-        // Weak tail files cost tokens without helping: keep files scoring at least a third of the best one.
-        if (topFiles.Count > 0)
-        {
-            var best = scores[topFiles[0].First().Id];
-            topFiles = topFiles.Where(f => scores[f.First().Id] >= best * 0.34).ToList();
-        }
+        var legs = new List<string> { "BM25", semantic?.Invoke() is null ? "n-gram vectors" : "semantic vectors" };
+        var topFiles = Search(worktree, prompt, recent, MaxFiles).GroupBy(c => c.Path, StringComparer.OrdinalIgnoreCase).ToList();
+        string? Fresh(string path, string hash) => ReadSource(worktree, path) is { } content && Hash(content) == hash ? content : null;
 
         // 3. The file map: often enough on its own to answer "where is X?", and always enough to open
         //    the right file directly instead of searching the workspace for it.

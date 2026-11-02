@@ -136,13 +136,15 @@ public sealed partial class SearchViewModel : ObservableObject
 {
     private readonly IHelperModel _helper;
     private readonly SourceIndex _index;
+    private readonly ProjectKnowledgeIndex? _knowledge;
     private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
 
     private CancellationTokenSource? _inFlight;
 
-    public SearchViewModel(string projectPath, IHelperModel helper)
+    public SearchViewModel(string projectPath, IHelperModel helper, ProjectKnowledgeIndex? knowledge = null)
     {
         _helper = helper;
+        _knowledge = knowledge;
 
         // The scan runs in the background from the moment the project opens, so the
         // first search is answered from memory.
@@ -204,6 +206,8 @@ public sealed partial class SearchViewModel : ObservableObject
             var discovery = new SourceExplorer(_index, model)
             {
                 // A references lookup lists every user, not the best few.
+                Knowledge = _knowledge,
+                UseSemanticSearch = !keywordOnly,
                 MaxRankedResults = keywordOnly ? 40 : 12,
                 MaxRelated = naturalLanguage ? 4 : 0,
             };
@@ -227,7 +231,7 @@ public sealed partial class SearchViewModel : ObservableObject
                 _ => $"{count} files",
             }) +
                      $" · {clock.Elapsed.TotalSeconds:0.0}s" +
-                     (naturalLanguage && model is null ? " · keyword search, no Claude CLI found" : "");
+                     (naturalLanguage && model is null ? " · local search" : "");
         }
         catch (OperationCanceledException)
         {

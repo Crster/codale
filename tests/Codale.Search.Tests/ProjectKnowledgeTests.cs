@@ -26,6 +26,28 @@ public sealed class ProjectKnowledgeTests : IDisposable
     private RetrievalResult Retrieve(string query, IReadOnlySet<string>? delivered = null, string? root = null) =>
         _index.Retrieve(root ?? Root, query, "", delivered ?? new HashSet<string>());
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Discovery_and_enrichment_share_fresh_hybrid_candidates(bool semantic)
+    {
+        using var retrieval = new ProjectKnowledgeIndex(_store, semantic ? () => SemanticModel.Current : null);
+        if (semantic) Assert.NotNull(await SemanticModel.EnsureLoadedAsync());
+        Write("Auth.cs", "class Authentication { void RefreshToken() {} }");
+        Write("Charts.cs", "class RevenueChart { void RenderGraph() {} }");
+        await retrieval.RefreshAsync(Root);
+        foreach (var (query, expected) in new[] { ("where is RefreshToken implemented", "Auth.cs"), ("where is RevenueChart rendered", "Charts.cs") })
+        {
+            Assert.Equal(expected, retrieval.Search(Root, query)[0].Path);
+            var explorer = new SourceExplorer(SourceIndex.For(Root), null) { Knowledge = retrieval, MaxRelated = 0 };
+            var result = await explorer.RunAsync(query);
+            Assert.Equal(expected, result.Files[0].RelativePath);
+            Assert.Contains(expected, Retrieve(query).Text);
+        }
+        Write("Auth.cs", "class Authentication { void ExchangeCredential() {} }");
+        Assert.DoesNotContain(retrieval.Search(Root, "RefreshToken"), c => c.Path == "Auth.cs");
+    }
+
     [Fact]
     public async Task Every_prompt_retrieves_its_topic_without_changing_session_history()
     {

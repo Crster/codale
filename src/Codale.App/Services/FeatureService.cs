@@ -19,6 +19,7 @@ public sealed class FeatureService : IDisposable
     private readonly IHelperModel _helper;
     private readonly FeatureStore _store;
     private readonly ProjectKnowledgeIndex _knowledge;
+    public ProjectKnowledgeIndex Knowledge => _knowledge;
     private readonly FileSystemWatcher? _databaseWatcher;
     private readonly Timer _historyRefresh;
 

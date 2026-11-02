@@ -55,11 +55,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         _helper.LoginRequired += cli => HelperLoginRequired?.Invoke(this, cli);
         Files = new FileTreeViewModel(ProjectPath, ExtraFolders);
         Git = new GitViewModel(ProjectPath, _helper);
-        Search = new SearchViewModel(ProjectPath, _helper);
+        Features = new FeatureService(ProjectPath, _helper);
+        Search = new SearchViewModel(ProjectPath, _helper, Features.Knowledge);
         References = new SearchViewModel(ProjectPath, _helper);
         Diff = new DiffViewModel(ProjectPath);
         DiffViewer = new DiffViewerViewModel(ProjectPath);
-        Features = new FeatureService(ProjectPath, _helper);
         Sessions = new SessionsViewModel(ProjectPath, Features);
         _endpoints = new CliEndpointSettings();
         _mcp = new McpServerSettings(_store, ProjectPath);

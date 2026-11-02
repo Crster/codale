@@ -3710,7 +3710,25 @@ public sealed partial class WorkspacePage : Page
 
     private void UpdateCwdDisplay()
     {
+        // Keep the bar useful in deeply nested repositories: show the project-relative
+        // path when possible, while retaining the absolute path in the tooltip.
         var display = _terminalCwd.Replace('\\', '/');
+        var projectRoot = ViewModel?.ProjectPath;
+        if (!string.IsNullOrWhiteSpace(projectRoot))
+        {
+            try
+            {
+                var relative = Path.GetRelativePath(projectRoot, _terminalCwd);
+                if (!Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                {
+                    display = relative == "." ? Path.GetFileName(projectRoot) : $"{Path.GetFileName(projectRoot)}/{relative.Replace('\\', '/')}";
+                }
+            }
+            catch
+            {
+                // Keep the absolute path if either path cannot be compared.
+            }
+        }
         if (StatusBarCwdText is not null)
         {
             StatusBarCwdText.Text = display;

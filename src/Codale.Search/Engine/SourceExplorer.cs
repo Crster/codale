@@ -52,6 +52,10 @@ public sealed class SourceExplorer
         _model = model;
     }
 
+    public ProjectKnowledgeIndex? Knowledge { get; init; }
+
+    public bool UseSemanticSearch { get; init; } = true;
+
     public int MaxRounds { get; init; } = DefaultMaxRounds;
 
     public TimeSpan Budget { get; init; } = TimeSpan.FromSeconds(60);
@@ -98,6 +102,26 @@ public sealed class SourceExplorer
 
         var question = Resolve(snapshot, questionTerms);
         var instant = Rank(snapshot, question, [], setup);
+        if (Knowledge is not null && UseSemanticSearch && SearchQueryIntent.IsNaturalLanguage(query))
+        {
+            await SemanticModel.EnsureLoadedAsync().WaitAsync(ct).ConfigureAwait(false);
+            await Knowledge.RefreshAsync(_index.Root).WaitAsync(ct).ConfigureAwait(false);
+            var hybrid = await Task.Run(() => Knowledge.Search(_index.Root, query, maxFiles: MaxRankedResults), ct).ConfigureAwait(false);
+            var combined = new Dictionary<string, (Ranked File, double Score)>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < instant.Count; i++)
+                combined[instant[i].File.RelativePath] = (instant[i], 1.0 / (60 + i + 1));
+            for (var i = 0; i < hybrid.Count; i++)
+            {
+                var chunk = hybrid[i];
+                if (snapshot.Find(chunk.Path) is not { } file) continue;
+                var existing = combined.GetValueOrDefault(chunk.Path);
+                var candidate = existing.File ?? new Ranked(file);
+
+                candidate.SemanticLine = chunk.StartLine;
+                combined[chunk.Path] = (candidate, existing.Score + 1.0 / (60 + i + 1));
+            }
+            instant = combined.Values.OrderByDescending(c => c.Score).Select(c => c.File).ToList();
+        }
         var provisional = Build(snapshot, instant.Take(_model is null ? MaxRankedResults : MaxProvisional).ToList(), question,
             confirmed: false, round: 0, isFinal: _model is null, setup);
         Progress?.Invoke(this, provisional);
@@ -656,6 +680,7 @@ public sealed class SourceExplorer
     internal sealed class Ranked(SourceFile file)
     {
         public SourceFile File { get; } = file;
+        public int? SemanticLine { get; set; }
         public double Score { get; set; }
         public double MatchedWeight { get; set; }
         public HashSet<int> Matched { get; } = [];
@@ -1040,7 +1065,11 @@ public sealed class SourceExplorer
         var weights = LineWeights(ranked.File, lines, terms, setup, ranked.UsesName);
         IReadOnlyList<DiscoveredRange> ranges;
 
-        if (ranked.Anchor is { } anchor && anchor.Line <= lines.Length)
+        if (weights.Count == 0 && ranked.SemanticLine is { } semanticLine)
+        {
+            ranges = [DeclarationRange(lines, semanticLine)];
+        }
+        else if (ranked.Anchor is { } anchor && anchor.Line <= lines.Length)
         {
             ranges = [DeclarationRange(lines, anchor.Line)];
         }
