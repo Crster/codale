@@ -388,7 +388,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             "Plans and asks first, then implements with full permission",
             current == "plan");
         Add("auto", "\uE945", "Full",
-            "Fully automated; only risky shell commands and deletes confirm",
+            "Fully automated; never stops to confirm, only for your answers",
             current is "auto" or "dontAsk" or "bypassPermissions");
         flyout.ShowAt((FrameworkElement)sender);
     }

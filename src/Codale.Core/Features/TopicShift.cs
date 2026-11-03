@@ -16,7 +16,8 @@ public static class TopicShift
     /// </summary>
     public static bool IsNewTopic(string prompt, IReadOnlyList<string> earlier, ITextEmbedder embedder)
     {
-        if (earlier.Count == 0 || MessageRouting.IsFollowUp(prompt)) return false;
+        // "commit all changes" shares no term with the feature it commits, yet changes no subject.
+        if (earlier.Count == 0 || MessageRouting.IsFollowUp(prompt) || !SearchText.HasTopic(prompt)) return false;
         var terms = SearchText.RetrievalTerms(prompt);
         if (terms.Count == 0) return false;
 

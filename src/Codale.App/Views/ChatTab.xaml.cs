@@ -528,6 +528,16 @@ public sealed partial class ChatTab : UserControl
     private void OnApprovalAllow(object sender, RoutedEventArgs e) =>
         RespondToApproval(((FrameworkElement)sender).Tag as ApprovalRequestItem, ApprovalDecision.Allow());
 
+    /// <summary>Allows this confirmation and the rest of the turn's, so the agent carries on unattended.</summary>
+    private void OnApprovalAllowTurn(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).Tag is ApprovalRequestItem approval)
+        {
+            ViewModel.AllowRestOfTurn(approval.RequestId);
+            DispatcherQueue.TryEnqueue(FocusDraft);
+        }
+    }
+
     private void OnApprovalDeny(object sender, RoutedEventArgs e) =>
         RespondToApproval(
             ((FrameworkElement)sender).Tag as ApprovalRequestItem,
@@ -647,6 +657,13 @@ public sealed partial class ChatTab : UserControl
 
         switch (e.Key)
         {
+            case VirtualKey.Enter when Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
+                .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down):
+                ViewModel.AllowRestOfTurn(approval.RequestId);
+                DispatcherQueue.TryEnqueue(FocusDraft);
+                e.Handled = true;
+                break;
+
             case VirtualKey.Enter:
                 RespondToApproval(approval, ApprovalDecision.Allow());
                 e.Handled = true;
@@ -1260,7 +1277,7 @@ public sealed partial class ChatTab : UserControl
 
         if (mentions.Count > 0)
         {
-            InsertAtCaret(string.Join(" ", mentions) + " ");
+            InsertMentionsAtCaret(mentions);
         }
     }
 
@@ -1351,7 +1368,7 @@ public sealed partial class ChatTab : UserControl
 
             var path = Path.Combine(PasteDirectory(), $"{Guid.NewGuid().ToString("N")[..6]}.txt");
             await File.WriteAllTextAsync(path, text);
-            InsertAtCaret("@" + (path.Contains(' ') ? $"\"{path}\"" : path) + " ");
+            InsertMentionsAtCaret(["@" + (path.Contains(' ') ? $"\"{path}\"" : path)]);
         }
         catch (Exception ex)
         {
@@ -1392,7 +1409,7 @@ public sealed partial class ChatTab : UserControl
 
             if (mentions.Count > 0)
             {
-                InsertAtCaret(string.Join(" ", mentions) + " ");
+                InsertMentionsAtCaret(mentions);
             }
         }
         catch (Exception ex)
@@ -1409,7 +1426,7 @@ public sealed partial class ChatTab : UserControl
             {
                 if (ViewModel.TryAddAttachment(path))
                 {
-                    InsertAtCaret(AttachmentMention(path) + " ");
+                    InsertMentionsAtCaret([AttachmentMention(path)]);
                 }
             }
             else
@@ -1432,6 +1449,16 @@ public sealed partial class ChatTab : UserControl
     {
         var name = Path.GetFileName(path);
         return "@" + (name.Contains(' ') ? $"\"{name}\"" : name);
+    }
+
+    /// <summary>Inserts "@file" mentions as words of their own (<see cref="Codale.Core.Helper.ComposerMentions"/>).</summary>
+    private void InsertMentionsAtCaret(IEnumerable<string> mentions)
+    {
+        var (text, caret) = Codale.Core.Helper.ComposerMentions.Insert(
+            DraftBox.Text, DraftBox.SelectionStart, DraftBox.SelectionLength, string.Join(" ", mentions));
+        DraftBox.Text = text;
+        DraftBox.SelectionStart = caret;
+        DraftBox.SelectionLength = 0;
     }
 
     private void InsertAtCaret(string text)

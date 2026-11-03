@@ -14,6 +14,36 @@ public sealed class CodexApprovalResponseTests
     private static JsonElement Serialize(object obj) =>
         JsonDocument.Parse(JsonSerializer.Serialize(obj)).RootElement;
 
+    [Fact]
+    public async Task A_request_codex_clears_itself_closes_its_card_but_our_own_answer_does_not()
+    {
+        await using var session = new CodexAgentSession(new CodexSessionOptions { WorkingDirectory = "." })
+        {
+            MessageWriter = (_, _) => Task.CompletedTask,
+        };
+        async Task<ApprovalRequested> Ask(int id)
+        {
+            await session.HandleServerRequestAsync(Serialize(id), "item/commandExecution/requestApproval", Serialize(new
+            {
+                @params = new { threadId = "main", itemId = "cmd-" + id, command = "rm -rf build" },
+            }));
+            Assert.True(session.Events.TryRead(out var requested));
+            return Assert.IsType<ApprovalRequested>(requested);
+        }
+
+        // Interrupted while open: codex resolves it itself, and the host hears the card is gone.
+        await Ask(7);
+        await session.HandleNotificationAsync("serverRequest/resolved", Serialize(new { @params = new { threadId = "main", requestId = 7 } }));
+        Assert.True(session.Events.TryRead(out var withdrawn));
+        Assert.Equal("7", Assert.IsType<ApprovalCancelled>(withdrawn).RequestId);
+
+        // Answered by us: the same notification follows, and is not a withdrawal.
+        var answered = await Ask(8);
+        await session.RespondToApprovalAsync(answered.RequestId, ApprovalDecision.Deny());
+        await session.HandleNotificationAsync("serverRequest/resolved", Serialize(new { @params = new { threadId = "main", requestId = 8 } }));
+        Assert.False(session.Events.TryRead(out _));
+    }
+
     [Theory]
     [InlineData("question-item", true)]
     [InlineData(null, true)]

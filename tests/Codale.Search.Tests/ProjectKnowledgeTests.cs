@@ -228,10 +228,99 @@ public sealed class ProjectKnowledgeTests : IDisposable
         Write("Auth.cs", "class Authentication { void RefreshToken() {} }");
         await _index.RefreshAsync(Root);
         var first = Retrieve("RefreshToken");
-        Assert.Contains("map:Auth.cs:" + ProjectKnowledgeIndex.Hash(File.ReadAllText(Path.Combine(Root, "Auth.cs"))), first.Keys);
+        Assert.Contains(first.Keys, k => k.StartsWith("map:Auth.cs:" + ProjectKnowledgeIndex.Hash(File.ReadAllText(Path.Combine(Root, "Auth.cs"))) + ":", StringComparison.Ordinal));
         var second = Retrieve("RefreshToken", first.Keys.ToHashSet());
         Assert.Empty(second.Files);
         Assert.Empty(second.Text);
+    }
+
+    [Fact]
+    public async Task Enrichment_keeps_two_ranked_chunks_while_discovery_keeps_one_per_file()
+    {
+        Write("Auth.cs", string.Join("\n", Enumerable.Range(0, 70).Select(i =>
+            i == 0 ? "class Authentication { void RefreshToken() {} }" :
+            i == 55 ? "void RefreshTokenFallback() { RotateCredential(); }" : "// authentication")));
+        await _index.RefreshAsync(Root);
+        Assert.Single(_index.Search(Root, "RefreshToken"));
+        var result = Retrieve("RefreshToken");
+        Assert.Equal(2, result.Keys.Count(k => k.StartsWith("source:Auth.cs:", StringComparison.Ordinal)));
+        Assert.Contains("RotateCredential", result.Text);
+    }
+
+    [Fact]
+    public async Task Changing_topic_in_an_unchanged_file_delivers_the_new_definition_location()
+    {
+        Write("Features.cs", "class Features {}\nvoid Placeholder() {}\npublic void Login() {}\npublic void Logout() {}\npublic void RefreshToken() {}\npublic void RevenueChart() {}");
+        await _index.RefreshAsync(Root);
+        var first = Retrieve("RefreshToken");
+        var next = Retrieve("RevenueChart", first.Keys.ToHashSet());
+        Assert.Contains("RevenueChart (L6)", next.Text);
+        Assert.Contains("Features.cs", next.Files);
+        Assert.DoesNotContain(next.Keys, k => k.StartsWith("source:", StringComparison.Ordinal));
+        Assert.Empty(Retrieve("RevenueChart", first.Keys.Concat(next.Keys).ToHashSet()).Text);
+    }
+
+    [Fact]
+    public async Task An_oversized_file_map_keeps_entries_that_fit()
+    {
+        for (var i = 0; i < 6; i++)
+            Write($"{new string('a', 80)}{i}/Authentication.cs", "class Authentication {}\npublic void RefreshToken() {}\npublic void RotateCredential() {}\npublic void ValidateCredential() {}");
+        await _index.RefreshAsync(Root);
+        var result = Retrieve("Authentication");
+        Assert.NotEmpty(result.Files);
+        Assert.True(result.Files.Count < 6);
+        Assert.True(result.Tokens <= ProjectKnowledgeIndex.MaxContextBytes);
+    }
+
+    [Fact]
+    public async Task Source_excerpt_preserves_the_end_of_the_ranked_chunk()
+    {
+        Write("Auth.cs", "class Authentication {\n" + new string(' ', 1100) + "\npublic void RefreshToken() { RotateCredential(); }\n}");
+        await _index.RefreshAsync(Root);
+        var result = Retrieve("RefreshToken");
+        Assert.Contains("RotateCredential();", result.Text);
+    }
+
+    [Fact]
+    public void Go_receiver_methods_are_located_by_the_current_topic()
+    {
+        var source = "package game\nfunc (g *Game) Draw() {}\nfunc (g *Game) Update() {}\nfunc (g *Game) Layout(w, h int) (int, int) { return w, h }\nfunc (g *Game) HandleGarrison() {}\nfunc (g *Game) HandleClick() {}";
+        Assert.Contains("HandleClick (L6)", ProjectKnowledgeIndex.Definitions(source, ["click"]));
+    }
+
+    [Fact]
+    public async Task Distinctive_topic_words_outrank_generic_path_matches()
+    {
+        Write("server/game/units.cs", "class Unit { void Game() {} }");
+        Write("client/defence.cs", "class Defence { void RenderMinimap() {} }");
+        for (var i = 0; i < 8; i++) Write($"other/Feature{i}.cs", $"class Feature{i} {{ void GameUnit() {{}} }}");
+        await _index.RefreshAsync(Root);
+        Assert.Equal("client/defence.cs", Retrieve("minimap game unit").Files.First());
+    }
+
+    [Fact]
+    public async Task Code_outranks_design_notes_and_instruction_files_are_never_repeated()
+    {
+        Write("docs/DESIGN.md", "# Garrison\nThe garrison panel lets the player station servants. Garrison garrison garrison.");
+        Write("CLAUDE.md", "Garrison rules: the garrison view lives in client.");
+        Write("client/garrison_view.js", "export function openGarrison() { renderGarrison(); }");
+        await _index.RefreshAsync(Root);
+        var result = Retrieve("garrison panel");
+        Assert.Equal("client/garrison_view.js", result.Files[0]);
+        Assert.DoesNotContain("CLAUDE.md", result.Files);
+        Assert.Equal("docs/DESIGN.md", Retrieve("update the garrison docs").Files[0]);
+    }
+
+    [Fact]
+    public async Task A_file_edited_mid_turn_is_still_retrieved()
+    {
+        Write("Auth.cs", "class Authentication { void RefreshToken() {} }");
+        await _index.RefreshAsync(Root);
+        // The agent edits the file; a steer about it arrives before the index catches up.
+        Write("Auth.cs", "class Authentication { void RefreshToken() { RotateCredential(); } }");
+        var result = Retrieve("RefreshToken");
+        Assert.Contains("Auth.cs", result.Files);
+        Assert.Contains("RotateCredential", result.Text);
     }
 
     public void Dispose()

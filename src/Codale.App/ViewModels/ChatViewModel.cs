@@ -52,6 +52,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private readonly Dictionary<string, ToolCallItem> _toolCalls = [];
     private readonly Dictionary<string, TaskCompletionSource<ApprovalDecision>> _approvals = [];
 
+    /// <summary>
+    /// The user chose "Allow for this turn" on a confirmation: every later confirmation in the
+    /// same turn is answered yes without asking. Cleared when the turn ends or the session goes.
+    /// </summary>
+    private bool _allowRestOfTurn;
+
     /// <summary>The timeline of the turn in flight: steps land here while it runs, and it folds when it lands.</summary>
     private TurnActivityItem? _activeTurn;
 
@@ -1497,6 +1503,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     public bool IsAskMode => PermissionMode == AskMode;
 
+    /// <summary>Full is YOLO: the agent runs unattended, and nothing it does waits for a confirmation.</summary>
+    public bool IsFullMode => PermissionMode is "auto" or "dontAsk" or "bypassPermissions";
+
     /// <summary>
     /// The host's routed mode: each message is classified by the helper model, sent as an
     /// ask, plan or act turn as it reads, and moved to a new session when it changes
@@ -2565,6 +2574,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 _ = HandleApprovalAsync(approval);
                 break;
 
+            case ApprovalCancelled cancelled:
+                WithdrawApproval(cancelled.RequestId);
+                break;
+
             case AgentError error:
                 CheckLoginRequired(error.Message);
                 Add(new NoticeItem { Text = error.Message, Severity = NoticeSeverity.Error });
@@ -2623,6 +2636,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             case TurnCompleted turn:
                 IsBusy = false;
+                _allowRestOfTurn = false;
                 CrashLog.Trace($"Turn completed: {turn.Subtype}");
                 SetActivity(null, toolUseId: null);
 
@@ -2825,6 +2839,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 // otherwise be re-applied at turn end and the meter would never drop.
                 _lastMessageUsage = null;
                 _compactedSinceLastPrompt = true;
+                ContextCompacted();
                 _idleCompactTimer.Stop();
                 if (compacted.PostTokens is { } post and > 0)
                 {
@@ -3638,6 +3653,22 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        // Full mode never stops to confirm: the CLI still asks for MCP servers with ask rules and for
+        // protected paths even under bypassPermissions, and those go through here. So does everything
+        // after "Allow for this turn". Questions and plans are not confirmations - they need the reader's
+        // answer - so they are still shown.
+        if ((IsFullMode || _allowRestOfTurn) && !NeedsReaderAnswer(approval.ToolName))
+        {
+            CrashLog.Trace($"{(IsFullMode ? "Full mode" : "Allowed for this turn")}: allowed {approval.ToolName} unasked");
+
+            if (_session is { } unattended)
+            {
+                await unattended.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
+            }
+
+            return;
+        }
+
         if (!_toolCalls.TryGetValue(approval.ToolUseId ?? "", out var pending))
         {
             // An approval with no transcript row yet: give it a row of its own, so
@@ -3715,6 +3746,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _approvals.Remove(approval.RequestId);
         OnApprovalsChanged();
         pending.Approval = null;
+
+        // The CLI withdrew the question (the turn was interrupted): the tool never ran, and the CLI
+        // is no longer waiting for an answer, so none is sent.
+        if (_withdrawnApprovals.Remove(approval.RequestId))
+        {
+            pending.Status = ToolCallStatus.Failed;
+            pending.Duration ??= DateTimeOffset.Now - pending.Timestamp;
+            pending.AutoCollapse();
+            return;
+        }
         NoteRevisionRequest(pending, decision);
         pending.Status = decision.Behavior == ApprovalBehavior.Allow
             ? ToolCallStatus.Running
@@ -3727,7 +3768,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         if (_session is not null)
         {
-            await _session.RespondToApprovalAsync(approval.RequestId, decision);
+            // The session gets the CLI half of the chosen mode: codex starts implementing an approved
+            // plan inside this answer, and the host id for Full ("auto") would run it on-request -
+            // asking about every command - instead of never.
+            await _session.RespondToApprovalAsync(approval.RequestId, decision.SwitchToMode is { Length: > 0 } switchTo
+                ? decision with { SwitchToMode = CliMode(switchTo) }
+                : decision);
         }
 
         if (decision.SwitchToMode is { Length: > 0 } chosen)
@@ -3770,6 +3816,44 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (_approvals.TryGetValue(requestId, out var answered))
         {
             answered.TrySetResult(decision);
+        }
+    }
+
+    /// <summary>Approvals the CLI took back before they were answered; see <see cref="WithdrawApproval"/>.</summary>
+    private readonly HashSet<string> _withdrawnApprovals = [];
+
+    /// <summary>Closes the card of an approval the CLI withdrew (<see cref="ApprovalCancelled"/>).</summary>
+    private void WithdrawApproval(string requestId)
+    {
+        CrashLog.Trace($"Approval withdrawn by the CLI: {requestId}");
+        if (_approvals.TryGetValue(requestId, out var answered))
+        {
+            _withdrawnApprovals.Add(requestId);
+            answered.TrySetResult(ApprovalDecision.Deny("Withdrawn by the CLI."));
+        }
+    }
+
+    /// <summary>A question or a plan: an answer only the reader can give, never auto-allowed.</summary>
+    private static bool NeedsReaderAnswer(string toolName) => toolName is "AskUserQuestion" or "ExitPlanMode";
+
+    /// <summary>
+    /// "Allow for this turn": allows this confirmation and every other one waiting now, and answers
+    /// yes to the rest of the turn's confirmations without asking. Questions and plans still wait.
+    /// </summary>
+    public void AllowRestOfTurn(string requestId)
+    {
+        _allowRestOfTurn = true;
+        var waiting = _toolCalls.Values
+            .Select(c => c.Approval)
+            .Where(a => a is not null && !a.IsAskUserQuestion && !a.IsPlan && _approvals.ContainsKey(a.RequestId))
+            .Select(a => a!.RequestId)
+            .Append(requestId)
+            .Distinct()
+            .ToList();
+
+        foreach (var id in waiting)
+        {
+            RespondToApproval(id, ApprovalDecision.Allow());
         }
     }
 
@@ -3957,6 +4041,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>The session is gone; nothing is coming to answer the open questions.</summary>
     private void AbandonPendingApprovals()
     {
+        _allowRestOfTurn = false;
         foreach (var answered in _approvals.Values)
         {
             answered.TrySetResult(ApprovalDecision.Deny("The session ended before this was answered."));
@@ -4215,10 +4300,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         NextPromptSuggestion = null;
         Attachments.Clear();
         ComposerNotice = null;
+        var sent = new UserMessageItem { Text = text, Attachments = attachments, IsSteer = true };
         RetrievalResult? retrieved;
         try
         {
-            retrieved = await RetrieveProjectContextAsync(text);
+            retrieved = await RetrieveProjectContextAsync(text, sent);
         }
         catch (OperationCanceledException)
         {
@@ -4236,7 +4322,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _lastUserPrompt = text;
         var started = _turnStarted;
         EndTurn(TurnOutcome.Completed);
-        Add(new UserMessageItem { Text = text, Attachments = attachments, IsSteer = true });
+        Add(sent);
         RecordUserTurn(text);
         ShowContextEnrichment(retrieved);
         BeginTurn();

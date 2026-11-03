@@ -20,7 +20,18 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
     private const int MapBudget = 700;
     private const int FindingBudget = 1300;
     private const int MaxFiles = 6;
+    /// <summary>Within the caller's two-second retrieval budget, leaving room for the search itself.</summary>
+    private static readonly TimeSpan StaleRefreshWait = TimeSpan.FromMilliseconds(900);
     private const double RrfK = 60;
+    private const double DocWeight = 0.5;
+    private static readonly string[] DocOrTestTerms = ["doc", "readme", "markdown", "md", "test", "spec", "changelog", "licen"];
+    private static readonly System.Text.RegularExpressions.Regex LicensePattern = new(
+        @"(^|[\\/])(licen[cs]e|copying|notice|ofl|third[-_]party[-_]notices?)(\.[a-z]+)?$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+    /// <summary>Instruction files every CLI already loads into the conversation: repeating them is waste.</summary>
+    private static readonly System.Text.RegularExpressions.Regex AgentInstructions = new(
+        @"(^|[\\/])(CLAUDE|AGENTS|GEMINI)(\.local)?\.md$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
     // Keyed by worktree + "\n" + model: one packed int8 matrix per pair.
     private readonly ConcurrentDictionary<string, QuantizedMatrix> _vectors = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, bool> _embedded = new(StringComparer.OrdinalIgnoreCase);
@@ -112,7 +123,11 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
         _vectors.GetOrAdd(worktree + "\n" + embedder.Model, _ => store.SourceVectors(worktree, embedder.Model));
 
     /// <summary>Shared hybrid retrieval for discovery and prompt enrichment; only fresh source is returned.</summary>
-    public IReadOnlyList<SourceChunk> Search(string worktree, string prompt, string recent = "", int maxFiles = 12)
+    public IReadOnlyList<SourceChunk> Search(string worktree, string prompt, string recent = "", int maxFiles = 12, int maxChunksPerFile = 1) =>
+        Search(worktree, prompt, recent, maxFiles, maxChunksPerFile, out _);
+
+    /// <param name="stale">True when a candidate was dropped because its file changed after indexing.</param>
+    private IReadOnlyList<SourceChunk> Search(string worktree, string prompt, string recent, int maxFiles, int maxChunksPerFile, out bool stale)
     {
         worktree = ProjectPaths.Normalize(worktree);
         Warm(worktree);
@@ -146,24 +161,46 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
         if (!string.IsNullOrWhiteSpace(recent)) Fuse(store.SearchSourceTerms(recent, worktree, 20).Select(c => c.Id), 0.35);
 
         var chunks = store.SourceChunks(scores.Keys.ToList()).ToDictionary(c => c.Id);
-        // A path naming the topic ("db/connectors.ts" for "connector table") is the strongest locator signal.
+        // A specific word such as "minimap" should outweigh generic matches for "game" or
+        // "unit". Count candidate files, not overlapping chunks, so long files get no bonus.
+        var chunkTerms = chunks.Values.ToDictionary(c => c.Id,
+            c => SearchText.Tokens(c.Path + "\n" + c.Text).Select(SearchText.Stem).ToHashSet());
+        var fileCount = chunks.Values.Select(c => c.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        bool Matches(long id, string term) => chunkTerms[id].Any(t => t.StartsWith(term, StringComparison.Ordinal));
+        var specificity = terms.ToDictionary(t => t, t =>
+        {
+            var matches = chunks.Values.Where(c => Matches(c.Id, t)).Select(c => c.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            return Math.Log(1.0 + (fileCount - matches + 0.5) / (matches + 0.5));
+        });
+        // A path naming the topic adds a locator bonus, weighted by the same specificity so
+        // broad folder names such as "game" cannot outweigh a distinctive implementation term.
         foreach (var chunk in chunks.Values)
         {
+            scores[chunk.Id] += 0.02 * terms.Where(t => Matches(chunk.Id, t)).Sum(t => specificity[t]);
             var pathStems = SearchText.Tokens(chunk.Path).Select(SearchText.Stem).ToList();
-            var pathHits = terms.Count(t => t.Length >= 3 && pathStems.Any(p => p.StartsWith(t, StringComparison.Ordinal)));
-            if (pathHits > 0) scores[chunk.Id] += 0.02 * pathHits;
+            scores[chunk.Id] += 0.02 * terms.Where(t => t.Length >= 3 && pathStems.Any(p => p.StartsWith(t, StringComparison.Ordinal)))
+                .Sum(t => specificity[t]);
         }
+
+        // Design notes and tests mention every subject in prose, so they outrank the code that
+        // implements it; they lead only when the prompt asks for them ("update the docs", "the test").
+        var wantsDocs = terms.Any(t => DocOrTestTerms.Any(d => t.StartsWith(d, StringComparison.Ordinal)));
+        if (!wantsDocs)
+            foreach (var chunk in chunks.Values)
+                if (CodeDiscovery.IsTestOrDoc(chunk.Path) || LicensePattern.IsMatch(chunk.Path)) scores[chunk.Id] *= DocWeight;
 
         var fresh = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         var floorScore = scores.Count == 0 ? 0 : scores.Values.Max() * 0.34;
-        return scores.Where(s => s.Value >= floorScore).OrderByDescending(s => s.Value).Where(s => chunks.ContainsKey(s.Key))
+        var result = scores.Where(s => s.Value >= floorScore).OrderByDescending(s => s.Value).Where(s => chunks.ContainsKey(s.Key))
             .Select(s => chunks[s.Key]).Where(c =>
             {
                 if (!fresh.TryGetValue(c.Path, out var valid))
                     fresh[c.Path] = valid = ReadSource(worktree, c.Path) is { } content && Hash(content) == c.Hash;
                 return valid;
             }).GroupBy(c => c.Path, StringComparer.OrdinalIgnoreCase).Take(Math.Max(0, maxFiles))
-            .Select(g => g.First()).ToList();
+            .SelectMany(g => g.Take(Math.Max(0, maxChunksPerFile))).ToList();
+        stale = fresh.ContainsValue(false);
+        return result;
     }
 
     /// <summary>
@@ -194,7 +231,14 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
 
         var terms = SearchText.RetrievalTerms(prompt);
         var legs = new List<string> { "BM25", semantic?.Invoke() is null ? "n-gram vectors" : "semantic vectors" };
-        var topFiles = Search(worktree, prompt, recent, MaxFiles).GroupBy(c => c.Path, StringComparer.OrdinalIgnoreCase).ToList();
+        var ranked = Search(worktree, prompt, recent, MaxFiles + 2, 2, out var stale);
+        // Mid-turn the agent is editing the very files a steer is about. Their rows are stale until the
+        // index catches up, and stale files are dropped, so wait briefly for that rather than lose them.
+        if (stale && CaughtUp(worktree))
+            ranked = Search(worktree, prompt, recent, MaxFiles + 2, 2, out _);
+        // The CLI already loaded its instruction files into the conversation.
+        var topFiles = ranked.Where(c => !AgentInstructions.IsMatch(c.Path))
+            .GroupBy(c => c.Path, StringComparer.OrdinalIgnoreCase).Take(MaxFiles).ToList();
         string? Fresh(string path, string hash) => ReadSource(worktree, path) is { } content && Hash(content) == hash ? content : null;
 
         // 3. The file map: often enough on its own to answer "where is X?", and always enough to open
@@ -206,12 +250,16 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
         {
             var first = file.First();
             var key = $"map:{first.Path}:{first.Hash}";
-            if (delivered.Contains(key)) continue;
             var path = first.Path.Replace('\\', '/');
             var symbols = Definitions(Fresh(first.Path, first.Hash)!, terms);
-            map.Append("- ").Append(path);
-            if (symbols.Count > 0) map.Append(" — ").Append(string.Join(", ", symbols));
-            map.Append('\n');
+            // Definitions depend on the prompt: another topic in an unchanged file needs its
+            // own locator, even though previously delivered source excerpts stay deduplicated.
+            key += ":" + Hash(string.Join(", ", symbols));
+            if (delivered.Contains(key)) continue;
+            var entry = "- " + path + (symbols.Count > 0 ? " — " + string.Join(", ", symbols) : "") + "\n";
+            // Keep the highest-ranked entries that fit, rather than losing the entire map.
+            if (Encoding.UTF8.GetByteCount(map.ToString() + entry + Environment.NewLine + Environment.NewLine) > MapBudget) continue;
+            map.Append(entry);
             mapKeys.Add(key);
             files.Add(path);
         }
@@ -243,7 +291,7 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
         {
             var endLine = chunk.StartLine + chunk.Text.Count(c => c == '\n');
             if (Add([$"source:{chunk.Path}:{chunk.Hash}:{chunk.StartLine}"],
-                    $"{chunk.Path.Replace('\\', '/')}:{chunk.StartLine}-{endLine}\n```\n{Clip(chunk.Text, 1100)}\n```", MaxContextBytes))
+                    $"{chunk.Path.Replace('\\', '/')}:{chunk.StartLine}-{endLine}\n```\n{chunk.Text}\n```", MaxContextBytes))
                 snippets++;
         }
         return new RetrievalResult(text.ToString().TrimEnd(), keys, bytes, timer.ElapsedMilliseconds)
@@ -253,6 +301,16 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
             Findings = findings,
             Method = string.Join(" + ", legs),
         };
+    }
+
+    private bool CaughtUp(string worktree)
+    {
+        try { return RefreshAsync(worktree).Wait(StaleRefreshWait); }
+        catch (AggregateException ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Project indexing failed: {ex.InnerException?.Message}");
+            return false;
+        }
     }
 
     /// <summary>Blank-line runs collapsed and trailing spaces dropped: whitespace is tokens too.</summary>
@@ -269,6 +327,7 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
         for (var i = 0; i < lines.Length && found.Count < 300; i++)
         {
             var m = DefinitionPattern.Match(lines[i]);
+            if (!m.Success) m = GoMethodPattern.Match(lines[i]);
             // SQL usually sits inside a string (db.exec(`CREATE TABLE ...`)), so tables match anywhere on the line.
             if (!m.Success) m = TablePattern.Match(lines[i]);
             if (!m.Success) m = MethodPattern.Match(lines[i]);
@@ -285,6 +344,10 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
         @"(?:class|interface|record|struct|enum|function|def|fn|func|type|const|let|var|namespace)\s+" +
         @"(?<name>[A-Za-z_$][\w$]*)",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static readonly System.Text.RegularExpressions.Regex GoMethodPattern = new(
+        @"^\s*func\s*\([^)]*\)\s*(?<name>[A-Za-z_]\w*)\s*\(",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
 
     // C#/Java members: at least one modifier, a return type, a name and an opening parenthesis.
     private static readonly System.Text.RegularExpressions.Regex MethodPattern = new(

@@ -27,6 +27,12 @@ public static class SearchText
         "look", "check", "now", "then", "them", "they", "than", "only", "still", "even", "same", "because", "feel",
         "think", "know", "sure", "yes", "ok", "okay", "thing", "things", "stuff", "code", "file", "files", "work",
         "works", "working", "currently", "actually", "really", "maybe", "where's", "whats", "who", "your",
+        // Request phrasing: how a change is asked for, not what it is about ("fix the hall menu").
+        "fix", "change", "improve", "good", "great", "nice", "better", "best", "easy", "able", "many", "more",
+        "less", "much", "very", "try", "trying", "having", "going", "before", "after", "real", "put", "instead",
+        "directly", "those", "off", "out", "way", "give", "take", "keep", "seem", "right", "wrong", "dont", "don't",
+        "doesnt", "isnt", "cant", "won't", "wont", "one", "something", "everything", "anything", "again",
+        "chang", "improv", // stems of "changed", "improved"
     };
 
     /// <summary>True for a word too common to say what a message is about ("please", "the").</summary>
@@ -47,10 +53,42 @@ public static class SearchText
         return token;
     }
 
+    /// <summary>
+    /// Attachment mentions that name no project file: pasted images and text ("@5f469e.png") and any
+    /// image path. Their hash fragments and "png" would otherwise rank asset manifests and generators.
+    /// A mention of a source file ("@server/game/units.go") is kept: it is the strongest locator there is.
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex AttachmentMention = new(
+        @"@(?:""[^""]*\.(?:png|jpe?g|gif|webp|bmp|ico|tiff?|heic)""|[^\s""]*\.(?:png|jpe?g|gif|webp|bmp|ico|tiff?|heic)\b|" +
+        @"""(?:[^""]*[\\/])?[0-9a-f]{6}\.txt""|(?:[^\s""]*[\\/])?[0-9a-f]{6}\.txt\b)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>The prompt without attachment mentions that say nothing about the subject.</summary>
+    public static string WithoutAttachments(string text) => AttachmentMention.Replace(text, " ");
+
+    /// <summary>
+    /// Words that run the session or the repository rather than name a subject: "commit all changes",
+    /// "continue in full permission mode". A prompt made only of these has no topic of its own.
+    /// </summary>
+    private static readonly HashSet<string> Workflow = new(StringComparer.Ordinal)
+    {
+        "commit", "push", "pull", "merge", "rebase", "stash", "branch", "amend", "squash", "pr",
+        "continue", "proceed", "go", "ahead", "resume", "finish", "stop", "wait", "retry", "undo", "redo", "revert",
+        "permission", "mode", "full", "auto", "bypass", "accept", "approve", "approv", "plan",
+    };
+
+    /// <summary>
+    /// True when the prompt names something to look up; false for pure workflow ("commit this",
+    /// "continue in full permission mode"), whose subject is the conversation so far.
+    /// </summary>
+    public static bool HasTopic(string text) => RetrievalTerms(text).Any(t => !Workflow.Contains(t));
+
     /// <summary>The meaningful stems of a prompt for project retrieval, most frequent first.</summary>
-    public static IReadOnlyList<string> RetrievalTerms(string text) => Tokens(text)
+    public static IReadOnlyList<string> RetrievalTerms(string text) => Tokens(WithoutAttachments(text))
         .Where(t => t.Length >= MinTokenLength && !Stop.Contains(t) && !QuestionFiller.Contains(t))
         .Select(Stem)
+        // Inflected filler ("changes", "improved") is still filler once stemmed.
+        .Where(t => !QuestionFiller.Contains(t))
         .GroupBy(t => t)
         .OrderByDescending(g => g.Count())
         .Select(g => g.Key)

@@ -171,6 +171,18 @@ public sealed class ClaudeStreamParserTests
         Assert.Empty(parser.Parse("{\"type\":\"prompt_suggestion\",\"suggestion\":\"\"}"));
     }
 
+    [Fact]
+    public void A_withdrawn_permission_prompt_cancels_the_approval_instead_of_warning()
+    {
+        var parser = new ClaudeStreamParser();
+
+        var cancelled = Assert.IsType<ApprovalCancelled>(Assert.Single(parser.Parse(
+            "{\"type\":\"control_cancel_request\",\"request_id\":\"req-7\"}")));
+
+        Assert.Equal("req-7", cancelled.RequestId);
+        Assert.Empty(parser.Parse("{\"type\":\"control_cancel_request\"}"));
+    }
+
     [Theory]
     [InlineData("Classifier unavailable", true, false)]
     [InlineData("Auto mode unavailable — stopped after repeated responses with no safety verdict", true, true)]

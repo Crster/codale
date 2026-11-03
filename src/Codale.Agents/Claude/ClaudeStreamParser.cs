@@ -88,6 +88,12 @@ public sealed class ClaudeStreamParser
             "rate_limit_event" => [ParseRateLimit(root)],
             "control_request" => ParseControlRequest(root),
 
+            // The CLI takes back a control request of its own (an open permission prompt when the
+            // turn is interrupted). Older builds nest the id under "request".
+            "control_cancel_request" => (root.Str("request_id") ?? root.Prop("request")?.Str("request_id")) is { Length: > 0 } cancelled
+                ? [new ApprovalCancelled(cancelled)]
+                : [],
+
             // Tolerated at either level: some CLI builds wrap it in "system", some
             // send the bare type.
             "conversation_reset" => [new ConversationReset()],

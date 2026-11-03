@@ -264,6 +264,9 @@ public sealed partial class ChatViewModel
     {
         _retrievalId = null;
         if (Features is not { } features || !AppSettings.ProjectKnowledge || text.StartsWith('/')) return null;
+        // "commit this", "continue in full permission mode": no subject to look up, and whatever the
+        // conversation is about was enriched when it was asked. Matching the words alone adds noise.
+        if (!SearchText.HasTopic(text)) return null;
         using var cts = new CancellationTokenSource();
         _briefing = cts;
         var session = _session;
@@ -320,8 +323,17 @@ public sealed partial class ChatViewModel
 
     private void ForgetDeliveredContext()
     {
-        _deliveredContext.Clear();
         _retrievalId = null;
+        ContextCompacted();
+    }
+
+    /// <summary>
+    /// The conversation was summarised, by "/compact" or by the CLI on its own: the excerpts it carried
+    /// are gone, so the next prompt about them must get them again rather than be told they were sent.
+    /// </summary>
+    private void ContextCompacted()
+    {
+        _deliveredContext.Clear();
         try
         {
             if (SessionId is { } native) Features?.ClearDeliveredContext(native);

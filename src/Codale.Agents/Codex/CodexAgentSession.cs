@@ -1114,6 +1114,19 @@ public sealed class CodexAgentSession : IAgentSession
                 // The workspace git panel refreshes on its own; the aggregated diff is redundant here.
                 return;
 
+            case "serverRequest/resolved":
+                // Also sent after our own answers, which already left _pendingApprovals: only a request
+                // codex cleared by itself (the turn was interrupted) is still pending here.
+                if (parameters.Prop("requestId") is { } resolved &&
+                    (resolved.ValueKind == JsonValueKind.Number ? resolved.GetInt32() :
+                        int.TryParse(resolved.ValueKind == JsonValueKind.String ? resolved.GetString() : null, out var parsed) ? parsed : -1) is var requestId &&
+                    _pendingApprovals.Remove(requestId))
+                {
+                    await _events.Writer.WriteAsync(new ApprovalCancelled(
+                        requestId.ToString(System.Globalization.CultureInfo.InvariantCulture))).ConfigureAwait(false);
+                }
+                return;
+
             case "error":
                 var errorText = parameters.Str("message") ?? parameters.GetRawText();
                 await _events.Writer.WriteAsync(new AgentError(errorText)).ConfigureAwait(false);

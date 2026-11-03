@@ -112,6 +112,12 @@ public sealed record ApprovalRequested : AgentEvent
     public IReadOnlyList<PermissionSuggestion> Suggestions { get; init; } = [];
 }
 
+/// <summary>
+/// The CLI withdrew an <see cref="ApprovalRequested"/> it no longer needs answered - the turn was
+/// interrupted while the question was open. Answering it now would answer nothing.
+/// </summary>
+public sealed record ApprovalCancelled(string RequestId) : AgentEvent;
+
 /// <summary>A tool was refused without the host being consulted (no host approval route wired up).</summary>
 public sealed record PermissionDenied : AgentEvent
 {
