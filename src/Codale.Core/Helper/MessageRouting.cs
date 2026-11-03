@@ -11,7 +11,7 @@ public enum RouteIntent
     /// <summary>A question: explain, change nothing.</summary>
     Ask,
 
-    /// <summary>Multi-step or architectural work: research and propose first.</summary>
+    /// <summary>An explicit request to plan or propose before implementing.</summary>
     Plan,
 
     /// <summary>A direct change: just do it.</summary>
@@ -22,38 +22,48 @@ public enum RouteIntent
 public sealed record RouteDecision(string Text, RouteIntent Intent, bool NewTopic);
 
 /// <summary>
-/// Automatic mode's single helper-model call per message: pick the mode for the turn
-/// and notice a change of subject. The message itself goes out as typed - the model
-/// writes back a few words, not the message. Prompt, tool and interpretation live here
-/// so the rules are testable without a model; the call itself is the app's.
+/// Automatic mode's local shortcuts and bounded helper call. Topic detection uses
+/// local embeddings separately. The user's message always goes out as typed.
 /// </summary>
 public static partial class MessageRouting
 {
     private const int MaxMessageChars = 4000;
     private const int MaxAssistantChars = 800;
 
-    /// <summary>
-    /// The shortest agent reply that says enough about the session to judge a change of
-    /// subject against; below it (a bare "Done.") the message stays where it was typed.
-    /// </summary>
-    public const int MinSummaryChars = 80;
+    /// <summary>Fast local decisions first; a bounded helper call only for ambiguous messages.</summary>
+    public static async Task<RouteDecision> RouteAsync(IHelperModel client, string message,
+        string? lastAssistantText = null, CancellationToken ct = default, TimeSpan? timeout = null)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (TryRouteLocally(message) is { } local) return local;
+        if (!client.IsAvailable) return RouteWithoutModel(message);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(timeout ?? TimeSpan.FromSeconds(5));
+        try
+        {
+            var call = await client.CallToolAsync(SystemPrompt, BuildConversation(message, lastAssistantText),
+                [RouteTool], deadline.Token).WaitAsync(deadline.Token).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            return Interpret(call, message, canMoveTopic: false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception)
+        {
+            return RouteWithoutModel(message);
+        }
+    }
 
     public const string SystemPrompt =
-        "You classify a developer's chat message for a coding agent: call route once with intent. Session boundaries are controlled only by the user.\n" +
-        "\n" +
-        "intent:\n" +
-        "- act (the default): any request to make, change, fix, add, remove, improve or redesign something, however " +
-        "it is phrased (\"let's make X nicer\", \"can you fix Y\", \"X should look more like Z\"); a problem report " +
-        "or complaint (\"the button is misaligned\", \"there is a dot before the name, remove it\", \"X doesn't work\", " +
-        "\"next issue is Y\"); a wish (\"I want X\", \"it needs X\"); a go-ahead (\"yes\", \"do it\", \"continue\", " +
-        "\"looks good, implement it\").\n" +
-        "- plan: a large, multi-step, multi-file or architectural change, or one the user wants planned first.\n" +
-        "- ask: ONLY a pure question that wants an answer and no change (what, why, how does, where is, explain, " +
-        "review, compare). A question mixed with a request (\"why is X slow? speed it up\") is act. A message that " +
-        "asks for a change is never ask. Unsure between ask and act: act.\n" +
-        "\n" +
-        "Rules:\n" +
-        "- Classify only. Never answer, carry out or reply to the message, and never ask for more information.\n" +
+        "Classify new_message; call route exactly once. Do not answer it.\n" +
+        "act (default): requests to implement/change/test/run, bug reports, wishes, approvals or continuation. " +
+        "Polite questions like 'can you fix X?' are act. Complexity alone never means plan.\n" +
+        "plan: explicitly requests a plan, proposal or design before implementation; no implementation requested yet. " +
+        "'Plan and implement' is act; 'plan first, do not edit yet' is plan.\n" +
+        "ask: explanation, investigation, review or comparison with no requested changes. " +
+        "'Why is X slow? Fix it' is act. 'How do I fix X?' is ask. " +
+        "An acknowledgment followed by a question ('yes, why is it broken?') is ask, not approval to edit. " +
+        "Use last_agent_message only to resolve replies such as approvals or answers to questions. " +
+        "Never change sessions. When uncertain choose act.\n" +
         PromptRules.DataOnly + "\n" +
         PromptRules.CallOnly;
 
@@ -91,17 +101,27 @@ public static partial class MessageRouting
     }
 
     /// <summary>
-    /// A message that needs no model: a bare go-ahead ("yes", "do it", "continue") is
-    /// always act and always belongs where it was typed. Null
-    /// means the model should read it.
+    /// Clear short approvals, requests, questions and explicit plans need no model.
+    /// Null means the model should read the message.
     /// </summary>
     public static RouteDecision? TryRouteLocally(string message)
     {
         var text = message.Trim();
-        if (text.Length <= 40 && GoAheadPattern().IsMatch(text) && CountWords(text) <= 4)
+        if (IsGoAhead(text))
         {
-            return new RouteDecision(text, RouteIntent.Act, NewTopic: false);
+            return new RouteDecision(message, RouteIntent.Act, NewTopic: false);
         }
+
+        // Only short, single-purpose messages qualify. Mixed/quoted/code prompts need the model.
+        if (text.Length == 0 || text.Length > 160 || CountWords(text) > 24 ||
+            text.IndexOfAny(['\r', '\n', '`', '"', '<', '>']) >= 0 ||
+            AmbiguousClause().IsMatch(text)) return null;
+
+        if (ExplicitPlan().IsMatch(Codale.Core.Agents.SessionTitles.StripFillers(text)))
+            return new(message, RouteIntent.Plan, false);
+        if (IsChangeRequest(text)) return new(message, RouteIntent.Act, false);
+        if (PureQuestion().IsMatch(Codale.Core.Agents.SessionTitles.StripFillers(text)))
+            return new(message, RouteIntent.Ask, false);
 
         return null;
     }
@@ -111,7 +131,14 @@ public static partial class MessageRouting
     /// question as ask and everything else as act, in the session it was typed in.
     /// </summary>
     public static RouteDecision RouteWithoutModel(string message) =>
-        new(message, IsQuestion(message) && !IsChangeRequest(message) ? RouteIntent.Ask : RouteIntent.Act, NewTopic: false);
+        TryRouteLocally(message) ?? new(message,
+            IsPlanOnly(message) ? RouteIntent.Plan :
+            IsQuestion(message) && !IsChangeRequest(message) ? RouteIntent.Ask : RouteIntent.Act, NewTopic: false);
+
+    private static bool IsPlanOnly(string message) =>
+        (ExplicitPlan().IsMatch(Codale.Core.Agents.SessionTitles.StripFillers(message.Trim())) &&
+            !ImplementationRequest().IsMatch(message)) ||
+        (NoEdits().IsMatch(message) && PlanWord().IsMatch(message));
 
     /// <summary>
     /// Turns the model's call into a decision for the message as typed, distrusting it
@@ -120,7 +147,7 @@ public static partial class MessageRouting
     /// </summary>
     public static RouteDecision Interpret(ToolCall? call, string original, bool canMoveTopic)
     {
-        if (call is null)
+        if (call is null || call.Tool != RouteTool.Name)
         {
             return RouteWithoutModel(original);
         }
@@ -131,6 +158,10 @@ public static partial class MessageRouting
             "plan" => RouteIntent.Plan,
             _ => RouteIntent.Act,
         };
+
+        if (IsPlanOnly(original)) intent = RouteIntent.Plan;
+        if (AcknowledgementPrefix().IsMatch(original.Trim()) &&
+            IsQuestion(original) && !IsChangeRequest(original)) intent = RouteIntent.Ask;
 
         // A small model leans ask, and an ask turn refuses every edit, so ask has to be
         // earned: the message must read as a question and carry no change request. A
@@ -152,13 +183,15 @@ public static partial class MessageRouting
     public static bool IsFollowUp(string message)
     {
         var text = PolitenessPattern().Replace(message.Trim(), "");
-        return CountWords(text) < 3 ||
-            GoAheadPattern().IsMatch(text) ||
+        return CountWords(text) < 2 ||
+            IsGoAhead(text) ||
             FollowUpOpener().IsMatch(text) ||
             BackReference().IsMatch(text);
     }
 
     private static int CountWords(string text) => WordPattern().Count(text);
+
+    private static bool IsGoAhead(string text) => text.Length <= 80 && GoAheadPattern().IsMatch(text);
 
     [GeneratedRegex(@"[\p{L}\p{N}_]+")]
     private static partial Regex WordPattern();
@@ -169,7 +202,7 @@ public static partial class MessageRouting
     /// </summary>
     public static bool IsChangeRequest(string message)
     {
-        if (GoAheadPattern().IsMatch(message.Trim()))
+        if (IsGoAhead(message.Trim()))
         {
             return true;
         }
@@ -194,14 +227,15 @@ public static partial class MessageRouting
     public static bool IsQuestion(string message)
     {
         var text = Codale.Core.Agents.SessionTitles.StripFillers(message.Trim());
+        text = AcknowledgementPrefix().Replace(text, "");
         return QuestionOpener().IsMatch(text) || message.TrimEnd().EndsWith('?');
     }
 
-    [GeneratedRegex(@"[.!?;\n]+\s*")]
+    [GeneratedRegex(@"[.!?;,\r\n]+\s*")]
     private static partial Regex SentenceBreak();
 
     [GeneratedRegex(
-        @"^(yes|yep|yeah|ok|okay|sure|go ahead|do it|proceed|continue|sounds good|looks good|lgtm|approved?)\b",
+        @"^(?:(?:yes|yep|yeah|ok|okay|sure|go ahead|do it|proceed|continue|try again|retry|sounds good|looks good|lgtm|approved?)[\s,.!]*(?:and\s+)?)+[.!]*$",
         RegexOptions.IgnoreCase)]
     private static partial Regex GoAheadPattern();
 
@@ -209,7 +243,7 @@ public static partial class MessageRouting
     private static partial Regex PolitenessPattern();
 
     [GeneratedRegex(
-        @"^(also|and|plus|now|then|next|again|still|instead|but|actually|nope|no|not|wait|" +
+        @"^(also|and|plus|then|again|still|instead|but|actually|nope|no|not|wait|" +
         @"it|its|it's|that|thats|that's|this|these|those|there|here|same|one more|another|" +
         @"try again|retry|undo|revert|redo)\b",
         RegexOptions.IgnoreCase)]
@@ -223,7 +257,7 @@ public static partial class MessageRouting
 
     [GeneratedRegex(
         @"^(what|whats|why|how|where|when|which|who|whom|whose|is|are|was|were|does|do|did|can|could|should|would|will|" +
-        @"explain|describe|tell me|show me|walk me|summari[sz]e|review|compare|list|find out|look into|check whether|" +
+        @"explain|describe|tell me|show me|walk me|summari[sz]e|review|compare|investigate|analy[sz]e|inspect|audit|list|find out|look into|check whether|" +
         @"i wonder|any idea)\b",
         RegexOptions.IgnoreCase)]
     private static partial Regex QuestionOpener();
@@ -237,9 +271,30 @@ public static partial class MessageRouting
     [GeneratedRegex(
         @"^(make|add|fix|change|update|create|remove|delete|rename|refactor|implement|move|replace|improve|" +
         @"redesign|rework|redo|rewrite|build|write|set|use|convert|clean|tweak|adjust|restyle|style|polish|" +
-        @"optimi[sz]e|speed it up|speed up|simplify|extract|split|merge|install|upgrade|bump|commit|push|run|deploy|" +
+        @"optimi[sz]e|speed it up|speed up|simplify|extract|split|merge|install|upgrade|bump|commit|push|run|test|debug|deploy|" +
         @"enable|disable|turn|hide|put|drop|revert|undo|reset|generate|migrate|port|wire|hook|support|" +
         @"allow|prevent|stop|handle|translate|format|resize|center|align|color|colour)\b",
         RegexOptions.IgnoreCase)]
     private static partial Regex ChangeVerbPattern();
+
+    [GeneratedRegex(@"\b(and|but|then|instead|unless|except|before|after|first|yet|don't|do not|without)\b|[,;:]|[.!?]\s+\S", RegexOptions.IgnoreCase)]
+    private static partial Regex AmbiguousClause();
+
+    [GeneratedRegex(@"^(plan\b|(?:write|create|draft|propose)\s+(?:(?:a|an|the)\s+)?(?:implementation\s+)?(?:plan|proposal)\b)", RegexOptions.IgnoreCase)]
+    private static partial Regex ExplicitPlan();
+
+    [GeneratedRegex(@"^(what|why|how|where|when|which|who|explain|describe|summari[sz]e|review|compare)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex PureQuestion();
+
+    [GeneratedRegex(@"^(?:yes|yep|yeah|sure)\s*[,!:]\s*", RegexOptions.IgnoreCase)]
+    private static partial Regex AcknowledgementPrefix();
+
+    [GeneratedRegex(@"\b(implement|build|fix|apply|execute|make|edit|write code)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex ImplementationRequest();
+
+    [GeneratedRegex(@"\b(do not|don't|dont)\s+(edit|implement|modify)(?:\s+(yet|anything|any files|the code))?(?=\s*(?:[;,.!?]|$))|\bno\s+(edits|implementation)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex NoEdits();
+
+    [GeneratedRegex(@"\b(plan|proposal)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex PlanWord();
 }

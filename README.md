@@ -157,6 +157,10 @@ Codale hands peripheral tasks to a lightweight model (via one-shot Claude CLI ca
 - Session auto-titling based on prompt contents.
 - Message routing in Auto mode.
 
+Auto mode routes clear short prompts locally, with no helper request. Ambiguous messages use one compact classification request, capped at five seconds with a local fallback. Ask answers without edits, Plan is for an explicit request to plan before implementing, and Act handles changes and bug reports regardless of task size. Topic detection runs locally using recent user messages and the latest Claude or Codex answer; it marks a new subject and refreshes retrieval context while keeping the current session.
+
+Routing regression tests run with `dotnet test tests/Codale.Core.Tests`. To exercise the classification corpus against both logged-in CLIs (uses tokens), set `CODALE_ROUTING_LIVE_TESTS=1` and run `dotnet test tests/Codale.Agents.Tests --filter FullyQualifiedName~MessageRoutingLiveTests --logger "console;verbosity=detailed"`.
+
 ---
 
 ### Git Panel & Worktree Isolation

@@ -152,6 +152,11 @@ public sealed class ClaudeAgentSession : IAgentSession
         var payloads = new List<AttachmentPayload>(turn.Attachments.Count);
         foreach (var attachment in turn.Attachments)
         {
+            if (attachment.Kind == TurnAttachmentKind.Text && new FileInfo(attachment.Path).Length > 32_768)
+            {
+                payloads.Add(new AttachmentPayload(attachment, []));
+                continue;
+            }
             var bytes = await readAllBytes(attachment.Path, ct).ConfigureAwait(false);
             payloads.Add(new AttachmentPayload(attachment, bytes));
         }
@@ -276,6 +281,7 @@ public sealed class ClaudeAgentSession : IAgentSession
     public static object BuildUserMessageFrame(string text, IReadOnlyList<AttachmentPayload> payloads)
     {
         var content = new List<object>();
+        var remainingTextBytes = 32_768;
 
         if (text.Length > 0)
         {
@@ -305,6 +311,12 @@ public sealed class ClaudeAgentSession : IAgentSession
                     break;
 
                 default: // Text
+                    if (payload.Bytes.Length == 0 || payload.Bytes.Length > remainingTextBytes)
+                    {
+                        content.Add(new { type = "text", text = $"[Attached file: {System.Text.Json.JsonSerializer.Serialize(payload.Attachment.Path)}]\nFile content was not embedded to preserve context space. Read this local file with tools in bounded sections as needed; avoid dumping the entire file, especially embedded base64 data in HTML." });
+                        break;
+                    }
+                    remainingTextBytes -= payload.Bytes.Length;
                     content.Add(new
                     {
                         type = "document",

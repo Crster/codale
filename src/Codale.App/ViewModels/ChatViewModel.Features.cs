@@ -263,15 +263,15 @@ public sealed partial class ChatViewModel
         if (FeatureId is { } id) Features?.IndexFile(id, path);
     }
 
-    /// <summary>
-    /// Retrieves project context for a prompt. When <paramref name="sent"/> is given and the prompt changes
-    /// the subject (see <see cref="TopicShift"/>), it is tagged New and the context is retrieved for the new
-    /// subject alone, without the earlier prompts steering the ranking back to the old one.
-    /// </summary>
+    // Final answers are lifted out of the activity timeline for both Claude and Codex.
+    // Ignore streaming narration and answers from older turns.
+    internal string? LastRoutingReply => Items.Reverse().TakeWhile(i => i is not UserMessageItem)
+        .OfType<AssistantMessageItem>().FirstOrDefault(i => !i.IsStreaming)?.Text;
+
     private async Task<RetrievalResult?> RetrieveProjectContextAsync(string text, UserMessageItem? sent = null)
     {
         _retrievalId = null;
-        if (Features is not { } features || !AppSettings.ProjectKnowledge || text.StartsWith('/')) return null;
+        if (text.StartsWith('/')) return null;
         // "commit this", "continue in full permission mode": no subject to look up, and whatever the
         // conversation is about was enriched when it was asked. Matching the words alone adds noise.
         if (!SearchText.HasTopic(text)) return null;
@@ -280,10 +280,17 @@ public sealed partial class ChatViewModel
         var session = _session;
         try
         {
-            var earlier = Items.OfType<UserMessageItem>().Where(i => !ReferenceEquals(i, sent) && i.Text.Length > 0)
+            var priorItems = Items.TakeWhile(i => !ReferenceEquals(i, sent)).ToList();
+            var earlier = priorItems.OfType<UserMessageItem>().Where(i => i.Text.Length > 0)
                 .TakeLast(3).Select(i => i.Text).ToList();
-            var newTopic = sent is not null && await Task.Run(() => TopicShift.IsNewTopic(text, earlier, SemanticModel.Best), cts.Token);
+            var lastReply = priorItems.AsEnumerable().Reverse().TakeWhile(i => i is not UserMessageItem)
+                .OfType<AssistantMessageItem>().FirstOrDefault(i => !i.IsStreaming)?.Text;
+            var newTopic = sent is not null && await Task.Run(() =>
+                TopicShift.IsNewTopic(text, earlier, SemanticModel.Best, lastReply), cts.Token);
+            cts.Token.ThrowIfCancellationRequested();
+            if (!ReferenceEquals(session, _session)) throw new OperationCanceledException();
             if (newTopic) sent!.IsNewTopic = true;
+            if (Features is not { } features || !AppSettings.ProjectKnowledge) return null;
             var recent = newTopic ? "" : string.Join("\n", earlier.TakeLast(2).Append(text));
             var result = await features.RetrieveAsync(WorktreePath ?? _projectPath, text, recent, new HashSet<string>(_deliveredContext),
                 _needsResumeContext ? null : FeatureId).WaitAsync(TimeSpan.FromSeconds(2), cts.Token);

@@ -13,6 +13,25 @@ namespace Codale.Agents.Tests;
 /// </summary>
 public sealed class ClaudeAttachmentFrameTests
 {
+    [Fact]
+    public void Large_html_is_referenced_without_embedding_its_content()
+    {
+        var payload = Payload(@"C:\docs\large.html") with { Bytes = new byte[32_769] };
+        var content = Frame("review", payload).GetProperty("message").GetProperty("content");
+        Assert.Equal("text", content[1].GetProperty("type").GetString());
+        Assert.Contains("large.html", content[1].GetProperty("text").GetString());
+        Assert.True(content[1].GetRawText().Length < 1024);
+    }
+
+    [Fact]
+    public void Text_attachment_budget_is_shared_across_files()
+    {
+        var payload = Payload(@"C:\docs\page.html") with { Bytes = new byte[20_000] };
+        var content = Frame("review", payload, payload).GetProperty("message").GetProperty("content");
+        Assert.Equal("document", content[1].GetProperty("type").GetString());
+        Assert.Equal("text", content[2].GetProperty("type").GetString());
+    }
+
     private static JsonElement Frame(string text, params ClaudeAgentSession.AttachmentPayload[] payloads) =>
         JsonDocument.Parse(ClaudeAgentSession.SerializeFrame(
             ClaudeAgentSession.BuildUserMessageFrame(text, payloads))).RootElement;

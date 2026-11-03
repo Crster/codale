@@ -1157,7 +1157,7 @@
                         BorderBrush="{StaticResource KindSearchBrush}"
                         BorderThickness="1"
                         CornerRadius="4"
-                        ToolTipService.ToolTip="New topic: project context was retrieved for this subject alone"
+                        ToolTipService.ToolTip="New topic detected from the recent conversation"
                         Visibility="{x:Bind IsNewTopic, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                         <StackPanel Orientation="Horizontal" Spacing="4">
                             <FontIcon FontSize="9" Foreground="{StaticResource KindSearchBrush}" Glyph="&#xE710;" />

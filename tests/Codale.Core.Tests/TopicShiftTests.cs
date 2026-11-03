@@ -55,4 +55,29 @@ public sealed class TopicShiftTests
         Assert.Contains("garrison", SearchText.RetrievalTerms("tidy up @client/web/js/garrison_view.js"));
         Assert.True(SearchText.HasTopic("commit @server/game/garrison.go"));
     }
+
+    [Fact]
+    public void Agent_reply_supplies_the_subject_missing_from_the_user_prompt()
+    {
+        Assert.False(TopicShift.IsNewTopic("fix the oauth callback", ["investigate the failure"], Embedder,
+            "The login failure is in the oauth callback: it discards the redirect URI."));
+        Assert.True(TopicShift.IsNewTopic("the terminal flickers when resizing", ["investigate the failure"], Embedder,
+            "The login failure is in the oauth callback: it discards the redirect URI."));
+    }
+
+    [Theory]
+    [InlineData("fix login")]
+    [InlineData("next fix the login redirect after oauth")]
+    [InlineData("now fix the login redirect after oauth")]
+    public void Short_or_sequenced_requests_can_start_a_topic(string prompt)
+    {
+        Assert.True(TopicShift.IsNewTopic(prompt, ["where is the connector table"], Embedder));
+    }
+
+    [Fact]
+    public void Only_recent_user_topics_are_compared()
+    {
+        Assert.True(TopicShift.IsNewTopic("fix login", ["fix login", "connector table", "connector secret", "connector status"], Embedder));
+        Assert.False(TopicShift.IsNewTopic("fix login", [], Embedder, "working on terminal"));
+    }
 }

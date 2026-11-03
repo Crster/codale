@@ -76,6 +76,10 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
         Assert.False(TopicShift.IsNewTopic("also add an index to it", earlier, model));
         Assert.True(TopicShift.IsNewTopic("the terminal flickers when resizing the window", earlier, model));
         Assert.True(TopicShift.IsNewTopic("fix the login redirect after oauth", earlier, model));
+        Assert.False(TopicShift.IsNewTopic("fix the oauth callback", ["investigate the failure"], model,
+            "The login failure is in the oauth callback: it discards the redirect URI."));
+        Assert.True(TopicShift.IsNewTopic("the terminal flickers when resizing", ["investigate the failure"], model,
+            "The login failure is in the oauth callback: it discards the redirect URI."));
     }
 
     [Fact]

@@ -1467,7 +1467,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // Automatic mode reads the message on send; starting the reader while the user
         // types takes its few seconds of start-up off the wait. A busy turn counts too:
         // the next message is often typed while the agent works and sent once it is done.
-        if (IsAutomaticMode && value.Length > 0 && !value.StartsWith('/') && Router is { } router)
+        if (IsAutomaticMode && value.Length > 0 && !value.StartsWith('/') &&
+            MessageRouting.TryRouteLocally(value) is null && Router is { } router)
         {
             router.Prewarm(Features);
         }
