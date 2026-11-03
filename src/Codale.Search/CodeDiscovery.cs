@@ -19,6 +19,9 @@ public sealed record DiscoveredRange
 
 public sealed record DiscoveredFile
 {
+    /// <summary>Verified literal terms for this file; empty uses the result keywords.</summary>
+    public IReadOnlyList<string> Keywords { get; init; } = [];
+
     public string FilePath { get; init; } = "";
     public string RelativePath { get; init; } = "";
     public int MatchCount { get; init; }
@@ -150,6 +153,11 @@ internal static class CodeDiscovery
             {
                 Name = "keywords",
                 Description = "only if none are relevant: new comma separated identifiers to grep",
+            },
+            new ToolParameter
+            {
+                Name = "locations",
+                Description = "JSON array of precise answers: {fileName, path, startLine, endLine, keywords: [literal source terms]}. Paths are project-relative, lines are 1-based. May replace candidates with another file from the project file list.",
             },
         ],
     };
@@ -290,6 +298,14 @@ internal static class CodeDiscovery
         how this codebase names things as the candidates show it. Keep short queries or
         commands (like "run build") together as a unified complete thought or compound
         identifier, not separate loose words.
+
+        locations: for each answer return a JSON array with fileName, project-relative
+        path, startLine, endLine (1-based inclusive), and keywords (an array of exact
+        literal source terms to highlight). Choose the lines implementing the request,
+        not every mention. Use only paths from the supplied project files and line
+        numbers and keywords supported by the source shown. If a different project
+        file is needed, return its path with keywords and omit unknown line numbers;
+        the application will read and locate it. Never invent source text.
 
         Rules:
         - A file that only mentions, imports, tests or calls it in passing is not relevant.

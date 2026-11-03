@@ -1,4 +1,6 @@
 using Codale.Core.Helper;
+using Codale.Storage;
+using System.Text.Json;
 
 namespace Codale.Search.Tests;
 
@@ -159,6 +161,104 @@ public sealed class SourceExplorerTests : IDisposable
         $$$"""{"tool":"pick","arguments":{"relevant":"{{{relevant}}}","keywords":"{{{keywords}}}"}}""";
 
     private SourceExplorer Explorer(ISearchModel? model = null) => new(_index, model);
+
+    private static string Locations(object[] locations, string relevant = "") =>
+        JsonSerializer.Serialize(new { tool = "pick", arguments = new
+        {
+            relevant, locations = JsonSerializer.Serialize(locations),
+        }});
+
+    [Fact]
+    public async Task Enrichment_results_stream_before_review_and_skip_keyword_generation()
+    {
+        using var store = new FeatureStore(Path.Combine(_root, "knowledge.db"));
+        using var knowledge = new ProjectKnowledgeIndex(store);
+        await knowledge.RefreshAsync(_root);
+        var retrieved = knowledge.Search(_root, "retry backoff");
+        Assert.NotEmpty(retrieved);
+        var gate = new TaskCompletionSource();
+        var model = new ScriptedModel(Pick("1")) { Gate = gate };
+        var explorer = new SourceExplorer(_index, model) { Knowledge = knowledge, MaxRelated = 0 };
+        var progress = new TaskCompletionSource<DiscoveryResult>();
+        explorer.Progress += (_, result) => progress.TrySetResult(result);
+        var running = explorer.RunAsync("retry backoff");
+        var initial = await progress.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal(P(retrieved[0].Path), initial.Files[0].RelativePath);
+        Assert.False(initial.IsFinal);
+        gate.SetResult();
+        var final = await running;
+        Assert.True(final.Files[0].Confirmed);
+        Assert.Equal("pick", Assert.Single(model.Seen).Tool);
+    }
+
+    [Fact]
+    public async Task Precise_locations_can_replace_candidates_with_a_different_project_file()
+    {
+        var model = new ScriptedModel(Keywords("RetryPolicy"), Locations([new
+        {
+            fileName = "player.js", path = "web/player.js", startLine = 2, endLine = 3,
+            keywords = new[] { "velocityY", "inventedTerm" },
+        }]));
+        var result = await new SourceExplorer(_index, model) { MaxRelated = 0 }.RunAsync("retry policy");
+        var file = Assert.Single(result.Files);
+        Assert.Equal(P("web/player.js"), file.RelativePath);
+        Assert.True(file.Confirmed);
+        Assert.Equal(["velocityY"], file.Keywords);
+        Assert.Equal([3], Assert.Single(file.Ranges).MatchLines);
+        Assert.Contains("velocityY = -12", file.Ranges[0].Code);
+    }
+
+    [Theory]
+    [InlineData("../outside.cs", 1, 2, "RetryPolicy")]
+    [InlineData(".env", 1, 1, "hunter2marker")]
+    [InlineData("src/RetryPolicy.cs", 0, 2, "RetryPolicy")]
+    [InlineData("src/RetryPolicy.cs", 1, 99999, "RetryPolicy")]
+    [InlineData("src/RetryPolicy.cs", 1, 2, "inventedTerm")]
+    public async Task Invalid_locations_leave_local_results_available(string path, int start, int end, string word)
+    {
+        var model = new ScriptedModel(Keywords("RetryPolicy"), Locations([new
+        {
+            path, startLine = start, endLine = end, keywords = new[] { word },
+        }]));
+        var result = await new SourceExplorer(_index, model) { MaxRelated = 0, MaxRounds = 1 }.RunAsync("retry policy");
+        Assert.NotEmpty(result.Files);
+        Assert.All(result.Files, f => Assert.False(f.Confirmed));
+        Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains("outside") || f.RelativePath == ".env");
+    }
+
+    [Fact]
+    public async Task A_corrected_path_without_lines_is_located_by_literal_keywords()
+    {
+        var model = new ScriptedModel(Keywords("RetryPolicy"), Locations([new
+        {
+            fileName = "player.js", path = "web/player.js", keywords = new[] { "velocityY" },
+        }]));
+        var result = await new SourceExplorer(_index, model) { MaxRelated = 0 }.RunAsync("retry policy");
+        Assert.Equal([3], Assert.Single(Assert.Single(result.Files).Ranges).MatchLines);
+    }
+
+    [Fact]
+    public async Task Enrichment_survives_an_unavailable_background_provider()
+    {
+        using var store = new FeatureStore(Path.Combine(_root, "knowledge.db"));
+        using var knowledge = new ProjectKnowledgeIndex(store);
+        await knowledge.RefreshAsync(_root);
+        var model = new ScriptedModel { Throw = () => new HelperModelException("offline") };
+        var result = await new SourceExplorer(_index, model) { Knowledge = knowledge, MaxRelated = 0 }
+            .RunAsync("retry backoff");
+        Assert.True(result.IsFinal);
+        Assert.NotEmpty(result.Files);
+        Assert.Equal("pick", Assert.Single(model.Seen).Tool);
+    }
+
+    [Fact]
+    public async Task Malformed_locations_fall_back_to_candidate_picks()
+    {
+        var model = new ScriptedModel(Keywords("RetryPolicy"),
+            """{"tool":"pick","arguments":{"relevant":"1","locations":"not JSON"}}""");
+        var result = await new SourceExplorer(_index, model) { MaxRelated = 0 }.RunAsync("retry policy");
+        Assert.True(Assert.Single(result.Files).Confirmed);
+    }
 
     [Theory]
     [InlineData("file upload")]
@@ -638,7 +738,7 @@ public sealed class SourceExplorerTests : IDisposable
 
         // Files turned down in round one are not offered again.
         Assert.Contains("RetryPolicy.cs", model.Seen[1].Prompt);
-        Assert.DoesNotContain("RetryPolicy.cs", model.Seen[2].Prompt);
+        Assert.DoesNotContain("RetryPolicy.cs", model.Seen[2].Prompt.Split("Project files:")[0]);
     }
 
     [Fact]

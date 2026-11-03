@@ -32,6 +32,9 @@ public sealed class SearchRangeItem
 
     /// <summary>What this slice highlights in the editor: its matched lines, or the whole slice.</summary>
     public LineSpan Span { get; init; } = new(1, 1);
+
+    /// <summary>Exact matching rows, excluding the context between separated matches.</summary>
+    public IReadOnlyList<LineSpan> MatchSpans { get; init; } = [];
 }
 
 /// <summary>A result the editor should open, with the spans it should highlight - current one first.</summary>
@@ -63,13 +66,13 @@ public sealed class SearchFileItem
             {
                 if (ReferenceEquals(Ranges[i], at))
                 {
-                    current = i;
+                    current = Ranges.Take(i).Sum(r => r.MatchSpans.Count > 0 ? r.MatchSpans.Count : 1);
                     break;
                 }
             }
         }
 
-        return new(FilePath, Ranges.Select(r => r.Span).ToList(), current, Terms);
+        return new(FilePath, Ranges.SelectMany(r => r.MatchSpans.Count > 0 ? r.MatchSpans : [r.Span]).ToList(), current, Terms);
     }
 
     /// <summary>True when <paramref name="file"/> would build the very item this is.</summary>
@@ -85,7 +88,8 @@ public sealed class SearchFileItem
         {
             if (source.Ranges[i].StartLine != file.Ranges[i].StartLine ||
                 source.Ranges[i].EndLine != file.Ranges[i].EndLine ||
-                source.Ranges[i].Code != file.Ranges[i].Code)
+                source.Ranges[i].Code != file.Ranges[i].Code ||
+                !source.Ranges[i].MatchLines.SequenceEqual(file.Ranges[i].MatchLines))
             {
                 return false;
             }
@@ -114,6 +118,7 @@ public sealed class SearchFileItem
             Terms = terms,
             MatchLines = string.Join(",", r.MatchLines.Select(n => n - r.StartLine)),
             FilePath = file.FilePath,
+            MatchSpans = r.MatchLines.Select(n => new LineSpan(n, n)).ToList(),
 
             // The matched lines, not the context padding around them.
             Span = r.MatchLines.Count > 0
@@ -125,7 +130,7 @@ public sealed class SearchFileItem
 
 /// <summary>
 /// Code discovery, driven from the title bar box. Keywords search the source index
-/// directly; questions and descriptions also use the background-task model to pick
+/// directly; global searches also use the background-task model to pick
 /// the files that answer them and add the code those files use and are used by.
 /// <see cref="SourceExplorer"/> ranks the project's source index. The result is files and
 /// code only - no write-up. Provisional matches stream in first so the list fills while
@@ -196,10 +201,10 @@ public sealed partial class SearchViewModel : ObservableObject
 
         try
         {
-            // Keywords and references return direct matches immediately. Questions and
-            // sentence descriptions use the model to find the implementation behind them.
+            // Every global query gets immediate retrieval followed by background
+            // refinement. Explicit references stay exhaustive and use local matches.
             var naturalLanguage = !keywordOnly && SearchQueryIntent.IsNaturalLanguage(Query);
-            ISearchModel? model = _helper.IsAvailable && naturalLanguage ? new HelperSearchModel(_helper) : null;
+            ISearchModel? model = _helper.IsAvailable && !keywordOnly ? new HelperSearchModel(_helper) : null;
 
             Status = "Searching…";
 
@@ -215,12 +220,14 @@ public sealed partial class SearchViewModel : ObservableObject
             {
                 if (_inFlight == cts)
                 {
+                    if (!IsSearching || cts.IsCancellationRequested) return;
                     Show(result);
                     Status = result.Round == 0 ? "Searching…" : $"Refining · round {result.Round}…";
                 }
             });
 
             var final = await discovery.RunAsync(Query, cts.Token);
+            if (_inFlight != cts || cts.IsCancellationRequested) return;
             Show(final);
 
             var count = final.Files.Count;
@@ -231,15 +238,15 @@ public sealed partial class SearchViewModel : ObservableObject
                 _ => $"{count} files",
             }) +
                      $" · {clock.Elapsed.TotalSeconds:0.0}s" +
-                     (naturalLanguage && model is null ? " · local search" : "");
+                     (!keywordOnly && model is null ? " · local search" : "");
         }
         catch (OperationCanceledException)
         {
-            Status = "Stopped.";
+            if (_inFlight == cts) Status = "Stopped.";
         }
         catch (Exception ex)
         {
-            Status = $"Search failed: {ex.Message}";
+            if (_inFlight == cts) Status = $"Search failed: {ex.Message}";
         }
         finally
         {
@@ -286,12 +293,12 @@ public sealed partial class SearchViewModel : ObservableObject
     /// </summary>
     private void Show(DiscoveryResult result)
     {
-        var terms = string.Join("\n", result.Keywords);
         var current = Files.ToDictionary(item => item.FilePath, StringComparer.OrdinalIgnoreCase);
 
         var items = new List<SearchFileItem>(result.Files.Count);
         foreach (var file in result.Files)
         {
+            var terms = string.Join("\n", file.Keywords.Count > 0 ? file.Keywords : result.Keywords);
             items.Add(current.TryGetValue(file.FilePath, out var existing) && existing.IsSameAs(file, terms)
                 ? existing
                 : SearchFileItem.From(file, terms));

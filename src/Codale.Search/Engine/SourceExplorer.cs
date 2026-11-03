@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 using Codale.Core.Helper;
@@ -13,13 +14,13 @@ namespace Codale.Search;
 /// definitions it uses and its callers, not only the files that repeat a keyword.
 /// </summary>
 /// <remarks>
-/// An instant pass on the question's words is streamed straight away, then the
-/// background-task model's keywords (<see cref="CodeDiscovery"/>'s prompts) and its pick of
-/// the candidates - with the grep work done in memory: ranking is BM25 over identifier
+/// Context-enrichment retrieval streams first, with local ranking as a cold-index
+/// fallback. The background-task model reviews those files directly before trying
+/// keyword exploration (<see cref="CodeDiscovery"/>'s prompts). Ranking is BM25 over identifier
 /// tokens with boosts for file names, declarations and the model's path hints, and it
 /// covers the whole project in milliseconds instead of a ripgrep process per keyword.
 ///
-/// Reliability rules: the model only narrows, it never empties - a failed, slow or unsure
+/// Reliability rules: refinement never empties the results - a failed, slow or unsure
 /// model leaves the ranked result; a keyword missing from the code falls back to the
 /// tokens that start like it; and nothing outside the project or matching a secrets
 /// pattern is ever indexed, so it cannot reach the model's prompt.
@@ -90,43 +91,52 @@ public sealed class SourceExplorer
 
         _model?.Prewarm(CodeDiscovery.JudgeSystemPrompt, [CodeDiscovery.JudgeTool]);
 
-        // The model is the long pole, so it starts first; the ranked pass is on screen
-        // well before its keywords come back.
-        var keywordCall = _model is null
-            ? Task.FromResult<ToolCall?>(null)
-            : AskAsync(
-                CodeDiscovery.KeywordSystemPrompt,
-                CodeDiscovery.BuildKeywordPrompt(query, snapshot.AllFiles.Where(f => !CodeDiscovery.IsNoisePath(f)).ToList(), snapshot.TypesNamedApart()),
-                CodeDiscovery.KeywordsTool,
-                budget.Token);
-
         var question = Resolve(snapshot, questionTerms);
         var instant = Rank(snapshot, question, [], setup);
-        if (Knowledge is not null && UseSemanticSearch && SearchQueryIntent.IsNaturalLanguage(query))
+        var enriched = false;
+        if (Knowledge is not null && UseSemanticSearch)
         {
-            await SemanticModel.EnsureLoadedAsync().WaitAsync(ct).ConfigureAwait(false);
-            await Knowledge.RefreshAsync(_index.Root).WaitAsync(ct).ConfigureAwait(false);
+            // Search committed, hash-verified chunks just as context enrichment does.
+            // Search warms the index itself; cold model loading and full refreshes must
+            // never hold up the first visible results.
             var hybrid = await Task.Run(() => Knowledge.Search(_index.Root, query, maxFiles: MaxRankedResults), ct).ConfigureAwait(false);
-            var combined = new Dictionary<string, (Ranked File, double Score)>(StringComparer.OrdinalIgnoreCase);
-            for (var i = 0; i < instant.Count; i++)
-                combined[instant[i].File.RelativePath] = (instant[i], 1.0 / (60 + i + 1));
-            for (var i = 0; i < hybrid.Count; i++)
+            var retrieved = new List<Ranked>();
+            foreach (var chunk in hybrid)
             {
-                var chunk = hybrid[i];
                 if (snapshot.Find(chunk.Path) is not { } file) continue;
-                var existing = combined.GetValueOrDefault(chunk.Path);
-                var candidate = existing.File ?? new Ranked(file);
-
-                candidate.SemanticLine = chunk.StartLine;
-                combined[chunk.Path] = (candidate, existing.Score + 1.0 / (60 + i + 1));
+                retrieved.Add(new Ranked(file) { SemanticLine = chunk.StartLine });
             }
-            instant = combined.Values.OrderByDescending(c => c.Score).Select(c => c.File).ToList();
+            if (retrieved.Count > 0)
+            {
+                enriched = true;
+                instant = retrieved.Concat(instant.Where(c => retrieved.All(r => r.File != c.File))).ToList();
+            }
         }
         var provisional = Build(snapshot, instant.Take(_model is null ? MaxRankedResults : MaxProvisional).ToList(), question,
             confirmed: false, round: 0, isFinal: _model is null, setup);
         Progress?.Invoke(this, provisional);
 
-        var call = await keywordCall.ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+        if (_model is not null && enriched)
+        {
+            var review = await AskAsync(CodeDiscovery.JudgeSystemPrompt,
+                BuildJudgePrompt(query, questionTerms.Select(t => t.Text).ToList(), instant.Take(MaxCandidates).ToList(), question) + "\nProject files:\n" + CodeDiscovery.BuildFileList(snapshot.Files.Select(f => f.RelativePath).ToList()),
+                CodeDiscovery.JudgeTool, budget.Token).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            if (review is not null && RefineLocations(snapshot, review, round: 1) is { } located)
+                return located;
+            var picked = Pick(review, instant.Take(MaxCandidates).ToList());
+            if (picked.Count > 0)
+                return Build(snapshot, picked, question, confirmed: true, round: 1, isFinal: true, setup);
+            // An unavailable provider leaves the retrieved results usable.
+            if (review is null) return provisional with { IsFinal = true };
+        }
+
+        var call = _model is null ? null : await AskAsync(
+            CodeDiscovery.KeywordSystemPrompt,
+            CodeDiscovery.BuildKeywordPrompt(query, snapshot.AllFiles.Where(f => !CodeDiscovery.IsNoisePath(f)).ToList(), snapshot.TypesNamedApart()),
+            CodeDiscovery.KeywordsTool, budget.Token).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
         if (call is null)
         {
             return provisional with { IsFinal = true };
@@ -190,7 +200,7 @@ public sealed class SourceExplorer
 
             if (candidates.Count == 0)
             {
-                call = await AskAsync(CodeDiscovery.JudgeSystemPrompt, BuildJudgePrompt(query, fresh, candidates, terms),
+                call = await AskAsync(CodeDiscovery.JudgeSystemPrompt, BuildJudgePrompt(query, fresh, candidates, terms) + "\nProject files:\n" + CodeDiscovery.BuildFileList(snapshot.Files.Select(f => f.RelativePath).ToList()),
                     CodeDiscovery.JudgeTool, budget.Token).ConfigureAwait(false);
                 keywords = CodeDiscovery.SplitList(call?.GetString("keywords")).ToList();
                 continue;
@@ -203,20 +213,17 @@ public sealed class SourceExplorer
             latest = Build(snapshot, candidates.Take(MaxProvisional).ToList(), terms, confirmed: false, round, isFinal: false, setup);
             Progress?.Invoke(this, latest);
 
-            call = await AskAsync(CodeDiscovery.JudgeSystemPrompt, BuildJudgePrompt(query, fresh, candidates, terms),
+            call = await AskAsync(CodeDiscovery.JudgeSystemPrompt, BuildJudgePrompt(query, fresh, candidates, terms) + "\nProject files:\n" + CodeDiscovery.BuildFileList(snapshot.Files.Select(f => f.RelativePath).ToList()),
                 CodeDiscovery.JudgeTool, budget.Token).ConfigureAwait(false);
             if (call is null)
             {
                 break;
             }
 
-            var picked = Regex.Matches(call.GetString("relevant") ?? "", @"\d+")
-                .Select(m => int.TryParse(m.Value, out var n) ? n - 1 : -1)
-                .Where(i => i >= 0 && i < candidates.Count)
-                .Distinct()
-                .Take(MaxPicked)
-                .Select(i => candidates[i])
-                .ToList();
+            ct.ThrowIfCancellationRequested();
+            if (RefineLocations(snapshot, call, round) is { } located)
+                return located;
+            var picked = Pick(call, candidates);
 
             if (picked.Count > 0)
             {
@@ -238,6 +245,68 @@ public sealed class SourceExplorer
         return allTerms.Count == 0
             ? latest with { IsFinal = true }
             : Build(snapshot, best.Take(MaxUnconfirmed).ToList(), bestTerms, confirmed: false, latest.Round, isFinal: true, setup);
+    }
+
+    private static List<Ranked> Pick(ToolCall? call, IReadOnlyList<Ranked> candidates) =>
+        Regex.Matches(call?.GetString("relevant") ?? "", @"\d+")
+            .Select(m => int.TryParse(m.Value, out var n) ? n - 1 : -1)
+            .Where(i => i >= 0 && i < candidates.Count).Distinct().Take(MaxPicked)
+            .Select(i => candidates[i]).ToList();
+
+    /// <summary>Only real indexed paths and literal source matches can become model highlights.</summary>
+    private static DiscoveryResult? RefineLocations(SourceSnapshot snapshot, ToolCall call, int round)
+    {
+        var json = call.GetString("locations");
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Array) return null;
+            var files = new List<DiscoveredFile>();
+            foreach (var item in document.RootElement.EnumerateArray().Take(16))
+            {
+                if (item.ValueKind != JsonValueKind.Object ||
+                    !item.TryGetProperty("path", out var path) || path.ValueKind != JsonValueKind.String ||
+                    snapshot.Find(path.GetString()!) is not { } source) continue;
+                // A provider may answer after the user edits a file. Do not attach its
+                // old line numbers to changed text; leave the local fallback available.
+                string current;
+                try { current = File.ReadAllText(source.FullPath); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
+                if (current != source.ReadText()) continue;
+                var lines = SourceText.SplitLines(current);
+                if (lines.Length == 0 || files.Any(f => f.FilePath == source.FullPath)) continue;
+                var start = 1;
+                var end = lines.Length;
+                if (item.TryGetProperty("startLine", out var first) || item.TryGetProperty("endLine", out _))
+                {
+                    if (first.ValueKind != JsonValueKind.Number || !first.TryGetInt32(out start) ||
+                        !item.TryGetProperty("endLine", out var last) || last.ValueKind != JsonValueKind.Number ||
+                        !last.TryGetInt32(out end) || start < 1 || end < start || end > lines.Length) continue;
+                }
+                if (!item.TryGetProperty("keywords", out var words) || words.ValueKind != JsonValueKind.Array) continue;
+                var keywords = words.EnumerateArray().Where(w => w.ValueKind == JsonValueKind.String)
+                    .Select(w => w.GetString()!).Where(w => !string.IsNullOrWhiteSpace(w) && w.Length <= 160)
+                    .Distinct(StringComparer.OrdinalIgnoreCase).Take(10).ToList();
+                var matches = Enumerable.Range(start, end - start + 1)
+                    .Where(n => keywords.Any(k => lines[n - 1].Contains(k, StringComparison.OrdinalIgnoreCase))).ToList();
+                if (matches.Count == 0) continue;
+                keywords = keywords.Where(k => matches.Any(n => lines[n - 1].Contains(k, StringComparison.OrdinalIgnoreCase))).ToList();
+                var ranges = CodeDiscovery.Slice(lines, matches.ToDictionary(n => n, _ => 100));
+                files.Add(new DiscoveredFile
+                {
+                    FilePath = source.FullPath, RelativePath = source.RelativePath,
+                    Confirmed = true, Keywords = keywords, MatchCount = matches.Count, Ranges = ranges,
+                });
+                if (files.Count == MaxPicked) break;
+            }
+            return files.Count == 0 ? null : new DiscoveryResult
+            {
+                Files = files, Keywords = files.SelectMany(f => f.Keywords).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                Round = round, IsFinal = true,
+            };
+        }
+        catch (JsonException) { return null; }
     }
 
     /// <summary>One model call; a failure or timeout is "no answer", only the caller's own cancel propagates.</summary>
@@ -1378,6 +1447,10 @@ public sealed class SourceExplorer
             var shown = weights.Count > 0
                 ? weights.OrderByDescending(w => w.Value).ThenBy(w => w.Key).Take(linesPerCandidate).Select(w => w.Key).Order()
                 : file.Symbols.Take(linesPerCandidate).Select(s => s.Line);
+
+            if (candidates[i].SemanticLine is { } anchor)
+                shown = Enumerable.Range(Math.Max(1, anchor), Math.Max(0, Math.Min(linesPerCandidate, lines.Length - anchor + 1)))
+                    .Concat(shown).Distinct().Take(linesPerCandidate * 2).Order();
 
             foreach (var number in shown)
             {
