@@ -26,6 +26,23 @@ public sealed class ProjectKnowledgeTests : IDisposable
     private RetrievalResult Retrieve(string query, IReadOnlySet<string>? delivered = null, string? root = null) =>
         _index.Retrieve(root ?? Root, query, "", delivered ?? new HashSet<string>());
 
+    [Fact]
+    public async Task Agent_edits_teach_future_prompts_which_file_to_open()
+    {
+        Write("src/component-a.tsx", "export const Panel = () => null;");
+        Write("src/unrelated.tsx", "export const Other = () => null;");
+        await _index.RefreshAsync(Root);
+        Assert.Empty(_index.Search(Root, "projects owner picker"));
+
+        _store.RecordLearnedEdit("session-1", Root, "src/component-a.tsx", "Improve projects owner picker");
+        Assert.Equal("src/component-a.tsx", _index.Search(Root, "projects owner picker")[0].Path.Replace('\\', '/'));
+        Assert.Contains("src/component-a.tsx", Retrieve("projects owner picker").Text);
+        Assert.DoesNotContain(_index.Search(Root, "hiky permission"), c => c.Path.Replace('\\', '/') == "src/component-a.tsx");
+
+        File.Delete(Path.Combine(Root, "src/component-a.tsx"));
+        Assert.DoesNotContain(_index.Search(Root, "projects owner picker"), c => c.Path.Replace('\\', '/') == "src/component-a.tsx");
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

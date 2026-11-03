@@ -3717,6 +3717,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             RiskNote = mcpRisk is { } noted ? noted.Effect : ToolCallItem.IsShellName(approval.ToolName) ? shellAssessment.FormatRiskNote() : "",
             Questions = ApprovalRequestItem.ParseQuestions(approval.Input),
             Suggestions = approval.Suggestions
+                .Where(s => !string.Equals(s.Type, "addRules", StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(s.Type, "addRule", StringComparison.OrdinalIgnoreCase))
                 .Select(s => new SuggestionOption { RequestId = approval.RequestId, Suggestion = s })
                 .ToArray(),
         };

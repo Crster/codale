@@ -751,17 +751,17 @@
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
                                 <Button
-                                    Click="OnApprovalDeny"
-                                    Content="Deny"
-                                    Style="{StaticResource QuietButton}"
-                                    Tag="{x:Bind Approval, Mode=OneWay}"
-                                    ToolTipService.ToolTip="Deny (Esc)" />
-                                <Button
                                     Click="OnApprovalAllowTurn"
                                     Content="Allow for this turn"
                                     Style="{StaticResource QuietButton}"
                                     Tag="{x:Bind Approval, Mode=OneWay}"
                                     ToolTipService.ToolTip="Allow this and every other confirmation until the turn ends (Shift+Enter)" />
+                                <Button
+                                    Click="OnApprovalDeny"
+                                    Content="Deny"
+                                    Style="{StaticResource QuietButton}"
+                                    Tag="{x:Bind Approval, Mode=OneWay}"
+                                    ToolTipService.ToolTip="Deny (Esc)" />
                                 <Button
                                     Padding="16,5"
                                     Click="OnApprovalAllow"

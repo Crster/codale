@@ -30,6 +30,7 @@ public sealed partial class ChatViewModel
     private CancellationTokenSource? _briefing;
     private readonly HashSet<string> _deliveredContext = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SourceReference> _turnReferences = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _turnEditedPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly StringBuilder _turnFindings = new();
     private string? _retrievalId;
     private bool _needsResumeContext;
@@ -151,6 +152,7 @@ public sealed partial class ChatViewModel
         _featureRequest = null;
         _turnFindings.Clear();
         _turnReferences.Clear();
+        _turnEditedPaths.Clear();
         _deliveredContext.Clear();
         _retrievalId = null;
         _needsResumeContext = false;
@@ -219,8 +221,11 @@ public sealed partial class ChatViewModel
         }
         if (e is ToolCallCompleted done)
         {
-            if (done.FileChange is { } change) CaptureReference(change.FilePath);
-            foreach (var changed in done.FileChanges ?? []) CaptureReference(changed.FilePath);
+            if (!done.IsError)
+            {
+                if (done.FileChange is { } change) { CaptureReference(change.FilePath); _turnEditedPaths.Add(change.FilePath); }
+                foreach (var changed in done.FileChanges ?? []) { CaptureReference(changed.FilePath); _turnEditedPaths.Add(changed.FilePath); }
+            }
         }
         if (e is AssistantMessageCompleted { ParentToolUseId: null } reply && _turnFindings.Length < 6000)
         {
@@ -232,6 +237,8 @@ public sealed partial class ChatViewModel
             EndFeatureTurn(completed.Subtype);
             if (FeatureId is { } id)
             {
+                foreach (var path in _turnEditedPaths)
+                    features.RecordLearnedEdit(id, WorktreePath ?? _projectPath, path, _featureRequest ?? "");
                 foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
                     _turnFindings.ToString(), @"(?:[A-Za-z0-9_.-]+[/\\])+[A-Za-z0-9_.-]+")) CaptureReference(match.Value);
                 features.RecordFinding(id, CliId, WorktreePath ?? _projectPath,
@@ -240,6 +247,7 @@ public sealed partial class ChatViewModel
             }
             _turnFindings.Clear();
             _turnReferences.Clear();
+            _turnEditedPaths.Clear();
             return;
         }
         _featureLog?.Append(e);

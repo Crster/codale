@@ -780,11 +780,11 @@ public sealed partial class ChatTab : UserControl
                 var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, i);
                 if (child is Button b && b.Visibility == Visibility.Visible && b.IsEnabled)
                 {
-                    if (b.Tag is not ApprovalQuestionOption)
+                    if (b.Tag is not ApprovalQuestionOption and not SuggestionOption)
                     {
                         var text = b.Content as string;
                         if (text is not null &&
-                            (text.StartsWith("Allow", StringComparison.OrdinalIgnoreCase) ||
+                            (string.Equals(text, "Allow", StringComparison.OrdinalIgnoreCase) ||
                              text.StartsWith("Accept", StringComparison.OrdinalIgnoreCase) ||
                              string.Equals(text, "Submit", StringComparison.OrdinalIgnoreCase) ||
                              string.Equals(text, "Next", StringComparison.OrdinalIgnoreCase)))

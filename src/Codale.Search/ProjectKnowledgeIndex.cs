@@ -160,6 +160,22 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
         }
         if (!string.IsNullOrWhiteSpace(recent)) Fuse(store.SearchSourceTerms(recent, worktree, 20).Select(c => c.Id), 0.35);
 
+        // A completed edit is direct evidence that its file answered that turn's request. Reuse
+        // the association for a similar later request, even when the current source lacks its words.
+        var learned = store.SearchLearnedEdits(worktree, prompt)
+            .Select(hit => (hit.Path, Terms: SearchText.RetrievalTerms(hit.Prompt)))
+            .Where(hit =>
+            {
+                var overlap = terms.Count(t => hit.Terms.Contains(t));
+                return overlap >= (terms.Count <= 2 ? terms.Count : 2) && overlap * 2 >= terms.Count;
+            })
+            .GroupBy(hit => hit.Path, StringComparer.OrdinalIgnoreCase).Take(8);
+        foreach (var file in learned)
+        {
+            foreach (var chunk in store.SourceChunksForPath(worktree, file.Key))
+                scores[chunk.Id] = scores.GetValueOrDefault(chunk.Id) + 0.12;
+        }
+
         var chunks = store.SourceChunks(scores.Keys.ToList()).ToDictionary(c => c.Id);
         // A specific word such as "minimap" should outweigh generic matches for "game" or
         // "unit". Count candidate files, not overlapping chunks, so long files get no bonus.

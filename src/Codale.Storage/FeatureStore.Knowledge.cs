@@ -37,6 +37,12 @@ public sealed partial class FeatureStore
         CREATE TABLE IF NOT EXISTS delivered_context (
             provider_session_id TEXT NOT NULL, key TEXT NOT NULL, PRIMARY KEY(provider_session_id, key)
         );
+        CREATE TABLE IF NOT EXISTS learned_edits (
+            id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, worktree TEXT NOT NULL,
+            path TEXT NOT NULL, prompt TEXT NOT NULL,
+            UNIQUE(session_id, path, prompt)
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS learned_edits_fts USING fts5(edit_id UNINDEXED, tokens);
         """);
 
     public IReadOnlyList<string> DeliveredContext(string providerSessionId)
@@ -261,5 +267,35 @@ public sealed partial class FeatureStore
     {
         lock (_gate) Execute("INSERT OR REPLACE INTO feature_files VALUES ($s,$p,$at)",
             ("$s", sessionId), ("$p", relativePath), ("$at", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
+    }
+
+    /// <summary>Associate an actual agent edit with the user request active during that turn.</summary>
+    public void RecordLearnedEdit(string sessionId, string worktree, string path, string prompt)
+    {
+        if (SearchText.RetrievalTerms(prompt).Count == 0) return;
+        path = path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+        lock (_gate)
+        {
+            using var tx = _connection.BeginTransaction();
+            var id = Insert("INSERT OR IGNORE INTO learned_edits(session_id,worktree,path,prompt) VALUES ($s,$w,$p,$q) RETURNING id",
+                ("$s", sessionId), ("$w", worktree), ("$p", path), ("$q", prompt.Length > 500 ? prompt[..500] : prompt));
+            if (id > 0) Execute("INSERT INTO learned_edits_fts VALUES ($id,$t)", ("$id", id), ("$t", SearchText.ForIndex(prompt)));
+            tx.Commit();
+        }
+    }
+
+    public IReadOnlyList<(string Path, string Prompt)> SearchLearnedEdits(string worktree, string prompt)
+    {
+        if (SearchText.ToRetrievalQuery(prompt) is not { } match) return [];
+        lock (_gate) return Query("""
+            SELECT e.path,e.prompt FROM learned_edits_fts f JOIN learned_edits e ON e.id=f.edit_id
+            WHERE learned_edits_fts MATCH $q AND e.worktree=$w ORDER BY bm25(learned_edits_fts) LIMIT 80
+            """, r => (r.GetString(0), r.GetString(1)), ("$q", match), ("$w", worktree));
+    }
+
+    public IReadOnlyList<SourceChunk> SourceChunksForPath(string worktree, string path, int limit = 2)
+    {
+        lock (_gate) return Query("SELECT worktree,path,hash,start_line,text,id FROM source_chunks WHERE worktree=$w AND path=$p ORDER BY start_line LIMIT $n",
+            ReadChunk, ("$w", worktree), ("$p", path), ("$n", limit));
     }
 }

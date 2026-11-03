@@ -122,6 +122,8 @@ public sealed partial class FeatureStore : IDisposable
                 DELETE FROM features WHERE id = $id;
                 DELETE FROM knowledge_fts WHERE id IN (SELECT id FROM knowledge WHERE session_id = $id);
                 DELETE FROM knowledge WHERE session_id = $id;
+                DELETE FROM learned_edits_fts WHERE edit_id IN (SELECT id FROM learned_edits WHERE session_id = $id);
+                DELETE FROM learned_edits WHERE session_id = $id;
                 DELETE FROM retrievals WHERE session_id = $id;
                 DELETE FROM delivered_context WHERE provider_session_id IN (SELECT provider_session_id FROM provider_sessions WHERE session_id = $id);
                 DELETE FROM provider_sessions WHERE session_id = $id;

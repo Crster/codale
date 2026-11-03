@@ -197,6 +197,15 @@ public sealed class FeatureService : IDisposable
 
     public void RecordRetrieval(string retrievalId, string sessionId, RetrievalResult result) => _store.RecordRetrieval(retrievalId, sessionId, result);
     public void RecordExploration(string retrievalId) => _store.RecordExploration(retrievalId);
+    public void RecordLearnedEdit(string sessionId, string worktree, string path, string prompt)
+    {
+        if (string.IsNullOrWhiteSpace(prompt)) return;
+        var root = ProjectPaths.Normalize(worktree);
+        var full = Path.GetFullPath(path, root);
+        if (!ProjectPaths.IsInside(root, full)) return;
+        var relative = Path.GetRelativePath(root, full);
+        if (ProjectKnowledgeIndex.Eligible(relative)) _store.RecordLearnedEdit(sessionId, root, relative, prompt);
+    }
     public void RecordUsage(string retrievalId, int inputTokens, int outputTokens) => _store.RecordUsage(retrievalId, inputTokens, outputTokens);
 
     public void RecordFinding(string sessionId, string provider, string worktree, string text, IReadOnlyList<SourceReference> references)
