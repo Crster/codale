@@ -25,7 +25,7 @@ namespace Codale.Search;
 /// tokens that start like it; and nothing outside the project or matching a secrets
 /// pattern is ever indexed, so it cannot reach the model's prompt.
 /// </remarks>
-public sealed class SourceExplorer
+public sealed partial class SourceExplorer
 {
     public const int DefaultMaxRounds = 3;
 
@@ -123,11 +123,9 @@ public sealed class SourceExplorer
                 BuildJudgePrompt(query, questionTerms.Select(t => t.Text).ToList(), instant.Take(MaxCandidates).ToList(), question) + "\nProject files:\n" + CodeDiscovery.BuildFileList(snapshot.Files.Select(f => f.RelativePath).ToList()),
                 CodeDiscovery.JudgeTool, budget.Token).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
-            if (review is not null && RefineLocations(snapshot, review, round: 1) is { } located)
-                return located;
-            var picked = Pick(review, instant.Take(MaxCandidates).ToList());
-            if (picked.Count > 0)
-                return Build(snapshot, picked, question, confirmed: true, round: 1, isFinal: true, setup);
+            if (review is not null && await FinishSelectionAsync(snapshot, query, review,
+                    instant.Take(MaxCandidates).ToList(), question, round: 1, setup, budget.Token, ct).ConfigureAwait(false) is { } selected)
+                return selected;
             // An unavailable provider leaves the retrieved results usable.
             if (review is null) return provisional with { IsFinal = true };
         }
@@ -202,6 +200,10 @@ public sealed class SourceExplorer
             {
                 call = await AskAsync(CodeDiscovery.JudgeSystemPrompt, BuildJudgePrompt(query, fresh, candidates, terms) + "\nProject files:\n" + CodeDiscovery.BuildFileList(snapshot.Files.Select(f => f.RelativePath).ToList()),
                     CodeDiscovery.JudgeTool, budget.Token).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
+                if (call is not null && await FinishSelectionAsync(snapshot, query, call, candidates, terms, round, setup, budget.Token, ct)
+                        .ConfigureAwait(false) is { } corrected)
+                    return corrected;
                 keywords = CodeDiscovery.SplitList(call?.GetString("keywords")).ToList();
                 continue;
             }
@@ -221,14 +223,9 @@ public sealed class SourceExplorer
             }
 
             ct.ThrowIfCancellationRequested();
-            if (RefineLocations(snapshot, call, round) is { } located)
-                return located;
-            var picked = Pick(call, candidates);
-
-            if (picked.Count > 0)
-            {
-                return Build(snapshot, picked, terms, confirmed: true, round, isFinal: true, setup);
-            }
+            if (await FinishSelectionAsync(snapshot, query, call, candidates, terms, round, setup, budget.Token, ct)
+                    .ConfigureAwait(false) is { } selected)
+                return selected;
 
             // A miss is the round's own keywords missing, not the instant files being wrong.
             foreach (var candidate in found)
@@ -254,7 +251,8 @@ public sealed class SourceExplorer
             .Select(i => candidates[i]).ToList();
 
     /// <summary>Only real indexed paths and literal source matches can become model highlights.</summary>
-    private static DiscoveryResult? RefineLocations(SourceSnapshot snapshot, ToolCall call, int round)
+    private static DiscoveryResult? RefineLocations(SourceSnapshot snapshot, ToolCall call, int round,
+        IReadOnlyDictionary<string, HashSet<int>>? evidence = null)
     {
         var json = call.GetString("locations");
         if (string.IsNullOrWhiteSpace(json)) return null;
@@ -278,6 +276,8 @@ public sealed class SourceExplorer
                 if (lines.Length == 0 || files.Any(f => f.FilePath == source.FullPath)) continue;
                 var start = 1;
                 var end = lines.Length;
+                if (evidence is not null && (!evidence.ContainsKey(source.RelativePath) ||
+                    !item.TryGetProperty("startLine", out _) || !item.TryGetProperty("endLine", out _))) continue;
                 if (item.TryGetProperty("startLine", out var first) || item.TryGetProperty("endLine", out _))
                 {
                     if (first.ValueKind != JsonValueKind.Number || !first.TryGetInt32(out start) ||
@@ -290,7 +290,9 @@ public sealed class SourceExplorer
                     .Distinct(StringComparer.OrdinalIgnoreCase).Take(10).ToList();
                 var matches = Enumerable.Range(start, end - start + 1)
                     .Where(n => keywords.Any(k => lines[n - 1].Contains(k, StringComparison.OrdinalIgnoreCase))).ToList();
-                if (matches.Count == 0) continue;
+                if (matches.Count == 0 || (evidence is not null &&
+                    (end - start >= MaxRangeLines || Enumerable.Range(start, end - start + 1)
+                        .Any(n => !evidence[source.RelativePath].Contains(n))))) continue;
                 keywords = keywords.Where(k => matches.Any(n => lines[n - 1].Contains(k, StringComparison.OrdinalIgnoreCase))).ToList();
                 var ranges = CodeDiscovery.Slice(lines, matches.ToDictionary(n => n, _ => 100));
                 files.Add(new DiscoveredFile
@@ -1412,7 +1414,7 @@ public sealed class SourceExplorer
 
     private static string BuildJudgePrompt(string query, IReadOnlyList<string> keywords, IReadOnlyList<Ranked> candidates, IReadOnlyList<ResolvedTerm> terms)
     {
-        const int maxChars = 14_000;
+        const int maxChars = 24_000;
         const int linesPerCandidate = 6;
 
         var builder = new StringBuilder();
@@ -1452,6 +1454,11 @@ public sealed class SourceExplorer
                 shown = Enumerable.Range(Math.Max(1, anchor), Math.Max(0, Math.Min(linesPerCandidate, lines.Length - anchor + 1)))
                     .Concat(shown).Distinct().Take(linesPerCandidate * 2).Order();
 
+            // Keep surrounding assignments, markup attributes and imports visible;
+            // isolated keyword lines often show only a comment or a component use.
+            shown = shown.SelectMany(n => Enumerable.Range(Math.Max(1, n - 3),
+                    Math.Max(0, Math.Min(lines.Length, n + 5) - Math.Max(1, n - 3) + 1)))
+                .Distinct().Take(24).Order();
             foreach (var number in shown)
             {
                 if (number >= 1 && number <= lines.Length)

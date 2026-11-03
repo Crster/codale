@@ -168,6 +168,126 @@ public sealed class SourceExplorerTests : IDisposable
             relevant, locations = JsonSerializer.Serialize(locations),
         }});
 
+    private static string Locate(object[] locations, string paths = "") =>
+        JsonSerializer.Serialize(new { tool = "locate", arguments = new
+        {
+            locations = JsonSerializer.Serialize(locations), paths,
+        }});
+
+    [Fact]
+    public async Task Sidebar_logo_edit_follows_the_component_and_marks_the_asset_source()
+    {
+        Write("web/Sidebar.tsx", """
+            import { BrandBadge } from './BrandBadge';
+            // Sidebar logo, sidebar logo, sidebar logo: layout documentation only.
+            export function Sidebar() {
+                return <aside><BrandBadge /><nav>Projects</nav></aside>;
+            }
+            """);
+        Write("web/BrandBadge.tsx", """
+            export function BrandBadge() {
+                return <img
+                    className="brand-mark"
+                    src="/assets/company.svg"
+                    alt="Company" />;
+            }
+            """);
+        var model = new ScriptedModel(Keywords("Sidebar", "web/Sidebar.tsx"), Pick("1"),
+            Locate([], "web/BrandBadge.tsx"), Locate([new
+            {
+                path = "web/BrandBadge.tsx", startLine = 4, endLine = 4,
+                keywords = new[] { "/assets/company.svg" },
+            }]));
+        var result = await new SourceExplorer(_index, model) { MaxRelated = 0 }
+            .RunAsync("where to change side bar logo?");
+        var file = Assert.Single(result.Files);
+        Assert.Equal(P("web/BrandBadge.tsx"), file.RelativePath);
+        Assert.True(file.Confirmed);
+        Assert.Equal(["/assets/company.svg"], file.Keywords);
+        Assert.Equal([4], Assert.Single(file.Ranges).MatchLines);
+        Assert.Equal(["search", "pick", "locate", "locate"], model.Seen.Select(s => s.Tool));
+        Assert.Contains("import { BrandBadge }", model.Seen[2].Prompt);
+        Assert.Contains(model.Seen[3].Prompt.Split('\n'), l => l.StartsWith("4:") && l.Contains("src=\"/assets/company.svg\""));
+    }
+
+    [Fact]
+    public async Task Enriched_sidebar_file_is_read_before_confirming_the_image_attribute()
+    {
+        Write("web/Sidebar.xaml", """
+            <Grid x:Name="Sidebar">
+                <!-- Sidebar logo -->
+                <Image
+                    Width="20"
+                    Source="Assets/AppIcon.ico" />
+            </Grid>
+            """);
+        using var store = new FeatureStore(Path.Combine(_root, "knowledge.db"));
+        using var knowledge = new ProjectKnowledgeIndex(store);
+        await knowledge.RefreshAsync(_root);
+        var model = new ScriptedModel(Locations([new
+        {
+            path = "web/Sidebar.xaml", keywords = new[] { "Sidebar" },
+        }]), Locate([new
+        {
+            path = "web/Sidebar.xaml", startLine = 5, endLine = 5,
+            keywords = new[] { "Assets/AppIcon.ico" },
+        }]));
+        var result = await new SourceExplorer(_index, model) { Knowledge = knowledge, MaxRelated = 0 }
+            .RunAsync("where to change side bar logo?");
+        Assert.Equal([5], Assert.Single(Assert.Single(result.Files).Ranges).MatchLines);
+        Assert.Equal(["pick", "locate"], model.Seen.Select(s => s.Tool));
+        Assert.Contains("Source=", model.Seen[1].Prompt);
+    }
+
+    [Fact]
+    public async Task A_sparse_preview_location_is_read_again_before_confirming_an_edit_site()
+    {
+        Write("web/Sidebar.tsx", """
+            // Sidebar logo settings
+            export function Sidebar() {
+                return <aside><img src="/assets/company.svg" /></aside>;
+            }
+            """);
+        var model = new ScriptedModel(Keywords("Sidebar", "web/Sidebar.tsx"), Locations([new
+        {
+            path = "web/Sidebar.tsx", startLine = 1, endLine = 1, keywords = new[] { "Sidebar logo" },
+        }]), Locate([new
+        {
+            path = "web/Sidebar.tsx", startLine = 3, endLine = 3, keywords = new[] { "/assets/company.svg" },
+        }]));
+        var result = await new SourceExplorer(_index, model) { MaxRelated = 0 }
+            .RunAsync("where to change side bar logo?");
+        Assert.Equal([3], Assert.Single(Assert.Single(result.Files).Ranges).MatchLines);
+        Assert.Equal("locate", model.Seen.Last().Tool);
+    }
+
+    [Fact]
+    public async Task A_failed_edit_locator_keeps_unconfirmed_results_instead_of_confirming_keyword_rows()
+    {
+        var model = new ScriptedModel(Keywords("RetryPolicy"), Pick("1"));
+        var result = await new SourceExplorer(_index, model) { MaxRelated = 0, MaxRounds = 1 }
+            .RunAsync("where do I change retry backoff?");
+        Assert.NotEmpty(result.Files);
+        Assert.All(result.Files, f => Assert.False(f.Confirmed));
+        Assert.Equal("locate", model.Seen.Last().Tool);
+    }
+
+    [Fact]
+    public async Task An_edit_location_in_an_unread_file_must_be_inspected_before_it_can_be_confirmed()
+    {
+        Write("web/Sidebar.tsx", "export const Sidebar = () => <aside>BrandBadge</aside>;");
+        Write("web/BrandBadge.tsx", "export const BrandBadge = () => <img src='/assets/company.svg' />;");
+        var answer = new { path = "web/BrandBadge.tsx", startLine = 1, endLine = 1,
+            keywords = new[] { "/assets/company.svg" } };
+        var model = new ScriptedModel(Keywords("Sidebar", "web/Sidebar.tsx"), Pick("1"),
+            Locate([answer]), Locate([answer]));
+        var result = await new SourceExplorer(_index, model) { MaxRelated = 0 }
+            .RunAsync("where to change side bar logo?");
+        Assert.True(Assert.Single(result.Files).Confirmed);
+        Assert.DoesNotContain("1: export const BrandBadge", model.Seen[2].Prompt);
+        Assert.Contains("1: export const BrandBadge", model.Seen[3].Prompt);
+    }
+
     [Fact]
     public async Task Enrichment_results_stream_before_review_and_skip_keyword_generation()
     {

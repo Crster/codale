@@ -42,6 +42,12 @@ public static class SearchQueryIntent
             (SentenceStarts.Contains(words[0]) || words.Any(SentenceWords.Contains));
     }
 
+    /// <summary>Requests for the source to edit need a verified edit site, not a file-level pick.</summary>
+    public static bool WantsEditLocation(string query) => IsNaturalLanguage(query) &&
+        Regex.IsMatch(CodeDiscovery.WithoutQuoted(query),
+            @"\b(chang(?:e|ing)|edit(?:ing)?|replac(?:e|ing)|customi[sz](?:e|ing)|updat(?:e|ing)|modif(?:y|ying)|rename|adjust|configure)\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     /// <summary>Keep literal code words, including words that would be filler in a question.</summary>
     internal static IEnumerable<string> Keywords(string query) =>
         Regex.Matches(query, @"[\p{L}_][\p{L}\p{N}_]*", RegexOptions.CultureInvariant)

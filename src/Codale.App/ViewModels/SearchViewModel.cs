@@ -203,6 +203,7 @@ public sealed partial class SearchViewModel : ObservableObject
         {
             // Every global query gets immediate retrieval followed by background
             // refinement. Explicit references stay exhaustive and use local matches.
+            var wantsEditLocation = !keywordOnly && SearchQueryIntent.WantsEditLocation(Query);
             var naturalLanguage = !keywordOnly && SearchQueryIntent.IsNaturalLanguage(Query);
             ISearchModel? model = _helper.IsAvailable && !keywordOnly ? new HelperSearchModel(_helper) : null;
 
@@ -238,7 +239,9 @@ public sealed partial class SearchViewModel : ObservableObject
                 _ => $"{count} files",
             }) +
                      $" · {clock.Elapsed.TotalSeconds:0.0}s" +
-                     (!keywordOnly && model is null ? " · local search" : "");
+                     (!keywordOnly && model is null ? " · local search" : "") +
+                     (wantsEditLocation && count > 0 && !final.Files.Any(f => f.Confirmed)
+                         ? " · edit location not confirmed" : "");
         }
         catch (OperationCanceledException)
         {

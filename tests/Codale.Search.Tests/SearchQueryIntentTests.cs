@@ -3,6 +3,16 @@ namespace Codale.Search.Tests;
 public sealed class SearchQueryIntentTests
 {
     [Theory]
+    [InlineData("where to change side bar logo?", true)]
+    [InlineData("how can I replace the navigation brand image?", true)]
+    [InlineData("where do I configure retry limits?", true)]
+    [InlineData("where is RetryPolicy", false)]
+    [InlineData("change", false)]
+    [InlineData("src/ChangeLogo.tsx", false)]
+    public void Edit_questions_require_a_precise_source_location(string query, bool expected) =>
+        Assert.Equal(expected, SearchQueryIntent.WantsEditLocation(query));
+
+    [Theory]
     [InlineData("RetryPolicy", false)]
     [InlineData("RetryPolcy", false)]
     [InlineData("get", false)]
