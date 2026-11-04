@@ -4278,6 +4278,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         try
         {
             var context = retrieved is { Text.Length: > 0 } ? SessionBriefing.ContextBlock(retrieved.Text) : null;
+            if (!compact && _handoffContext is not null)
+            {
+                context = context is null ? TakeHandoffContext() : TakeHandoffContext() + "\n\n" + context;
+            }
 
             if (compact && await session.TryCompactAsync())
             {

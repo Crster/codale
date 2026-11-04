@@ -315,6 +315,7 @@ public sealed partial class ChatTab : UserControl
     private void OnScrollerViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
     {
         var wasFollowingView = _followViewPending;
+        if (!e.IsIntermediate) TraceScroll("view.changed", $"pending={_followViewPending} user={_userScrollPending} applying={_applyingFollow}");
         _scrollFollow.Observe(ChatScroller.VerticalOffset, ChatScroller.ExtentHeight, ChatScroller.ViewportHeight,
             _applyingFollow || _followViewPending || !(_userScrollPending || _pointerScrolling));
         ChatScroller.VerticalAnchorRatio = _scrollFollow.IsFollowing ? 1 : 0;
@@ -382,7 +383,10 @@ public sealed partial class ChatTab : UserControl
                 if (!_scrollFollow.IsFollowing) return;
                 _followedTail = tail;
             }
+            var beforeOffset = ChatScroller.VerticalOffset;
+            var beforeExtent = ChatScroller.ExtentHeight;
             var changed = ChatScroller.ChangeView(null, ChatScroller.ScrollableHeight, null, disableAnimation: true);
+            TraceScroll("follow.apply", $"changed={changed} tail={tail.GetType().Name} offset={beforeOffset:0.0} extent={beforeExtent:0.0} target={ChatScroller.ScrollableHeight:0.0}");
             if (!changed && ChatScroller.ScrollableHeight - ChatScroller.VerticalOffset <= 1) _followViewPending = false;
         }
         finally
@@ -487,11 +491,13 @@ public sealed partial class ChatTab : UserControl
         return false;
     }
 
-    private void TraceScroll(string reason)
+    private void TraceScroll(string reason, string? detail = null)
     {
-        if (DateTime.UtcNow - _lastScrollTrace < TimeSpan.FromSeconds(1)) return;
+        // Size/follow events are the evidence for the long-history jump, so only the noisy
+        // settled events are throttled.
+        if (detail is null && DateTime.UtcNow - _lastScrollTrace < TimeSpan.FromMilliseconds(100)) return;
         _lastScrollTrace = DateTime.UtcNow;
-        CrashLog.Debug("chat-scroll", $"event={reason} following={_scrollFollow.IsFollowing} attempts={_followAttempts} " +
+        CrashLog.Debug("chat-scroll", $"event={reason} {detail} following={_scrollFollow.IsFollowing} attempts={_followAttempts} " +
             $"items={_viewModel?.Items.Count ?? 0} offset={ChatScroller.VerticalOffset:0.0} extent={ChatScroller.ExtentHeight:0.0} " +
             $"viewport={ChatScroller.ViewportHeight:0.0} gap={ChatScroller.ScrollableHeight - ChatScroller.VerticalOffset:0.0}");
     }
@@ -500,6 +506,7 @@ public sealed partial class ChatTab : UserControl
     {
         if (((FrameworkElement)sender).Tag is FeatureBriefingItem briefing)
         {
+            TraceScroll("toggle.before", $"kind=briefing expanding={!briefing.IsExpanded}");
             briefing.IsExpanded = !briefing.IsExpanded;
         }
     }
@@ -508,6 +515,7 @@ public sealed partial class ChatTab : UserControl
     {
         if (((FrameworkElement)sender).Tag is ContextEnrichedItem context)
         {
+            TraceScroll("toggle.before", $"kind=context expanding={!context.IsExpanded}");
             context.IsExpanded = !context.IsExpanded;
         }
     }
@@ -516,6 +524,7 @@ public sealed partial class ChatTab : UserControl
     {
         if (((FrameworkElement)sender).Tag is HandoffBriefItem brief)
         {
+            TraceScroll("toggle.before", $"kind=brief expanding={!brief.IsExpanded}");
             brief.IsExpanded = !brief.IsExpanded;
         }
     }

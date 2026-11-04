@@ -1273,10 +1273,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             return null;
         }
 
-        var chat = FreshChat(Features.ProviderSession(feature.Id)?.Provider);
+        // A history is shared between CLIs: an empty chat already set to the other CLI takes it
+        // (starting fresh there with the transcript); otherwise it resumes under its own CLI.
+        var owner = Features.ProviderSession(feature.Id)?.Provider;
+        var wanted = !Chat.HasConversation && !Chat.IsConnected ? Chat.CliId : null;
+        var chat = FreshChat(wanted ?? owner);
         IsViewingHistory = false;
         HistoryTitle = null;
-        await chat.AttachFeatureAsync(feature);
+        await chat.AttachFeatureAsync(feature, wanted);
         ChatActivationRequested?.Invoke(this, chat);
         await Diff.RefreshAsync();
         return chat;

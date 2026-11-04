@@ -35,6 +35,7 @@ public sealed partial class ChatViewModel
     private readonly StringBuilder _turnFindings = new();
     private string? _retrievalId;
     private bool _needsResumeContext;
+    private string? _handoffContext;
     private bool SmartHistory => Features is not null;
 
     private bool IsSeparateWorktree(string? worktree)
@@ -52,14 +53,25 @@ public sealed partial class ChatViewModel
     }
 
     /// <summary>Only opening a history row resumes it. Prompts never select a different session.</summary>
-    public async Task<bool> AttachFeatureAsync(FeatureInfo feature)
+    public async Task<bool> AttachFeatureAsync(FeatureInfo feature, string? cliId = null)
     {
         if (Features is not { } features) return false;
         TraceMemory("chat.history.begin", $"targetFeature={feature.Id}");
         await DisposeSessionAsync();
         ResetForNewSession();
         var mapping = features.ProviderSession(feature.Id);
-        if (mapping is not null)
+        // A history is Codale's, not one CLI's: opened under the other CLI it cannot resume the
+        // native session, so that CLI starts fresh and its first prompt carries the transcript.
+        var handoff = mapping is not null && cliId is { Length: > 0 } && cliId != mapping.Provider;
+        if (handoff)
+        {
+            CliId = cliId!;
+            WorktreePath = IsSeparateWorktree(mapping!.Worktree) ? mapping.Worktree : null;
+            ResumeSessionId = null;
+            _needsResumeContext = true;
+            OnPropertyChanged(nameof(EndpointName));
+        }
+        else if (mapping is not null)
         {
             CliId = mapping.Provider;
             EndpointName = mapping.Endpoint;
@@ -71,6 +83,7 @@ public sealed partial class ChatViewModel
             foreach (var key in features.DeliveredContext(mapping.ProviderSessionId)) _deliveredContext.Add(key);
         }
         SetFeature(feature);
+        if (handoff) CaptureHandoff();
         Title = feature.Name;
         var events = _featureLog!.ReadTail(400, out var more);
         if (more) Add(new NoticeItem { Text = "Showing recent messages. Earlier messages are available in session history." });
@@ -160,8 +173,29 @@ public sealed partial class ChatViewModel
         PublishFeatureActivity(false);
     }
 
+    /// <summary>
+    /// The earlier conversation as a context block for the first prompt after a history moved to
+    /// another CLI; null once delivered or when nothing was handed over.
+    /// </summary>
+    private string? TakeHandoffContext()
+    {
+        var context = _handoffContext;
+        _handoffContext = null;
+        return context;
+    }
+
+    private void CaptureHandoff()
+    {
+        var (text, more) = FeatureHistoryText(60);
+        _handoffContext = text.Length == 0
+            ? null
+            : "This conversation was started in another coding agent and is continued here. " +
+              "Earlier transcript" + (more ? " (most recent part)" : "") + ":\n\n" + text;
+    }
+
     private void ClearFeature()
     {
+        _handoffContext = null;
         Features?.ClearChatActivity(_chatId);
         FeatureId = null;
         FeatureName = "";
