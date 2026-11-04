@@ -167,6 +167,8 @@ public sealed partial class ChatTab : UserControl
         ChatScroller.AddHandler(PointerReleasedEvent, new PointerEventHandler(OnTranscriptPointerReleased), true);
         ChatScroller.AddHandler(PointerCanceledEvent, new PointerEventHandler(OnTranscriptPointerReleased), true);
         ChatScroller.AddHandler(KeyDownEvent, new KeyEventHandler(OnTranscriptNavigationKey), true);
+        ChatScroller.DirectManipulationStarted += OnTranscriptManipulationStarted;
+        ChatScroller.DirectManipulationCompleted += OnTranscriptManipulationCompleted;
 
         // Only Esc presses nothing else claimed (a popup, a question card) reach this.
         KeyDown += OnChatKeyDown;
@@ -391,11 +393,39 @@ public sealed partial class ChatTab : UserControl
 
     private void OnTranscriptWheel(object sender, PointerRoutedEventArgs e)
     {
-        // ScrollViewer handles wheel events itself; still observe those for this scroller,
-        // but leave independently scrolling tool outputs alone.
-        if (!IsTranscriptScrollSource(e.OriginalSource) || e.GetCurrentPoint(ChatScroller).Properties.IsHorizontalMouseWheel) return;
+        // ScrollViewer handles wheel events itself; still observe those for this scroller.
+        // A nested viewer (tool output, code block) only keeps the wheel when it can still
+        // scroll that way; otherwise the wheel chains to the transcript and is the reader's.
+        var point = e.GetCurrentPoint(ChatScroller).Properties;
+        if (point.IsHorizontalMouseWheel || point.MouseWheelDelta == 0) return;
+        if (!WheelScrollsTranscript(e.OriginalSource, up: point.MouseWheelDelta > 0)) return;
         _userScrollPending = true;
-        if (e.GetCurrentPoint(ChatScroller).Properties.MouseWheelDelta > 0) PauseFollow();
+        if (point.MouseWheelDelta > 0) PauseFollow();
+    }
+
+    /// <summary>
+    /// Touch and precision-touchpad pans run through DirectManipulation and raise no
+    /// wheel or pointer events here, so the manipulation itself marks the reader.
+    /// </summary>
+    private void OnTranscriptManipulationStarted(object? sender, object e)
+    {
+        _pointerScrolling = true;
+        PauseFollow();
+    }
+
+    private void OnTranscriptManipulationCompleted(object? sender, object e) => ResumeAfterPointerScroll();
+
+    private bool WheelScrollsTranscript(object source, bool up)
+    {
+        for (var node = source as DependencyObject; node is UIElement; node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is not ScrollViewer viewer) continue;
+            if (ReferenceEquals(viewer, ChatScroller)) return true;
+            var canScroll = viewer.VerticalScrollMode != ScrollMode.Disabled && viewer.ScrollableHeight > 0.5 &&
+                (up ? viewer.VerticalOffset > 0.5 : viewer.ScrollableHeight - viewer.VerticalOffset > 0.5);
+            if (canScroll) return false;
+        }
+        return false;
     }
 
     private void OnTranscriptPointerPressed(object sender, PointerRoutedEventArgs e)
@@ -414,7 +444,9 @@ public sealed partial class ChatTab : UserControl
         }
     }
 
-    private void OnTranscriptPointerReleased(object sender, PointerRoutedEventArgs e)
+    private void OnTranscriptPointerReleased(object sender, PointerRoutedEventArgs e) => ResumeAfterPointerScroll();
+
+    private void ResumeAfterPointerScroll()
     {
         if (!_pointerScrolling) return;
         _pointerScrolling = false;

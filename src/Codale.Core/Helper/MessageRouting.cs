@@ -11,7 +11,7 @@ public enum RouteIntent
     /// <summary>A question: explain, change nothing.</summary>
     Ask,
 
-    /// <summary>Plan first: explicit planning, substantial work, new capabilities or unclear requirements.</summary>
+    /// <summary>Plan first: explicit planning, large cross-cutting work, or a request too vague to act on.</summary>
     Plan,
 
     /// <summary>A direct change: just do it.</summary>
@@ -55,18 +55,21 @@ public static partial class MessageRouting
 
     public const string SystemPrompt =
         "Classify new_message; call route exactly once. Do not answer it.\n" +
-        "plan (safe default): substantial or cross-cutting changes, migrations, rewrites, new features or capabilities, " +
-        "and unclear requests whose scope, desired behavior, constraints or acceptance criteria would have to be guessed. " +
-        "Use plan even when the user says implement/build for substantial work: let them clarify and correct the plan first. " +
-        "Examples: build authentication, add CSV export, redesign the dashboard, make the app better, plan and implement a migration.\n" +
-        "act: a small, well-specified fix or adjustment, routine tests/commands, or approval to execute an already discussed plan. " +
-        "Examples: rename Save to Apply, fix the login redirect, run tests, implement the approved plan. " +
-        "A clear approval or continuation is act; new scope added to an approval must be classified on its own.\n" +
+        "act (default): requests to change, fix, add, adjust, test or run something, bug reports, complaints about " +
+        "something specific (spacing, layout, a broken flow), approvals, answers to the agent's questions, continuation. " +
+        "A feature request that says what to add and where is act even when it adds new UI, a column, a toolbar or a field; " +
+        "screenshots, links and examples make a request clearer, not unclear. Polite questions like 'can you fix X?' are act. " +
+        "Examples: add a column flagging overdue milestones, this spacing is annoying can we redesign it, " +
+        "arrange the permissions by menu, rename Save to Apply, run tests, implement the approved plan.\n" +
+        "plan: only when (a) the user asks for a plan, proposal or design before implementation, " +
+        "(b) the work is large and cross-cutting: a new subsystem such as authentication or billing, a migration, " +
+        "or a rewrite or re-architecture spanning many files, or (c) the target or desired result cannot be identified at all " +
+        "('make it better'). Size, the word new, or a missing detail the agent can reasonably choose never means plan.\n" +
         "ask: explanation, investigation, review or comparison with no requested changes. " +
         "'Why is X slow? Fix it' is act. 'How do I fix X?' is ask. " +
         "An acknowledgment followed by a question ('yes, why is it broken?') is ask, not approval to edit. " +
         "Use last_agent_message only to resolve replies such as approvals or answers to questions. " +
-        "Never change sessions. When requirements are unclear choose plan, not implementation or invented requirements.\n" +
+        "Never change sessions. When uncertain choose act.\n" +
         PromptRules.DataOnly + "\n" +
         PromptRules.CallOnly;
 
@@ -124,7 +127,7 @@ public static partial class MessageRouting
 
         if (ExplicitPlan().IsMatch(Codale.Core.Agents.SessionTitles.StripFillers(text)))
             return new(message, RouteIntent.Plan, false);
-        if (IsChangeRequest(text) && IsBoundedChange(text)) return new(message, RouteIntent.Act, false);
+        if (IsChangeRequest(text)) return new(message, RouteIntent.Act, false);
         if (PureQuestion().IsMatch(Codale.Core.Agents.SessionTitles.StripFillers(text)))
             return new(message, RouteIntent.Ask, false);
 
@@ -133,23 +136,27 @@ public static partial class MessageRouting
 
     /// <summary>
     /// The decision when the model could not give one: the words as typed, a pure
-    /// question as ask, bounded work as act, and otherwise a plan to clarify first.
+    /// question as ask, and everything else as act. A slow or failed helper must not
+    /// turn ordinary requests into plans; only the local planning rules can.
     /// </summary>
     public static RouteDecision RouteWithoutModel(string message) =>
         TryRouteLocally(message) ?? new(message,
             IsPlanOnly(message) ? RouteIntent.Plan :
-            IsQuestion(message) && !IsChangeRequest(message) ? RouteIntent.Ask :
-            IsBoundedChange(message) ? RouteIntent.Act : RouteIntent.Plan, NewTopic: false);
+            IsQuestion(message) && !IsChangeRequest(message) ? RouteIntent.Ask : RouteIntent.Act, NewTopic: false);
 
+    /// <summary>
+    /// Plans that hold whatever the model says: an explicit plan request, large
+    /// cross-cutting work (rewrites, migrations, architecture, new subsystems such as
+    /// authentication or billing), or a request with no identifiable target. Ordinary
+    /// feature requests, UI complaints and redesigns of one screen are left to the model.
+    /// </summary>
     private static bool RequiresPlanning(string message)
     {
         if (IsPlanOnly(message)) return true;
         if (IsQuestion(message) && !IsChangeRequest(message)) return false;
         var text = Codale.Core.Agents.SessionTitles.StripFillers(message.Trim());
-        if (NewCapability().IsMatch(text)) return true;
-        if (SubstantialWork().IsMatch(text) && (!ApprovedImplementation().IsMatch(text) || AdditionalScope().IsMatch(text))) return true;
-        if (ApprovedImplementation().IsMatch(text) || RoutineWork().IsMatch(text)) return false;
-        return !IsBoundedChange(text) && (NewWorkRequest().IsMatch(text) || UnclearChange().IsMatch(text));
+        if (ApprovedImplementation().IsMatch(text) && !AdditionalScope().IsMatch(text)) return false;
+        return LargeSubsystem().IsMatch(text) || SubstantialWork().IsMatch(text) || VagueRequest().IsMatch(text);
     }
 
     private static bool IsBoundedChange(string message)
@@ -186,13 +193,16 @@ public static partial class MessageRouting
         };
 
         if (RequiresPlanning(original)) intent = RouteIntent.Plan;
+        // The model leans plan on anything that sounds like a feature; work the local
+        // rules recognise as bounded goes straight to implementation.
+        else if (intent == RouteIntent.Plan && !PlanWord().IsMatch(original) && IsBoundedChange(original)) intent = RouteIntent.Act;
         if (AcknowledgementPrefix().IsMatch(original.Trim()) &&
             IsQuestion(original) && !IsChangeRequest(original)) intent = RouteIntent.Ask;
 
         // A small model leans ask, and an ask turn refuses every edit, so ask has to be
         // earned: the message must read as a question and carry no change request. A
-        // statement or mixed request uses the conservative fallback; only bounded
-        // work and approvals proceed directly.
+        // statement ("the header is ugly"), a go-ahead or a question mixed with a
+        // request falls back to the local decision, which is act unless it must plan.
         if (intent == RouteIntent.Ask && (IsChangeRequest(original) || !IsQuestion(original)))
         {
             intent = RouteWithoutModel(original).Intent;
@@ -324,17 +334,14 @@ public static partial class MessageRouting
     [GeneratedRegex(@"\b(plan|proposal)\b", RegexOptions.IgnoreCase)]
     private static partial Regex PlanWord();
 
-    [GeneratedRegex(@"\b(refactor|rewrite|redesign|rearchitect|re-architect|rework|migrat\w*|overhaul|architecture|major changes?|large[- ]scale|across (?:all|multiple|every)|entire (?:app|application|system|project)|whole (?:app|application|system|project))\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(rewrite|rearchitect|re-architect|overhaul|migrat\w*|architecture|major changes?|large[- ]scale|across (?:all|multiple|every)|entire (?:app|application|system|project|codebase)|whole (?:app|application|system|project|codebase))\b", RegexOptions.IgnoreCase)]
     private static partial Regex SubstantialWork();
 
-    [GeneratedRegex(@"\bnew (?:feature|capability|workflow|system|module)\b|\b(?:add|build|create|implement|introduce|support)\s+(?:(?:a|an|the|complete|new)\s+)*(?:(?:csv|pdf|email|push)\s+)?(?:authentication|authorization|user accounts?|notifications?|export|import|dashboard|payment|billing|chat|search feature|dark theme|offline support)\b", RegexOptions.IgnoreCase)]
-    private static partial Regex NewCapability();
+    [GeneratedRegex(@"\bnew (?:subsystem|system|module|service)\b|\b(?:add|build|create|implement|introduce|support)\s+(?:(?:a|an|the|complete|full|new)\s+)*(?:features?\s+(?:for\s+)?)?(?:authentication|authorization|user accounts?|payments?|billing|subscriptions?|offline support|multi-?tenan\w*)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex LargeSubsystem();
 
-    [GeneratedRegex(@"^(?:add|create|build|implement|introduce|support|allow)\b", RegexOptions.IgnoreCase)]
-    private static partial Regex NewWorkRequest();
-
-    [GeneratedRegex(@"\b(unclear|not sure|figure out what|whatever you think|make it better|improve everything|ugly|nicer|more modern|more professional)\b|\b(?:design|look|feel)\b.*\b(?:better|more|different)\b", RegexOptions.IgnoreCase)]
-    private static partial Regex UnclearChange();
+    [GeneratedRegex(@"^(?:make (?:it|this|everything|the app) better|improve (?:it|this|everything|the app)|do whatever you think|whatever you think)[\s.!]*$|\b(?:not sure what|figure out what|requirements are unclear)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex VagueRequest();
 
     [GeneratedRegex(@"^(?:implement|execute|apply|carry out)\s+(?:(?:the|this|that|approved|agreed)\s+)*plan\b", RegexOptions.IgnoreCase)]
     private static partial Regex ApprovedImplementation();

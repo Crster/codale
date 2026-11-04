@@ -49,12 +49,12 @@ public sealed class MessageRoutingTests
     }
 
     [Fact]
-    public void An_unclear_design_change_the_model_calls_ask_is_sent_as_plan()
+    public void A_change_request_the_model_calls_ask_is_sent_as_act()
     {
         var decision = MessageRouting.Interpret(
             Call("ask", "yes"), "lets make the snake design more snake. not like a stitch balloon", canMoveTopic: true);
 
-        Assert.Equal(RouteIntent.Plan, decision.Intent);
+        Assert.Equal(RouteIntent.Act, decision.Intent);
     }
 
     [Theory]
@@ -71,16 +71,16 @@ public sealed class MessageRoutingTests
     }
 
     [Theory]
-    [InlineData("the file list has a dot before every name", RouteIntent.Plan)]
-    [InlineData("next issue is the retitle modal looks ugly", RouteIntent.Plan)]
-    [InlineData("yes go ahead", RouteIntent.Act)]
-    [InlineData("why is the panel slow? speed it up", RouteIntent.Plan)]
-    [InlineData("I want the center panel to fill the window", RouteIntent.Plan)]
-    public void A_statement_or_mixed_request_the_model_calls_ask_uses_safe_fallback(string original, RouteIntent expected)
+    [InlineData("the file list has a dot before every name")]
+    [InlineData("next issue is the retitle modal looks ugly")]
+    [InlineData("yes go ahead")]
+    [InlineData("why is the panel slow? speed it up")]
+    [InlineData("I want the center panel to fill the window")]
+    public void A_statement_or_mixed_request_the_model_calls_ask_is_sent_as_act(string original)
     {
         var decision = MessageRouting.Interpret(Call("ask", "yes"), original, canMoveTopic: true);
 
-        Assert.Equal(expected, decision.Intent);
+        Assert.Equal(RouteIntent.Act, decision.Intent);
     }
 
     [Theory]
@@ -122,11 +122,11 @@ public sealed class MessageRoutingTests
     }
 
     [Fact]
-    public void Without_a_model_questions_are_ask_and_unclear_or_new_work_plans_first()
+    public void Without_a_model_a_pure_question_is_ask_and_a_request_is_act()
     {
         Assert.Equal(RouteIntent.Ask, MessageRouting.Interpret(null, "how does the router decide?", true).Intent);
-        Assert.Equal(RouteIntent.Plan, MessageRouting.Interpret(null, "can you add a dark theme?", true).Intent);
-        Assert.Equal(RouteIntent.Plan, MessageRouting.RouteWithoutModel("the header is ugly").Intent);
+        Assert.Equal(RouteIntent.Act, MessageRouting.Interpret(null, "can you add a dark theme?", true).Intent);
+        Assert.Equal(RouteIntent.Act, MessageRouting.RouteWithoutModel("the header is ugly").Intent);
     }
 
     [Theory]
@@ -182,6 +182,7 @@ public sealed class MessageRoutingTests
 
     [Theory]
     [InlineData("fix the login redirect", RouteIntent.Act)]
+    [InlineData("fix login", RouteIntent.Act)]
     [InlineData("test it", RouteIntent.Act)]
     [InlineData("try again", RouteIntent.Act)]
     [InlineData("can you fix the login redirect?", RouteIntent.Act)]
@@ -207,7 +208,6 @@ public sealed class MessageRoutingTests
     [InlineData("yes, why is it broken?")]
     [InlineData("why is login broken, fix it")]
     [InlineData("how does it work? make it faster")]
-    [InlineData("fix login")]
     [InlineData("fix `plan()`")]
     [InlineData("explain this\nthen implement it")]
     public void Ambiguous_short_messages_still_use_the_helper(string message)
@@ -226,6 +226,9 @@ public sealed class MessageRoutingTests
         Assert.True(helper.Conversation!.Length < 1100);
     }
 
+    /// <summary>A request the local rules cannot settle, so it reaches the helper.</summary>
+    private const string Mixed = "the header is ugly";
+
     [Fact]
     public async Task Unavailable_failed_and_malformed_helpers_fall_back()
     {
@@ -233,9 +236,9 @@ public sealed class MessageRoutingTests
             new FakeHelper { Fail = true }, new FakeHelper(),
             new FakeHelper { Reply = new ToolCall("wrong_tool", JsonSerializer.SerializeToElement(new { intent = "plan" })) } })
         {
-            var decision = await MessageRouting.RouteAsync(helper, "improve caching strategy for repeated queries");
-            Assert.Equal(RouteIntent.Plan, decision.Intent);
-            Assert.Equal("improve caching strategy for repeated queries", decision.Text);
+            var decision = await MessageRouting.RouteAsync(helper, Mixed);
+            Assert.Equal(RouteIntent.Act, decision.Intent);
+            Assert.Equal(Mixed, decision.Text);
         }
     }
 
@@ -243,8 +246,8 @@ public sealed class MessageRoutingTests
     public async Task A_helper_ignoring_cancellation_cannot_hold_up_the_message()
     {
         var helper = new FakeHelper { Hang = true };
-        var task = MessageRouting.RouteAsync(helper, "improve caching strategy for repeated queries", timeout: TimeSpan.FromMilliseconds(30));
-        Assert.Equal(RouteIntent.Plan, (await task.WaitAsync(TimeSpan.FromSeconds(2))).Intent);
+        var task = MessageRouting.RouteAsync(helper, Mixed, timeout: TimeSpan.FromMilliseconds(30));
+        Assert.Equal(RouteIntent.Act, (await task.WaitAsync(TimeSpan.FromSeconds(2))).Intent);
     }
 
     [Fact]
@@ -252,7 +255,7 @@ public sealed class MessageRoutingTests
     {
         using var cts = new CancellationTokenSource();
         var helper = new FakeHelper { Hang = true };
-        var task = MessageRouting.RouteAsync(helper, "improve caching strategy for repeated queries", ct: cts.Token);
+        var task = MessageRouting.RouteAsync(helper, Mixed, ct: cts.Token);
         cts.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => MessageRouting.RouteAsync(helper, "yes", ct: cts.Token));
