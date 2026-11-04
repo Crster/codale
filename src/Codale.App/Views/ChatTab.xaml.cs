@@ -330,7 +330,8 @@ public sealed partial class ChatTab : UserControl
         // renders. Snapping here means no frame shows the new row below the fold; waiting for the
         // follow timer let one frame render at the old offset and then jump.
         _followAttempts = 0;
-        if (e.NewSize.Height > e.PreviousSize.Height && !_applyingFollow && !_followTimer.IsRunning) FollowTranscriptEnd();
+        // Shrinking (a collapsed reply) moves the end too: the clamped offset can land short of it.
+        if (e.NewSize.Height != e.PreviousSize.Height && !_applyingFollow && !_followTimer.IsRunning) FollowTranscriptEnd();
         else ScheduleFollow();
     }
 
