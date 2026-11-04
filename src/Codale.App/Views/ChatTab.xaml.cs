@@ -324,7 +324,16 @@ public sealed partial class ChatTab : UserControl
         if (!_pointerScrolling) ScheduleFollow();
     }
 
-    private void OnTranscriptSizeChanged(object sender, SizeChangedEventArgs e) => RequestFollow();
+    private void OnTranscriptSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        // SizeChanged runs after the layout pass that grew the transcript but before that frame
+        // renders. Snapping here means no frame shows the new row below the fold; waiting for the
+        // follow timer let one frame render at the old offset and then jump.
+        _followAttempts = 0;
+        // Shrinking (a collapsed reply) moves the end too: the clamped offset can land short of it.
+        if (e.NewSize.Height != e.PreviousSize.Height && !_applyingFollow && !_followTimer.IsRunning) FollowTranscriptEnd();
+        else ScheduleFollow();
+    }
 
     private void OnTranscriptItemsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
     {
@@ -365,10 +374,12 @@ public sealed partial class ChatTab : UserControl
             if (!ReferenceEquals(tail, _followedTail))
             {
                 // A virtual extent is an estimate. Realize the actual last row before targeting its end.
+                // Only ChangeView moves the view: a second, bring-into-view request aligned to the
+                // row (not the end, which includes the transcript margin) and the two settled in
+                // turn, so every new entry landed twice.
                 var element = Transcript.GetOrCreateElement(_viewModel.Items.Count - 1);
                 element.UpdateLayout();
                 if (!_scrollFollow.IsFollowing) return;
-                element.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false, VerticalAlignmentRatio = 1 });
                 _followedTail = tail;
             }
             var changed = ChatScroller.ChangeView(null, ChatScroller.ScrollableHeight, null, disableAnimation: true);
