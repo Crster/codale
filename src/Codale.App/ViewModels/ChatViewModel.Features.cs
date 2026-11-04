@@ -3,6 +3,7 @@ using Codale.Agents.History;
 using Codale.App.Services;
 using Codale.Core.Agents;
 using Codale.Core.Features;
+using Codale.Core.Projects;
 using Codale.Search;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -36,6 +37,20 @@ public sealed partial class ChatViewModel
     private bool _needsResumeContext;
     private bool SmartHistory => Features is not null;
 
+    private bool IsSeparateWorktree(string? worktree)
+    {
+        if (string.IsNullOrWhiteSpace(worktree) || !Directory.Exists(worktree)) return false;
+        try
+        {
+            return !string.Equals(ProjectPaths.Normalize(worktree), ProjectPaths.Normalize(_projectPath),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Only opening a history row resumes it. Prompts never select a different session.</summary>
     public async Task<bool> AttachFeatureAsync(FeatureInfo feature)
     {
@@ -48,7 +63,9 @@ public sealed partial class ChatViewModel
         {
             CliId = mapping.Provider;
             EndpointName = mapping.Endpoint;
-            WorktreePath = mapping.Worktree;
+            // The mapping always stores a root (the project itself when not isolated); only a
+            // separate, still-existing directory means this history ran in an isolated worktree.
+            WorktreePath = IsSeparateWorktree(mapping.Worktree) ? mapping.Worktree : null;
             ResumeSessionId = mapping.ProviderSessionId;
             OnPropertyChanged(nameof(EndpointName));
             foreach (var key in features.DeliveredContext(mapping.ProviderSessionId)) _deliveredContext.Add(key);
