@@ -3623,20 +3623,28 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // A shell command that trips no risk rule runs without asking; one that does is shown with
         // why, so the reader decides it knowing what it touches.
         var shellAssessment = ShellApprovalAssessment(approval, out var shellCommand, out var shellHint);
-        // A request to escape Codex's planning sandbox must never enable writes.
-        // Normal inspection commands already run inside its read-only sandbox.
-        if (IsCodexSession && PermissionMode == "plan" &&
-            approval.ToolName is "Edit" or "Write" or "MultiEdit" or "NotebookEdit" or "Bash" or "Permissions")
+        // Windows may request approval even for reads in Codex's planning sandbox.
+        // Risk "Safe" is insufficient here: it also includes builds and unknown programs.
+        var requiresPlanApproval = IsCodexSession && PermissionMode == "plan" &&
+            approval.ToolName is "Edit" or "Write" or "MultiEdit" or "NotebookEdit" or "Bash" or "Permissions";
+        if (requiresPlanApproval)
         {
-            if (_session is { } planning)
+            if (approval.ToolName == "Bash" && PlanningShellPolicy.AllowsInspection(shellCommand))
             {
-                await planning.RespondToApprovalAsync(approval.RequestId,
-                    ApprovalDecision.Deny("Plan mode permits inspection only. Present the plan for approval before making changes."));
+                CrashLog.Trace($"Plan mode: allowed inspection {approval.ToolName}");
+                if (_session is { } planning)
+                {
+                    await planning.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
+                }
+                return;
             }
-            return;
+
+            // An unrecognized command may still be a valid inspection. Keep the turn
+            // waiting on the normal approval card so the reader can decide.
+            CrashLog.Trace($"Plan mode: requesting approval for {approval.ToolName}");
         }
 
-        if (shellAssessment.Risk == ShellRisk.Safe && AppSettings.AutoApproveSafeShell)
+        if (!requiresPlanApproval && shellAssessment.Risk == ShellRisk.Safe && AppSettings.AutoApproveSafeShell)
         {
             CrashLog.Trace($"{ModeDisplay(PermissionMode)} mode: allowed safe {approval.ToolName} command unasked");
 
@@ -3671,7 +3679,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // protected paths even under bypassPermissions, and those go through here. So does everything
         // after "Allow for this turn". Questions and plans are not confirmations - they need the reader's
         // answer - so they are still shown.
-        if ((IsFullMode || _allowRestOfTurn) && !NeedsReaderAnswer(approval.ToolName))
+        if (!requiresPlanApproval && (IsFullMode || _allowRestOfTurn) && !NeedsReaderAnswer(approval.ToolName))
         {
             CrashLog.Trace($"{(IsFullMode ? "Full mode" : "Allowed for this turn")}: allowed {approval.ToolName} unasked");
 
