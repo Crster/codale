@@ -65,6 +65,15 @@ public sealed record UserTurn(string Text)
 
     private const string AskMarker = "[Ask mode] ";
 
+    /// <summary>Planning exposes missing decisions for user correction before implementation.</summary>
+    public const string PlanInstruction =
+        "[Plan mode] Plan first; do not implement changes to application files. Inspect the relevant code, " +
+        "identify missing requirements and ask focused questions about material scope, behavior or design decisions. " +
+        "Do not invent requirements or silently fill gaps. Clearly distinguish confirmed requirements, open questions " +
+        "and proposed assumptions. Present a concrete plan the user can correct, and wait for their approval before implementation.\n\n";
+
+    private const string PlanMarker = "[Plan mode] ";
+
     /// <summary>
     /// A feature's briefing (<see cref="SessionBriefing.ContextBlock"/>), carried on a session's
     /// first turn only. Hidden from the transcript on replay, like the ask-mode prefix.
@@ -72,7 +81,7 @@ public sealed record UserTurn(string Text)
     public string? ContextPrefix { get; init; }
 
     /// <summary>The text as sent to the provider: the fork briefing and ask-mode prefix folded in when set.</summary>
-    public string ProviderText => (ContextPrefix ?? "") + (AskOnly ? AskInstruction + Text : Text);
+    public string ProviderText => (ContextPrefix ?? "") + (AskOnly ? AskInstruction + Text : PlanOnly ? PlanInstruction + Text : Text);
 
     /// <summary>
     /// The user's own words from a recorded prompt: any ask-mode prefix removed. Matched
@@ -82,7 +91,7 @@ public sealed record UserTurn(string Text)
     public static string StripHostInstructions(string text)
     {
         text = SessionBriefing.StripContext(text);
-        if (!text.StartsWith(AskMarker, StringComparison.Ordinal))
+        if (!text.StartsWith(AskMarker, StringComparison.Ordinal) && !text.StartsWith(PlanMarker, StringComparison.Ordinal))
         {
             return text;
         }

@@ -101,26 +101,30 @@ public sealed partial class ChatViewModel
     }
 
     /// <summary>
-    /// Puts the session into plan mode for the next turn: high effort first - live
+    /// Puts the session into plan mode for the next turn: Lite becomes Flash; other
+    /// tiers retain their high-effort planning override. The effort switches live
     /// when the CLI can switch mid-session, restart-and-resume otherwise - then the
-    /// permission-mode switch. When the switch is refused the plan is phrased as an
-    /// instruction on the turn itself.
+    /// permission-mode switch. A refused switch leaves the request in the composer.
     /// </summary>
     private async Task<bool> EnterPlanModeAsync()
     {
-        // Planning twice in a row keeps the first pick: the second would save "high".
+        // Planning twice in a row keeps the original tier and restoration effort.
         if (!_planEffortRaised)
         {
+            _planPromotedFromLite = CurrentTier == "lite";
             _planRestoreEffort = RequestedEffort;
             _planEffortRaised = true;
         }
 
-        RequestedEffort = "high";
+        // Lite and Flash share the fast model; their difference is low vs medium effort.
+        var planEffort = _planPromotedFromLite ? TierConfig("flash").Effort : "high";
+        RequestedEffort = planEffort;
+        if (_planPromotedFromLite) CrashLog.Trace("Temporary planning tier: Lite -> Flash");
 
         // Mid-turn there is nothing to restart without killing the running turn: the
         // request still goes out in plan mode, and the effort lands on the next turn.
-        if (!IsBusy && !string.Equals(_liveEffort, "high", StringComparison.OrdinalIgnoreCase) &&
-            !await TryApplyModelEffortLiveAsync(RequestedModel, "high"))
+        if (!IsBusy && !string.Equals(_liveEffort, planEffort, StringComparison.OrdinalIgnoreCase) &&
+            !await TryApplyModelEffortLiveAsync(RequestedModel, planEffort))
         {
             await RestartWithCurrentConfigAsync();
         }
@@ -128,17 +132,37 @@ public sealed partial class ChatViewModel
         var session = _session;
         if (session is null || !IsConnected)
         {
+            RestorePlanEffort();
             return false;
         }
 
         _planSession = session;
         _planRestoreMode = PermissionMode is { Length: > 0 } mode ? mode : DefaultMode;
 
-        if (await session.TrySetPermissionModeAsync("plan"))
+        bool entered;
+        try
         {
-            PermissionMode = "plan";
+            entered = await session.TrySetPermissionModeAsync("plan");
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Error("planning", "Could not enter planning mode", ex);
+            entered = false;
+        }
+        if (!entered)
+        {
+            _planSession = null;
+            _planRestoreMode = null;
+            RestorePlanEffort();
+            ComposerNotice = new NoticeItem
+            {
+                Text = "Could not enter planning mode. Your request is still in the composer; reconnect and try again.",
+                Severity = NoticeSeverity.Warning,
+            };
+            return false;
         }
 
+        PermissionMode = "plan";
         return true;
     }
 
@@ -172,7 +196,7 @@ public sealed partial class ChatViewModel
         return true;
     }
 
-    /// <summary>Planning is done: puts the effort Ctrl+Enter raised back to what it was.</summary>
+    /// <summary>Planning is done: restores the original tier's effort without changing saved defaults.</summary>
     private void RestorePlanEffort()
     {
         if (!_planEffortRaised)
@@ -181,6 +205,8 @@ public sealed partial class ChatViewModel
         }
 
         var effort = _planRestoreEffort;
+        if (_planPromotedFromLite) CrashLog.Trace("Temporary planning tier restored: Flash -> Lite");
+        _planPromotedFromLite = false;
         _planEffortRaised = false;
         _planRestoreEffort = null;
         RequestedEffort = effort;

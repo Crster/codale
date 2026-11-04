@@ -49,12 +49,12 @@ public sealed class MessageRoutingTests
     }
 
     [Fact]
-    public void A_change_request_the_model_calls_ask_is_sent_as_act()
+    public void An_unclear_design_change_the_model_calls_ask_is_sent_as_plan()
     {
         var decision = MessageRouting.Interpret(
             Call("ask", "yes"), "lets make the snake design more snake. not like a stitch balloon", canMoveTopic: true);
 
-        Assert.Equal(RouteIntent.Act, decision.Intent);
+        Assert.Equal(RouteIntent.Plan, decision.Intent);
     }
 
     [Theory]
@@ -71,16 +71,16 @@ public sealed class MessageRoutingTests
     }
 
     [Theory]
-    [InlineData("the file list has a dot before every name")]
-    [InlineData("next issue is the retitle modal looks ugly")]
-    [InlineData("yes go ahead")]
-    [InlineData("why is the panel slow? speed it up")]
-    [InlineData("I want the center panel to fill the window")]
-    public void A_statement_or_mixed_request_the_model_calls_ask_is_sent_as_act(string original)
+    [InlineData("the file list has a dot before every name", RouteIntent.Plan)]
+    [InlineData("next issue is the retitle modal looks ugly", RouteIntent.Plan)]
+    [InlineData("yes go ahead", RouteIntent.Act)]
+    [InlineData("why is the panel slow? speed it up", RouteIntent.Plan)]
+    [InlineData("I want the center panel to fill the window", RouteIntent.Plan)]
+    public void A_statement_or_mixed_request_the_model_calls_ask_uses_safe_fallback(string original, RouteIntent expected)
     {
         var decision = MessageRouting.Interpret(Call("ask", "yes"), original, canMoveTopic: true);
 
-        Assert.Equal(RouteIntent.Act, decision.Intent);
+        Assert.Equal(expected, decision.Intent);
     }
 
     [Theory]
@@ -115,7 +115,6 @@ public sealed class MessageRoutingTests
     }
 
     [Theory]
-    [InlineData("ok now add a dark theme to the settings page and wire it to the toggle")]
     [InlineData("why does the terminal flicker, and can you fix the rendering?")]
     public void Mixed_requests_go_to_the_model(string message)
     {
@@ -123,11 +122,11 @@ public sealed class MessageRoutingTests
     }
 
     [Fact]
-    public void Without_a_model_a_pure_question_is_ask_and_a_request_is_act()
+    public void Without_a_model_questions_are_ask_and_unclear_or_new_work_plans_first()
     {
         Assert.Equal(RouteIntent.Ask, MessageRouting.Interpret(null, "how does the router decide?", true).Intent);
-        Assert.Equal(RouteIntent.Act, MessageRouting.Interpret(null, "can you add a dark theme?", true).Intent);
-        Assert.Equal(RouteIntent.Act, MessageRouting.RouteWithoutModel("the header is ugly").Intent);
+        Assert.Equal(RouteIntent.Plan, MessageRouting.Interpret(null, "can you add a dark theme?", true).Intent);
+        Assert.Equal(RouteIntent.Plan, MessageRouting.RouteWithoutModel("the header is ugly").Intent);
     }
 
     [Theory]
@@ -182,7 +181,7 @@ public sealed class MessageRoutingTests
     }
 
     [Theory]
-    [InlineData("fix login", RouteIntent.Act)]
+    [InlineData("fix the login redirect", RouteIntent.Act)]
     [InlineData("test it", RouteIntent.Act)]
     [InlineData("try again", RouteIntent.Act)]
     [InlineData("can you fix the login redirect?", RouteIntent.Act)]
@@ -206,11 +205,9 @@ public sealed class MessageRoutingTests
 
     [Theory]
     [InlineData("yes, why is it broken?")]
-    [InlineData("plan and implement the migration")]
-    [InlineData("fix the router but do not edit yet; propose a plan first")]
     [InlineData("why is login broken, fix it")]
     [InlineData("how does it work? make it faster")]
-    [InlineData("the header is ugly")]
+    [InlineData("fix login")]
     [InlineData("fix `plan()`")]
     [InlineData("explain this\nthen implement it")]
     public void Ambiguous_short_messages_still_use_the_helper(string message)
@@ -222,7 +219,7 @@ public sealed class MessageRoutingTests
     public async Task Ambiguous_message_uses_one_call_with_bounded_agent_context()
     {
         var helper = new FakeHelper { Reply = Call("plan", "yes") };
-        var decision = await MessageRouting.RouteAsync(helper, "propose the architecture before editing", new string('x', 5000));
+        var decision = await MessageRouting.RouteAsync(helper, "evaluate caching behavior before responding", new string('x', 5000));
         Assert.Equal(1, helper.Calls);
         Assert.Equal(RouteIntent.Plan, decision.Intent);
         Assert.Contains("last_agent_message", helper.Conversation);
@@ -236,9 +233,9 @@ public sealed class MessageRoutingTests
             new FakeHelper { Fail = true }, new FakeHelper(),
             new FakeHelper { Reply = new ToolCall("wrong_tool", JsonSerializer.SerializeToElement(new { intent = "plan" })) } })
         {
-            var decision = await MessageRouting.RouteAsync(helper, "the header is ugly");
-            Assert.Equal(RouteIntent.Act, decision.Intent);
-            Assert.Equal("the header is ugly", decision.Text);
+            var decision = await MessageRouting.RouteAsync(helper, "improve caching strategy for repeated queries");
+            Assert.Equal(RouteIntent.Plan, decision.Intent);
+            Assert.Equal("improve caching strategy for repeated queries", decision.Text);
         }
     }
 
@@ -246,8 +243,8 @@ public sealed class MessageRoutingTests
     public async Task A_helper_ignoring_cancellation_cannot_hold_up_the_message()
     {
         var helper = new FakeHelper { Hang = true };
-        var task = MessageRouting.RouteAsync(helper, "the header is ugly", timeout: TimeSpan.FromMilliseconds(30));
-        Assert.Equal(RouteIntent.Act, (await task.WaitAsync(TimeSpan.FromSeconds(2))).Intent);
+        var task = MessageRouting.RouteAsync(helper, "improve caching strategy for repeated queries", timeout: TimeSpan.FromMilliseconds(30));
+        Assert.Equal(RouteIntent.Plan, (await task.WaitAsync(TimeSpan.FromSeconds(2))).Intent);
     }
 
     [Fact]
@@ -255,7 +252,7 @@ public sealed class MessageRoutingTests
     {
         using var cts = new CancellationTokenSource();
         var helper = new FakeHelper { Hang = true };
-        var task = MessageRouting.RouteAsync(helper, "the header is ugly", ct: cts.Token);
+        var task = MessageRouting.RouteAsync(helper, "improve caching strategy for repeated queries", ct: cts.Token);
         cts.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => MessageRouting.RouteAsync(helper, "yes", ct: cts.Token));
@@ -264,7 +261,7 @@ public sealed class MessageRoutingTests
     [Theory]
     [InlineData("fix the router but do not edit yet; propose a plan first", RouteIntent.Plan)]
     [InlineData("plan the migration across all services before doing anything", RouteIntent.Plan)]
-    [InlineData("plan and implement the migration", RouteIntent.Act)]
+    [InlineData("plan and implement the migration", RouteIntent.Plan)]
     [InlineData("implement the plan without changing the database", RouteIntent.Act)]
     [InlineData("implement the plan; do not change the database", RouteIntent.Act)]
     [InlineData("why is login slow, fix it", RouteIntent.Act)]

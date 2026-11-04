@@ -86,6 +86,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private string? _planRestoreMode;
     private string? _planRestoreEffort;
     private bool _planEffortRaised;
+    private bool _planPromotedFromLite;
 
     /// <summary>Relative workspace paths for @-references, built on first use per connect.</summary>
     private IReadOnlyList<string>? _workspaceFiles;
@@ -1731,8 +1732,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         get
         {
-            // Ctrl+Enter raises the effort for the plan turn only: the chip keeps the pick.
-            var shownEffort = _planEffortRaised ? _planRestoreEffort : RequestedEffort;
+            // Lite temporarily becomes Flash while planning. Other tiers keep their
+            // chosen label during the existing high-effort planning override.
+            var shownEffort = _planEffortRaised && !_planPromotedFromLite ? _planRestoreEffort : RequestedEffort;
             foreach (var tier in ModelTiers)
             {
                 var (model, effort) = TierConfig(tier);
@@ -4068,7 +4070,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     private Task SendAsync() => SendCoreAsync(planOnly: false);
 
-    /// <summary>Ctrl+Enter: send as a plan-only turn with high effort.</summary>
+    /// <summary>Ctrl+Enter: send a temporary plan turn, promoting Lite to Flash.</summary>
     [RelayCommand]
     private Task SendPlanAsync() => SendCoreAsync(planOnly: true);
 

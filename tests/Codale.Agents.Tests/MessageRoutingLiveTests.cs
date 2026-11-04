@@ -17,14 +17,17 @@ public sealed class MessageRoutingLiveTests(ITestOutputHelper output)
         Assert.True(helper.IsAvailable, $"{provider} CLI unavailable");
         (string Message, RouteIntent Expected)[] cases =
         [
-            ("the header is ugly", RouteIntent.Act),
+            ("the header is ugly", RouteIntent.Plan),
             ("why is login slow? fix the redirect and add tests", RouteIntent.Act),
-            ("plan and implement the migration across every service", RouteIntent.Act),
+            ("plan and implement the migration across every service", RouteIntent.Plan),
             ("fix the router but do not edit yet; propose a plan first", RouteIntent.Plan),
             ("compare the two authentication approaches and explain the tradeoffs", RouteIntent.Ask),
             ("can you explain how the topic detector works?", RouteIntent.Ask),
             ("yes, why is it broken?", RouteIntent.Ask),
-            ("build a complete authentication system with sessions, roles and tests", RouteIntent.Act),
+            ("build a complete authentication system with sessions, roles and tests", RouteIntent.Plan),
+            ("add CSV export for invoices", RouteIntent.Plan),
+            ("make the dashboard more modern", RouteIntent.Plan),
+            ("implement the approved plan", RouteIntent.Act),
         ];
         var failures = new List<string>();
         foreach (var (message, expected) in cases)

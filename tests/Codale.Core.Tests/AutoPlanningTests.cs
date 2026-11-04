@@ -1,0 +1,68 @@
+using System.Text.Json;
+using Codale.Core.Agents;
+using Codale.Core.Helper;
+
+namespace Codale.Core.Tests;
+
+public sealed class AutoPlanningTests
+{
+    [Theory]
+    [InlineData("build a complete authentication system with sessions, roles and tests")]
+    [InlineData("add CSV export for invoices")]
+    [InlineData("add a new feature for project sharing")]
+    [InlineData("implement notifications")]
+    [InlineData("rewrite the storage architecture")]
+    [InlineData("migrate the database across all services")]
+    [InlineData("plan and implement the migration")]
+    [InlineData("make it better")]
+    [InlineData("the header is ugly")]
+    [InlineData("redesign the dashboard")]
+    [InlineData("ok now add a dark theme to the settings page and wire it to the toggle")]
+    [InlineData("implement the approved plan and add a new feature for billing")]
+    [InlineData("run a migration across all services")]
+    [InlineData("add recurring task schedules")]
+    [InlineData("build a timetable editor")]
+    [InlineData("support plugin-defined reports")]
+    public void Substantial_new_and_unclear_work_cannot_be_downgraded_to_implementation(string text)
+    {
+        Assert.Equal(RouteIntent.Plan, MessageRouting.TryRouteLocally(text)?.Intent);
+        Assert.Equal(RouteIntent.Plan, MessageRouting.RouteWithoutModel(text).Intent);
+        foreach (var intent in new[] { "act", "ask", "invalid" })
+        {
+            var call = new ToolCall("route", JsonSerializer.SerializeToElement(new { intent }));
+            var result = MessageRouting.Interpret(call, text, false);
+            Assert.Equal(RouteIntent.Plan, result.Intent);
+            Assert.Equal(text, result.Text);
+        }
+    }
+
+    [Theory]
+    [InlineData("rename Save to Apply")]
+    [InlineData("fix the login redirect")]
+    [InlineData("run the test suite")]
+    [InlineData("commit all changes")]
+    [InlineData("implement the approved plan")]
+    [InlineData("yes go ahead")]
+    [InlineData("write unit tests for the parser")]
+    [InlineData("build the project")]
+    public void Bounded_work_and_approvals_still_proceed(string text) =>
+        Assert.Equal(RouteIntent.Act, MessageRouting.RouteWithoutModel(text).Intent);
+
+    [Theory]
+    [InlineData("how would we build a new feature for payments?")]
+    [InlineData("explain the authentication architecture")]
+    [InlineData("compare migration approaches")]
+    public void Pure_questions_stay_read_only(string text) =>
+        Assert.Equal(RouteIntent.Ask, MessageRouting.RouteWithoutModel(text).Intent);
+
+    [Fact]
+    public void Planning_instructions_expose_missing_requirements_and_are_hidden_on_replay()
+    {
+        var turn = new UserTurn("add sharing") { PlanOnly = true, ContextPrefix = SessionBriefing.ContextBlock("reference") };
+        Assert.Contains(UserTurn.PlanInstruction, turn.ProviderText);
+        Assert.Contains("Do not invent requirements", turn.ProviderText);
+        Assert.Contains("wait for their approval", turn.ProviderText);
+        Assert.Equal("add sharing", UserTurn.StripHostInstructions(turn.ProviderText));
+        Assert.StartsWith(UserTurn.AskInstruction, new UserTurn("why?") { PlanOnly = true, AskOnly = true }.ProviderText);
+    }
+}

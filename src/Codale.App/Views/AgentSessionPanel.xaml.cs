@@ -378,7 +378,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
         Add(ChatViewModel.AutomaticMode, "\uE82F", "Auto",
             chat.Router?.IsAvailable == true
-                ? "Picks the right depth per message: answer, clarify, plan or work"
+                ? "Plans new, large or unclear work before making changes"
                 : "Needs the Claude CLI to pick modes",
             current == ChatViewModel.AutomaticMode);
         Add("manual", "\uE7C9", "Interactive",
