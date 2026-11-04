@@ -57,7 +57,8 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
                 index.Invalidate(!_revisions.TryGetValue(worktree, out var previousRevision) || previousRevision != revision);
                 _revisions[worktree] = revision;
                 var snapshot = await index.GetSnapshotAsync().ConfigureAwait(false);
-                if (_snapshots.GetValueOrDefault(worktree) == snapshot.BuiltAt)
+                var reChunk = store.SourceChunkVersion(worktree) != FileChunker.Version;
+                if (!reChunk && _snapshots.GetValueOrDefault(worktree) == snapshot.BuiltAt)
                 {
                     // A model that became ready after the last refresh (or an index built before vectors
                     // existed) is embedded once, without re-chunking.
@@ -71,16 +72,17 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
                     if (!Eligible(file.RelativePath) || file.Length > FileChunker.MaxFileBytes) continue;
                     var identity = worktree + "\n" + file.RelativePath;
                     present.Add(file.RelativePath);
-                    if (_indexedFiles.TryGetValue(identity, out var previous) && ReferenceEquals(previous, file) && old.ContainsKey(file.RelativePath)) continue;
+                    if (!reChunk && _indexedFiles.TryGetValue(identity, out var previous) && ReferenceEquals(previous, file) && old.ContainsKey(file.RelativePath)) continue;
                     // Re-read disk: a retained snapshot may predate a branch switch.
                     var text = ReadSource(worktree, file.RelativePath);
                     if (text is null) { present.Remove(file.RelativePath); continue; }
                     var hash = Hash(text);
-                    if (old.GetValueOrDefault(file.RelativePath) != hash)
+                    if (reChunk || old.GetValueOrDefault(file.RelativePath) != hash)
                         store.ReplaceSource(worktree, file.RelativePath, hash, FileChunker.Chunk(text));
                     _indexedFiles[identity] = file;
                 }
                 foreach (var removed in old.Keys.Where(p => !present.Contains(p))) store.ReplaceSource(worktree, removed, null, []);
+                store.SetSourceChunkVersion(worktree, FileChunker.Version);
                 foreach (var embedder in Embedders()) _embedded.TryRemove(worktree + "\n" + embedder.Model, out _);
                 EmbedPending(worktree);
                 lock (_gate) _snapshots[worktree] = snapshot.BuiltAt;
@@ -139,7 +141,9 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
             var rank = 0;
             foreach (var id in ranked) scores[id] = scores.GetValueOrDefault(id) + weight / (RrfK + ++rank);
         }
-        Fuse(store.SearchSourceTerms(prompt, worktree).Select(c => c.Id), 1.0);
+        var lexical = store.SearchSourceTerms(prompt, worktree).Select(c => c.Id).ToList();
+        var lexicalIds = lexical.ToHashSet();
+        Fuse(lexical, 1.0);
         var terms = SearchText.RetrievalTerms(prompt);
 
         if (terms.Count > 0)
@@ -152,9 +156,13 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
                 if (vectors.Count == 0) continue;
                 var similar = vectors.Top(embedder.Embed(topic), 40);
                 // Relative cut: keep near-best neighbours only, so unrelated files never ride in on noise.
+                // Relative similarity alone always supplies neighbours, even for an absent topic.
+                // Lexical evidence can support weaker semantic matches; otherwise require confidence.
+                var minimum = embedder is HashedTextEmbedder ? 0.25f : 0.4f;
                 var floor = similar.Count > 0 ? Math.Max(0.08f, similar[0].Score * 0.5f) : 1f;
                 // The semantic model leads; the hashed one adds fragments and inflections at lower weight.
-                Fuse(similar.Where(v => v.Score >= floor).Select(v => v.Id), embedder is HashedTextEmbedder ? 0.6 : 1.0);
+                Fuse(similar.Where(v => v.Score >= floor && (lexicalIds.Contains(v.Id) || v.Score >= minimum)).Select(v => v.Id),
+                    embedder is HashedTextEmbedder ? 0.6 : 1.0);
 
             }
         }
@@ -250,7 +258,7 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
         var ranked = Search(worktree, prompt, recent, MaxFiles + 2, 2, out var stale);
         // Mid-turn the agent is editing the very files a steer is about. Their rows are stale until the
         // index catches up, and stale files are dropped, so wait briefly for that rather than lose them.
-        if (stale && CaughtUp(worktree))
+        if ((stale || ranked.Count == 0) && CaughtUp(worktree))
             ranked = Search(worktree, prompt, recent, MaxFiles + 2, 2, out _);
         // The CLI already loaded its instruction files into the conversation.
         var topFiles = ranked.Where(c => !AgentInstructions.IsMatch(c.Path))

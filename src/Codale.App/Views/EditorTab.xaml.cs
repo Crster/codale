@@ -116,6 +116,15 @@ public sealed partial class EditorTab : UserControl
     /// <summary>Puts the caret back in the text, so F3 and Esc reach this tab.</summary>
     public void FocusText() => FileEditor.Focus(Microsoft.UI.Xaml.FocusState.Programmatic);
 
+    public void CloseHost()
+    {
+        _wordCountTimer.Stop();
+        _zoomSettleTimer.Stop();
+        _focusSearch?.Cancel();
+        CloseAskPanel();
+        FileEditor.Close();
+    }
+
     /// <summary>Live-applies Settings changes to the editor (font size, tabs, gutter, colours, wrap).</summary>
     public void ApplyAppSettings()
     {

@@ -24,6 +24,9 @@ public sealed partial class FeatureStore
             start_line INTEGER NOT NULL, text TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS ix_source_chunks ON source_chunks(worktree, path);
+        CREATE TABLE IF NOT EXISTS source_index_versions (
+            worktree TEXT PRIMARY KEY, chunk_version INTEGER NOT NULL
+        );
         CREATE VIRTUAL TABLE IF NOT EXISTS source_fts USING fts5(chunk_id UNINDEXED, tokens);
         DROP TABLE IF EXISTS source_vectors;
         CREATE TABLE IF NOT EXISTS chunk_vectors (
@@ -130,6 +133,19 @@ public sealed partial class FeatureStore
             return Query("SELECT path,hash FROM source_files WHERE worktree=$w", r => (r.GetString(0), r.GetString(1)), ("$w", worktree))
                 .ToDictionary(x => x.Item1, x => x.Item2, StringComparer.OrdinalIgnoreCase);
         }
+    }
+
+    public int SourceChunkVersion(string worktree)
+    {
+        lock (_gate)
+            return Query("SELECT chunk_version FROM source_index_versions WHERE worktree=$w", r => r.GetInt32(0), ("$w", worktree)).FirstOrDefault();
+    }
+
+    public void SetSourceChunkVersion(string worktree, int version)
+    {
+        lock (_gate)
+            Execute("INSERT INTO source_index_versions(worktree,chunk_version) VALUES ($w,$v) ON CONFLICT(worktree) DO UPDATE SET chunk_version=$v",
+                ("$w", worktree), ("$v", version));
     }
 
     public void ReplaceSource(string worktree, string path, string? hash, IReadOnlyList<(int StartLine, string Text)> chunks)

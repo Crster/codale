@@ -57,4 +57,13 @@ public sealed class FeatureSearchTests
         Assert.False(FileChunker.IsIndexable(""));
         Assert.True(FileChunker.IsIndexable("class A {}"));
     }
+
+    [Fact]
+    public void Chunk_line_numbers_match_source_even_after_leading_blank_lines()
+    {
+        const string content = "\n\n    public void RefreshToken() {}\n\n";
+        var chunk = Assert.Single(FileChunker.Chunk(content));
+        Assert.Equal(3, chunk.StartLine);
+        Assert.Equal("    public void RefreshToken() {}", chunk.Text);
+    }
 }

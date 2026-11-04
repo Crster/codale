@@ -55,7 +55,11 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
     /// selected, so Unloaded is tab-hide, not tab-close, and must not tear down
     /// the view or the terminal would come back blank.
     /// </summary>
-    public void CloseHost() => UnsubscribeFromViewModel();
+    public void CloseHost()
+    {
+        UnsubscribeFromViewModel();
+        Terminal.Close();
+    }
 
     /// <summary>Live-applies Settings changes to the terminal display (font size, scrollback).</summary>
     public void ApplyAppSettings() => Terminal.ApplyAppSettings();

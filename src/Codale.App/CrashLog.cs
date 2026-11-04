@@ -65,6 +65,7 @@ public static class CrashLog
     {
         Info("app", $"start pid={Environment.ProcessId} os={Environment.OSVersion.Version} " +
                     $"clr={Environment.Version} args={Environment.CommandLine}");
+        MemoryDiagnostics.Start();
 
         // Marking an exception handled keeps the process alive, which is only right for
         // failures that leave nothing half-done (a cancelled operation, a window that closed
@@ -89,6 +90,7 @@ public static class CrashLog
 
         AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         {
+            MemoryDiagnostics.Stop();
             Info("app", "exit");
             FlushPending();
             lock (Gate)

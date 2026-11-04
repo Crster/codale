@@ -143,6 +143,7 @@ public sealed partial class TerminalView : UserControl
         _caretTimer.Interval = TimeSpan.FromMilliseconds(530);
         _caretTimer.Tick += (_, _) =>
         {
+            if (_closed) return;
             // The blink redraws the one-cell cursor layer, not the whole grid: a full
             // repaint twice a second while idle was pure burn on every open terminal.
             _caretVisible = !_caretVisible;
@@ -161,6 +162,7 @@ public sealed partial class TerminalView : UserControl
             InvalidateAll();
         };
         LosingFocus += OnTerminalLosingFocus;
+        Unloaded += (_, _) => _caretTimer.Stop();
 
         // The bar counts lines: it drags the viewport's top line directly, and the
         // wheel over it scrolls the terminal like the wheel over the grid.
@@ -178,6 +180,29 @@ public sealed partial class TerminalView : UserControl
     }
 
     // ------------------------------------------------------------------ public surface
+
+    private bool _closed;
+
+    /// <summary>Releases native graphics only when the host closes, not on a tab switch.</summary>
+    public void Close()
+    {
+        if (_closed) return;
+        MemoryDiagnostics.Sample("terminal.close.begin", $"lines={_emulator.TotalLines} brushes={_brushes.Count}");
+        _closed = true;
+        _caretTimer.Stop();
+        _emulator.Invalidated -= OnEmulatorInvalidated;
+        DisposeTextFormats();
+        foreach (var brush in _brushes.Values) brush.Dispose();
+        _brushes.Clear();
+        _caretBrush?.Dispose();
+        _caretGlyphBrush?.Dispose();
+        _bar.Close();
+        Canvas.RemoveFromVisualTree();
+        CaretCanvas.RemoveFromVisualTree();
+        Canvas = null!;
+        CaretCanvas = null!;
+        MemoryDiagnostics.Released("terminal.close.released", "canvases=3 timersStopped=1", this);
+    }
 
     /// <summary>A reply the emulator wants sent to the shell (DSR, DA) - route it to the PTY input.</summary>
     public event EventHandler<string>? Response;
@@ -241,6 +266,7 @@ public sealed partial class TerminalView : UserControl
     /// <summary>Invalidates both layers: the grid lives on Canvas, the cursor alone on CaretCanvas.</summary>
     private void InvalidateAll()
     {
+        if (_closed) return;
         Canvas.Invalidate();
         CaretCanvas.Invalidate();
     }
@@ -453,6 +479,7 @@ public sealed partial class TerminalView : UserControl
     /// <summary>Fits the cell grid to the viewport, resizing the shell when it changed.</summary>
     private void RefitGrid()
     {
+        if (_closed) return;
         // While the tab is hidden the control reports zero; resizing the shell to
         // nothing would be wrong, so wait for a real size.
         if (Canvas.ActualWidth < _charWidth || Canvas.ActualHeight < _lineHeight)
@@ -529,10 +556,7 @@ public sealed partial class TerminalView : UserControl
             }
 
             _brushes.Clear();
-            _textFormat = null;
-            _boldFormat = null;
-            _italicFormat = null;
-            _boldItalicFormat = null;
+            DisposeTextFormats();
         }
         finally
         {
@@ -979,6 +1003,7 @@ public sealed partial class TerminalView : UserControl
     /// </summary>
     private void SyncScrollbar(bool reveal = false)
     {
+        if (_closed) return;
         if (Canvas.ActualHeight <= 0)
         {
             return;

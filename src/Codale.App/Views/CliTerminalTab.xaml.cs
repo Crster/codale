@@ -76,7 +76,11 @@ public sealed partial class CliTerminalTab : UserControl, ITerminalHost
     }
 
     /// <summary>Tears the display down; called only when the tab is actually closing, not when it is hidden.</summary>
-    public void CloseHost() => UnsubscribeFromViewModel();
+    public void CloseHost()
+    {
+        UnsubscribeFromViewModel();
+        Terminal.Close();
+    }
 
     public void ApplyAppSettings() => Terminal.ApplyAppSettings();
 

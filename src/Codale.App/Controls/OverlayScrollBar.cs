@@ -177,6 +177,14 @@ public sealed class OverlayScrollBar : Grid
     /// <summary>The user moved the thumb; the argument is the new offset in the host's units.</summary>
     public event EventHandler<double>? ValueChanged;
 
+    /// <summary>Breaks the Win2D event cycle when the owning display is closed.</summary>
+    public void Close()
+    {
+        _hideTimer.Stop();
+        _marksCanvas.Draw -= OnMarksDraw;
+        _marksCanvas.RemoveFromVisualTree();
+    }
+
     /// <summary>The wheel turned over the bar; the host scrolls as if it had turned over the content.</summary>
     public event WheelHandler? WheelScrolled;
 

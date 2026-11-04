@@ -27,6 +27,54 @@ public sealed class ProjectKnowledgeTests : IDisposable
         _index.Retrieve(root ?? Root, query, "", delivered ?? new HashSet<string>());
 
     [Fact]
+    public void First_prompt_waits_briefly_for_the_initial_source_index()
+    {
+        Write("Auth.cs", "class Authentication { void RefreshToken() {} }");
+        Assert.Contains("Auth.cs", Retrieve("RefreshToken").Files);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Unknown_topic_does_not_send_unrelated_neighbours(bool semantic)
+    {
+        var model = semantic ? await SemanticModel.EnsureLoadedAsync() : null;
+        if (semantic) Assert.NotNull(model);
+        using var retrieval = new ProjectKnowledgeIndex(_store, () => model);
+        Write("src/Authentication.cs", "class Authentication { bool RefreshCredential() => true; }");
+        Write("src/RevenueChart.cs", "class RevenueChart { void DrawMonthlyGraph() {} }");
+        await retrieval.RefreshAsync(Root);
+        Assert.Empty(retrieval.Retrieve(Root, "zygomorphic quasar submarine teleportation", "", new HashSet<string>()).Text);
+    }
+
+    [Fact]
+    public async Task Old_chunk_formats_are_rebuilt_even_when_source_hash_is_unchanged()
+    {
+        const string text = "\n\n    public void RefreshToken() {}\n";
+        Write("Auth.cs", text);
+        _store.ReplaceSource(Root, "Auth.cs", ProjectKnowledgeIndex.Hash(text), [(1, "public void RefreshToken() {}")]);
+        await _index.RefreshAsync(Root);
+        var chunk = Assert.Single(_store.SourceChunksForPath(Root, "Auth.cs"));
+        Assert.Equal(3, chunk.StartLine);
+        Assert.StartsWith("    public", chunk.Text);
+        Assert.Equal(FileChunker.Version, _store.SourceChunkVersion(Root));
+    }
+
+    [Fact]
+    public async Task Confident_semantic_paraphrases_still_work_without_lexical_matches()
+    {
+        var model = await SemanticModel.EnsureLoadedAsync();
+        Assert.NotNull(model);
+        using var retrieval = new ProjectKnowledgeIndex(_store, () => model);
+        Write("vault.cs", "// Protect saved credentials with encryption.\nclass Vault { void Seal() {} }");
+        Write("chart.cs", "// Draw monthly revenue totals in a bar graph.\nclass Chart { void Paint() {} }");
+        await retrieval.RefreshAsync(Root);
+        const string query = "secure stored passwords";
+        Assert.Empty(_store.SearchSourceTerms(query, Root));
+        Assert.Contains("vault.cs", retrieval.Retrieve(Root, query, "", new HashSet<string>()).Files);
+    }
+
+    [Fact]
     public async Task Agent_edits_teach_future_prompts_which_file_to_open()
     {
         Write("src/component-a.tsx", "export const Panel = () => null;");

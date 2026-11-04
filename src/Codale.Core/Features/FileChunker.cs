@@ -3,6 +3,7 @@ namespace Codale.Core.Features;
 /// <summary>Cuts a file into overlapping stretches of lines, the unit file search finds and context quotes.</summary>
 public static class FileChunker
 {
+    public const int Version = 2;
     public const int MaxLines = 40;
     public const int MaxChars = 1500;
     private const int OverlapLines = 5;
@@ -26,10 +27,14 @@ public static class FileChunker
                 end++;
             }
 
-            var text = string.Join('\n', lines[start..end]).Trim();
+            var first = start;
+            var last = end;
+            while (first < last && string.IsNullOrWhiteSpace(lines[first])) first++;
+            while (last > first && string.IsNullOrWhiteSpace(lines[last - 1])) last--;
+            var text = string.Join('\n', lines[first..last]);
             if (text.Length > 0)
             {
-                chunks.Add((start + 1, text));
+                chunks.Add((first + 1, text));
             }
 
             if (end >= lines.Length)

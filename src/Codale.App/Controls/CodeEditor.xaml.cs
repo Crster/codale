@@ -324,6 +324,7 @@ public sealed partial class CodeEditor : UserControl
             _caretTimer.Interval = TimeSpan.FromMilliseconds(530);
             _caretTimer.Tick += (_, _) =>
             {
+                if (_closed) return;
                 // The blink redraws the caret layer only: a full viewport repaint twice a
                 // second while the editor sits idle was pure burn.
                 _caretVisible = !_caretVisible;
@@ -343,6 +344,12 @@ public sealed partial class CodeEditor : UserControl
                 InvalidateAll();
             };
             LosingFocus += OnEditorLosingFocus;
+            Unloaded += (_, _) =>
+            {
+                _caretTimer.Stop();
+                _autoScrollTimer?.Stop();
+                _occurrenceTimer?.Stop();
+            };
 
             // Tunnelling: the focus system takes Tab before a bubbling KeyDown fires.
             PreviewKeyDown += OnEditorKeyDown;
@@ -373,6 +380,34 @@ public sealed partial class CodeEditor : UserControl
     }
 
     // ------------------------------------------------------------------ public surface
+
+    private bool _closed;
+
+    /// <summary>Releases native graphics when the owner permanently closes.</summary>
+    public void Close()
+    {
+        if (_closed) return;
+        MemoryDiagnostics.Sample("editor.close.begin", $"lines={_doc.LineCount} layoutEntries={_laidOut.Count} numberLayouts={_lineNumberLayouts.Count} brushes={_brushes.Count}");
+        _closed = true;
+        _caretTimer.Stop();
+        _autoScrollTimer?.Stop();
+        _occurrenceTimer?.Stop();
+        _ghostCts?.Cancel();
+        CloseCompletion();
+        ClearLayouts();
+        _textFormat?.Dispose();
+        _lineNumberFormat?.Dispose();
+        foreach (var brush in _brushes.Values) brush.Dispose();
+        _brushes.Clear();
+        _caretBrush?.Dispose();
+        _vBar.Close();
+        _hBar.Close();
+        Canvas.RemoveFromVisualTree();
+        CaretCanvas.RemoveFromVisualTree();
+        Canvas = null!;
+        CaretCanvas = null!;
+        MemoryDiagnostics.Released("editor.close.released", "canvases=4 layoutsDisposed=true timersStopped=true", this);
+    }
 
 
     /// <summary>The whole buffer text, joined with CRLF.</summary>
@@ -836,6 +871,7 @@ public sealed partial class CodeEditor : UserControl
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             _prefetchQueued = false;
+            if (_closed || !IsLoaded) return;
             if (_textFormat is null || _doc.LineCount == 0 || _lineHeight <= 0 || Canvas.ActualHeight <= 0)
             {
                 return;
@@ -1073,6 +1109,7 @@ public sealed partial class CodeEditor : UserControl
     /// <summary>Invalidates both layers. Everything but the caret lives on Canvas; the caret alone on CaretCanvas.</summary>
     private void InvalidateAll()
     {
+        if (_closed) return;
         Canvas.Invalidate();
         CaretCanvas.Invalidate();
     }
@@ -1088,6 +1125,8 @@ public sealed partial class CodeEditor : UserControl
         }
 
         _brushes.Clear();
+        _textFormat?.Dispose();
+        _lineNumberFormat?.Dispose();
         _textFormat = null;
         _lineNumberFormat = null;
     }
@@ -1352,6 +1391,7 @@ public sealed partial class CodeEditor : UserControl
 
     private void OnCanvasSizeChanged(object sender, SizeChangedEventArgs e)
     {
+        if (_closed) return;
         UpdateExtent();
         InvalidateAll();
     }

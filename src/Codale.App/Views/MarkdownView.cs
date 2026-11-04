@@ -50,7 +50,7 @@ public sealed class MarkdownView : StackPanel
         ActualThemeChanged += (_, _) =>
         {
             _markdownStale = true;
-            Rebuild();
+            if (IsLoaded) Rebuild();
         };
 
         // A non-virtualized transcript accumulates hundreds of these over a session;
@@ -68,7 +68,21 @@ public sealed class MarkdownView : StackPanel
         {
             _debounce.Stop();
             Core.Syntax.SyntaxService.Store.Changed -= OnGrammarsChanged;
+            // Recycled transcript rows must release native text and decoded images.
+            MemoryDiagnostics.MarkdownReleased(Children.Count, _images.Count);
+            Children.Clear();
+            _images.Clear();
+            _imagesInUse.Clear();
+            _markdownStale = true;
         };
+    }
+
+    protected override Windows.Foundation.Size MeasureOverride(Windows.Foundation.Size availableSize)
+    {
+        // A recycled row must have its real height on its first measure. Waiting for
+        // Loaded first measures an empty row, then moves the viewport when text appears.
+        if (!IsLoaded && _markdownStale) Rebuild();
+        return base.MeasureOverride(availableSize);
     }
 
     /// <summary>A grammar was installed or replaced: fences may now colour differently.</summary>
@@ -834,14 +848,16 @@ public sealed class MarkdownView : StackPanel
                 return null;
             }
 
-            var bitmap = new BitmapImage();
+            // Decode at twice the displayed height for high-DPI screens, rather than
+            // retaining the full-resolution screenshot for every transcript row.
+            var bitmap = new BitmapImage { DecodePixelHeight = 640 };
             _imagesInUse[key] = bitmap;
             frame.Source = bitmap;
             _ = LoadDataImageAsync(bitmap, bytes, Failed);
         }
         else
         {
-            var bitmap = new BitmapImage();
+            var bitmap = new BitmapImage { DecodePixelHeight = 640 };
             bitmap.ImageFailed += (_, _) => Failed();
             _imagesInUse[key] = bitmap;
             frame.Source = bitmap;

@@ -40,6 +40,7 @@ public sealed partial class ChatViewModel
     public async Task<bool> AttachFeatureAsync(FeatureInfo feature)
     {
         if (Features is not { } features) return false;
+        TraceMemory("chat.history.begin", $"targetFeature={feature.Id}");
         await DisposeSessionAsync();
         ResetForNewSession();
         var mapping = features.ProviderSession(feature.Id);
@@ -70,6 +71,7 @@ public sealed partial class ChatViewModel
             }
         }
         RestorePendingPlan();
+        TraceMemory("chat.history.loaded", $"events={events.Count} earlierEvents={more}");
         await ConnectAsync();
         return IsConnected;
     }
@@ -300,6 +302,8 @@ public sealed partial class ChatViewModel
             if (FeatureId is { } id) features.RecordRetrieval(_retrievalId, id, result);
             CrashLog.Trace($"Project retrieval ({CliId}, {result.Method}): {result.ElapsedMilliseconds}ms, {result.Files.Count} files, " +
                 $"{result.Snippets} excerpts, {result.Findings} findings, {result.Keys.Count} keys, byte upper bound={result.Tokens}");
+            CrashLog.Debug("knowledge", $"retrieval={_retrievalId} session={FeatureId ?? "none"} " +
+                $"files={System.Text.Json.JsonSerializer.Serialize(result.Files)} refs={System.Text.Json.JsonSerializer.Serialize(result.Keys)}");
             return result;
         }
         catch (OperationCanceledException) { throw; }

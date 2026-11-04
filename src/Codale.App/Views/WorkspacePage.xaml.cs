@@ -134,6 +134,8 @@ public sealed partial class WorkspacePage : Page
         base.OnNavigatedFrom(e);
 
         AppSettings.Changed -= OnAppSettingsChanged;
+        foreach (var entry in _terminalTabs) entry.Tab.CloseHost();
+        foreach (var entry in _editorTabs) entry.Tab.CloseHost();
 
         if (App.Current.MainWindow is { } window)
         {
@@ -2047,6 +2049,7 @@ public sealed partial class WorkspacePage : Page
             }
 
             entry.Tab.ViewModel.Close();
+            entry.Tab.CloseHost();
 
             if (ReferenceEquals(ViewModel.ActiveEditor, entry.Tab.ViewModel))
             {

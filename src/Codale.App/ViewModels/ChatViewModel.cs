@@ -208,6 +208,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _idleCompactTimer = _dispatcher.CreateTimer();
         _idleCompactTimer.IsRepeating = false;
         _idleCompactTimer.Tick += (_, _) => RunInBackgroundOnUi(CompactWhileCacheWarmAsync);
+        StartMemoryDiagnostics();
     }
 
     /// <summary>Fires once the chat has sat idle almost as long as the prompt cache lives.</summary>
@@ -246,6 +247,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         CrashLog.Trace($"Idle compaction: {_status.ContextTokens} context tokens before the prompt cache expires");
+        TraceMemory("chat.compact.begin", "trigger=idle");
         _compactItem = new CompactItem
         {
             Reason = $"Idle for {AppSettings.IdleCompactSeconds / 60.0:0.#} min",
@@ -2093,6 +2095,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             _status.CliName = cliName;
 
+            _diagnosticRawPath = CrashLog.NewRawLogPath($"{activeCli.Id}-{ResumeSessionId?[..8] ?? "new"}");
+            TraceMemory("chat.connect.begin");
+
             IAgentSession session = starting = IsCodexSession
                 ? new Codale.Agents.Codex.CodexAgentSession(new Codale.Agents.Codex.CodexSessionOptions
                 {
@@ -2107,7 +2112,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     AdditionalDirectoriesSource = () => ExtraRoots,
                     SystemPromptAppend = mcpServers.Count > 0 ? WithMcpDirective("", mcpServers).Trim() : null,
                     ResumeSessionId = ResumeSessionId,
-                    RawLogPath = CrashLog.NewRawLogPath($"{activeCli.Id}-{ResumeSessionId?[..8] ?? "new"}"),
+                    RawLogPath = _diagnosticRawPath,
                     Environment = environment.Count == 0 ? null : environment,
                     CustomProvider = _endpointSettings?.CodexProvider(EndpointName),
                 })
@@ -2127,7 +2132,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     PromptSuggestions = AppSettings.SuggestNextPrompt,
                     SessionId = ResumeSessionId is null ? Guid.NewGuid() : null,
                     ResumeSessionId = ResumeSessionId,
-                    RawLogPath = CrashLog.NewRawLogPath($"{activeCli.Id}-{ResumeSessionId?[..8] ?? "new"}"),
+                    RawLogPath = _diagnosticRawPath,
                     Environment = environment.Count == 0 ? null : environment,
                 });
 
@@ -2139,6 +2144,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             SessionStateChanged?.Invoke(this, EventArgs.Empty);
             CrashLog.Trace($"Connect ok: session={session.SessionId ?? "unknown"}");
+            TraceMemory("chat.connect.end");
 
             RunInBackground(() => PumpAsync(session), "event pump");
             RunInBackground(() => PollTasksAsync(session), "task poll");
@@ -2639,6 +2645,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 IsBusy = false;
                 _allowRestOfTurn = false;
                 CrashLog.Trace($"Turn completed: {turn.Subtype}");
+                TraceMemory("chat.turn.completed", $"outcome={turn.Subtype}");
                 SetActivity(null, toolUseId: null);
 
                 RestoreAfterPlanTurn();
@@ -2813,6 +2820,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             case ConversationReset:
+                TraceMemory("chat.reset.begin");
                 AbandonFeatureTurn();
                 ClearFeature();
                 // A reset is not a turn the CLI finishes - no result event follows it -
@@ -2832,6 +2840,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 ShowTodos([]);
                 Artifacts.Clear();
                 _status.ClearSessionChanges();
+                TraceMemory("chat.reset.end");
+                MemoryDiagnostics.Released("chat.reset.released", $"chat={_chatId}");
                 break;
 
             case ConversationCompacted compacted:
@@ -2858,6 +2868,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 compactItem.BeforeTokens = compacted.PreTokens ?? compactItem.BeforeTokens;
                 compactItem.AfterTokens = compacted.PostTokens;
                 compactItem.IsDone = true;
+                TraceMemory("chat.compacted", $"preTokens={compacted.PreTokens} postTokens={compacted.PostTokens}");
                 break;
 
             case UnknownEvent unknown:
@@ -4412,6 +4423,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         WorkingElapsed = "";
         WorkingMessage = WorkingPhrases.Next(WorkingMessage);
         _turnTimer.Start();
+        TraceMemory("chat.turn.begin");
     }
 
     /// <summary>
@@ -5026,6 +5038,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
+        TraceMemory("chat.dispose.begin");
+        if (_memoryTimer is { } memoryTimer)
+        {
+            memoryTimer.Stop();
+            _memoryTimer = null;
+        }
         _taskCaptureTimer?.Stop();
         StopTaskHost();
 
@@ -5042,6 +5060,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             Features!.Summarize(featureId, force: true);
         }
+        TraceMemory("chat.dispose.end");
+        MemoryDiagnostics.Released("chat.dispose.released", $"chat={_chatId}", this);
     }
 
     /// <summary>
@@ -5050,6 +5070,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeSessionAsync()
     {
+        TraceMemory("chat.session.dispose.begin");
         // A tab closed mid-turn would otherwise leave the 500ms timer ticking forever,
         // keeping this view model and its whole transcript rooted.
         _turnTimer.Stop();
@@ -5079,5 +5100,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             _session = null;
             await session.DisposeAsync();
         }
+        TraceMemory("chat.session.dispose.end");
     }
 }
