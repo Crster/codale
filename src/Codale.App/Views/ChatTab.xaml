@@ -2082,16 +2082,12 @@
             </VisualStateGroup>
         </VisualStateManager.VisualStateGroups>
 
-        <ScrollViewer x:Name="ChatScroller" VerticalScrollBarVisibility="Auto" VerticalAnchorRatio="1">
-            <ItemsRepeater
+        <ScrollViewer x:Name="ChatScroller" VerticalScrollBarVisibility="Auto">
+            <ItemsControl
                 x:Name="Transcript"
-                Margin="12,12,16,16"
-                ItemTemplate="{StaticResource ChatTemplateSelector}"
-                ItemsSource="{x:Bind ViewModel.Items}">
-                <ItemsRepeater.Layout>
-                    <StackLayout />
-                </ItemsRepeater.Layout>
-            </ItemsRepeater>
+                Padding="12,12,16,16"
+                ItemTemplateSelector="{StaticResource ChatTemplateSelector}"
+                ItemsSource="{x:Bind ViewModel.Items}" />
         </ScrollViewer>
 
         <!--  Shown until the first message arrives: Vibrant Welcome & Quick Starters  -->

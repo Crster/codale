@@ -1276,8 +1276,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         // A history is shared between CLIs: an empty chat already set to the other CLI takes it
         // (starting fresh there with the transcript); otherwise it resumes under its own CLI.
         var owner = Features.ProviderSession(feature.Id)?.Provider;
-        var wanted = !Chat.HasConversation && !Chat.IsConnected ? Chat.CliId : null;
-        var chat = FreshChat(wanted ?? owner);
+        // The empty chat in front takes it whether or not it already connected (a blank chat
+        // connects on open); AttachFeatureAsync tears that session down and starts the right one.
+        var reuseFront = !Chat.HasConversation && !Chat.IsTerminalSession;
+        var wanted = reuseFront ? Chat.CliId : null;
+        var chat = reuseFront ? Chat : FreshChat(owner);
         IsViewingHistory = false;
         HistoryTitle = null;
         await chat.AttachFeatureAsync(feature, wanted);

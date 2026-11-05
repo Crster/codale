@@ -36,6 +36,9 @@ public sealed partial class ChatViewModel
     private string? _retrievalId;
     private bool _needsResumeContext;
     private string? _handoffContext;
+    /// <summary>Events of a history shown when it opens. The transcript is not virtualized (that made the
+    /// scroll jump), so the window is what bounds its memory; the rest stays in the session log.</summary>
+    private const int HistoryWindowEvents = 120;
     private bool SmartHistory => Features is not null;
 
     private bool IsSeparateWorktree(string? worktree)
@@ -85,7 +88,7 @@ public sealed partial class ChatViewModel
         SetFeature(feature);
         if (handoff) CaptureHandoff();
         Title = feature.Name;
-        var events = _featureLog!.ReadTail(400, out var more);
+        var events = _featureLog!.ReadTail(HistoryWindowEvents, out var more);
         if (more) Add(new NoticeItem { Text = "Showing recent messages. Earlier messages are available in session history." });
         foreach (var e in events)
         {

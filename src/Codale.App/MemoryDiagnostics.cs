@@ -13,14 +13,18 @@ internal static class MemoryDiagnostics
     private static long? _lastPrivate;
     private static long? _lastManaged;
     private static long _peakPrivate;
-    private static readonly List<(WeakReference<object> Owner, double ClosedAt)> Closed = [];
+    private static readonly List<(WeakReference<object> Owner, double ClosedAt, int Gen2AtClose)> Closed = [];
     private static long _collectedClosed;
     private static long _droppedClosed;
     private static long _releasedMarkdownViews;
     private static long _releasedMarkdownBlocks;
     private static long _releasedImageReferences;
-    private static long _preparedRows;
-    private static long _recycledRows;
+
+    /// <summary>
+    /// A closed XAML tree needs two full collections: the first lets the native side drop its
+    /// references, the second frees the managed peers. Only survivors of more than this are suspects.
+    /// </summary>
+    private const int Gen2GraceCollections = 2;
 
     public static void MarkdownReleased(int blocks, int images)
     {
@@ -28,9 +32,6 @@ internal static class MemoryDiagnostics
         Interlocked.Add(ref _releasedMarkdownBlocks, blocks);
         Interlocked.Add(ref _releasedImageReferences, images);
     }
-
-    public static void RowPrepared() => Interlocked.Increment(ref _preparedRows);
-    public static void RowRecycled() => Interlocked.Increment(ref _recycledRows);
 
     public static void Start()
     {
@@ -65,7 +66,7 @@ internal static class MemoryDiagnostics
                     Closed.RemoveAt(0);
                     _droppedClosed++;
                 }
-                Closed.Add((new WeakReference<object>(owner), Uptime.Elapsed.TotalSeconds));
+                Closed.Add((new WeakReference<object>(owner), Uptime.Elapsed.TotalSeconds, GC.CollectionCount(2)));
             }
             // Coalesce bursts of recycled rows/closed tabs into one follow-up.
             _releaseTimer?.Change(TimeSpan.FromSeconds(5), Timeout.InfiniteTimeSpan);
@@ -85,6 +86,8 @@ internal static class MemoryDiagnostics
                 var gc = GC.GetGCMemoryInfo();
                 _collectedClosed += Closed.RemoveAll(entry => !entry.Owner.TryGetTarget(out _));
                 var oldestClosedSec = Closed.Count == 0 ? 0 : Uptime.Elapsed.TotalSeconds - Closed[0].ClosedAt;
+                var gen2 = GC.CollectionCount(2);
+                var leakSuspects = Closed.Count(entry => gen2 - entry.Gen2AtClose > Gen2GraceCollections);
                 _peakPrivate = Math.Max(_peakPrivate, privateBytes);
                 var text = $"pid={Environment.ProcessId} event={reason} uptimeSec={Uptime.Elapsed.TotalSeconds:0} " +
                     $"workingMB={Mb(process.WorkingSet64)} privateMB={Mb(privateBytes)} managedMB={Mb(managed)} " +
@@ -94,11 +97,12 @@ internal static class MemoryDiagnostics
                     $"allocatedMB={Mb(GC.GetTotalAllocatedBytes(precise: false))} " +
                     $"gc0={GC.CollectionCount(0)} gc1={GC.CollectionCount(1)} gc2={GC.CollectionCount(2)} " +
                     $"handles={process.HandleCount} threads={process.Threads.Count} " +
-                    $"closedStillAlive={Closed.Count} closedCollected={_collectedClosed} oldestClosedSec={oldestClosedSec:0} closedTrackingDropped={_droppedClosed} " +
+                    $"closedStillAlive={Closed.Count} closedCollected={_collectedClosed} oldestClosedSec={oldestClosedSec:0} closedLeakSuspects={leakSuspects} closedTrackingDropped={_droppedClosed} " +
                     $"markdownUnloaded={Interlocked.Read(ref _releasedMarkdownViews)} markdownBlocksReleased={Interlocked.Read(ref _releasedMarkdownBlocks)} " +
-                    $"imageReferencesReleased={Interlocked.Read(ref _releasedImageReferences)} " +
-                    $"rowsPrepared={Interlocked.Read(ref _preparedRows)} rowsRecycled={Interlocked.Read(ref _recycledRows)} {details}";
-                if (_lastPrivate is { } previous && privateBytes - previous >= 128L * 1024 * 1024)
+                    $"imageReferencesReleased={Interlocked.Read(ref _releasedImageReferences)} {details}";
+                if (leakSuspects > 0)
+                    CrashLog.Warn("memory", $"closed tab survived {Gen2GraceCollections}+ full GCs: " + text);
+                else if (_lastPrivate is { } previous && privateBytes - previous >= 128L * 1024 * 1024)
                     CrashLog.Warn("memory", text);
                 else
                     CrashLog.Info("memory", text);

@@ -111,15 +111,13 @@ public sealed partial class ChatTab : UserControl
     /// <summary>CLI update was requested from the session panel.</summary>
     public event EventHandler<string>? UpdateCliRequested;
 
-    private readonly ScrollFollowState _scrollFollow = new();
-    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _followTimer;
-    private bool _applyingFollow;
-    private bool _followViewPending;
-    private bool _pointerScrolling;
-    private bool _userScrollPending;
-    private int _followAttempts;
-    private ChatItem? _followedTail;
-    private DateTime _lastScrollTrace;
+    /// <summary>Whether the transcript should ride the bottom. Only scroll events may
+    /// change it: content growth is answered by following, so it must never count as
+    /// "the reader moved away".</summary>
+    private bool _pinnedToBottom = true;
+
+    /// <summary>A ride-to-bottom is already queued for this layout pass.</summary>
+    private bool _followQueued;
 
     /// <summary>Question cards whose visibility is already watched; a card can load more than once.</summary>
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, object> _hookedCards = new();
@@ -154,21 +152,7 @@ public sealed partial class ChatTab : UserControl
         // - neither adds an item, so an items-added hook would never fire for the
         // cases where following matters most.
         Transcript.SizeChanged += OnTranscriptSizeChanged;
-        Transcript.ElementPrepared += (_, _) => MemoryDiagnostics.RowPrepared();
-        Transcript.ElementClearing += (_, _) => MemoryDiagnostics.RowRecycled();
         ChatScroller.ViewChanged += OnScrollerViewChanged;
-        ChatScroller.SizeChanged += (_, _) => RequestFollow();
-        _followTimer = DispatcherQueue.CreateTimer();
-        _followTimer.Interval = TimeSpan.FromMilliseconds(16);
-        _followTimer.IsRepeating = false;
-        _followTimer.Tick += (_, _) => FollowTranscriptEnd();
-        ChatScroller.AddHandler(PointerWheelChangedEvent, new PointerEventHandler(OnTranscriptWheel), true);
-        ChatScroller.AddHandler(PointerPressedEvent, new PointerEventHandler(OnTranscriptPointerPressed), true);
-        ChatScroller.AddHandler(PointerReleasedEvent, new PointerEventHandler(OnTranscriptPointerReleased), true);
-        ChatScroller.AddHandler(PointerCanceledEvent, new PointerEventHandler(OnTranscriptPointerReleased), true);
-        ChatScroller.AddHandler(KeyDownEvent, new KeyEventHandler(OnTranscriptNavigationKey), true);
-        ChatScroller.DirectManipulationStarted += OnTranscriptManipulationStarted;
-        ChatScroller.DirectManipulationCompleted += OnTranscriptManipulationCompleted;
 
         // Only Esc presses nothing else claimed (a popup, a question card) reach this.
         KeyDown += OnChatKeyDown;
@@ -176,14 +160,11 @@ public sealed partial class ChatTab : UserControl
         Loaded += (_, _) =>
         {
             UpdateStopPulse();
-            RequestFollow();
-            _viewModel?.TraceMemory("chat.view.loaded", $"realizedChildren={VisualTreeHelper.GetChildrenCount(Transcript)}");
+            _pinnedToBottom = true;
+            FollowTranscriptEnd();
         };
         Unloaded += (_, _) =>
         {
-            _followTimer.Stop();
-            _followViewPending = _pointerScrolling = _userScrollPending = false;
-            _viewModel?.TraceMemory("chat.view.unloaded", $"realizedChildren={VisualTreeHelper.GetChildrenCount(Transcript)}");
             // A background tab's forever storyboard would still tick every frame.
             StopStopPulse();
         };
@@ -225,19 +206,16 @@ public sealed partial class ChatTab : UserControl
             {
                 _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
                 _viewModel.Suggestions.CollectionChanged -= OnSuggestionsChanged;
-                _viewModel.Items.CollectionChanged -= OnTranscriptItemsChanged;
             }
 
             _viewModel = value;
             _viewModel.PropertyChanged += OnViewModelPropertyChanged;
             _viewModel.Suggestions.CollectionChanged += OnSuggestionsChanged;
-            _viewModel.Items.CollectionChanged += OnTranscriptItemsChanged;
-            _scrollFollow.Reset();
-            _followedTail = null;
+            _pinnedToBottom = true;
             SessionPanel.Session = value;
             Bindings.Update();
             UpdateStopPulse();
-            RequestFollow();
+            FollowTranscriptEnd();
         }
     }
 
@@ -314,193 +292,36 @@ public sealed partial class ChatTab : UserControl
 
     private void OnScrollerViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
     {
-        var wasFollowingView = _followViewPending;
-        if (!e.IsIntermediate) TraceScroll("view.changed", $"pending={_followViewPending} user={_userScrollPending} applying={_applyingFollow}");
-        _scrollFollow.Observe(ChatScroller.VerticalOffset, ChatScroller.ExtentHeight, ChatScroller.ViewportHeight,
-            _applyingFollow || _followViewPending || !(_userScrollPending || _pointerScrolling));
-        ChatScroller.VerticalAnchorRatio = _scrollFollow.IsFollowing ? 1 : 0;
-        if (!e.IsIntermediate) _followViewPending = _userScrollPending = false;
-        if (!e.IsIntermediate) TraceScroll(wasFollowingView ? "follow.settled" : "view.settled");
-        // Estimates can change in either direction as virtual rows become measured.
-        if (!_pointerScrolling) ScheduleFollow();
+        // Only the reader moves the view away; our own snap lands within the threshold.
+        if (!e.IsIntermediate || !_followQueued)
+            _pinnedToBottom = ChatScroller.ScrollableHeight - ChatScroller.VerticalOffset < 40;
     }
 
     private void OnTranscriptSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        // SizeChanged runs after the layout pass that grew the transcript but before that frame
-        // renders. Snapping here means no frame shows the new row below the fold; waiting for the
-        // follow timer let one frame render at the old offset and then jump.
-        _followAttempts = 0;
-        // Shrinking (a collapsed reply) moves the end too: the clamped offset can land short of it.
-        if (e.NewSize.Height != e.PreviousSize.Height && !_applyingFollow && !_followTimer.IsRunning) FollowTranscriptEnd();
-        else ScheduleFollow();
-    }
-
-    private void OnTranscriptItemsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
-    {
-        if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
-        {
-            _scrollFollow.Reset();
-            _followedTail = null;
-        }
-        RequestFollow();
-    }
-
-    private void RequestFollow()
-    {
-        _followAttempts = 0;
-        ScheduleFollow();
-    }
-
-    private void ScheduleFollow()
-    {
-        if (!IsLoaded || !_scrollFollow.IsFollowing || _pointerScrolling || _applyingFollow
-            || _viewModel?.Items.Count is not > 0 || _followAttempts >= 4 || _followTimer.IsRunning) return;
-        var tail = _viewModel.Items[^1];
-        if (ReferenceEquals(tail, _followedTail) && ChatScroller.ScrollableHeight - ChatScroller.VerticalOffset <= 1) return;
-        _followTimer.Start();
+        // Streaming text and finished tool output grow rows without adding items, so follow
+        // by size. The transcript is not virtualized, so extents are exact and one snap settles.
+        if (e.NewSize.Height == e.PreviousSize.Height || !_pinnedToBottom) return;
+        FollowTranscriptEnd();
     }
 
     private void FollowTranscriptEnd()
     {
-        // Recheck when the queued work runs: the reader may have scrolled up since it was requested.
-        if (!IsLoaded || !_scrollFollow.IsFollowing || _pointerScrolling || _viewModel?.Items.Count is not > 0) return;
-        _followAttempts++;
-        _applyingFollow = true;
-        _followViewPending = true;
-        ChatScroller.VerticalAnchorRatio = 1;
-        try
+        if (_followQueued) return;
+        // Low priority: the new row has to be measured first. Coalesced per pass, so a burst
+        // of streaming deltas needs one scroll.
+        _followQueued = true;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
-            var tail = _viewModel.Items[^1];
-            if (!ReferenceEquals(tail, _followedTail))
-            {
-                // A virtual extent is an estimate. Realize the actual last row before targeting its end.
-                // Only ChangeView moves the view: a second, bring-into-view request aligned to the
-                // row (not the end, which includes the transcript margin) and the two settled in
-                // turn, so every new entry landed twice.
-                var element = Transcript.GetOrCreateElement(_viewModel.Items.Count - 1);
-                element.UpdateLayout();
-                if (!_scrollFollow.IsFollowing) return;
-                _followedTail = tail;
-            }
-            var beforeOffset = ChatScroller.VerticalOffset;
-            var beforeExtent = ChatScroller.ExtentHeight;
-            var changed = ChatScroller.ChangeView(null, ChatScroller.ScrollableHeight, null, disableAnimation: true);
-            TraceScroll("follow.apply", $"changed={changed} tail={tail.GetType().Name} offset={beforeOffset:0.0} extent={beforeExtent:0.0} target={ChatScroller.ScrollableHeight:0.0}");
-            if (!changed && ChatScroller.ScrollableHeight - ChatScroller.VerticalOffset <= 1) _followViewPending = false;
-        }
-        finally
-        {
-            _applyingFollow = false;
-        }
-        ScheduleFollow();
+            _followQueued = false;
+            if (!_pinnedToBottom || !IsLoaded) return;
+            ChatScroller.UpdateLayout();
+            ChatScroller.ChangeView(null, ChatScroller.ScrollableHeight, null, disableAnimation: true);
+        });
     }
 
-    private void PauseFollow()
-    {
-        _userScrollPending = true;
-        _scrollFollow.Pause();
-        _followTimer.Stop();
-        _followViewPending = false;
-        ChatScroller.VerticalAnchorRatio = 0;
-        TraceScroll("reader.pause");
-    }
-
-    private void OnTranscriptWheel(object sender, PointerRoutedEventArgs e)
-    {
-        // ScrollViewer handles wheel events itself; still observe those for this scroller.
-        // A nested viewer (tool output, code block) only keeps the wheel when it can still
-        // scroll that way; otherwise the wheel chains to the transcript and is the reader's.
-        var point = e.GetCurrentPoint(ChatScroller).Properties;
-        if (point.IsHorizontalMouseWheel || point.MouseWheelDelta == 0) return;
-        if (!WheelScrollsTranscript(e.OriginalSource, up: point.MouseWheelDelta > 0)) return;
-        _userScrollPending = true;
-        if (point.MouseWheelDelta > 0) PauseFollow();
-    }
-
-    /// <summary>
-    /// Touch and precision-touchpad pans run through DirectManipulation and raise no
-    /// wheel or pointer events here, so the manipulation itself marks the reader.
-    /// </summary>
-    private void OnTranscriptManipulationStarted(object? sender, object e)
-    {
-        _pointerScrolling = true;
-        PauseFollow();
-    }
-
-    private void OnTranscriptManipulationCompleted(object? sender, object e) => ResumeAfterPointerScroll();
-
-    private bool WheelScrollsTranscript(object source, bool up)
-    {
-        for (var node = source as DependencyObject; node is UIElement; node = VisualTreeHelper.GetParent(node))
-        {
-            if (node is not ScrollViewer viewer) continue;
-            if (ReferenceEquals(viewer, ChatScroller)) return true;
-            var canScroll = viewer.VerticalScrollMode != ScrollMode.Disabled && viewer.ScrollableHeight > 0.5 &&
-                (up ? viewer.VerticalOffset > 0.5 : viewer.ScrollableHeight - viewer.VerticalOffset > 0.5);
-            if (canScroll) return false;
-        }
-        return false;
-    }
-
-    private void OnTranscriptPointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        if (!IsTranscriptScrollSource(e.OriginalSource)) return;
-        var scrollbar = false;
-        for (var node = e.OriginalSource as DependencyObject; node is not null && !ReferenceEquals(node, ChatScroller);
-            node = VisualTreeHelper.GetParent(node))
-        {
-            if (node is ScrollBar) { scrollbar = true; break; }
-        }
-        if (scrollbar || e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Touch)
-        {
-            _pointerScrolling = true;
-            PauseFollow();
-        }
-    }
-
-    private void OnTranscriptPointerReleased(object sender, PointerRoutedEventArgs e) => ResumeAfterPointerScroll();
-
-    private void ResumeAfterPointerScroll()
-    {
-        if (!_pointerScrolling) return;
-        _pointerScrolling = false;
-        _userScrollPending = true;
-        if (ChatScroller.ScrollableHeight - ChatScroller.VerticalOffset <= 4) _scrollFollow.Follow();
-        RequestFollow();
-    }
-
-    private void OnTranscriptNavigationKey(object sender, KeyRoutedEventArgs e)
-    {
-        if (!IsTranscriptScrollSource(e.OriginalSource)) return;
-        if (e.Key is VirtualKey.Down or VirtualKey.PageDown) _userScrollPending = true;
-        if (e.Key is VirtualKey.Up or VirtualKey.PageUp or VirtualKey.Home) PauseFollow();
-        else if (e.Key == VirtualKey.End)
-        {
-            _scrollFollow.Follow();
-            RequestFollow();
-        }
-    }
-
-    private bool IsTranscriptScrollSource(object source)
-    {
-        for (var node = source as DependencyObject; node is UIElement; node = VisualTreeHelper.GetParent(node))
-        {
-            if (node is ScrollViewer viewer) return ReferenceEquals(viewer, ChatScroller);
-        }
-        return false;
-    }
-
-    private void TraceScroll(string reason, string? detail = null)
-    {
-        // Size/follow events are the evidence for the long-history jump, so only the noisy
-        // settled events are throttled.
-        if (detail is null && DateTime.UtcNow - _lastScrollTrace < TimeSpan.FromMilliseconds(100)) return;
-        _lastScrollTrace = DateTime.UtcNow;
-        CrashLog.Debug("chat-scroll", $"event={reason} {detail} following={_scrollFollow.IsFollowing} attempts={_followAttempts} " +
-            $"items={_viewModel?.Items.Count ?? 0} offset={ChatScroller.VerticalOffset:0.0} extent={ChatScroller.ExtentHeight:0.0} " +
-            $"viewport={ChatScroller.ViewportHeight:0.0} gap={ChatScroller.ScrollableHeight - ChatScroller.VerticalOffset:0.0}");
-    }
+    private void TraceScroll(string reason, string? detail = null) =>
+        CrashLog.Debug("chat-scroll", $"event={reason} {detail} pinned={_pinnedToBottom} items={_viewModel?.Items.Count ?? 0}");
 
     private void OnBriefingToggleClick(object sender, RoutedEventArgs e)
     {
