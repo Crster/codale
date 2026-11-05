@@ -1092,9 +1092,19 @@ public sealed partial class ChatTab : UserControl
 
     private void OnDraftSelectionChanged(object sender, RoutedEventArgs e) => RefreshSuggestions();
 
+    /// <summary>Set while a paste rewrites the draft: the suggestion popup must neither open nor
+    /// be reshaped mid-edit (a second pasted image arrives with the @-popup of the first still live).</summary>
+    private bool _suppressSuggestions;
+
     private void RefreshSuggestions()
     {
         if (_viewModel is null || SuggestPopup is null) return;
+        if (_suppressSuggestions)
+        {
+            ViewModel.Draft = DraftBox.Text;
+            return;
+        }
+
         ViewModel.Draft = DraftBox.Text;
         ViewModel.UpdateSuggestions(DraftBox.SelectionStart);
         ShowSuggestions();
@@ -1474,18 +1484,31 @@ public sealed partial class ChatTab : UserControl
     {
         var (text, caret) = Codale.Core.Helper.ComposerMentions.Insert(
             DraftBox.Text, DraftBox.SelectionStart, DraftBox.SelectionLength, string.Join(" ", mentions));
-        DraftBox.Text = text;
-        DraftBox.SelectionStart = caret;
-        DraftBox.SelectionLength = 0;
+        ReplaceDraft(text, caret);
     }
 
     private void InsertAtCaret(string text)
     {
         var start = DraftBox.SelectionStart;
         var current = DraftBox.Text;
-        DraftBox.Text = current[..start] + text + current[(start + DraftBox.SelectionLength)..];
-        DraftBox.SelectionStart = start + text.Length;
-        DraftBox.SelectionLength = 0;
+        ReplaceDraft(current[..start] + text + current[(start + DraftBox.SelectionLength)..], start + text.Length);
+    }
+
+    /// <summary>Programmatic draft rewrite for pastes; closes the suggestion popup first and keeps it shut.</summary>
+    private void ReplaceDraft(string text, int caret)
+    {
+        _suppressSuggestions = true;
+        try
+        {
+            CloseSuggestions();
+            DraftBox.Text = text;
+            DraftBox.SelectionStart = Math.Clamp(caret, 0, text.Length);
+            DraftBox.SelectionLength = 0;
+        }
+        finally
+        {
+            _suppressSuggestions = false;
+        }
     }
 
     /// <summary>
