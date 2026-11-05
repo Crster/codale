@@ -40,6 +40,15 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
     private readonly ConcurrentDictionary<string, DateTime> _snapshots = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, SourceFile> _indexedFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string> _revisions = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Per worktree: files whose content changed while Codale watched, and when. Covers edits
+    /// made through the shell (sed, scripts), which never arrive as a tool's file change.</summary>
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, DateTime>> _contentChanges = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>More changed files than this in one refresh is a checkout, pull or formatter run, not a session's edits.</summary>
+    private const int MaxRecordedChanges = 40;
+    /// <summary>The session's most recently written files that get a ranking boost, newest strongest.</summary>
+    private const int MaxWorkingSet = 8;
+    private const double WorkingSetBoost = 0.06;
+    private const double WorkingSetDecay = 0.75;
     private bool _disposed;
 
     public Task RefreshAsync(string worktree)
@@ -54,7 +63,8 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
                 var index = SourceIndex.For(worktree);
                 // HEAD changes and lost watcher events must not leave a branch's snapshot reusable forever.
                 var revision = Revision(worktree);
-                index.Invalidate(!_revisions.TryGetValue(worktree, out var previousRevision) || previousRevision != revision);
+                var watched = _revisions.TryGetValue(worktree, out var previousRevision);
+                index.Invalidate(!watched || previousRevision != revision);
                 _revisions[worktree] = revision;
                 var snapshot = await index.GetSnapshotAsync().ConfigureAwait(false);
                 var reChunk = store.SourceChunkVersion(worktree) != FileChunker.Version;
@@ -67,6 +77,7 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
                 }
                 var old = store.SourceHashes(worktree);
                 var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var changed = new List<string>();
                 foreach (var file in snapshot.Files)
                 {
                     if (!Eligible(file.RelativePath) || file.Length > FileChunker.MaxFileBytes) continue;
@@ -78,10 +89,21 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
                     if (text is null) { present.Remove(file.RelativePath); continue; }
                     var hash = Hash(text);
                     if (reChunk || old.GetValueOrDefault(file.RelativePath) != hash)
+                    {
                         store.ReplaceSource(worktree, file.RelativePath, hash, FileChunker.Chunk(text));
+                        if (!reChunk && old.Count > 0) changed.Add(file.RelativePath);
+                    }
                     _indexedFiles[identity] = file;
                 }
                 foreach (var removed in old.Keys.Where(p => !present.Contains(p))) store.ReplaceSource(worktree, removed, null, []);
+                // The first refresh in this process compares against an index from an earlier run, and a
+                // branch switch rewrites whatever differs: neither is work done in a session.
+                if (watched && SameBranch(previousRevision!, revision) && changed.Count is > 0 and <= MaxRecordedChanges)
+                {
+                    var now = DateTime.UtcNow;
+                    var log = _contentChanges.GetOrAdd(worktree, _ => new(StringComparer.OrdinalIgnoreCase));
+                    foreach (var path in changed) log[path] = now;
+                }
                 store.SetSourceChunkVersion(worktree, FileChunker.Version);
                 foreach (var embedder in Embedders()) _embedded.TryRemove(worktree + "\n" + embedder.Model, out _);
                 EmbedPending(worktree);
@@ -126,10 +148,12 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
 
     /// <summary>Shared hybrid retrieval for discovery and prompt enrichment; only fresh source is returned.</summary>
     public IReadOnlyList<SourceChunk> Search(string worktree, string prompt, string recent = "", int maxFiles = 12, int maxChunksPerFile = 1) =>
-        Search(worktree, prompt, recent, maxFiles, maxChunksPerFile, out _);
+        Search(worktree, prompt, recent, maxFiles, maxChunksPerFile, null, out _);
 
+    /// <param name="workingSet">Files the current session wrote, newest first; boosted with decay.</param>
     /// <param name="stale">True when a candidate was dropped because its file changed after indexing.</param>
-    private IReadOnlyList<SourceChunk> Search(string worktree, string prompt, string recent, int maxFiles, int maxChunksPerFile, out bool stale)
+    private IReadOnlyList<SourceChunk> Search(string worktree, string prompt, string recent, int maxFiles, int maxChunksPerFile,
+        IReadOnlyList<string>? workingSet, out bool stale)
     {
         worktree = ProjectPaths.Normalize(worktree);
         Warm(worktree);
@@ -184,6 +208,18 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
                 scores[chunk.Id] = scores.GetValueOrDefault(chunk.Id) + 0.12;
         }
 
+        // The session's working set: a follow-up ("highland villages take 20 more minutes") rarely repeats
+        // the words of the request that edited the file, so neither the source nor a learned edit matches.
+        // Rank by recency; the newest file is boosted most, and every file still has to clear the floor.
+        var working = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in workingSet ?? [])
+        {
+            var key = path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+            if (working.Count == MaxWorkingSet) break;
+            if (AgentInstructions.IsMatch(key) || !working.TryAdd(key, working.Count)) continue;
+            foreach (var chunk in store.SourceChunksForPath(worktree, key)) scores.TryAdd(chunk.Id, 0);
+        }
+
         var chunks = store.SourceChunks(scores.Keys.ToList()).ToDictionary(c => c.Id);
         // A specific word such as "minimap" should outweigh generic matches for "game" or
         // "unit". Count candidate files, not overlapping chunks, so long files get no bonus.
@@ -204,6 +240,8 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
             var pathStems = SearchText.Tokens(chunk.Path).Select(SearchText.Stem).ToList();
             scores[chunk.Id] += 0.02 * terms.Where(t => t.Length >= 3 && pathStems.Any(p => p.StartsWith(t, StringComparison.Ordinal)))
                 .Sum(t => specificity[t]);
+            if (working.TryGetValue(chunk.Path, out var recency))
+                scores[chunk.Id] += WorkingSetBoost * Math.Pow(WorkingSetDecay, recency);
         }
 
         // Design notes and tests mention every subject in prose, so they outrank the code that
@@ -233,7 +271,9 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
     /// and hash-verified source excerpts. Anything in <paramref name="delivered"/> is already in the
     /// provider's conversation and is not repeated.
     /// </summary>
-    public RetrievalResult Retrieve(string worktree, string prompt, string recent, IReadOnlySet<string> delivered, string? currentSessionId = null)
+    /// <param name="workingSet">Files the current session wrote, newest first; empty on a new topic.</param>
+    public RetrievalResult Retrieve(string worktree, string prompt, string recent, IReadOnlySet<string> delivered, string? currentSessionId = null,
+        IReadOnlyList<string>? workingSet = null)
     {
         var timer = Stopwatch.StartNew();
         worktree = ProjectPaths.Normalize(worktree);
@@ -255,11 +295,11 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
 
         var terms = SearchText.RetrievalTerms(prompt);
         var legs = new List<string> { "BM25", semantic?.Invoke() is null ? "n-gram vectors" : "semantic vectors" };
-        var ranked = Search(worktree, prompt, recent, MaxFiles + 2, 2, out var stale);
+        var ranked = Search(worktree, prompt, recent, MaxFiles + 2, 2, workingSet, out var stale);
         // Mid-turn the agent is editing the very files a steer is about. Their rows are stale until the
         // index catches up, and stale files are dropped, so wait briefly for that rather than lose them.
         if ((stale || ranked.Count == 0) && CaughtUp(worktree))
-            ranked = Search(worktree, prompt, recent, MaxFiles + 2, 2, out _);
+            ranked = Search(worktree, prompt, recent, MaxFiles + 2, 2, workingSet, out _);
         // The CLI already loaded its instruction files into the conversation.
         var topFiles = ranked.Where(c => !AgentInstructions.IsMatch(c.Path))
             .GroupBy(c => c.Path, StringComparer.OrdinalIgnoreCase).Take(MaxFiles).ToList();
@@ -384,6 +424,25 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
 
     public static string Hash(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+
+    /// <summary>Project-relative files whose content changed at or after <paramref name="sinceUtc"/>, newest first.</summary>
+    public IReadOnlyList<string> ChangedSince(string worktree, DateTime sinceUtc) =>
+        _contentChanges.TryGetValue(ProjectPaths.Normalize(worktree), out var log)
+            ? log.Where(e => e.Value >= sinceUtc).OrderByDescending(e => e.Value).Select(e => e.Key).ToList()
+            : [];
+
+    /// <summary>
+    /// Same checked-out branch: a commit moves the branch's head without rewriting the tree, so the
+    /// files changed around it are still the session's own edits. A switch or detached head is not.
+    /// </summary>
+    internal static bool SameBranch(string previous, string current)
+    {
+        if (previous == current) return true;
+        static string? Branch(string revision) =>
+            revision.StartsWith("ref: ", StringComparison.Ordinal) && revision.LastIndexOf(' ') is var space and > 4
+                ? revision[..space] : null;
+        return Branch(previous) is { } branch && branch == Branch(current);
+    }
 
     public static string Revision(string root)
     {

@@ -91,6 +91,71 @@ public sealed class ProjectKnowledgeTests : IDisposable
         Assert.DoesNotContain(_index.Search(Root, "projects owner picker"), c => c.Path.Replace('\\', '/') == "src/component-a.tsx");
     }
 
+    [Fact]
+    public async Task Working_set_keeps_files_the_session_edited_in_view_for_follow_ups()
+    {
+        // The follow-up names neither the file nor anything in it, but other files repeat its words.
+        Write("server/timing.go", "package game\nconst RaidArrivalMinutes = 30\nfunc RaidTravel(distance int) int { return RaidArrivalMinutes }");
+        Write("server/terrain.go", "package game\n// Highland villages sit inland, away from the sea.\nfunc HighlandVillage() bool { return true }");
+        Write("client/map_view.js", "// Draw highland villages and their minutes of daylight.\nexport function drawVillage() {}");
+        for (var i = 0; i < 6; i++)
+            Write($"client/view{i}.js", $"// Village panel {i}: highland minutes shown to the player.\nexport function village{i}() {{}}");
+        await _index.RefreshAsync(Root);
+        const string followUp = "if the village is in the highland add 20 more minutes";
+
+        Assert.DoesNotContain("server/timing.go", _index.Retrieve(Root, followUp, "", new HashSet<string>()).Files);
+        var boosted = _index.Retrieve(Root, followUp, "", new HashSet<string>(), workingSet: ["server/terrain.go", "server/timing.go"]);
+        Assert.Contains("server/timing.go", boosted.Files);
+        Assert.Contains("server/terrain.go", boosted.Files);
+    }
+
+    [Fact]
+    public async Task Working_set_does_not_outrank_what_the_prompt_is_clearly_about()
+    {
+        Write("Auth.cs", "class Authentication { void RefreshToken() {} void RotateCredential() {} }");
+        for (var i = 0; i < 8; i++) Write($"Old{i}.cs", $"class Unrelated{i} {{ void Paint{i}() {{}} }}");
+        await _index.RefreshAsync(Root);
+        var result = _index.Search(Root, "RefreshToken RotateCredential");
+        var boosted = _index.Retrieve(Root, "RefreshToken RotateCredential", "", new HashSet<string>(),
+            workingSet: Enumerable.Range(0, 8).Select(i => $"Old{i}.cs").ToList());
+        Assert.Equal("Auth.cs", boosted.Files[0]);
+        // Only the newest edits keep a seat on recency alone; the older ones need relevance.
+        Assert.True(boosted.Files.Count(f => f.StartsWith("Old")) <= 2, string.Join(", ", boosted.Files));
+        Assert.Equal("Auth.cs", result[0].Path);
+    }
+
+    [Fact]
+    public async Task Shell_edits_are_recorded_as_session_changes_but_branch_switches_are_not()
+    {
+        Write(".git/HEAD", "ref: refs/heads/main");
+        Write(".git/refs/heads/main", "1111111");
+        Write("rivals.go", "package game\nconst Distance = 1");
+        Write("timing.go", "package game\nconst Minutes = 30");
+        var before = DateTime.UtcNow;
+        await _index.RefreshAsync(Root);
+        Assert.Empty(_index.ChangedSince(Root, before));   // the first index is not session work
+
+        Write("timing.go", "package game\nconst Minutes = 50");  // e.g. sed -i
+        Write(".git/refs/heads/main", "2222222");                 // ...then committed
+        await _index.RefreshAsync(Root);
+        Assert.Equal(["timing.go"], _index.ChangedSince(Root, before));
+
+        var switched = DateTime.UtcNow;
+        Write(".git/HEAD", "ref: refs/heads/other");
+        Write(".git/refs/heads/other", "3333333");
+        Write("rivals.go", "package game\nconst Distance = 2");
+        await _index.RefreshAsync(Root);
+        Assert.Empty(_index.ChangedSince(Root, switched));
+    }
+
+    [Theory]
+    [InlineData("ref: refs/heads/main aaa", "ref: refs/heads/main bbb", true)]
+    [InlineData("ref: refs/heads/main aaa", "ref: refs/heads/other aaa", false)]
+    [InlineData("aaa", "bbb", false)]
+    [InlineData("unknown", "unknown", true)]
+    public void Same_branch_ignores_commits_but_not_switches(string previous, string current, bool same) =>
+        Assert.Equal(same, ProjectKnowledgeIndex.SameBranch(previous, current));
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

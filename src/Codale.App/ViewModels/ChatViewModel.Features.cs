@@ -32,6 +32,8 @@ public sealed partial class ChatViewModel
     private readonly HashSet<string> _deliveredContext = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SourceReference> _turnReferences = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _turnEditedPaths = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>When the current turn's request went out; files changed on disk since then are the turn's work.</summary>
+    private DateTime? _turnStartedUtc;
     private readonly StringBuilder _turnFindings = new();
     private string? _retrievalId;
     private bool _needsResumeContext;
@@ -209,6 +211,7 @@ public sealed partial class ChatViewModel
         _turnFindings.Clear();
         _turnReferences.Clear();
         _turnEditedPaths.Clear();
+        _turnStartedUtc = null;
         _deliveredContext.Clear();
         _retrievalId = null;
         _needsResumeContext = false;
@@ -248,6 +251,7 @@ public sealed partial class ChatViewModel
         log.AppendUser(text);
         features.RecordProgress(id, log, text);
         _featureRequest = text;
+        _turnStartedUtc = DateTime.UtcNow;
         PublishFeatureActivity(true);
     }
 
@@ -295,6 +299,9 @@ public sealed partial class ChatViewModel
             {
                 foreach (var path in _turnEditedPaths)
                     features.RecordLearnedEdit(id, WorktreePath ?? _projectPath, path, _featureRequest ?? "");
+                // Shell edits (sed, scripts) only show on disk: credit them to this history's working set.
+                if (_turnStartedUtc is { } started)
+                    _ = features.RecordTurnChangesAsync(id, WorktreePath ?? _projectPath, started);
                 foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
                     _turnFindings.ToString(), @"(?:[A-Za-z0-9_.-]+[/\\])+[A-Za-z0-9_.-]+")) CaptureReference(match.Value);
                 features.RecordFinding(id, CliId, WorktreePath ?? _projectPath,
@@ -304,6 +311,7 @@ public sealed partial class ChatViewModel
             _turnFindings.Clear();
             _turnReferences.Clear();
             _turnEditedPaths.Clear();
+            _turnStartedUtc = null;
             return;
         }
         _featureLog?.Append(e);
@@ -348,8 +356,9 @@ public sealed partial class ChatViewModel
             if (newTopic) sent!.IsNewTopic = true;
             if (Features is not { } features || !AppSettings.ProjectKnowledge) return null;
             var recent = newTopic ? "" : string.Join("\n", earlier.TakeLast(2).Append(text));
+            // A new topic leaves the files the session has been editing behind.
             var result = await features.RetrieveAsync(WorktreePath ?? _projectPath, text, recent, new HashSet<string>(_deliveredContext),
-                _needsResumeContext ? null : FeatureId).WaitAsync(TimeSpan.FromSeconds(2), cts.Token);
+                _needsResumeContext ? null : FeatureId, newTopic ? null : FeatureId).WaitAsync(TimeSpan.FromSeconds(2), cts.Token);
             if (newTopic) result = result with { NewTopic = true };
             if (!ReferenceEquals(session, _session)) throw new OperationCanceledException();
             _retrievalId = Guid.NewGuid().ToString("N");

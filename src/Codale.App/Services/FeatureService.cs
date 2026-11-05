@@ -192,8 +192,34 @@ public sealed class FeatureService : IDisposable
         _store.SetProviderSession(new ProviderSession(id, provider, nativeId, ProjectPaths.Normalize(worktree), endpoint));
     }
 
-    public Task<RetrievalResult> RetrieveAsync(string worktree, string prompt, string recent, IReadOnlySet<string> delivered, string? currentSessionId) =>
-        Task.Run(() => _knowledge.Retrieve(worktree, prompt, recent, delivered, currentSessionId));
+    /// <param name="workingSessionId">The history whose recently written files get a ranking boost; null on a new topic.</param>
+    public Task<RetrievalResult> RetrieveAsync(string worktree, string prompt, string recent, IReadOnlySet<string> delivered, string? currentSessionId,
+        string? workingSessionId = null) =>
+        Task.Run(() => _knowledge.Retrieve(worktree, prompt, recent, delivered, currentSessionId,
+            workingSessionId is null ? null : _store.FilesOf(workingSessionId, WorkingSetFiles)));
+
+    private const int WorkingSetFiles = 8;
+
+    /// <summary>
+    /// Credits a finished turn with every file whose content changed on disk while it ran, including
+    /// edits made through the shell, which never arrive as a tool's file change. Re-indexes first, so
+    /// the next prompt's retrieval already sees those files fresh.
+    /// </summary>
+    public Task RecordTurnChangesAsync(string sessionId, string worktree, DateTime startedUtc) => Task.Run(async () =>
+    {
+        var root = ProjectPaths.Normalize(worktree);
+        try
+        {
+            await _knowledge.RefreshAsync(root).ConfigureAwait(false);
+            foreach (var relative in _knowledge.ChangedSince(root, startedUtc))
+                if (ProjectKnowledgeIndex.Eligible(relative)) _store.RecordSessionFile(sessionId, relative);
+        }
+        catch (Exception ex)
+        {
+            // Best effort: a missed credit only weakens the next prompt's ranking.
+            CrashLog.Debug("knowledge", $"turn changes not recorded: {ex.GetType().Name}");
+        }
+    });
 
     public void RecordRetrieval(string retrievalId, string sessionId, RetrievalResult result) => _store.RecordRetrieval(retrievalId, sessionId, result);
     public void RecordExploration(string retrievalId) => _store.RecordExploration(retrievalId);
