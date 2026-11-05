@@ -224,19 +224,86 @@ public sealed class SourceExplorerTests : IDisposable
         using var store = new FeatureStore(Path.Combine(_root, "knowledge.db"));
         using var knowledge = new ProjectKnowledgeIndex(store);
         await knowledge.RefreshAsync(_root);
-        var model = new ScriptedModel(Locations([new
+        var model = new ScriptedModel(Review([new
         {
-            path = "web/Sidebar.xaml", keywords = new[] { "Sidebar" },
-        }]), Locate([new
-        {
-            path = "web/Sidebar.xaml", startLine = 5, endLine = 5,
-            keywords = new[] { "Assets/AppIcon.ico" },
+            path = "web/Sidebar.xaml", reason = "sets the sidebar logo",
+            locations = new[] { new { startLine = 5, endLine = 5, keywords = new[] { "Assets/AppIcon.ico" } } },
         }]));
         var result = await new SourceExplorer(_index, model) { Knowledge = knowledge, MaxRelated = 0 }
             .RunAsync("where to change side bar logo?");
-        Assert.Equal([5], Assert.Single(Assert.Single(result.Files).Ranges).MatchLines);
-        Assert.Equal(["pick", "locate"], model.Seen.Select(s => s.Tool));
-        Assert.Contains("Source=", model.Seen[1].Prompt);
+        var file = Assert.Single(result.Files);
+        Assert.True(file.Confirmed);
+        Assert.Equal("sets the sidebar logo", file.Reason);
+        Assert.Equal([5], Assert.Single(file.Ranges).MatchLines);
+        Assert.Equal(["review"], model.Seen.Select(s => s.Tool));
+        Assert.Contains(model.Seen[0].Prompt.Split('\n'), l => l.StartsWith("5:") && l.Contains("Source=\"Assets/AppIcon.ico\""));
+    }
+
+    private static string Review(object[] results, string paths = "") =>
+        JsonSerializer.Serialize(new { tool = "review", arguments = new
+        {
+            results = JsonSerializer.Serialize(results), paths,
+        }});
+
+    private async Task<ProjectKnowledgeIndex> KnowledgeAsync(FeatureStore store)
+    {
+        var knowledge = new ProjectKnowledgeIndex(store);
+        await knowledge.RefreshAsync(_root);
+        return knowledge;
+    }
+
+    [Fact]
+    public async Task Review_drops_unrelated_retrieved_files_and_keeps_its_order()
+    {
+        using var store = new FeatureStore(Path.Combine(_root, "knowledge.db"));
+        using var knowledge = await KnowledgeAsync(store);
+        var model = new ScriptedModel(Review([
+            new { path = "src/RetryPolicy.cs", reason = "computes the backoff delay",
+                locations = new[] { new { startLine = 22, endLine = 22, keywords = new[] { "Backoff" } } } },
+            new { path = "src/Uploader.cs", reason = "retries the upload",
+                locations = new[] { new { startLine = 10, endLine = 10, keywords = new[] { "RetryPolicy.Execute" } } } },
+        ]));
+        var result = await new SourceExplorer(_index, model) { Knowledge = knowledge }.RunAsync("retry backoff");
+
+        Assert.Equal([P("src/RetryPolicy.cs"), P("src/Uploader.cs")], result.Files.Select(f => f.RelativePath));
+        Assert.All(result.Files, f => Assert.True(f.Confirmed));
+        Assert.Equal([22], Assert.Single(result.Files[0].Ranges).MatchLines);
+        Assert.Equal("computes the backoff delay", result.Files[0].Reason);
+        Assert.Equal(["review"], model.Seen.Select(s => s.Tool));
+    }
+
+    [Fact]
+    public async Task Review_rows_that_drifted_are_realigned_onto_the_line_holding_the_word()
+    {
+        using var store = new FeatureStore(Path.Combine(_root, "knowledge.db"));
+        using var knowledge = await KnowledgeAsync(store);
+        // Execute is declared on line 6; the provider is three lines off.
+        var model = new ScriptedModel(Review([new
+        {
+            path = "src/RetryPolicy.cs",
+            locations = new[] { new { startLine = 9, endLine = 9, keywords = new[] { "public static void Execute", "inventedTerm" } } },
+        }]));
+        var result = await new SourceExplorer(_index, model) { Knowledge = knowledge }.RunAsync("retry backoff");
+
+        var file = Assert.Single(result.Files);
+        Assert.Equal([6], Assert.Single(file.Ranges).MatchLines);
+        Assert.Equal(["public static void Execute"], file.Keywords);
+    }
+
+    [Fact]
+    public async Task A_review_with_invented_words_keeps_the_retrieved_results()
+    {
+        using var store = new FeatureStore(Path.Combine(_root, "knowledge.db"));
+        using var knowledge = await KnowledgeAsync(store);
+        var model = new ScriptedModel(Review([new
+        {
+            path = "src/RetryPolicy.cs",
+            locations = new[] { new { startLine = 7, endLine = 7, keywords = new[] { "inventedTerm" } } },
+        }]));
+        var result = await new SourceExplorer(_index, model) { Knowledge = knowledge, MaxRelated = 0, MaxRounds = 1 }
+            .RunAsync("where do I change retry backoff?");
+        Assert.NotEmpty(result.Files);
+        Assert.All(result.Files, f => Assert.False(f.Confirmed));
     }
 
     [Fact]
@@ -297,7 +364,12 @@ public sealed class SourceExplorerTests : IDisposable
         var retrieved = knowledge.Search(_root, "retry backoff");
         Assert.NotEmpty(retrieved);
         var gate = new TaskCompletionSource();
-        var model = new ScriptedModel(Pick("1")) { Gate = gate };
+        var model = new ScriptedModel(Review([new
+        {
+            path = retrieved[0].Path,
+            locations = new[] { new { startLine = retrieved[0].StartLine, endLine = retrieved[0].StartLine + 4,
+                keywords = new[] { "Retry", "retry", "Backoff", "backoff" } } },
+        }])) { Gate = gate };
         var explorer = new SourceExplorer(_index, model) { Knowledge = knowledge, MaxRelated = 0 };
         var progress = new TaskCompletionSource<DiscoveryResult>();
         explorer.Progress += (_, result) => progress.TrySetResult(result);
@@ -308,7 +380,7 @@ public sealed class SourceExplorerTests : IDisposable
         gate.SetResult();
         var final = await running;
         Assert.True(final.Files[0].Confirmed);
-        Assert.Equal("pick", Assert.Single(model.Seen).Tool);
+        Assert.Equal("review", Assert.Single(model.Seen).Tool);
     }
 
     [Fact]
@@ -368,7 +440,7 @@ public sealed class SourceExplorerTests : IDisposable
             .RunAsync("retry backoff");
         Assert.True(result.IsFinal);
         Assert.NotEmpty(result.Files);
-        Assert.Equal("pick", Assert.Single(model.Seen).Tool);
+        Assert.Equal("review", Assert.Single(model.Seen).Tool);
     }
 
     [Fact]

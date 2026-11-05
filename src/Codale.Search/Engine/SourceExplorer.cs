@@ -119,15 +119,15 @@ public sealed partial class SourceExplorer
         ct.ThrowIfCancellationRequested();
         if (_model is not null && enriched)
         {
-            var review = await AskAsync(CodeDiscovery.JudgeSystemPrompt,
-                BuildJudgePrompt(query, questionTerms.Select(t => t.Text).ToList(), instant.Take(MaxCandidates).ToList(), question) + "\nProject files:\n" + CodeDiscovery.BuildFileList(snapshot.Files.Select(f => f.RelativePath).ToList()),
-                CodeDiscovery.JudgeTool, budget.Token).ConfigureAwait(false);
-            ct.ThrowIfCancellationRequested();
-            if (review is not null && await FinishSelectionAsync(snapshot, query, review,
-                    instant.Take(MaxCandidates).ToList(), question, round: 1, setup, budget.Token, ct).ConfigureAwait(false) is { } selected)
-                return selected;
-            // An unavailable provider leaves the retrieved results usable.
-            if (review is null) return provisional with { IsFinal = true };
+            // Retrieval chose the related files; the provider reads their source, drops
+            // the ones that do not answer, and marks the exact rows and words.
+            Progress?.Invoke(this, provisional with { Round = 1 });
+            var (reviewed, answered) = await ReviewRetrievedAsync(snapshot, query, provisional,
+                instant.Take(MaxCandidates).ToList(), question, setup, budget.Token, ct).ConfigureAwait(false);
+            if (reviewed is not null) return reviewed;
+            // An unavailable provider leaves the retrieved results usable; one that
+            // found nothing to keep gets a keyword exploration instead.
+            if (!answered) return provisional with { IsFinal = true };
         }
 
         var call = _model is null ? null : await AskAsync(

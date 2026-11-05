@@ -94,9 +94,8 @@ public sealed partial class SourceExplorer
     }
 
     private static void AppendLocationSource(StringBuilder source, Dictionary<string, HashSet<int>> evidence,
-        SourceFile file, IReadOnlyList<ResolvedTerm> terms)
+        SourceFile file, IReadOnlyList<ResolvedTerm> terms, IEnumerable<int>? anchors = null, int maxFileChars = 24_000)
     {
-        const int maxFileChars = 24_000;
         const int maxTotalChars = 96_000;
         var lines = file.ReadLines();
         var block = new StringBuilder();
@@ -121,9 +120,11 @@ public sealed partial class SourceExplorer
         {
             // Large files: prioritize complete neighborhoods and their imports,
             // rather than flooding the context with isolated keyword occurrences.
-            var anchors = LineWeights(file, lines, terms, setup: false)
+            // Retrieval's own anchors (the chunk it matched, the rows shown) come first:
+            // they are why the file is here, even when no keyword appears on them.
+            var weighted = LineWeights(file, lines, terms, setup: false)
                 .OrderByDescending(w => w.Value).ThenBy(w => w.Key).Take(16).Select(w => w.Key);
-            foreach (var anchor in anchors)
+            foreach (var anchor in (anchors ?? []).Concat(weighted).Distinct())
                 for (var n = Math.Max(1, anchor - 12); n <= Math.Min(lines.Length, anchor + 20); n++) Add(n);
             for (var n = 1; n <= Math.Min(60, lines.Length); n++) Add(n);
         }
