@@ -183,11 +183,6 @@ internal sealed class PlanAnnotator
 
     private void OnRightTapped(object sender, RightTappedRoutedEventArgs e)
     {
-        if (!CanAnnotate)
-        {
-            return;
-        }
-
         var point = e.GetPosition(_markdown);
         var block = VisualTreeHelper
             .FindElementsInHostCoordinates(e.GetPosition(null), _markdown)
@@ -203,21 +198,14 @@ internal sealed class PlanAnnotator
 
         quote = quote.Trim();
 
-        var add = new MenuFlyoutItem { Text = "Add annotation…", Icon = new FontIcon { Glyph = "" } };
-        add.Click += (_, _) => Prompt(quote, point);
         var menu = new MenuFlyout();
-        menu.Items.Add(add);
-        if (quote.Length > 0)
+        if (CanAnnotate)
         {
-            var copy = new MenuFlyoutItem { Text = "Copy", Icon = new FontIcon { Glyph = "" } };
-            copy.Click += (_, _) =>
-            {
-                var data = new Windows.ApplicationModel.DataTransfer.DataPackage();
-                data.SetText(quote);
-                Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data);
-            };
-            menu.Items.Add(copy);
+            var add = new MenuFlyoutItem { Text = "Add annotation…", Icon = new FontIcon { Glyph = "" } };
+            add.Click += (_, _) => Prompt(quote, point);
+            menu.Items.Add(add);
         }
+        menu.Items.Add(_markdown.CreateCopyMarkdownItem());
 
         menu.ShowAt(_markdown, point);
         e.Handled = true;

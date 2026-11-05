@@ -135,8 +135,9 @@ public sealed partial class EditorTab
         menu.Opening += (_, _) => RefreshContextMenu();
         FileEditor.ContextFlyout = menu;
 
-        // While previewing, the only thing to do is go back to the text.
+        // The preview can copy the source or return to editing.
         var back = new MenuFlyout();
+        back.Items.Add(MarkdownPreview.CreateCopyMarkdownItem());
         back.Items.Add(Item("Edit Markdown", TogglePreview, null, ""));
         MarkdownPreviewHost.ContextFlyout = back;
     }

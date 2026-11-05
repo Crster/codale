@@ -31,7 +31,7 @@ public sealed partial class ArtifactTab : UserControl
         VerticalAlignment = VerticalAlignment.Center,
     };
 
-    private readonly MarkdownView _markdown = new() { HostOwnsTextMenu = true };
+    private readonly MarkdownView _markdown = new() { HostOwnsTextMenu = true, BaseFontSize = 16 };
 
     private readonly TextBlock _revisionNote = new()
     {
@@ -60,7 +60,7 @@ public sealed partial class ArtifactTab : UserControl
         meta.Children.Add(_statusPill);
         meta.Children.Add(_subtitle);
 
-        var page = new StackPanel { MaxWidth = 860, Spacing = 14, Padding = new Thickness(32, 24, 32, 40) };
+        var page = new StackPanel { MaxWidth = 820, HorizontalAlignment = HorizontalAlignment.Center, Spacing = 14 };
         page.Children.Add(_title);
         page.Children.Add(meta);
         _revisionNote.Foreground = ChatPaletteTheme.Brush("TextFillColorSecondaryBrush");
@@ -83,7 +83,7 @@ public sealed partial class ArtifactTab : UserControl
             }
         };
 
-        var scroller = new ScrollViewer { Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        var scroller = new ScrollViewer { Content = page, Padding = new Thickness(24, 16, 24, 32), VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         var root = new Grid();
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });

@@ -149,6 +149,29 @@ public sealed class MarkdownView : StackPanel
             text.ContextFlyout = null;
             text.SelectionFlyout = null;
         }
+        else
+        {
+            var menu = new MenuFlyout();
+            menu.Items.Add(CreateCopyMarkdownItem());
+            text.ContextFlyout = menu;
+            var selectionMenu = new MenuFlyout();
+            selectionMenu.Items.Add(CreateCopyMarkdownItem());
+            text.SelectionFlyout = selectionMenu;
+        }
+    }
+
+    internal void CopyMarkdown()
+    {
+        var data = new Windows.ApplicationModel.DataTransfer.DataPackage();
+        data.SetText(Markdown ?? "");
+        Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data);
+    }
+
+    internal MenuFlyoutItem CreateCopyMarkdownItem()
+    {
+        var item = new MenuFlyoutItem { Text = "Copy", Icon = new FontIcon { Glyph = "\uE8C8" } };
+        item.Click += (_, _) => CopyMarkdown();
+        return item;
     }
 
     private static void OnMarkdownChanged(DependencyObject sender, DependencyPropertyChangedEventArgs e)
@@ -186,6 +209,13 @@ public sealed class MarkdownView : StackPanel
         _markdownStale = false;
         Children.Clear();
         _imagesInUse = [];
+
+        if (!HostOwnsTextMenu && ContextFlyout is null)
+        {
+            var menu = new MenuFlyout();
+            menu.Items.Add(CreateCopyMarkdownItem());
+            ContextFlyout = menu;
+        }
 
         if (!string.IsNullOrEmpty(Markdown))
         {
@@ -546,13 +576,37 @@ public sealed class MarkdownView : StackPanel
             text.Text = code.Text;
         }
 
+        var copy = new Button
+        {
+            Content = new FontIcon { Glyph = "\uE8C8", FontSize = 12 },
+            Padding = new Thickness(6),
+            MinWidth = 0,
+            MinHeight = 0,
+            VerticalAlignment = VerticalAlignment.Top,
+        };
+        ToolTipService.SetToolTip(copy, "Copy code");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(copy, "Copy code");
+        copy.Click += (_, _) =>
+        {
+            var data = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            data.SetText(code.Text);
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data);
+        };
+
+        var content = new Grid { ColumnSpacing = 8 };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(copy, 1);
+        content.Children.Add(text);
+        content.Children.Add(copy);
+
         return new Border
         {
             Background = ThemeBrush("SubtleFillColorSecondaryBrush", 0x2B, 0x2F, 0x38),
             CornerRadius = new CornerRadius(4),
             Padding = new Thickness(8, 6, 8, 6),
             Margin = new Thickness(0, 2, 0, 2),
-            Child = text,
+            Child = content,
         };
     }
 
