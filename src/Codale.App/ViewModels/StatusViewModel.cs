@@ -465,9 +465,8 @@ public sealed partial class StatusViewModel : ObservableObject
             // Awaited on the UI thread, so the continuation lands back on it.
             await Task.Delay(TimeSpan.FromSeconds(3));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("status", "fresh-change highlight failed", ex);
         }
         finally
         {

@@ -42,7 +42,6 @@ public sealed partial class ChatViewModel
     {
         if (!await BrowserViewportControl.RestoreAsync(_browserControlPipe))
         {
-            CrashLog.Trace("browser: viewport restore unavailable (browser session may have closed)");
         }
     }
 }

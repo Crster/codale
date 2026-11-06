@@ -63,7 +63,6 @@ public sealed partial class HexViewer : UserControl
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            CrashLog.Error("hex", $"open failed: {path}", ex);
             SizeText.Text = ex.Message;
             return;
         }

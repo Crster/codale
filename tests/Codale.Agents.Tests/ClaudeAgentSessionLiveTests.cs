@@ -36,8 +36,6 @@ public sealed class ClaudeAgentSessionLiveTests
                 // Pinning the tool set keeps the assertions deterministic and exercises
                 // the structured tool_use_result that the file-changes panel depends on.
                 ExtraArguments = ["--tools", "Write"],
-
-                RawLogPath = Environment.GetEnvironmentVariable("CODALE_LIVE_RAW_LOG"),
             });
 
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));

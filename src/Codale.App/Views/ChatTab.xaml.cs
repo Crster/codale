@@ -320,14 +320,10 @@ public sealed partial class ChatTab : UserControl
         });
     }
 
-    private void TraceScroll(string reason, string? detail = null) =>
-        CrashLog.Debug("chat-scroll", $"event={reason} {detail} pinned={_pinnedToBottom} items={_viewModel?.Items.Count ?? 0}");
-
     private void OnBriefingToggleClick(object sender, RoutedEventArgs e)
     {
         if (((FrameworkElement)sender).Tag is FeatureBriefingItem briefing)
         {
-            TraceScroll("toggle.before", $"kind=briefing expanding={!briefing.IsExpanded}");
             briefing.IsExpanded = !briefing.IsExpanded;
         }
     }
@@ -336,7 +332,6 @@ public sealed partial class ChatTab : UserControl
     {
         if (((FrameworkElement)sender).Tag is ContextEnrichedItem context)
         {
-            TraceScroll("toggle.before", $"kind=context expanding={!context.IsExpanded}");
             context.IsExpanded = !context.IsExpanded;
         }
     }
@@ -345,7 +340,6 @@ public sealed partial class ChatTab : UserControl
     {
         if (((FrameworkElement)sender).Tag is HandoffBriefItem brief)
         {
-            TraceScroll("toggle.before", $"kind=brief expanding={!brief.IsExpanded}");
             brief.IsExpanded = !brief.IsExpanded;
         }
     }
@@ -401,9 +395,8 @@ public sealed partial class ChatTab : UserControl
             package.SetText(text);
             Clipboard.SetContent(package);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("chat", "copy text failed", ex);
         }
     }
 
@@ -1398,9 +1391,8 @@ public sealed partial class ChatTab : UserControl
             await File.WriteAllTextAsync(path, text);
             InsertMentionsAtCaret(["@" + (path.Contains(' ') ? $"\"{path}\"" : path)]);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("chat", "paste of text failed", ex);
         }
     }
 
@@ -1440,9 +1432,8 @@ public sealed partial class ChatTab : UserControl
                 InsertMentionsAtCaret(mentions);
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("chat", "paste of files failed", ex);
         }
     }
 
@@ -1466,9 +1457,8 @@ public sealed partial class ChatTab : UserControl
                 };
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("chat", "paste of image failed", ex);
         }
     }
 
@@ -1565,7 +1555,6 @@ public sealed partial class ChatTab : UserControl
         catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or TaskCanceledException
             or InvalidOperationException or UnauthorizedAccessException or IOException)
         {
-            CrashLog.Error("chat", "clipboard image could not be saved", ex);
             return null;
         }
     }

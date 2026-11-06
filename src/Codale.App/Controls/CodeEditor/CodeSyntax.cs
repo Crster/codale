@@ -154,7 +154,6 @@ public static class CodeTokenizer
         catch
         {
             // A tokenizer bug must never take the editor down; plain text is an acceptable fallback.
-            CrashLog.Warn("editor", $"tokenizer failed for {syntax}; line rendered plain");
             tokens.Clear();
             return default;
         }

@@ -162,9 +162,8 @@ public sealed class TaskPipeServer : IDisposable
         {
             await AcceptLoopAsync().ConfigureAwait(false);
         }
-        catch (Exception e)
+        catch (Exception)
         {
-            Trace.WriteLine($"Task pipe accept loop ended: {e}");
         }
     });
 
@@ -201,7 +200,6 @@ public sealed class TaskPipeServer : IDisposable
                 pipe?.Dispose();
                 if (e is not IOException)
                 {
-                    Trace.WriteLine($"Task pipe accept failed: {e.Message}");
                 }
 
                 await Task.Delay(200, _cts.Token).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
@@ -227,10 +225,9 @@ public sealed class TaskPipeServer : IDisposable
             {
                 // The MCP process went away.
             }
-            catch (Exception e)
+            catch (Exception)
             {
                 // Runs unobserved on the thread pool: log it rather than lose it.
-                Trace.WriteLine($"Task pipe connection failed: {e}");
             }
         }
     }
@@ -338,7 +335,6 @@ public sealed class TaskPipeServer : IDisposable
         catch (Exception e) when (e is not OperationCanceledException)
         {
             // Whatever a service throws is the caller's error response, not a dropped connection.
-            Trace.WriteLine($"Task request failed: {e}");
             return new JsonObject { ["ok"] = false, ["error"] = e.Message };
         }
     }

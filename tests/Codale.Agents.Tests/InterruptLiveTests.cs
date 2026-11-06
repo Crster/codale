@@ -39,7 +39,6 @@ public sealed class InterruptLiveTests
                 // No tools: the interrupted turn is pure generation, so the assertion
                 // measures the interrupt itself rather than an approval detour.
                 ExtraArguments = ["--disallowedTools", "*"],
-                RawLogPath = Environment.GetEnvironmentVariable("CODALE_LIVE_RAW_LOG"),
             });
 
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));

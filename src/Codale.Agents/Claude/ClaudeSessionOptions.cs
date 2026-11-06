@@ -97,13 +97,6 @@ public sealed record ClaudeSessionOptions
     /// <summary>Ask the CLI to predict the next user prompt after each turn (the initialize request's promptSuggestions).</summary>
     public bool PromptSuggestions { get; init; }
 
-    /// <summary>
-    /// When set, every raw stdout line is appended to this file. The protocol is
-    /// undocumented and version-drifts, so being able to capture a verbatim
-    /// transcript is how we diagnose and turn a surprise into a replay fixture.
-    /// </summary>
-    public string? RawLogPath { get; init; }
-
     internal IReadOnlyList<string> BuildArguments()
     {
         var args = new List<string>

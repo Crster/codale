@@ -106,7 +106,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         }
         catch (StoreSchemaException ex)
         {
-            CrashLog.Warn("workspace", $"database not usable, running on a temporary one: {ex.Message}");
             var temporary = Path.Combine(Path.GetTempPath(), "codale-temporary", $"{Environment.ProcessId}.db");
             return (new CodaleStore(temporary), temporary, ex.Message + " Session history will not be saved in this window.");
         }
@@ -337,7 +336,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>The chat's tab closed: its session ends, and the front moves to another chat.</summary>
     public async Task CloseChatAsync(ChatViewModel chat)
     {
-        CrashLog.Trace($"Close chat: session={chat.SessionId ?? "none"}");
 
         chat.TurnFinished -= OnTurnFinished;
         chat.FilesChanged -= OnChatFilesChanged;
@@ -714,7 +712,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             }
 
             WorktreeError = null;
-            CrashLog.Trace($"Isolated session: worktree={path}");
 
             // Same rule as New session: its own tab unless the chat in front holds nothing.
             // The reused chat is reset below, so anything on screen - a notice, a task,
@@ -799,7 +796,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             }
 
             WorktreeError = null;
-            CrashLog.Trace($"Isolated session left: worktree={path} merged={merge}");
 
             await chat.DisposeSessionAsync();
             chat.ResetForNewSession();
@@ -991,11 +987,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         catch (OperationCanceledException)
         {
             // A git read that outlived its 30 s timeout; the next poll catches up.
-            CrashLog.Debug("workspace", "post-turn refresh timed out");
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("workspace", "post-turn refresh failed", ex);
         }
     }
 
@@ -1039,9 +1033,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             await Git.RefreshAsync();
             await Diff.RefreshAsync();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Trace($"Live refresh failed: {ex.Message}");
         }
     }
 
@@ -1144,9 +1137,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         {
             await Sessions.RefreshAsync();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("workspace", "session list refresh failed", ex);
         }
     }
 
@@ -1226,9 +1218,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             await Diff.RefreshAsync();
             ListTerminalCliChanges();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("workspace", "diff refresh after a git change failed", ex);
         }
     }
 
@@ -1246,9 +1237,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         {
             await OpenSessionAsync(summary);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("workspace", $"opening {summary.SessionId} failed", ex);
         }
     }
 
@@ -1260,7 +1250,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// </summary>
     private async Task<ChatViewModel?> OpenSessionAsync(TranscriptSummary summary)
     {
-        CrashLog.Trace($"Open: {summary.SessionId}");
 
         if (FindOpenChat(summary.SessionId) is { } open)
         {
@@ -1378,10 +1367,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         {
             await shutdown.WaitAsync(TimeSpan.FromSeconds(10));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // A session that will not stop in time is abandoned: its process dies with ours.
-            CrashLog.Warn("workspace", $"closing sessions: {ex.GetType().Name}: {ex.Message}");
         }
 
         Features.Dispose();

@@ -24,13 +24,6 @@ public sealed class ClaudeAgentSession : IAgentSession
     /// <summary>Guards stdin: the UI thread and the read loop both write control frames.</summary>
     private readonly SemaphoreSlim _stdinLock = new(1, 1);
 
-    /// <summary>Open once for the session; replaces re-opening the raw log per streamed line.</summary>
-    private StreamWriter? _rawLog;
-    private long _rawLogBytes;
-
-    /// <summary>A raw log past this size is rotated to <c>.1</c> (replacing the previous one) so it cannot grow without bound.</summary>
-    private const long RawLogMaxBytes = 32 * 1024 * 1024;
-
     /// <summary>Control requests awaiting their response, keyed by the request_id we chose.</summary>
     private readonly Dictionary<string, TaskCompletionSource<JsonElement>> _pendingControl = [];
 
@@ -501,33 +494,6 @@ public sealed class ClaudeAgentSession : IAgentSession
         }
     }
 
-    /// <summary>Appends one line to the raw log, rotating it once it passes <see cref="RawLogMaxBytes"/>. Logging never fails the session.</summary>
-    private async Task AppendRawLogAsync(string path, string line)
-    {
-        try
-        {
-            if (_rawLog is not null && _rawLogBytes > RawLogMaxBytes)
-            {
-                await _rawLog.DisposeAsync().ConfigureAwait(false);
-                _rawLog = null;
-                File.Move(path, path + ".1", overwrite: true);
-            }
-
-            if (_rawLog is null)
-            {
-                var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
-                _rawLogBytes = stream.Length;
-                _rawLog = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
-            }
-
-            await _rawLog.WriteLineAsync(line).ConfigureAwait(false);
-            _rawLogBytes += line.Length + 1;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
-
     private async Task WriteLineAsync(object frame, CancellationToken ct)
     {
         var process = _process ?? throw new InvalidOperationException("Session not started.");
@@ -552,13 +518,6 @@ public sealed class ClaudeAgentSession : IAgentSession
         {
             while (await process.StandardOutput.ReadLineAsync().ConfigureAwait(false) is { } line)
             {
-                if (_options.RawLogPath is { Length: > 0 } rawLog)
-                {
-                    // One open stream instead of re-opening the file per streamed line;
-                    // flush per line so the tail a stall diagnosis needs is on disk.
-                    await AppendRawLogAsync(rawLog, line).ConfigureAwait(false);
-                }
-
                 HandleControlResponse(line);
 
                 if (UnsupportedControlRequest(line) is var (requestId, subtype))
@@ -756,12 +715,6 @@ public sealed class ClaudeAgentSession : IAgentSession
 
             process.Dispose();
             _process = null;
-        }
-
-        if (_rawLog is not null)
-        {
-            await _rawLog.DisposeAsync().ConfigureAwait(false);
-            _rawLog = null;
         }
 
         _stdinLock.Dispose();

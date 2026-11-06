@@ -31,9 +31,8 @@ internal static class SecretProtector
         {
             return Prefix + Convert.ToBase64String(Transform(Encoding.UTF8.GetBytes(secret), protect: true));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("settings", "could not protect a stored secret; writing it unprotected", ex);
             return secret;
         }
     }
@@ -50,9 +49,8 @@ internal static class SecretProtector
         {
             return Encoding.UTF8.GetString(Transform(Convert.FromBase64String(stored[Prefix.Length..]), protect: false));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Warn("settings", $"a stored secret could not be decrypted (written by another account or machine?): {ex.Message}");
             return "";
         }
     }

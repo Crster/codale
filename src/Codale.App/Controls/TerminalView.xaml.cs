@@ -120,7 +120,6 @@ public sealed partial class TerminalView : UserControl
 
     public TerminalView()
     {
-        CrashLog.Trace("terminal: view ctor begin");
         InitializeComponent();
 
         // Settings drive the defaults; ApplyAppSettings follows a live change.
@@ -176,7 +175,6 @@ public sealed partial class TerminalView : UserControl
         PreviewKeyDown += OnTerminalKeyDown;
         CharacterReceived += OnTerminalCharacterReceived;
 
-        CrashLog.Trace("terminal: view ctor end");
     }
 
     // ------------------------------------------------------------------ public surface
@@ -187,7 +185,6 @@ public sealed partial class TerminalView : UserControl
     public void Close()
     {
         if (_closed) return;
-        MemoryDiagnostics.Sample("terminal.close.begin", $"lines={_emulator.TotalLines} brushes={_brushes.Count}");
         _closed = true;
         _caretTimer.Stop();
         _emulator.Invalidated -= OnEmulatorInvalidated;
@@ -201,7 +198,6 @@ public sealed partial class TerminalView : UserControl
         CaretCanvas.RemoveFromVisualTree();
         Canvas = null!;
         CaretCanvas = null!;
-        MemoryDiagnostics.Released("terminal.close.released", "canvases=3 timersStopped=1", this);
     }
 
     /// <summary>A reply the emulator wants sent to the shell (DSR, DA) - route it to the PTY input.</summary>
@@ -546,7 +542,6 @@ public sealed partial class TerminalView : UserControl
 
     private void OnCreateResources(CanvasControl sender, CanvasCreateResourcesEventArgs args)
     {
-        CrashLog.Trace("terminal: CreateResources begin");
         try
         {
             // A device rebuild invalidates every cached brush and format; they are rebuilt lazily.
@@ -560,7 +555,6 @@ public sealed partial class TerminalView : UserControl
         }
         finally
         {
-            CrashLog.Trace("terminal: CreateResources end");
         }
     }
 
@@ -603,14 +597,13 @@ public sealed partial class TerminalView : UserControl
         {
             DrawFrame(args);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // Log the first fault only, but keep drawing: a single bad frame (say, mid
             // resize) must not freeze the terminal for the rest of the session.
             if (!_drawFaulted)
             {
                 _drawFaulted = true;
-                CrashLog.Write("Terminal", "canvas draw threw; later faults not logged", ex);
             }
         }
     }

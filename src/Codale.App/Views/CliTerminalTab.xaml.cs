@@ -110,21 +110,13 @@ public sealed partial class CliTerminalTab : UserControl, ITerminalHost
 
         _initialized = true;
 
-        try
-        {
-            _viewModel.OutputReceived += OnOutputReceived;
-            _viewModel.Exited += OnExited;
-            _subscribed = true;
+        _viewModel.OutputReceived += OnOutputReceived;
+        _viewModel.Exited += OnExited;
+        _subscribed = true;
 
-            if (_viewModel.StartupError is { Length: > 0 } error)
-            {
-                Terminal.Write($"\x1b[31m{error}\x1b[0m\r\n\x1b[90m[session ended]\x1b[0m\r\n");
-            }
-        }
-        catch (Exception ex)
+        if (_viewModel.StartupError is { Length: > 0 } error)
         {
-            CrashLog.Write("Terminal", "cli terminal tab load failed", ex);
-            throw;
+            Terminal.Write($"\x1b[31m{error}\x1b[0m\r\n\x1b[90m[session ended]\x1b[0m\r\n");
         }
     }
 

@@ -123,9 +123,8 @@ public sealed partial class WorkspacePage : Page
         {
             await ViewModel.InitializeAsync();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Write("WorkspacePage.OnNavigatedTo", ex.Message, ex);
         }
     }
 
@@ -545,7 +544,6 @@ public sealed partial class WorkspacePage : Page
     /// </summary>
     private async Task OpenChatTabAsync(string cliId = "claude")
     {
-        CrashLog.Trace("Chat tab open requested");
 
         var chat = ViewModel.FreshChat(cliId);
 
@@ -842,70 +840,59 @@ public sealed partial class WorkspacePage : Page
     /// </summary>
     private void AddTerminalTab(TerminalViewModel terminal, int insertIndex = -1)
     {
-        CrashLog.Trace("terminal: AddTerminalTab begin");
-        try
-        {
-            // An agent CLI typed at this terminal's prompt is launched in its own tab with its own
-            // session's MCP servers (see TryOpenCliTab), so nothing is written for it here.
-            terminal.LaunchRewriter ??= OnTerminalLaunchTyped;
+        // An agent CLI typed at this terminal's prompt is launched in its own tab with its own
+        // session's MCP servers (see TryOpenCliTab), so nothing is written for it here.
+        terminal.LaunchRewriter ??= OnTerminalLaunchTyped;
 
-            ITerminalHost tab;
-            if (terminal.AgentSession is not null)
+        ITerminalHost tab;
+        if (terminal.AgentSession is not null)
+        {
+            // An agent CLI: its TUI in a rounded card beside the session panel.
+            var cli = new CliTerminalTab { ViewModel = terminal, Workspace = ViewModel };
+            cli.FileDiffRequested += (_, path) => OnChatToolFileRequested(cli, new ToolFileRequestEventArgs(path, isEdit: true));
+            cli.ArtifactRequested += (_, artifact) => ShowArtifact(artifact);
+            cli.UpdateCliRequested += (_, cmd) => _ = UpdateCliAsync(cmd);
+            cli.TaskPeekRequested += (_, task) => SetPeek(ReferenceEquals(PeekPane.Task, task) && PeekPane.Visibility == Visibility.Visible ? null : task);
+            cli.ResumeRequested += (_, resume) =>
             {
-                // An agent CLI: its TUI in a rounded card beside the session panel.
-                var cli = new CliTerminalTab { ViewModel = terminal, Workspace = ViewModel };
-                cli.FileDiffRequested += (_, path) => OnChatToolFileRequested(cli, new ToolFileRequestEventArgs(path, isEdit: true));
-                cli.ArtifactRequested += (_, artifact) => ShowArtifact(artifact);
-                cli.UpdateCliRequested += (_, cmd) => _ = UpdateCliAsync(cmd);
-                cli.TaskPeekRequested += (_, task) => SetPeek(ReferenceEquals(PeekPane.Task, task) && PeekPane.Visibility == Visibility.Visible ? null : task);
-                cli.ResumeRequested += (_, resume) =>
+                // A past conversation resumes natively: the CLI is launched again with its own resume
+                // arguments, through the same path as a launch typed at a shell prompt.
+                if (ViewModel is { } workspace)
                 {
-                    // A past conversation resumes natively: the CLI is launched again with its own resume
-                    // arguments, through the same path as a launch typed at a shell prompt.
-                    if (ViewModel is { } workspace)
-                    {
-                        TryOpenCliTab($"PS {workspace.ProjectPath}> {resume.Cli.Executable} {resume.Arguments}", TerminalTabInFront());
-                    }
-                };
-                tab = cli;
-            }
-            else
-            {
-                tab = new TerminalTab { ViewModel = terminal };
-            }
-
-            tab.LinkActivated += OnTerminalLinkActivated;
-            var item = new TabViewItem { IsClosable = true, Header = BuildTerminalHeader(terminal) };
-            item.ContextRequested += (_, args) => tab.ShowContextMenu(item, args);
-            item.Content = (UIElement)tab;
-
-            var entry = new TerminalTabEntry(item, tab, terminal);
-            _terminalTabs.Add(entry);
-            if (insertIndex >= 0 && insertIndex <= CentreTabs.TabItems.Count)
-            {
-                CentreTabs.TabItems.Insert(insertIndex, item);
-            }
-            else
-            {
-                CentreTabs.TabItems.Add(item);
-            }
-
-            UpdateEmptyState();
-            CentreTabs.SelectedItem = item;
-
-            // The shell lives exactly as long as its tab: started when the tab first
-            // appears, terminated when the tab is closed.
-            if (!terminal.IsOpen)
-            {
-                terminal.Toggle();
-            }
-
-            CrashLog.Trace("terminal: AddTerminalTab end");
+                    TryOpenCliTab($"PS {workspace.ProjectPath}> {resume.Cli.Executable} {resume.Arguments}", TerminalTabInFront());
+                }
+            };
+            tab = cli;
         }
-        catch (Exception ex)
+        else
         {
-            CrashLog.Write("Terminal", "AddTerminalTab failed", ex);
-            throw;
+            tab = new TerminalTab { ViewModel = terminal };
+        }
+
+        tab.LinkActivated += OnTerminalLinkActivated;
+        var item = new TabViewItem { IsClosable = true, Header = BuildTerminalHeader(terminal) };
+        item.ContextRequested += (_, args) => tab.ShowContextMenu(item, args);
+        item.Content = (UIElement)tab;
+
+        var entry = new TerminalTabEntry(item, tab, terminal);
+        _terminalTabs.Add(entry);
+        if (insertIndex >= 0 && insertIndex <= CentreTabs.TabItems.Count)
+        {
+            CentreTabs.TabItems.Insert(insertIndex, item);
+        }
+        else
+        {
+            CentreTabs.TabItems.Add(item);
+        }
+
+        UpdateEmptyState();
+        CentreTabs.SelectedItem = item;
+
+        // The shell lives exactly as long as its tab: started when the tab first
+        // appears, terminated when the tab is closed.
+        if (!terminal.IsOpen)
+        {
+            terminal.Toggle();
         }
     }
 
@@ -972,7 +959,6 @@ public sealed partial class WorkspacePage : Page
             ViewModel.InjectMcpForTerminalCli(session);
 
             var command = ViewModel.RewriteCliLaunch(promptLine, session) ?? cli.Executable + args;
-            CrashLog.Trace($"cli tab: launching {cli.Id} as '{command}'");
             var directory = PromptDirectory(promptLine);
             if (string.IsNullOrWhiteSpace(directory) ||
                 directory.StartsWith(McpServerSettings.CodaleDataRoot(), StringComparison.OrdinalIgnoreCase) ||
@@ -1002,9 +988,8 @@ public sealed partial class WorkspacePage : Page
 
             return true;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Write("Terminal", "CLI tab launch failed", ex);
             if (session is not null)
             {
                 _ = RemoveCliSessionAsync(session);
@@ -1065,7 +1050,6 @@ public sealed partial class WorkspacePage : Page
             return;
         }
 
-        CrashLog.Trace($"cli tab: {terminal.CliId} exited with {terminal.ExitCode}");
         var name = terminal.CommandName ?? terminal.CliId;
         NotifyAttention(
             terminal.ExitCode == 0 ? $"{name} session ended" : $"{name} stopped with an error",
@@ -1091,7 +1075,6 @@ public sealed partial class WorkspacePage : Page
             return;
         }
 
-        CrashLog.Trace($"cli tab: ending CLI session after {closing.CliId} tab ended");
         if (ReferenceEquals(ViewModel.Panel, session))
         {
             ViewModel.Panel = ViewModel.Chat;
@@ -1106,9 +1089,8 @@ public sealed partial class WorkspacePage : Page
         {
             await ViewModel.RemoveTerminalSessionAsync(session);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("workspace", "ending a CLI session failed", ex);
         }
     }
 
@@ -1222,9 +1204,8 @@ public sealed partial class WorkspacePage : Page
                 {
                     await ShowSearchResultAsync(request);
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    CrashLog.Write("WorkspacePage.ShowSearchResult", ex.Message, ex);
                 }
             };
             _searchTabItem = new TabViewItem { Header = "Search", IsClosable = true };
@@ -2064,7 +2045,6 @@ public sealed partial class WorkspacePage : Page
             // Closing a chat ends that conversation only - the others keep running -
             // and it stays reachable through the session list. Fire and forget: a tab
             // close cannot await.
-            CrashLog.Trace("Chat tab closed (session ended)");
             _chatTabs.Remove(chatEntry);
             StopTabAttention(chatEntry);
             chatEntry.Chat.LoginRequired -= OnChatLoginRequired;
@@ -2158,9 +2138,8 @@ public sealed partial class WorkspacePage : Page
                 ViewModel?.McpTools.ServeFolder(folder.Path);
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Write("ServeFolder", ex.Message, ex);
         }
     }
 
@@ -2499,9 +2478,8 @@ public sealed partial class WorkspacePage : Page
                 {
                     await ShowSearchResultAsync(request, ViewModel.References);
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    CrashLog.Write("WorkspacePage.ShowReferenceResult", ex.Message, ex);
                 }
             };
         }
@@ -2636,9 +2614,8 @@ public sealed partial class WorkspacePage : Page
         {
             await action();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Write("WorkspacePage.Shortcut", ex.Message, ex);
         }
     }
 
@@ -2869,10 +2846,9 @@ public sealed partial class WorkspacePage : Page
                     window.ClearSearchText();
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 // async void: an escaping exception would take the process down.
-                CrashLog.Write("WorkspacePage.FocusOnQuery", ex.Message, ex);
             }
 
             return;
@@ -2945,9 +2921,8 @@ public sealed partial class WorkspacePage : Page
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Write("AddWorkspaceFolder", ex.Message, ex);
         }
     }
 
@@ -2959,9 +2934,8 @@ public sealed partial class WorkspacePage : Page
         {
             await ViewModel.Git.RefreshAsync();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Trace($"Files refresh failed: {ex.Message}");
         }
     }
 
@@ -3866,9 +3840,8 @@ public sealed partial class WorkspacePage : Page
                 ViewModel?.ExtraFolders.AddRecentCwd(folder.Path);
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Write("PickCustomFolder", ex.Message, ex);
         }
     }
 
@@ -4014,9 +3987,8 @@ public sealed partial class WorkspacePage : Page
         catch (OperationCanceledException)
         {
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            Trace.WriteLine($"Shell completion failed: {ex.Message}");
         }
 
         return "";
@@ -4170,9 +4142,8 @@ public sealed partial class WorkspacePage : Page
                 }];
             });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Debug("shell", $"risky command dialog assessment failed: {ex.Message}");
         }
     }
 

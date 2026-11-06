@@ -271,9 +271,8 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
                 await CliUpdate.RefreshAsync(cli);
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Write("AgentSessionPanel.OnUpdateCliClick", ex.Message, ex);
         }
     }
 
@@ -286,9 +285,8 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
                 await session.CompactAsync();
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Write("AgentSessionPanel.OnCompactContextClick", ex.Message, ex);
         }
     }
 

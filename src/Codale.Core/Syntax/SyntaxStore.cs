@@ -62,9 +62,8 @@ public sealed class SyntaxStore
             var path = GrammarPath(entry);
             return File.Exists(path) ? File.ReadAllText(path) : null;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLogHook.Warn("syntax", $"could not read grammar {entry.Id}: {ex.Message}");
             return null;
         }
     }
@@ -161,9 +160,8 @@ public sealed class SyntaxStore
                 .Where(l => l.Id.Length > 0 && l.GrammarFile.Length > 0 && File.Exists(GrammarPath(l)))
                 .ToList();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLogHook.Warn("syntax", $"languages.json unreadable ({ex.Message}); starting with built-ins only");
             try { File.Copy(ManifestPath, ManifestPath + ".broken", overwrite: true); } catch { /* best effort */ }
             _languages = [];
         }
@@ -212,12 +210,4 @@ public sealed class SyntaxStore
             .ToArray();
         return new string(chars).Trim('-');
     }
-}
-
-/// <summary>Lets Core log without referencing the app's CrashLog; the app wires it up at start-up.</summary>
-public static class CrashLogHook
-{
-    public static Action<string, string>? Sink { get; set; }
-
-    internal static void Warn(string area, string message) => Sink?.Invoke(area, message);
 }

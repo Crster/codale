@@ -144,10 +144,9 @@ public sealed class HostedTask
         {
             OutputReceived?.Invoke(this, line + "\n");
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // This runs on the process's data thread: a throwing subscriber must not take the app down.
-            Trace.WriteLine($"Hosted task output handler failed: {ex.Message}");
         }
     }
 
@@ -157,9 +156,8 @@ public sealed class HostedTask
         {
             Finished?.Invoke(this);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            Trace.WriteLine($"Hosted task finished handler failed: {ex.Message}");
         }
     }
 
@@ -329,9 +327,8 @@ public sealed class HostedTaskManager : IDisposable
         {
             TaskStarted?.Invoke(task);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            Trace.WriteLine($"Hosted task started handler failed: {ex.Message}");
         }
 
         return task;

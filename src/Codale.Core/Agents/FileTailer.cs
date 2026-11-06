@@ -92,10 +92,9 @@ public sealed class FileTailer : IDisposable
                     {
                         Chunk?.Invoke(text);
                     }
-                    catch (Exception e)
+                    catch (Exception)
                     {
                         // A throwing subscriber must not end the tail for everyone after it.
-                        Trace.WriteLine($"FileTailer chunk handler failed: {e.Message}");
                     }
                 }
             }

@@ -134,9 +134,8 @@ public sealed partial class TaskPeekPane : UserControl
         {
             // The pane closed or moved to another command.
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Debug("tasks", $"shell task assessment failed: {ex.Message}");
         }
     }
 

@@ -355,9 +355,8 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
             RefreshVitals();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Write("TerminalAgentSessionPanel.OnTick", ex.Message, ex);
         }
         finally
         {
@@ -497,9 +496,8 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
                 await CliUpdate.RefreshAsync(cli);
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Write("TerminalAgentSessionPanel.OnUpdateCliClick", ex.Message, ex);
         }
     }
 
@@ -584,7 +582,6 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
         }
         catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException or PlatformNotSupportedException)
         {
-            CrashLog.Write("TerminalAgentSessionPanel.WatchHistory", ex.Message, ex);
         }
     }
 
@@ -640,9 +637,8 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
                 ? $"No {cli.DisplayName} conversations in this project yet."
                 : "Pick a conversation to resume it in a new tab, with its full context.";
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Write("TerminalAgentSessionPanel.RefreshHistory", ex.Message, ex);
         }
     }
 

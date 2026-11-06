@@ -25,9 +25,6 @@ public sealed class MessageRouter
 
     public async Task<RouteDecision> RouteAsync(string text, ChatViewModel chat, CancellationToken ct = default)
     {
-        var started = System.Diagnostics.Stopwatch.StartNew();
-        var decision = await MessageRouting.RouteAsync(_client, text, chat.LastRoutingReply, ct);
-        CrashLog.Trace($"Routed in {started.ElapsedMilliseconds}ms: intent={decision.Intent}");
-        return decision;
+        return await MessageRouting.RouteAsync(_client, text, chat.LastRoutingReply, ct);
     }
 }

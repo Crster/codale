@@ -455,9 +455,8 @@ public sealed partial class MainWindow : Window
             TitleBarExtras.Visibility = Visibility.Collapsed;
             RootFrame.Navigate(typeof(ProjectPickerPage));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("MainWindow", "changing folder failed", ex);
         }
     }
 
@@ -507,11 +506,9 @@ public sealed partial class MainWindow : Window
                     var logPath = Path.Combine(Windows.Storage.ApplicationData.Current.LocalCacheFolder.Path,
                         "Codale", "codex-update.log");
                     await Codale.Agents.Codex.CodexUpdater.StartAfterExitAsync(logPath);
-                    CrashLog.Info("Codex update", $"Updater started; results: {logPath}");
                 }
                 catch (Exception ex)
                 {
-                    CrashLog.Error("Codex update", "could not start updater", ex);
                     await AppDialog.Apply(new ContentDialog
                     {
                         XamlRoot = RootGrid.XamlRoot,
@@ -532,9 +529,8 @@ public sealed partial class MainWindow : Window
                 await DisposeWorkspaceAsync(workspace);
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("MainWindow", "close cleanup failed", ex);
         }
         finally
         {
@@ -551,9 +547,8 @@ public sealed partial class MainWindow : Window
         {
             await workspace.DisposeAsync();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("MainWindow", "workspace shutdown failed", ex);
         }
     }
 
@@ -616,10 +611,9 @@ public sealed partial class MainWindow : Window
             }, DialogTone.Danger).ShowAsync();
             return false;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // Another dialog is already up, or the window is going away: stay open rather than lose edits.
-            CrashLog.Error("MainWindow", "unsaved-changes prompt failed", ex);
             return false;
         }
     }

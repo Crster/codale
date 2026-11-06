@@ -63,7 +63,7 @@ public sealed partial class HelperModel
             _errors = process.StandardError.ReadToEndAsync();
             _ready = InitializeAsync(systemPrompt, model, endpoint);
             // Observe failure even if this spare expires without ever being consumed.
-            _ = _ready.ContinueWith(t => Trace.WriteLine($"Codex helper prewarm failed: {t.Exception?.GetBaseException().Message}"),
+            _ = _ready.ContinueWith(static t => _ = t.Exception,
                 TaskContinuationOptions.OnlyOnFaulted);
         }
 
@@ -105,9 +105,8 @@ public sealed partial class HelperModel
             {
                 return Process.Start(startInfo) is { } process ? new(process, systemPrompt, model, endpoint) : null;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Trace.WriteLine($"Could not start a warm Codex helper: {ex.Message}");
                 return null;
             }
         }

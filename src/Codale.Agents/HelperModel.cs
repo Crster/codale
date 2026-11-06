@@ -430,9 +430,8 @@ public sealed partial class HelperModel(
             {
                 return await spare.AskAsync(prompt, ct, CliTimeout, OnApiRequestServed).ConfigureAwait(false);
             }
-            catch (HelperModelException ex)
+            catch (HelperModelException)
             {
-                Trace.WriteLine($"Warm helper failed, running cold: {ex.Message}");
             }
         }
 
@@ -711,9 +710,8 @@ public sealed partial class HelperModel(
             {
                 return Process.Start(startInfo) is { } process ? new WarmProcess(process, systemPrompt) : null;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Trace.WriteLine($"Could not start a warm helper: {ex.Message}");
                 return null;
             }
         }

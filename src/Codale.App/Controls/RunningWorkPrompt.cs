@@ -28,10 +28,9 @@ public static class RunningWorkPrompt
 
             return await dialog.ShowAsync() == ContentDialogResult.Primary;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // Another dialog is already up: stay put rather than kill work unasked.
-            CrashLog.Error("RunningWorkPrompt", "prompt failed", ex);
             return false;
         }
     }

@@ -92,9 +92,8 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
         {
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true })?.Dispose();
         }
-        catch (Win32Exception e)
+        catch (Win32Exception)
         {
-            CrashLog.Warn("serve", $"could not open {url}: {e.Message}");
         }
     }
 
@@ -193,7 +192,6 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
             }
         }
 
-        CrashLog.Warn("browser", "neither Edge nor Chrome could be started for the agent's browser");
         OpenBrowserError = "Neither Microsoft Edge nor Google Chrome was found. Install one to open a browser the agent can use.";
     }
 

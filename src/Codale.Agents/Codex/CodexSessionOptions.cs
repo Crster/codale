@@ -89,12 +89,6 @@ public sealed record CodexSessionOptions
     /// </summary>
     public CodexCustomProvider? CustomProvider { get; init; }
 
-    /// <summary>
-    /// When set, every raw stdout line is appended to this file, so a protocol surprise
-    /// becomes a diagnosable (and replayable) transcript.
-    /// </summary>
-    public string? RawLogPath { get; init; }
-
     /// <summary>The <c>-c</c> overrides that point Codex at a custom provider; shared with one-shot <c>codex exec</c> runs.</summary>
     internal static IReadOnlyList<string> ProviderArguments(CodexCustomProvider provider)
     {

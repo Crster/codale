@@ -105,10 +105,9 @@ public static class ChatPaletteTheme
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // A palette problem must never take the launch down with it.
-            CrashLog.Write("Theme", "palette apply failed", ex);
         }
     }
 

@@ -22,7 +22,6 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
 
     public TerminalTab()
     {
-        CrashLog.Trace("terminal: tab ctor begin");
         InitializeComponent();
         Loaded += OnLoaded;
 
@@ -33,7 +32,6 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
 
         PointerPressed += (_, _) => FocusTerminal();
         GotFocus += (_, _) => FocusTerminal();
-        CrashLog.Trace("terminal: tab ctor end");
     }
 
     /// <summary>A URL or file path in the output was Ctrl+clicked.</summary>
@@ -91,29 +89,28 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
         }
 
         _initialized = true;
-        CrashLog.Trace("terminal: tab loaded");
 
-        try
-        {
-            _viewModel.OutputReceived += OnOutputReceived;
-            _viewModel.Exited += OnExited;
-            _subscribed = true;
+        _viewModel.OutputReceived += OnOutputReceived;
+        _viewModel.Exited += OnExited;
+        _viewModel.Cleared += OnCleared;
+        _subscribed = true;
 
-            // Output can arrive before the tab is first laid out; the emulator buffers
-            // everything, so nothing is lost - the first draw shows it all.
-            if (_viewModel.StartupError is { Length: > 0 } error)
-            {
-                Terminal.Write($"\x1b[31m{error}\x1b[0m\r\n\x1b[90m[shell exited]\x1b[0m\r\n");
-            }
-        }
-        catch (Exception ex)
+        // Output can arrive before the tab is first laid out; the emulator buffers
+        // everything, so nothing is lost - the first draw shows it all.
+        if (_viewModel.StartupError is { Length: > 0 } error)
         {
-            CrashLog.Write("Terminal", "terminal tab load failed", ex);
-            throw;
+            Terminal.Write($"\x1b[31m{error}\x1b[0m\r\n\x1b[90m[shell exited]\x1b[0m\r\n");
         }
     }
 
     private void OnOutputReceived(object? sender, string chunk) => Terminal.Write(chunk);
+
+    /// <summary>A restart starts on an empty screen: the old run's rows and scrollback are freed.</summary>
+    private void OnCleared(object? sender, EventArgs e)
+    {
+        Terminal.Clear();
+        Terminal.Write("\x1b[H");
+    }
 
     private void OnExited(object? sender, EventArgs e) =>
         Terminal.Write("\r\n\x1b[90m[shell exited]\x1b[0m\r\n");
@@ -123,8 +120,8 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
 
     public void ShowContextMenu(UIElement anchor, ContextRequestedEventArgs args) =>
         TerminalContextMenu.Show(Terminal, args,
-            _viewModel is { IsCommandTerminal: true, IsCliTerminal: false } viewModel
-                ? viewModel.RefreshAsync : null, anchor);
+            _viewModel is { IsCliTerminal: false } viewModel
+                ? viewModel.RefreshAsync : null, anchor, _viewModel?.IsCommandTerminal == true);
 
     private void UnsubscribeFromViewModel()
     {
@@ -136,5 +133,6 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
         _subscribed = false;
         _viewModel.OutputReceived -= OnOutputReceived;
         _viewModel.Exited -= OnExited;
+        _viewModel.Cleared -= OnCleared;
     }
 }

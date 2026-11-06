@@ -61,7 +61,6 @@ public sealed partial class ChatViewModel
     public async Task<bool> AttachFeatureAsync(FeatureInfo feature, string? cliId = null)
     {
         if (Features is not { } features) return false;
-        TraceMemory("chat.history.begin", $"targetFeature={feature.Id}");
         await DisposeSessionAsync();
         ResetForNewSession();
         var mapping = features.ProviderSession(feature.Id);
@@ -91,7 +90,7 @@ public sealed partial class ChatViewModel
         if (handoff) CaptureHandoff();
         Title = feature.Name;
         var events = _featureLog!.ReadTail(HistoryWindowEvents, out var more);
-        if (more) Add(new NoticeItem { Text = "Showing recent messages. Earlier messages are available in session history." });
+        if (more) Add(new NoticeItem { Text = TrimmedNoticeText });
         foreach (var e in events)
         {
             if (e is UserMessageRecorded user)
@@ -105,8 +104,8 @@ public sealed partial class ChatViewModel
                 Add(item);
             }
         }
+        TrimTranscript();
         RestorePendingPlan();
-        TraceMemory("chat.history.loaded", $"events={events.Count} earlierEvents={more}");
         await ConnectAsync();
         return IsConnected;
     }
@@ -363,16 +362,11 @@ public sealed partial class ChatViewModel
             if (!ReferenceEquals(session, _session)) throw new OperationCanceledException();
             _retrievalId = Guid.NewGuid().ToString("N");
             if (FeatureId is { } id) features.RecordRetrieval(_retrievalId, id, result);
-            CrashLog.Trace($"Project retrieval ({CliId}, {result.Method}): {result.ElapsedMilliseconds}ms, {result.Files.Count} files, " +
-                $"{result.Snippets} excerpts, {result.Findings} findings, {result.Keys.Count} keys, byte upper bound={result.Tokens}");
-            CrashLog.Debug("knowledge", $"retrieval={_retrievalId} session={FeatureId ?? "none"} " +
-                $"files={System.Text.Json.JsonSerializer.Serialize(result.Files)} refs={System.Text.Json.JsonSerializer.Serialize(result.Keys)}");
             return result;
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Warn("knowledge", $"Context retrieval skipped: {ex.Message}");
             return null;
         }
         finally { _briefing = null; }
@@ -387,7 +381,7 @@ public sealed partial class ChatViewModel
         if (_recording)
         {
             try { _featureLog?.AppendContext(item.Summary, item.Details); }
-            catch (IOException ex) { CrashLog.Warn("knowledge", $"Context entry not logged: {ex.Message}"); }
+            catch (IOException) {  }
         }
     }
 
@@ -400,7 +394,7 @@ public sealed partial class ChatViewModel
         {
             if (SessionId is { } native) Features?.MarkContextDelivered(native, result.Keys);
         }
-        catch (Exception ex) { CrashLog.Warn("knowledge", $"Context delivery metadata not saved: {ex.Message}"); }
+        catch (Exception) {  }
     }
 
     private void ForgetDeliveredContext()
@@ -420,7 +414,7 @@ public sealed partial class ChatViewModel
         {
             if (SessionId is { } native) Features?.ClearDeliveredContext(native);
         }
-        catch (Exception ex) { CrashLog.Warn("knowledge", $"Context compaction metadata not cleared: {ex.Message}"); }
+        catch (Exception) {  }
     }
 
     private void AbandonFeatureTurn()

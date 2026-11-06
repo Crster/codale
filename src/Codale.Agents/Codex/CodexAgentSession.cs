@@ -26,13 +26,6 @@ public sealed class CodexAgentSession : IAgentSession
     /// <summary>Guards stdin: the UI thread and the read loop both write frames.</summary>
     private readonly SemaphoreSlim _stdinLock = new(1, 1);
 
-    /// <summary>Open once for the session; replaces re-opening the raw log per streamed line.</summary>
-    private StreamWriter? _rawLog;
-    private long _rawLogBytes;
-
-    /// <summary>A raw log past this size is rotated to <c>.1</c> so it cannot grow without bound.</summary>
-    private const long RawLogMaxBytes = 32 * 1024 * 1024;
-
     /// <summary>Our JSON-RPC requests awaiting their response, keyed by the id we chose.</summary>
     private readonly Dictionary<int, TaskCompletionSource<JsonElement>> _pendingRequests = [];
 
@@ -676,33 +669,6 @@ public sealed class CodexAgentSession : IAgentSession
         }
     }
 
-    /// <summary>Appends one line to the raw log, rotating it once it passes <see cref="RawLogMaxBytes"/>. Logging never fails the session.</summary>
-    private async Task AppendRawLogAsync(string path, string line)
-    {
-        try
-        {
-            if (_rawLog is not null && _rawLogBytes > RawLogMaxBytes)
-            {
-                await _rawLog.DisposeAsync().ConfigureAwait(false);
-                _rawLog = null;
-                File.Move(path, path + ".1", overwrite: true);
-            }
-
-            if (_rawLog is null)
-            {
-                var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
-                _rawLogBytes = stream.Length;
-                _rawLog = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
-            }
-
-            await _rawLog.WriteLineAsync(line).ConfigureAwait(false);
-            _rawLogBytes += line.Length + 1;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
-
     private async Task WriteMessageAsync(object message, CancellationToken ct)
     {
         if (MessageWriter is { } write)
@@ -782,11 +748,6 @@ public sealed class CodexAgentSession : IAgentSession
         {
             while (await process.StandardOutput.ReadLineAsync().ConfigureAwait(false) is { } line)
             {
-                if (_options.RawLogPath is { Length: > 0 } rawLog)
-                {
-                    await AppendRawLogAsync(rawLog, line).ConfigureAwait(false);
-                }
-
                 if (line.Length == 0)
                 {
                     continue;
@@ -1588,12 +1549,6 @@ public sealed class CodexAgentSession : IAgentSession
 
             process.Dispose();
             _process = null;
-        }
-
-        if (_rawLog is not null)
-        {
-            await _rawLog.DisposeAsync().ConfigureAwait(false);
-            _rawLog = null;
         }
 
         _stdinLock.Dispose();

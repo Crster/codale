@@ -252,9 +252,8 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         {
             // A git read that outlived its 30s timeout; the next tick tries again.
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Trace($"Git refresh failed: {ex.Message}");
         }
     }
 

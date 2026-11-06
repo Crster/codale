@@ -740,10 +740,9 @@ public static class AppSettings
                 });
             }
         }
-        catch (StoreSchemaException ex)
+        catch (StoreSchemaException)
         {
             // A database from a newer Codale: leave it alone and start from defaults.
-            CrashLog.Warn("settings", $"legacy settings not carried over: {ex.Message}");
         }
         catch (Exception)
         {
@@ -888,7 +887,6 @@ public static class AppSettings
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            CrashLog.Warn("settings", $"could not save {FilePath}: {ex.Message}");
         }
     }
 

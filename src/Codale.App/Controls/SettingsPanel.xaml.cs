@@ -370,7 +370,6 @@ public sealed partial class SettingsPanel : UserControl
         }
         catch (Exception ex)
         {
-            CrashLog.Error("settings", "Account sign-in failed to start", ex);
             var status = cli == "codex" ? CodexAccountStatus : ClaudeAccountStatus;
             status.Text = $"Could not start sign-in: {ex.Message}";
         }
@@ -1194,9 +1193,8 @@ public sealed partial class SettingsPanel : UserControl
                 FillTierBoxes(cli, models);
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("settings", $"Could not load the {cli} model list", ex);
         }
     }
 

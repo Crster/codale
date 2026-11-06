@@ -119,7 +119,6 @@ public sealed partial class ChatViewModel
         // Lite and Flash share the fast model; their difference is low vs medium effort.
         var planEffort = _planPromotedFromLite ? TierConfig("flash").Effort : "high";
         RequestedEffort = planEffort;
-        if (_planPromotedFromLite) CrashLog.Trace("Temporary planning tier: Lite -> Flash");
 
         // Mid-turn there is nothing to restart without killing the running turn: the
         // request still goes out in plan mode, and the effort lands on the next turn.
@@ -144,9 +143,8 @@ public sealed partial class ChatViewModel
         {
             entered = await session.TrySetPermissionModeAsync("plan");
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("planning", "Could not enter planning mode", ex);
             entered = false;
         }
         if (!entered)
@@ -186,14 +184,42 @@ public sealed partial class ChatViewModel
         {
             await session.TrySetPermissionModeAsync("manual");
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // The turn still carries the explain-only instruction.
-            CrashLog.Trace($"Ask turn mode switch failed: {ex.Message}");
         }
 
         PermissionMode = AskMode;
+        _askTurnFromAuto = _planRestoreMode == AutomaticMode;
         return true;
+    }
+
+    /// <summary>
+    /// Ask mode is still showing from a question Auto routed earlier - its turn-end restore
+    /// was skipped (subagents still running, a replaced session, a failed send): hands
+    /// Automatic back, host and CLI, so the next message is routed afresh.
+    /// </summary>
+    private async Task ReturnFromRoutedAskAsync()
+    {
+        if (!_askTurnFromAuto || PermissionMode != AskMode)
+        {
+            return;
+        }
+
+        _planSession = null;
+        _planRestoreMode = null;
+        PermissionMode = AutomaticMode;
+
+        if (_session is { } session && IsConnected)
+        {
+            try
+            {
+                await session.TrySetPermissionModeAsync(CliMode(AutomaticMode));
+            }
+            catch (Exception)
+            {
+            }
+        }
     }
 
     /// <summary>Planning is done: restores the original tier's effort without changing saved defaults.</summary>
@@ -205,7 +231,6 @@ public sealed partial class ChatViewModel
         }
 
         var effort = _planRestoreEffort;
-        if (_planPromotedFromLite) CrashLog.Trace("Temporary planning tier restored: Flash -> Lite");
         _planPromotedFromLite = false;
         _planEffortRaised = false;
         _planRestoreEffort = null;
@@ -258,9 +283,8 @@ public sealed partial class ChatViewModel
             {
                 await session.TrySetPermissionModeAsync(CliMode(restore));
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                CrashLog.Trace($"Plan mode restore failed: {ex.Message}");
             }
         });
     }

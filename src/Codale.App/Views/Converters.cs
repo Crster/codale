@@ -391,9 +391,8 @@ public sealed partial class PathToImageSourceConverter : IValueConverter
         {
             return new BitmapImage { DecodePixelWidth = 64, UriSource = new Uri(path) };
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("chat", $"attachment thumbnail failed for {path}", ex);
             return null;
         }
     }

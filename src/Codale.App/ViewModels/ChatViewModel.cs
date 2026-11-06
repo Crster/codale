@@ -84,6 +84,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     private IAgentSession? _planSession;
     private string? _planRestoreMode;
+
+    /// <summary>
+    /// The current Ask mode is Auto's, set for one routed question - not a pick of the user's.
+    /// The next prompt hands Auto back even when the end-of-turn restore never ran.
+    /// </summary>
+    private bool _askTurnFromAuto;
     private string? _planRestoreEffort;
     private bool _planEffortRaised;
     private bool _planPromotedFromLite;
@@ -209,7 +215,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _idleCompactTimer = _dispatcher.CreateTimer();
         _idleCompactTimer.IsRepeating = false;
         _idleCompactTimer.Tick += (_, _) => RunInBackgroundOnUi(CompactWhileCacheWarmAsync);
-        StartMemoryDiagnostics();
     }
 
     /// <summary>Fires once the chat has sat idle almost as long as the prompt cache lives.</summary>
@@ -247,8 +252,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        CrashLog.Trace($"Idle compaction: {_status.ContextTokens} context tokens before the prompt cache expires");
-        TraceMemory("chat.compact.begin", "trigger=idle");
         _compactItem = new CompactItem
         {
             Reason = $"Idle for {AppSettings.IdleCompactSeconds / 60.0:0.#} min",
@@ -287,9 +290,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             await work();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Error("chat", "idle compaction failed", ex);
         }
     }
 
@@ -746,9 +748,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .FirstOrDefault();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Debug("tasks", $"task output lookup failed: {ex.Message}");
             return null;
         }
     }
@@ -995,7 +996,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            CrashLog.Debug("tasks", $"subagent transcript read failed: {ex.Message}");
             return [];
         }
     }
@@ -1087,14 +1087,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     }
                 });
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 // The session was dying under the call, or the CLI stopped answering: a few
                 // failures in a row end the poll rather than spin on a dead pipe.
-                CrashLog.Debug("tasks", $"task poll failed: {ex.Message}");
                 if (++failures >= 5)
                 {
-                    CrashLog.Warn("tasks", "task poll stopped after repeated failures");
                     break;
                 }
             }
@@ -1594,6 +1592,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     partial void OnPermissionModeChanged(string value)
     {
+        // Leaving ask in any direction ends Auto's hold on it.
+        if (value != AskMode)
+        {
+            _askTurnFromAuto = false;
+        }
+
         OnPropertyChanged(nameof(IsAskMode));
         OnPropertyChanged(nameof(IsAutomaticMode));
         OnPropertyChanged(nameof(ModeGlyph));
@@ -1609,6 +1613,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public async Task SetPermissionModeAsync(string mode)
     {
         mode = IsHostMode(mode) ? mode : ClaudeSessionOptions.ClampPermissionMode(mode);
+
+        // Any pick is the user's own: picking Ask while Auto had borrowed it makes it stick.
+        _askTurnFromAuto = false;
         if (mode == PermissionMode)
         {
             return;
@@ -1766,7 +1773,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         if (!IsConnected)
         {
-            CrashLog.Trace($"Session config queued: tier={tier} (nothing running)");
             return;
         }
 
@@ -1821,7 +1827,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             if ((cliId == "codex" || !EnvironmentOverridesEndpoint()) && !await CodaleAccountCli.IsSignedInAsync(cliId))
             {
                 CachedModels.Remove(cliId);
-                CrashLog.Trace($"Model list fetch for {cliId}: skipped, Codale's account is signed out");
                 return [];
             }
 
@@ -1848,14 +1853,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             }
             else
             {
-                CrashLog.Trace($"Model list fetch for {cliId}: the CLI returned none");
             }
 
             return models;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Trace($"Model list fetch for {cliId} failed: {ex.Message}");
             return [];
         }
         finally
@@ -1960,7 +1963,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         if (_connecting || (IsConnected && _session is not null))
         {
-            CrashLog.Trace("Connect skipped: a session is already starting or running");
             return;
         }
 
@@ -1987,7 +1989,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         var permissionMode = CliMode(PermissionMode);
         if (permissionMode != PermissionMode && !IsHostMode(PermissionMode))
         {
-            CrashLog.Trace($"Permission mode '{PermissionMode}' is not a Claude mode; starting with '{permissionMode}'");
             PermissionMode = permissionMode;
         }
 
@@ -2003,7 +2004,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         catch (InvalidOperationException ex)
         {
             // The provider cannot serve this CLI (e.g. OpenAI-only for Claude): say so rather than fall back to a login.
-            CrashLog.Error("chat", "Connect FAILED: no endpoint", ex);
             Add(new NoticeItem { Text = $"Could not start {ProviderName}: {ex.Message}", Severity = NoticeSeverity.Error });
             return;
         }
@@ -2014,7 +2014,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (endpointEnv is null && (IsCodexSession || !EnvironmentOverridesEndpoint()) &&
             !await CodaleAccountCli.IsSignedInAsync(cliId))
         {
-            CrashLog.Trace($"Connect: Codale's {cliId} account is signed out");
             Add(new NoticeItem { Text = $"Codale isn't signed in to {ProviderName}. Sign in, then resend your message.", Severity = NoticeSeverity.Warning });
             LoginRequired?.Invoke(this, IsCodexSession ? "Codex" : ProviderName);
             return;
@@ -2050,9 +2049,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             ? Codale.Agents.Codex.CodexSessionOptions.ClampEffort(endpointEnv is not null ? RequestedEffort : LaunchValue(RequestedEffort))
             : ClaudeSessionOptions.ClampEffort(endpointEnv is not null ? RequestedEffort : LaunchValue(RequestedEffort));
 
-        CrashLog.Trace(
-            $"Connect: provider={ProviderName} model={model ?? "default"} effort={effort ?? "default"} " +
-            $"mode={permissionMode} resume={ResumeSessionId ?? "none"} worktree={WorktreePath ?? "project"}");
 
         _liveEffort = effort;
         _workspaceFiles = null;
@@ -2080,7 +2076,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             if (endpointEnv is not null)
             {
-                CrashLog.Trace($"Connect: endpoint override active for {ProviderName}");
             }
 
             _connectedFolders = ExtraRoots;
@@ -2097,9 +2092,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             _status.CliName = cliName;
 
-            _diagnosticRawPath = CrashLog.NewRawLogPath($"{activeCli.Id}-{ResumeSessionId?[..8] ?? "new"}");
-            TraceMemory("chat.connect.begin");
-
             IAgentSession session = starting = IsCodexSession
                 ? new Codale.Agents.Codex.CodexAgentSession(new Codale.Agents.Codex.CodexSessionOptions
                 {
@@ -2114,7 +2106,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     AdditionalDirectoriesSource = () => ExtraRoots,
                     SystemPromptAppend = mcpServers.Count > 0 ? WithMcpDirective("", mcpServers).Trim() : null,
                     ResumeSessionId = ResumeSessionId,
-                    RawLogPath = _diagnosticRawPath,
                     Environment = environment.Count == 0 ? null : environment,
                     CustomProvider = _endpointSettings?.CodexProvider(EndpointName),
                 })
@@ -2134,7 +2125,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     PromptSuggestions = AppSettings.SuggestNextPrompt,
                     SessionId = ResumeSessionId is null ? Guid.NewGuid() : null,
                     ResumeSessionId = ResumeSessionId,
-                    RawLogPath = _diagnosticRawPath,
                     Environment = environment.Count == 0 ? null : environment,
                 });
 
@@ -2145,8 +2135,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             IsConnected = true;
 
             SessionStateChanged?.Invoke(this, EventArgs.Empty);
-            CrashLog.Trace($"Connect ok: session={session.SessionId ?? "unknown"}");
-            TraceMemory("chat.connect.end");
 
             RunInBackground(() => PumpAsync(session), "event pump");
             RunInBackground(() => PollTasksAsync(session), "task poll");
@@ -2173,7 +2161,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                  ex.Message.Contains("thread not found", StringComparison.OrdinalIgnoreCase) ||
                  (ex.Message.Contains("thread", StringComparison.OrdinalIgnoreCase) && ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase)));
 
-            CrashLog.Error("chat", "Connect FAILED", ex);
             if (!resumeLost)
             {
                 Add(new NoticeItem { Text = $"Could not start {ProviderName}: {ex.Message}", Severity = NoticeSeverity.Error });
@@ -2193,9 +2180,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 {
                     await starting.DisposeAsync();
                 }
-                catch (Exception disposeError)
+                catch (Exception)
                 {
-                    CrashLog.Debug("chat", $"disposing the failed session threw: {disposeError.Message}");
                 }
             }
 
@@ -2228,9 +2214,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             {
                 await work();
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                CrashLog.Error("chat", $"{what} failed", ex);
             }
         });
     }
@@ -2309,7 +2294,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             if (!ReferenceEquals(_session, session))
             {
-                CrashLog.Trace("Session replaced: dropping trailing events from the old session");
                 return;
             }
 
@@ -2320,7 +2304,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             {
                 if (ignored.Kind != "system/thinking_tokens")
                 {
-                    CrashLog.Debug("cli-ignored", $"{ignored.Kind}: {ignored.Raw}");
                 }
 
                 continue;
@@ -2353,7 +2336,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            CrashLog.Error("chat", $"handling {e.GetType().Name} failed", ex);
             Add(new NoticeItem
             {
                 Text = $"Codale could not show a {e.GetType().Name} from the session: {ex.Message}",
@@ -2399,9 +2381,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 }
 
                 NotifyModelDisplays();
-                CrashLog.Trace(
-                    $"Session initialized: model={init.Model} mode={init.PermissionMode} " +
-                    $"commands={init.SlashCommands.Count}");
 
                 // The CLI names the session only now (the first message makes it say
                 // so): the history list and the persisted record need the real id.
@@ -2508,7 +2487,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     : $"{item.Verb} {item.Target}".Trim(),
                     started.ToolUseId);
 
-                CrashLog.Trace($"Tool start: {started.ToolName} id={started.ToolUseId}");
 
                 break;
 
@@ -2517,7 +2495,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             case ToolCallCompleted completed:
-                CrashLog.Trace($"Tool done: id={completed.ToolUseId} error={completed.IsError}");
 
                 if (_activityToolId == completed.ToolUseId)
                 {
@@ -2538,6 +2515,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     // cap it. Flattening newlines turned a directory table into one
                     // unwrapped-in-any-language line of text.
                     call.Output = CapOutput(completed.ResultText);
+
+                    // A question's raw result is one long "q"="a" line; the step shows each
+                    // question with its answer instead, for when the reader reopens it.
+                    if (call.Kind == ToolKind.Ask && !completed.IsError &&
+                        AskTranscript(call, completed.ResultText) is { } asked)
+                    {
+                        call.Output = CapOutput(asked);
+                    }
 
                     // The plan card already shows the plan itself; the ExitPlanMode
                     // result only echoes "the user approved the plan" back, so it
@@ -2579,7 +2564,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             case ApprovalRequested approval:
-                CrashLog.Trace($"Approval requested: {approval.ToolName} id={approval.ToolUseId ?? "none"}");
                 _ = HandleApprovalAsync(approval);
                 break;
 
@@ -2646,8 +2630,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             case TurnCompleted turn:
                 IsBusy = false;
                 _allowRestOfTurn = false;
-                CrashLog.Trace($"Turn completed: {turn.Subtype}");
-                TraceMemory("chat.turn.completed", $"outcome={turn.Subtype}");
                 SetActivity(null, toolUseId: null);
 
                 RestoreAfterPlanTurn();
@@ -2748,7 +2730,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 // A session dying mid-turn never sends TurnCompleted; the clock has to
                 // stop and the line has to settle anyway, or it runs forever.
                 EndTurn(TurnOutcome.Stopped);
-                CrashLog.Trace($"Session ended: exit={ended.ExitCode} error={ended.Error ?? "none"}");
                 SessionStateChanged?.Invoke(this, EventArgs.Empty);
                 Add(new NoticeItem
                 {
@@ -2768,7 +2749,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             case CliMessageIgnored ignored:
-                CrashLog.Debug("cli-ignored", $"{ignored.Kind}: {ignored.Raw}");
                 break;
 
             case HookFailed hook:
@@ -2822,7 +2802,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             case ConversationReset:
-                TraceMemory("chat.reset.begin");
                 AbandonFeatureTurn();
                 ClearFeature();
                 // A reset is not a turn the CLI finishes - no result event follows it -
@@ -2842,8 +2821,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 ShowTodos([]);
                 Artifacts.Clear();
                 _status.ClearSessionChanges();
-                TraceMemory("chat.reset.end");
-                MemoryDiagnostics.Released("chat.reset.released", $"chat={_chatId}");
                 break;
 
             case ConversationCompacted compacted:
@@ -2870,7 +2847,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 compactItem.BeforeTokens = compacted.PreTokens ?? compactItem.BeforeTokens;
                 compactItem.AfterTokens = compacted.PostTokens;
                 compactItem.IsDone = true;
-                TraceMemory("chat.compacted", $"preTokens={compacted.PreTokens} postTokens={compacted.PostTokens}");
                 break;
 
             case UnknownEvent unknown:
@@ -3237,7 +3213,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
         {
-            CrashLog.Trace($"Could not save tool image: {ex.Message}");
         }
     }
 
@@ -3320,7 +3295,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                CrashLog.Trace($"Could not save artifact markdown: {ex.Message}");
                 return;
             }
         }
@@ -3431,7 +3405,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            CrashLog.Error("chat", $"approval for {approval.ToolName} failed", ex);
             _approvals.Remove(approval.RequestId);
             OnApprovalsChanged();
             Add(new NoticeItem { Text = $"Could not ask about {approval.ToolName}: {ex.Message}", Severity = NoticeSeverity.Error });
@@ -3442,9 +3415,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 {
                     await session.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Deny("Codale could not show this request."));
                 }
-                catch (Exception respondError)
+                catch (Exception)
                 {
-                    CrashLog.Debug("chat", $"denying the failed approval also failed: {respondError.Message}");
                 }
             }
         }
@@ -3495,9 +3467,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 item.RiskNote = assessment.FormatRiskNote();
             });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Debug("approval", $"shell approval assessment failed: {ex.Message}");
         }
     }
 
@@ -3561,7 +3532,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // in every mode - it is not an excursion outside the workspace.
         if (IsReadOfAttachedFile(approval))
         {
-            CrashLog.Trace($"allowed Read of attached file unasked");
 
             if (_session is { } reading)
             {
@@ -3577,7 +3547,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (PermissionMode is not ("manual" or "default") &&
             McpServerSpec.RunsUnasked(_sessionMcpServers, approval.ToolName))
         {
-            CrashLog.Trace($"{ModeDisplay(PermissionMode)} mode: allowed {approval.ToolName} unasked");
 
             if (_session is { } allowing)
             {
@@ -3592,7 +3561,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if ((PermissionMode == "acceptEdits" || (IsAutomaticMode && _cliReportedMode == "default")) &&
             approval.ToolName is "Edit" or "Write" or "MultiEdit" or "NotebookEdit")
         {
-            CrashLog.Trace($"{ModeDisplay(PermissionMode)} mode: allowed {approval.ToolName} unasked");
 
             if (_session is { } editing)
             {
@@ -3610,7 +3578,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // answer: ask mode lets it through unasked.
         if (IsAskMode && approval.ToolName is "WebSearch" or "WebFetch")
         {
-            CrashLog.Trace($"Ask mode: allowed {approval.ToolName} unasked");
 
             if (_session is { } searching)
             {
@@ -3631,7 +3598,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             if (approval.ToolName == "Bash" && PlanningShellPolicy.AllowsInspection(shellCommand))
             {
-                CrashLog.Trace($"Plan mode: allowed inspection {approval.ToolName}");
                 if (_session is { } planning)
                 {
                     await planning.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
@@ -3641,12 +3607,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             // An unrecognized command may still be a valid inspection. Keep the turn
             // waiting on the normal approval card so the reader can decide.
-            CrashLog.Trace($"Plan mode: requesting approval for {approval.ToolName}");
         }
 
         if (!requiresPlanApproval && shellAssessment.Risk == ShellRisk.Safe && AppSettings.AutoApproveSafeShell)
         {
-            CrashLog.Trace($"{ModeDisplay(PermissionMode)} mode: allowed safe {approval.ToolName} command unasked");
 
             if (_session is { } running)
             {
@@ -3665,7 +3629,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 refused.Status = ToolCallStatus.Denied;
             }
 
-            CrashLog.Trace($"Ask mode: denied {approval.ToolName}");
 
             if (_session is { } asking)
             {
@@ -3681,7 +3644,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // answer - so they are still shown.
         if (!requiresPlanApproval && (IsFullMode || _allowRestOfTurn) && !NeedsReaderAnswer(approval.ToolName))
         {
-            CrashLog.Trace($"{(IsFullMode ? "Full mode" : "Allowed for this turn")}: allowed {approval.ToolName} unasked");
 
             if (_session is { } unattended)
             {
@@ -3822,9 +3784,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     // always differs; the only no-op case is a session already gone.
                     await live.TrySetPermissionModeAsync(cliChosen);
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    CrashLog.Trace($"Post-plan mode switch failed: {ex.Message}");
                 }
             }
         }
@@ -3849,7 +3810,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Closes the card of an approval the CLI withdrew (<see cref="ApprovalCancelled"/>).</summary>
     private void WithdrawApproval(string requestId)
     {
-        CrashLog.Trace($"Approval withdrawn by the CLI: {requestId}");
         if (_approvals.TryGetValue(requestId, out var answered))
         {
             _withdrawnApprovals.Add(requestId);
@@ -4024,6 +3984,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // Auth method → OAuth" rather than repeating the question.
         if (_toolCalls.Values.FirstOrDefault(c => ReferenceEquals(c.Approval, approval)) is { } call)
         {
+            call.AskedAnswers = approval.Questions
+                .Select(q => new AskedQuestion(q.Header, q.Text, q.IsAnswered ? string.Join(", ", q.Answers) : null))
+                .ToList();
             call.AnswerSummary = string.Join("  ·  ", approval.Questions
                 .Where(q => q.IsAnswered)
                 .Select(q => $"{(q.HasHeader ? q.Header : Shorten(q.Text, 48))} → {string.Join(", ", q.Answers)}"));
@@ -4036,6 +3999,17 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         };
 
         RespondToApproval(approval.RequestId, decision);
+    }
+
+    /// <summary>
+    /// The question-and-answer record of a finished AskUserQuestion call: the answers the reader
+    /// submitted here, or - read back from a transcript - the ones its result text quotes. Null when
+    /// neither names an answer, so an unfamiliar result shape still shows as the CLI wrote it.
+    /// </summary>
+    private static string? AskTranscript(ToolCallItem call, string? resultText)
+    {
+        var asked = call.AskedAnswers is { Count: > 0 } live ? live : AskedQuestions.Read(call.Input, resultText);
+        return asked.Any(q => q.Answer is { Length: > 0 }) ? AskedQuestions.Format(asked) : null;
     }
 
     private static string Shorten(string text, int max)
@@ -4112,6 +4086,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (!IsBusy)
         {
             _status.BeginPrompt();
+
+            // Every fresh prompt in Auto is read on its own: an ask turn Auto routed
+            // earlier that never handed the mode back is undone before this one goes out.
+            await ReturnFromRoutedAskAsync();
         }
 
         // Automatic mode reads the message first. Slash commands are the CLI's own
@@ -4242,6 +4220,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (!silent)
         {
             Add(sent);
+            TrimTranscript();
         }
 
         if (!compact) RecordUserTurn(text);
@@ -4396,7 +4375,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        CrashLog.Trace($"Unprompted turn started by the CLI ({e.GetType().Name})");
         NextPromptSuggestion = null;
         IsBusy = true;
         BeginTurn();
@@ -4437,7 +4415,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         WorkingElapsed = "";
         WorkingMessage = WorkingPhrases.Next(WorkingMessage);
         _turnTimer.Start();
-        TraceMemory("chat.turn.begin");
     }
 
     /// <summary>
@@ -4467,14 +4444,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 {
                     _status.ContextWindow = window;
                 }
-                CrashLog.Trace($"Model/effort applied live: model={model ?? "default"} effort={effort ?? "default"}");
             }
 
             return applied;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Trace($"Live model/effort switch failed: {ex.Message}");
             return false;
         }
     }
@@ -4487,9 +4462,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public async Task RestartWithCurrentConfigAsync()
     {
         var resumeId = Items.Any(i => i is UserMessageItem or TurnActivityItem) ? SessionId : null;
-        CrashLog.Trace(
-            $"Restart for config: model={RequestedModel ?? "default"} effort={RequestedEffort ?? "default"} " +
-            $"resume={resumeId ?? "none"}");
 
         // The session only: a dev server Codale runs for the agent outlives a model switch.
         await DisposeSessionAsync();
@@ -4547,7 +4519,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(HasModelCatalog));
         OnPropertyChanged(nameof(CanPickModel));
 
-        CrashLog.Trace($"Provider changed {(_connectedProvider is { Length: > 0 } ? _connectedProvider : "Default")} -> {(SelectedProviderName() is { Length: > 0 } n ? n : "Default")}; restarting session");
         await RestartWithCurrentConfigAsync();
 
         if (IsConnected)
@@ -4747,12 +4718,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             if (_workspaceFiles is null)
             {
                 _workspaceFiles = files;
-                CrashLog.Trace($"Workspace file index: {files.Count} files");
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Trace($"Workspace file index failed: {ex.Message}");
         }
         finally
         {
@@ -4971,6 +4940,84 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>
+    /// Prompts the transcript keeps in memory. Older turns have long scrolled out of view;
+    /// they are dropped with their rows, tool calls and rendered markdown so a long session
+    /// does not grow without bound. The session history still has every message.
+    /// </summary>
+    private const int KeptPrompts = 4;
+
+    /// <summary>The notice standing in for turns no longer in the transcript.</summary>
+    internal const string TrimmedNoticeText = "Showing recent messages. Earlier messages are available in session history.";
+
+    /// <summary>
+    /// Drops everything before the <see cref="KeptPrompts"/>th-latest prompt (steers join their
+    /// turn and do not count). Anything still waiting on the user - a running call, an approval
+    /// or plan not yet decided - stays, with everything after it.
+    /// </summary>
+    private void TrimTranscript()
+    {
+        var cut = -1;
+        var prompts = 0;
+        for (var i = Items.Count - 1; i >= 0; i--)
+        {
+            if (Items[i] is UserMessageItem { IsSteer: false } && ++prompts == KeptPrompts)
+            {
+                cut = i;
+                break;
+            }
+        }
+
+        var first = Items.Count > 0 && Items[0] is NoticeItem { Text: TrimmedNoticeText } ? 1 : 0;
+        for (var i = first; i < cut; i++)
+        {
+            if (ToolsOf(Items[i]).Any(IsStillLive))
+            {
+                cut = i;
+                break;
+            }
+        }
+
+        if (cut <= first)
+        {
+            return;
+        }
+
+        var cutoff = Items[cut].Timestamp;
+        for (var i = cut - 1; i >= first; i--)
+        {
+            Items.RemoveAt(i);
+        }
+
+        // The dropped turns' calls, subagent children included: the lookup is all that still holds them.
+        foreach (var (id, call) in _toolCalls.ToList())
+        {
+            if (call.Timestamp < cutoff && !IsStillLive(call))
+            {
+                _toolCalls.Remove(id);
+                _hiddenCalls.Remove(id);
+            }
+        }
+
+        if (first == 0)
+        {
+            Items.Insert(0, new NoticeItem { Text = TrimmedNoticeText });
+        }
+
+        Reflow();
+
+        static IEnumerable<ToolCallItem> ToolsOf(ChatItem item) => item switch
+        {
+            ToolCallItem tool => [tool],
+            TurnActivityItem turn => turn.AllTools,
+            _ => [],
+        };
+    }
+
+    private bool IsStillLive(ToolCallItem call) =>
+        call.Status is ToolCallStatus.Running or ToolCallStatus.AwaitingApproval ||
+        (call.Approval is { } approval && _approvals.ContainsKey(approval.RequestId));
+
+    /// <summary>
     /// Neighbor-aware transcript spacing: rows of one block - the tool run, the prose
     /// answer - sit close together, and a boundary between blocks gets room to breathe.
     /// Recomputed over the whole list after every transcript mutation; the list is short,
@@ -5052,12 +5099,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        TraceMemory("chat.dispose.begin");
-        if (_memoryTimer is { } memoryTimer)
-        {
-            memoryTimer.Stop();
-            _memoryTimer = null;
-        }
         _taskCaptureTimer?.Stop();
         StopTaskHost();
 
@@ -5074,8 +5115,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             Features!.Summarize(featureId, force: true);
         }
-        TraceMemory("chat.dispose.end");
-        MemoryDiagnostics.Released("chat.dispose.released", $"chat={_chatId}", this);
     }
 
     /// <summary>
@@ -5084,7 +5123,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeSessionAsync()
     {
-        TraceMemory("chat.session.dispose.begin");
         // A tab closed mid-turn would otherwise leave the 500ms timer ticking forever,
         // keeping this view model and its whole transcript rooted.
         _turnTimer.Stop();
@@ -5105,7 +5143,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         if (_session is { } session)
         {
-            CrashLog.Trace($"Dispose session: session={session.SessionId ?? "unknown"}");
             RestoreBrowserViewport();
             await _browserViewportRestore;
 
@@ -5114,6 +5151,5 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             _session = null;
             await session.DisposeAsync();
         }
-        TraceMemory("chat.session.dispose.end");
     }
 }

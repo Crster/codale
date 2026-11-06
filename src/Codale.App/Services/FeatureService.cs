@@ -40,7 +40,6 @@ public sealed class FeatureService : IDisposable
             {
                 if (t.Result is { } model)
                 {
-                    CrashLog.Trace($"Semantic model ready: {model.Model}");
                     _knowledge.Warm(projectPath);
                 }
             }, TaskScheduler.Default);
@@ -57,7 +56,6 @@ public sealed class FeatureService : IDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            CrashLog.Warn("history", $"Shared history notifications unavailable: {ex.Message}");
         }
     }
 
@@ -76,7 +74,6 @@ public sealed class FeatureService : IDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException or PathTooLongException)
         {
-            CrashLog.Warn("features", $"feature database unavailable, history will not outlive this window: {ex.Message}");
             return new FeatureStore(Path.Combine(Path.GetTempPath(), "codale-features-" + Guid.NewGuid().ToString("N"), "features.db"));
         }
     }
@@ -214,10 +211,9 @@ public sealed class FeatureService : IDisposable
             foreach (var relative in _knowledge.ChangedSince(root, startedUtc))
                 if (ProjectKnowledgeIndex.Eligible(relative)) _store.RecordSessionFile(sessionId, relative);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // Best effort: a missed credit only weakens the next prompt's ranking.
-            CrashLog.Debug("knowledge", $"turn changes not recorded: {ex.GetType().Name}");
         }
     });
 
@@ -244,7 +240,6 @@ public sealed class FeatureService : IDisposable
         }
         catch (Exception ex) when (ex is IOException or Microsoft.Data.Sqlite.SqliteException)
         {
-            CrashLog.Warn("knowledge", $"Finding not saved: {ex.Message}");
         }
     }
 
@@ -321,7 +316,6 @@ public sealed class FeatureService : IDisposable
             }
             catch (Exception ex) when (ex is HelperModelException or IOException or UnauthorizedAccessException or OperationCanceledException or Microsoft.Data.Sqlite.SqliteException)
             {
-                CrashLog.Trace($"Summary of feature {featureId} skipped: {ex.Message}");
             }
             finally
             {

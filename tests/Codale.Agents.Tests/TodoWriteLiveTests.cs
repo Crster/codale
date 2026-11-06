@@ -40,7 +40,6 @@ public sealed class TodoWriteLiveTests
                 SessionId = Guid.NewGuid(),
 
                 // Task tools change no files, so manual permissions stay out of the way.
-                RawLogPath = Environment.GetEnvironmentVariable("CODALE_LIVE_RAW_LOG"),
             });
 
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));

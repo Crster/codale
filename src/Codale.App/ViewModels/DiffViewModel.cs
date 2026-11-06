@@ -77,10 +77,9 @@ public sealed partial class DiffViewModel : ObservableObject
             // Keep the user on the file they were reading across a refresh.
             Selected = Files.FirstOrDefault(f => string.Equals(f.Path, previouslySelected, StringComparison.OrdinalIgnoreCase)) ?? Files.FirstOrDefault();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // git missing, or the read timed out: the panel shows nothing rather than stale rows.
-            CrashLog.Debug("diff", $"working-tree diff failed: {ex.Message}");
             Files.ReplaceAll([]);
             FileCount = 0;
         }

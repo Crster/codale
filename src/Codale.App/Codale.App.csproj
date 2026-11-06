@@ -142,6 +142,17 @@
     <PackageReference Include="Microsoft.Graphics.Win2D" />
   </ItemGroup>
 
+  <!--
+    Memory: a ceiling on the managed heap (normal use stays under 200 MB; a runaway once
+    reached 24 GB and paged the machine, with the ceiling it fails at 4 GB instead), and
+    ConserveMemory, which has the GC compact the large-object heap rather than let it
+    fragment, trading a little GC time for a smaller working set.
+  -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.HeapHardLimit" Value="4294967296" />
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="7" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Codale.Core\Codale.Core.csproj" />
     <ProjectReference Include="..\Codale.Commands\Codale.Commands.csproj" />

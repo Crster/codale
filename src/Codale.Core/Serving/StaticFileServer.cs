@@ -112,9 +112,8 @@ public sealed class StaticFileServer : IDisposable
         {
             // The browser went away mid-response.
         }
-        catch (Exception e)
+        catch (Exception)
         {
-            Trace.WriteLine($"Static server request failed: {e}");
             TryStatus(response, 500);
         }
         finally

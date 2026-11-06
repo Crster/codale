@@ -69,7 +69,6 @@ public sealed class MarkdownView : StackPanel
             _debounce.Stop();
             Core.Syntax.SyntaxService.Store.Changed -= OnGrammarsChanged;
             // Recycled transcript rows must release native text and decoded images.
-            MemoryDiagnostics.MarkdownReleased(Children.Count, _images.Count);
             Children.Clear();
             _images.Clear();
             _imagesInUse.Clear();

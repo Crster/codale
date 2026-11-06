@@ -23,7 +23,6 @@ public static class SyntaxSelection
         }
 
         _started = true;
-        CrashLogHook.Sink = CrashLog.Warn;
         SyntaxService.Initialize(Path.Combine(
             Path.GetDirectoryName(Codale.Storage.CodaleStore.DefaultDatabasePath)!,
             "syntax"));

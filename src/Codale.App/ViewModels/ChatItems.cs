@@ -1389,8 +1389,9 @@ public sealed partial class ToolCallItem : ChatItem
     /// <summary>
     /// An edit's result text ("The file … has been updated") says less than its diff,
     /// so the diff replaces it - unless the edit failed, when the error is the story.
+    /// A question's output is its question-and-answer record (see <see cref="AskedAnswers"/>).
     /// </summary>
-    public bool ShowOutput => HasOutput && (Status == ToolCallStatus.Failed || (!HasDiff && Kind != ToolKind.Ask));
+    public bool ShowOutput => HasOutput && (Status == ToolCallStatus.Failed || !HasDiff);
 
     /// <summary>The change this call makes: previewed from its input, then replaced by the CLI's own patch.</summary>
     [ObservableProperty]
@@ -1458,6 +1459,13 @@ public sealed partial class ToolCallItem : ChatItem
     public string DiffAddedText => HasDiff && Diff!.Added > 0 ? $"+{Diff.Added}" : "";
 
     public string DiffRemovedText => HasDiff && Diff!.Removed > 0 ? $"−{Diff.Removed}" : "";
+
+    /// <summary>
+    /// An AskUserQuestion call's questions with the reader's full answers, captured as they submit;
+    /// the finished step's output is built from them. Null for transcripts read back, whose
+    /// answers come from the CLI's result text instead.
+    /// </summary>
+    public IReadOnlyList<AskedQuestion>? AskedAnswers { get; set; }
 
     /// <summary>What the reader answered, once they have: "Auth method → OAuth".</summary>
     [ObservableProperty]

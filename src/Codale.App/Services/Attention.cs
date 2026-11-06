@@ -65,9 +65,8 @@ internal static class Attention
                 ExpirationTime = DateTimeOffset.Now.AddHours(1),
             });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Trace($"Notification failed: {ex.Message}");
         }
     }
 

@@ -68,6 +68,17 @@ public sealed class TerminalTranscript
         }
     }
 
+    /// <summary>Drops everything held; offsets keep counting, so a reader's next read starts after the cut.</summary>
+    public void Clear()
+    {
+        lock (_gate)
+        {
+            _dropped += _buffer.Length;
+            _buffer.Clear();
+            _buffer.Capacity = 0;
+        }
+    }
+
     /// <summary>Everything still held after <paramref name="since"/>, capped to the last <paramref name="tailChars"/>, and the offset just past it.</summary>
     public (string Text, long NextOffset) Read(long? since = null, int? tailChars = null)
     {

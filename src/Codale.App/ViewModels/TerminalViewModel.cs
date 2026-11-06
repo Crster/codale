@@ -152,10 +152,17 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
         session?.Dispose();
     }
 
-    /// <summary>Ends a project command's shell and reruns its original command in the same tab.</summary>
+    /// <summary>Raised on the UI thread when a restart wipes the screen, scrollback and transcript.</summary>
+    public event EventHandler? Cleared;
+
+    /// <summary>
+    /// Ends the shell and starts it over in the same tab - a command tab reruns its original
+    /// command. The restart starts clean: the previous run's screen, scrollback and transcript
+    /// are dropped, so a tab restarted again and again never grows.
+    /// </summary>
     public async Task RefreshAsync()
     {
-        if (!IsCommandTerminal || IsCliTerminal || _disposed || !IsOpen || _refreshing)
+        if (IsCliTerminal || _disposed || !IsOpen || _refreshing)
         {
             return;
         }
@@ -178,10 +185,9 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
             }
 
             ExitCode = null;
-            Activity = TerminalActivity.Busy;
-            const string marker = "\r\n\x1b[0m\x1b[90m[restarting command]\x1b[0m\r\n";
-            Transcript.Append(marker);
-            OutputReceived?.Invoke(this, marker);
+            Activity = IsCommandTerminal ? TerminalActivity.Busy : TerminalActivity.Idle;
+            Transcript.Clear();
+            Cleared?.Invoke(this, EventArgs.Empty);
             Start();
             if (StartupError.Length > 0)
             {
@@ -199,7 +205,6 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     private void Start()
     {
         StartupError = "";
-        CrashLog.Trace("terminal: session start begin");
 
         try
         {
@@ -208,7 +213,6 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
             // Settings, falling back to the automatic probe when missing.
             var shell = TerminalSession.ResolveShell(AppSettings.TerminalShell);
             var command = CommandText is { } line ? TerminalSession.WrapCommand(shell, line, keepShell: !IsCliTerminal) : shell;
-            CrashLog.Trace($"terminal: shell = {command}");
 
             // Created on the UI thread, so the session delivers output there.
             var session = new TerminalSession();
@@ -235,14 +239,12 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
             };
             session.Start(_workingDirectory, command, _columns, _rows);
             IsRunning = true;
-            CrashLog.Trace($"terminal: session started, pid = {_session.ProcessId}");
         }
         catch (Exception ex)
         {
             IsRunning = false;
             StartupError = $"Could not start a shell: {ex.Message}";
             Activity = TerminalActivity.Error;
-            CrashLog.Write("Terminal", "session start failed", ex);
         }
     }
 

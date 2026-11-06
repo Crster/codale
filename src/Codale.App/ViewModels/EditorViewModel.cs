@@ -336,8 +336,6 @@ public sealed partial class EditorViewModel : ObservableObject
                 return;
             }
 
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-
             // Async read: a multi-MB file (or a cold, AV-scanned one) must not freeze
             // the UI thread on every tree or search-result click. The stamp is taken
             // before the read, so a change that lands mid-read is caught on the next save.
@@ -359,14 +357,12 @@ public sealed partial class EditorViewModel : ObservableObject
             _diskStamp = stamp;
             OnPropertyChanged(nameof(EncodingLabel));
             OnPropertyChanged(nameof(LineEndingLabel));
-            CrashLog.Info("editor", $"loaded {path} ({info.Length} bytes, {EncodingLabel}, {LineEndingLabel}) in {sw.ElapsedMilliseconds} ms");
             HasFile = true;
             CanEdit = true;
             WordCount = CountWords(text);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            CrashLog.Error("editor", $"load failed: {path}", ex);
             // ERROR_SHARING_VIOLATION (32) and ERROR_LOCK_VIOLATION (33)
             if (ex is IOException && (ex.HResult & 0xFFFF) is 32 or 33)
             {
@@ -424,7 +420,6 @@ public sealed partial class EditorViewModel : ObservableObject
             {
                 _overwriteArmed = true;
                 Message = "This file changed on disk since you opened it. Save again to overwrite it with your version.";
-                CrashLog.Info("editor", $"save held back, changed on disk: {path}");
                 return false;
             }
 
@@ -437,7 +432,6 @@ public sealed partial class EditorViewModel : ObservableObject
             _diskStamp = (written.LastWriteTimeUtc, written.Length);
             _overwriteArmed = false;
 
-            CrashLog.Info("editor", $"saved {path} ({text.Length} chars, {EncodingLabel}, {LineEndingLabel})");
             IsDirty = false;
             OnPropertyChanged(nameof(EncodingLabel));
             Saved?.Invoke(this, EventArgs.Empty);
@@ -449,7 +443,6 @@ public sealed partial class EditorViewModel : ObservableObject
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            CrashLog.Error("editor", $"save failed: {path}", ex);
             Message = $"Save failed: {ex.Message}";
             return false;
         }

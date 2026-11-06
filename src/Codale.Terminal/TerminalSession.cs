@@ -39,9 +39,6 @@ public sealed class TerminalSession : IDisposable, IAsyncDisposable
         _uiContext = SynchronizationContext.Current;
     }
 
-    /// <summary>Diagnostics sink the host app wires up; null (silent) in tests and tools.</summary>
-    public static Action<string>? Log { get; set; }
-
     /// <summary>
     /// True from Start until the shell process exits, read from its handle. The output reader is no
     /// signal: the pseudoconsole owns that pipe, so it stays open after the shell is gone.
@@ -163,9 +160,7 @@ public sealed class TerminalSession : IDisposable, IAsyncDisposable
     {
         command ??= ResolveDefaultShell();
 
-        Log?.Invoke($"start shell={command} cwd={workingDirectory} size={columns}x{rows}");
         _pty.Start(command, workingDirectory, columns, rows);
-        Log?.Invoke($"started pid={_pty.ProcessId}");
         _reader = Task.Run(ReadLoopAsync);
         _writer = Task.Run(WriteLoopAsync);
         _watcher = Task.Run(WatchForExitAsync);
@@ -209,13 +204,11 @@ public sealed class TerminalSession : IDisposable, IAsyncDisposable
 
         // Let the last of the output drain before announcing the exit.
         await Task.Delay(100).ConfigureAwait(false);
-        Log?.Invoke($"exited pid={_pty.ProcessId} code={exitCode}");
         Post(() => Exited?.Invoke(this, exitCode));
     }
 
     public void Resize(short columns, short rows)
     {
-        Log?.Invoke($"resize pid={_pty.ProcessId} {columns}x{rows}");
         _pty.Resize(columns, rows);
     }
 
@@ -249,10 +242,9 @@ public sealed class TerminalSession : IDisposable, IAsyncDisposable
         {
             // Disposing.
         }
-        catch (IOException ex)
+        catch (IOException)
         {
             // The pipe closed because the pseudoconsole was torn down.
-            Log?.Invoke($"input pipe closed: {ex.Message}");
         }
         catch (ObjectDisposedException)
         {
@@ -291,9 +283,8 @@ public sealed class TerminalSession : IDisposable, IAsyncDisposable
         {
             // Disposing.
         }
-        catch (IOException ex)
+        catch (IOException)
         {
-            Log?.Invoke($"output pipe closed: {ex.Message}");
         }
         catch (ObjectDisposedException)
         {
@@ -361,7 +352,6 @@ public sealed class TerminalSession : IDisposable, IAsyncDisposable
         }
 
         _disposed = true;
-        Log?.Invoke($"dispose pid={_pty.ProcessId}");
         _input.Writer.TryComplete();
         _cancellation.Cancel();
 
@@ -373,9 +363,8 @@ public sealed class TerminalSession : IDisposable, IAsyncDisposable
         {
             teardown.Wait(TeardownWait);
         }
-        catch (AggregateException ex)
+        catch (AggregateException)
         {
-            Log?.Invoke($"teardown failed: {ex.InnerException?.Message}");
         }
 
         // The loops read the token until they unwind, so it can only be disposed after them.

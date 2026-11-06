@@ -209,7 +209,6 @@ public sealed class McpServerSettings
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            CrashLog.Trace($"Failed to sync MCP config: {ex.Message}");
         }
     }
 
@@ -250,7 +249,6 @@ public sealed class McpServerSettings
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                CrashLog.Trace($"Failed to write global MCP config to {dir}: {ex.Message}");
             }
         }
     }
@@ -381,9 +379,8 @@ public sealed class McpServerSettings
                 _ => null,
             };
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Trace($"Failed to rewrite CLI launch: {ex.Message}");
             return null;
         }
     }
@@ -463,7 +460,6 @@ public sealed class McpServerSettings
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            CrashLog.Trace($"Failed to clear staged CLI config: {ex.Message}");
         }
     }
 
@@ -682,9 +678,8 @@ public sealed class McpServerSettings
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, doc.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLog.Trace($"Failed to merge MCP config into {path}: {ex.Message}");
         }
     }
 
@@ -804,7 +799,6 @@ public sealed class McpServerSettings
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            CrashLog.Trace($"MCP staging failed for {name}: {ex.Message}");
             return source;
         }
     }

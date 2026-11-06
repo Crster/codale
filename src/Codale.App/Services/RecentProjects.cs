@@ -26,10 +26,9 @@ public static class RecentProjects
             using var store = new CodaleStore(CodaleStore.DefaultDatabasePath);
             return Load(store);
         }
-        catch (StoreSchemaException ex)
+        catch (StoreSchemaException)
         {
             // A database from a newer Codale: show an empty list rather than fail the welcome screen.
-            CrashLog.Warn("recent", ex.Message);
             return [];
         }
     }
@@ -61,10 +60,9 @@ public static class RecentProjects
             using var store = new CodaleStore(CodaleStore.DefaultDatabasePath);
             store.SetSetting(SettingName, string.Empty);
         }
-        catch (StoreSchemaException ex)
+        catch (StoreSchemaException)
         {
             // The list reappears on next launch at worst; not worth failing over.
-            CrashLog.Warn("recent", ex.Message);
         }
     }
 
@@ -92,10 +90,9 @@ public static class RecentProjects
 
             store.SetSetting(SettingName, JsonSerializer.Serialize(entries, SerializerOptions));
         }
-        catch (StoreSchemaException ex)
+        catch (StoreSchemaException)
         {
             // The project still opens; it just is not remembered.
-            CrashLog.Warn("recent", ex.Message);
         }
     }
 }

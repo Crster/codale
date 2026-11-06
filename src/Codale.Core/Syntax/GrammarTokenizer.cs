@@ -74,9 +74,8 @@ public sealed class GrammarTokenizer
                 return true;
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            CrashLogHook.Warn("syntax", $"grammar {languageId} failed on a line ({ex.GetType().Name}); line rendered plain");
             tokens.Clear();
             stateOut = null;
             return false;
@@ -143,9 +142,8 @@ public sealed class GrammarTokenizer
             {
                 grammar = _registry.LoadGrammar(info.ScopeName);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                CrashLogHook.Warn("syntax", $"grammar {languageId} failed to load: {ex.Message}");
             }
         }
 

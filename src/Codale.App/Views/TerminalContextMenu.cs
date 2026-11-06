@@ -11,7 +11,7 @@ namespace Codale.App.Views;
 internal static class TerminalContextMenu
 {
     /// <summary>Clipboard and selection actions, followed by terminal and project command actions.</summary>
-    public static void Show(TerminalView terminal, ContextRequestedEventArgs args, Func<Task>? refresh = null, UIElement? anchor = null)
+    public static void Show(TerminalView terminal, ContextRequestedEventArgs args, Func<Task>? refresh = null, UIElement? anchor = null, bool isCommand = false)
     {
         args.Handled = true;
 
@@ -56,8 +56,10 @@ internal static class TerminalContextMenu
 
         if (refresh is not null)
         {
-            var refreshItem = new MenuFlyoutItem { Text = "Restart Command", Icon = new SymbolIcon(Symbol.Refresh) };
-            ToolTipService.SetToolTip(refreshItem, "Stop the current process and rerun the original project command.");
+            var refreshItem = new MenuFlyoutItem { Text = isCommand ? "Restart Command" : "Restart Terminal", Icon = new SymbolIcon(Symbol.Refresh) };
+            ToolTipService.SetToolTip(refreshItem, isCommand
+                ? "Stop the current process, clear the terminal and rerun the original project command."
+                : "Stop the shell, clear the terminal and start a fresh shell.");
             refreshItem.Click += async (_, _) => await refresh();
             menu.Items.Add(refreshItem);
         }

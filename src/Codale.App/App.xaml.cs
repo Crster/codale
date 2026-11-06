@@ -21,9 +21,8 @@ public partial class App : Application
         _request = request;
         _instance = instance;
 
-        CrashLog.Install();
+        UnhandledErrors.Install();
         AppSettings.AttachUiThread();
-        Codale.Terminal.TerminalSession.Log = message => CrashLog.Debug("pty", message);
         InitializeComponent();
 
         // Fires when another launch was redirected here because this instance already

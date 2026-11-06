@@ -107,9 +107,8 @@ public sealed partial class CodeEditor
         catch (OperationCanceledException)
         {
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            Trace.WriteLine($"Ghost text failed: {ex.Message}");
         }
     }
 
