@@ -1374,14 +1374,108 @@
 
                     <!--  TabView's default style pins VerticalAlignment to Top, which
                           collapses the whole centre area to one tab's content height.  -->
-                    <TabView
-                        x:Name="CentreTabs"
-                        Grid.Column="0"
-                        AddTabButtonClick="OnCentreAddTabClick"
-                        Background="Transparent"
-                        SelectionChanged="OnCentreTabSelectionChanged"
-                        TabCloseRequested="OnCentreTabCloseRequested"
-                        VerticalAlignment="Stretch" />
+                    <!--  The tab groups: one TabView, or two split side by side or stacked.
+                          Drag a tab onto an edge of the content to split; drag the last tab
+                          out of a group (or close it) to merge back.  -->
+                    <Grid x:Name="TabGroups" Grid.Column="0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" MinWidth="160" />
+                            <ColumnDefinition Width="0" />
+                            <ColumnDefinition Width="0" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" MinHeight="120" />
+                            <RowDefinition Height="0" />
+                            <RowDefinition Height="0" />
+                        </Grid.RowDefinitions>
+
+                        <Grid x:Name="PrimaryGroup">
+                            <TabView
+                                x:Name="CentreTabs"
+                                AddTabButtonClick="OnCentreAddTabClick"
+                                AllowDropTabs="True"
+                                Background="Transparent"
+                                CanDragTabs="True"
+                                CanReorderTabs="True"
+                                SelectionChanged="OnCentreTabSelectionChanged"
+                                TabCloseRequested="OnCentreTabCloseRequested"
+                                TabDragCompleted="OnTabDragCompleted"
+                                TabDragStarting="OnTabDragStarting"
+                                TabStripDragOver="OnTabStripDragOver"
+                                TabStripDrop="OnTabStripDrop"
+                                VerticalAlignment="Stretch" />
+                            <!--  Shown only while a tab is dragged: covers the tab's content
+                                  (not the strip, which keeps its own reorder/drop) so the
+                                  editor or terminal underneath cannot swallow the drop.  -->
+                            <Grid
+                                x:Name="PrimaryDropTarget"
+                                AllowDrop="True"
+                                Background="Transparent"
+                                DragLeave="OnGroupDropTargetDragLeave"
+                                DragOver="OnGroupDropTargetDragOver"
+                                Drop="OnGroupDropTargetDrop"
+                                Visibility="Collapsed">
+                                <Border
+                                    x:Name="PrimaryDropHint"
+                                    Margin="4"
+                                    BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                    BorderThickness="2"
+                                    CornerRadius="6"
+                                    IsHitTestVisible="False"
+                                    Visibility="Collapsed">
+                                    <Border.Background>
+                                        <SolidColorBrush Opacity="0.18" Color="{ThemeResource SystemAccentColor}" />
+                                    </Border.Background>
+                                </Border>
+                            </Grid>
+                        </Grid>
+
+                        <sizers:GridSplitter
+                            x:Name="TabGroupSplitter"
+                            ResizeBehavior="PreviousAndNext"
+                            Visibility="Collapsed" />
+
+                        <Grid x:Name="SecondaryGroup" Visibility="Collapsed">
+                            <TabView
+                                x:Name="SplitTabs"
+                                AddTabButtonClick="OnCentreAddTabClick"
+                                AllowDropTabs="True"
+                                Background="Transparent"
+                                CanDragTabs="True"
+                                CanReorderTabs="True"
+                                SelectionChanged="OnCentreTabSelectionChanged"
+                                TabCloseRequested="OnCentreTabCloseRequested"
+                                TabDragCompleted="OnTabDragCompleted"
+                                TabDragStarting="OnTabDragStarting"
+                                TabStripDragOver="OnTabStripDragOver"
+                                TabStripDrop="OnTabStripDrop"
+                                VerticalAlignment="Stretch" />
+                            <!--  Shown only while a tab is dragged: covers the tab's content
+                                  (not the strip, which keeps its own reorder/drop) so the
+                                  editor or terminal underneath cannot swallow the drop.  -->
+                            <Grid
+                                x:Name="SecondaryDropTarget"
+                                AllowDrop="True"
+                                Background="Transparent"
+                                DragLeave="OnGroupDropTargetDragLeave"
+                                DragOver="OnGroupDropTargetDragOver"
+                                Drop="OnGroupDropTargetDrop"
+                                Visibility="Collapsed">
+                                <Border
+                                    x:Name="SecondaryDropHint"
+                                    Margin="4"
+                                    BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                    BorderThickness="2"
+                                    CornerRadius="6"
+                                    IsHitTestVisible="False"
+                                    Visibility="Collapsed">
+                                    <Border.Background>
+                                        <SolidColorBrush Opacity="0.18" Color="{ThemeResource SystemAccentColor}" />
+                                    </Border.Background>
+                                </Border>
+                            </Grid>
+                        </Grid>
+                    </Grid>
 
                 <StackPanel
                     x:Name="EmptyState"

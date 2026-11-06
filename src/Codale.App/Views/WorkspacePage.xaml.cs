@@ -65,6 +65,7 @@ public sealed partial class WorkspacePage : Page
     public WorkspacePage()
     {
         InitializeComponent();
+        InitializeTabGroups();
         _outsidePointerPressedHandler = new PointerEventHandler(OnPointerPressedOutsideDrawer);
         AddHandler(PointerPressedEvent, _outsidePointerPressedHandler, handledEventsToo: true);
         Loaded += (_, _) => MarkdownView.FileLinkClicked += OnMarkdownFileLink;
@@ -204,9 +205,10 @@ public sealed partial class WorkspacePage : Page
     /// </summary>
     private void UpdateEmptyState()
     {
+        NormalizeTabGroups();
         var hasTabs = CentreTabs.TabItems.Count > 0;
         EmptyState.Visibility = hasTabs ? Visibility.Collapsed : Visibility.Visible;
-        CentreTabs.Visibility = hasTabs ? Visibility.Visible : Visibility.Collapsed;
+        TabGroups.Visibility = hasTabs ? Visibility.Visible : Visibility.Collapsed;
         CentreTabs.IsAddTabButtonVisible = hasTabs;
 
         if (!hasTabs)
@@ -219,7 +221,10 @@ public sealed partial class WorkspacePage : Page
     /// The status bar shows cursor and word counts only while an editor tab is in
     /// front, reading that tab's own view model through <see cref="WorkspaceViewModel.ActiveEditor"/>.
     /// </summary>
-    private void OnCentreTabSelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void OnCentreTabSelectionChanged(object sender, SelectionChangedEventArgs e) => OnActiveTabChanged();
+
+    /// <summary>Re-reads the tab in front (of the active group, when the centre is split).</summary>
+    private void OnActiveTabChanged()
     {
         if (ViewModel is null)
         {
@@ -231,7 +236,7 @@ public sealed partial class WorkspacePage : Page
             RefreshTabAttention(chatTab);
         }
 
-        var activeItem = CentreTabs.SelectedItem as TabViewItem;
+        var activeItem = ActiveTabItem as TabViewItem;
         var active = _editorTabs.FirstOrDefault(t => ReferenceEquals(t.Item, activeItem))?.Tab;
 
         foreach (var entry in _editorTabs)
@@ -258,7 +263,7 @@ public sealed partial class WorkspacePage : Page
     }
 
     private EditorTab? ActiveEditorTab() =>
-        _editorTabs.FirstOrDefault(t => ReferenceEquals(t.Item, CentreTabs.SelectedItem))?.Tab;
+        _editorTabs.FirstOrDefault(t => ReferenceEquals(t.Item, ActiveTabItem))?.Tab;
 
     /// <summary>
     /// Shows the language colouring the file in front (or "No File", disabled, when the tab in front is not
@@ -328,6 +333,9 @@ public sealed partial class WorkspacePage : Page
 
     private void OnCentreAddTabClick(TabView sender, object args)
     {
+        // A new tab opens in the group whose + was clicked.
+        SetActiveGroup(sender);
+
         // Anchor to the + button itself: showing at the TabView drops the menu at
         // the bottom of the whole centre area. The button lives in the control's
         // template, so fall back to the TabView if the template ever renames it.
@@ -674,12 +682,12 @@ public sealed partial class WorkspacePage : Page
 
             entry = new ChatTabEntry(item, tab, chat);
             _chatTabs.Add(entry);
-            CentreTabs.TabItems.Add(item);
+            AddTab(item);
             UpdateEmptyState();
         }
 
         ViewModel.Chat = chat;
-        CentreTabs.SelectedItem = entry.Item;
+        SelectTab(entry.Item);
     }
 
     /// <summary>The tab's chat icon is blue while its chat works in an isolated worktree.</summary>
@@ -716,7 +724,7 @@ public sealed partial class WorkspacePage : Page
     /// </summary>
     private void RefreshTabAttention(ChatTabEntry entry)
     {
-        var active = entry.Chat.IsWaitingForYou && !ReferenceEquals(CentreTabs.SelectedItem, entry.Item);
+        var active = entry.Chat.IsWaitingForYou && !IsTabShowing(entry.Item);
         if (active == entry.AttentionPulse is not null)
         {
             return;
@@ -806,10 +814,10 @@ public sealed partial class WorkspacePage : Page
     }
 
     private ChatTabEntry? ChatTabInFront() =>
-        _chatTabs.FirstOrDefault(e => ReferenceEquals(e.Item, CentreTabs.SelectedItem));
+        _chatTabs.FirstOrDefault(e => ReferenceEquals(e.Item, ActiveTabItem));
 
     private TerminalTabEntry? TerminalTabInFront() =>
-        _terminalTabs.FirstOrDefault(e => ReferenceEquals(e.Item, CentreTabs.SelectedItem));
+        _terminalTabs.FirstOrDefault(e => ReferenceEquals(e.Item, ActiveTabItem));
 
     private bool IsCliInSession()
     {
@@ -876,17 +884,10 @@ public sealed partial class WorkspacePage : Page
 
         var entry = new TerminalTabEntry(item, tab, terminal);
         _terminalTabs.Add(entry);
-        if (insertIndex >= 0 && insertIndex <= CentreTabs.TabItems.Count)
-        {
-            CentreTabs.TabItems.Insert(insertIndex, item);
-        }
-        else
-        {
-            CentreTabs.TabItems.Add(item);
-        }
+        AddTab(item, insertIndex);
 
         UpdateEmptyState();
-        CentreTabs.SelectedItem = item;
+        SelectTab(item);
 
         // The shell lives exactly as long as its tab: started when the tab first
         // appears, terminated when the tab is closed.
@@ -905,10 +906,7 @@ public sealed partial class WorkspacePage : Page
         _terminalTabs.Remove(entry);
         EndCliSession(entry.Terminal);
 
-        if (CentreTabs.TabItems.Contains(entry.Item))
-        {
-            CentreTabs.TabItems.Remove(entry.Item);
-        }
+        RemoveTab(entry.Item);
 
         UpdateEmptyState();
         UpdateSessionPanelForActiveTab();
@@ -1189,7 +1187,7 @@ public sealed partial class WorkspacePage : Page
         // Untitled buffers are born pinned: there is nothing on disk to preview, and
         // every click of "New file" means one more buffer.
         var entry = CreateEditorTab(isPreview: false);
-        CentreTabs.SelectedItem = entry.Item;
+        SelectTab(entry.Item);
         entry.Tab.StartNewFile();
     }
 
@@ -1211,11 +1209,11 @@ public sealed partial class WorkspacePage : Page
             _searchTabItem = new TabViewItem { Header = "Search", IsClosable = true };
             _searchTabItem.IconSource = new FontIconSource { Glyph = "\uE721" };
             _searchTabItem.Content = _searchTab;
-            CentreTabs.TabItems.Add(_searchTabItem);
+            AddTab(_searchTabItem);
             UpdateEmptyState();
         }
 
-        CentreTabs.SelectedItem = _searchTabItem;
+        SelectTab(_searchTabItem);
     }
 
     /// <summary>
@@ -1250,7 +1248,7 @@ public sealed partial class WorkspacePage : Page
 
         _diffTabItem = new TabViewItem { IsClosable = true, Header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { icon, name } } };
         _diffTabItem.Content = _diffTab;
-        CentreTabs.TabItems.Add(_diffTabItem);
+        AddTab(_diffTabItem);
         UpdateEmptyState();
     }
 
@@ -1283,7 +1281,7 @@ public sealed partial class WorkspacePage : Page
         if (e.IsEdit && ToRepoRelative(e.Path) is { } relative)
         {
             EnsureDiffTab();
-            CentreTabs.SelectedItem = _diffTabItem;
+            SelectTab(_diffTabItem);
             var absolute = ResolveGitPath(relative);
             await ViewModel.DiffViewer.LoadFileAsync(relative, absolute is not null && File.Exists(absolute));
         }
@@ -1478,7 +1476,7 @@ public sealed partial class WorkspacePage : Page
     {
         var absolute = ResolveWorkspacePath(path);
         EnsureDiffTab();
-        CentreTabs.SelectedItem = _diffTabItem;
+        SelectTab(_diffTabItem);
         ViewModel.DiffViewer.LoadDiffs(
             Path.GetFileName(absolute),
             ToRepoRelative(absolute) ?? absolute,
@@ -1561,13 +1559,13 @@ public sealed partial class WorkspacePage : Page
                 IconSource = new FontIconSource { Glyph = "\uE8FD" },
                 Content = _artifactTab,
             };
-            CentreTabs.TabItems.Add(_artifactTabItem);
+            AddTab(_artifactTabItem);
             UpdateEmptyState();
         }
 
         _artifactTab.Show(artifact);
         _artifactTabItem!.Header = artifact.Title.Length > 28 ? artifact.Title[..28] + "…" : artifact.Title;
-        CentreTabs.SelectedItem = _artifactTabItem;
+        SelectTab(_artifactTabItem);
 
         // The tab follows plan takeovers, so it must listen to the chat the plan came
         // from; switching to another chat's plan re-aims the subscription.
@@ -1634,7 +1632,7 @@ public sealed partial class WorkspacePage : Page
     {
         var absolute = ResolveGitPath(change.Path);
         EnsureDiffTab();
-        CentreTabs.SelectedItem = _diffTabItem;
+        SelectTab(_diffTabItem);
         await ViewModel.DiffViewer.LoadFileAsync(change.Path, absolute is not null && File.Exists(absolute));
     }
 
@@ -1644,7 +1642,7 @@ public sealed partial class WorkspacePage : Page
         var root = ViewModel.Git.RepositoryRoot ?? ViewModel.ProjectPath;
         var relative = Path.GetRelativePath(root, node.FullPath).Replace('\\', '/');
         EnsureDiffTab();
-        CentreTabs.SelectedItem = _diffTabItem;
+        SelectTab(_diffTabItem);
         await ViewModel.DiffViewer.LoadFileAsync(relative, File.Exists(node.FullPath));
     }
 
@@ -1657,7 +1655,7 @@ public sealed partial class WorkspacePage : Page
         }
 
         EnsureDiffTab();
-        CentreTabs.SelectedItem = _diffTabItem;
+        SelectTab(_diffTabItem);
         await ViewModel.DiffViewer.LoadCommitAsync(commit);
     }
 
@@ -1673,7 +1671,7 @@ public sealed partial class WorkspacePage : Page
         }
 
         EnsureDiffTab();
-        CentreTabs.SelectedItem = _diffTabItem;
+        SelectTab(_diffTabItem);
         await ViewModel.DiffViewer.LoadCommitAsync(commit);
     }
 
@@ -1791,7 +1789,7 @@ public sealed partial class WorkspacePage : Page
             !t.Tab.ViewModel.IsPreview && PathsEqual(t.Tab.ViewModel.FilePath, path));
         if (open is not null)
         {
-            CentreTabs.SelectedItem = open.Item;
+            SelectTab(open.Item);
             _ = open.Tab.CheckAndUpdateIfModifiedAsync();
             return open;
         }
@@ -1802,13 +1800,13 @@ public sealed partial class WorkspacePage : Page
             // because the first keystroke pins the tab. Re-clicking picks up outside
             // changes instead of showing stale text.
             await preview.Tab.OpenFileAsync(path);
-            CentreTabs.SelectedItem = preview.Item;
+            SelectTab(preview.Item);
             return preview;
         }
 
         var entry = CreateEditorTab(isPreview: true);
         await entry.Tab.OpenFileAsync(path);
-        CentreTabs.SelectedItem = entry.Item;
+        SelectTab(entry.Item);
         return entry;
     }
 
@@ -1864,7 +1862,7 @@ public sealed partial class WorkspacePage : Page
         }
 
         ApplyHeader(entry);
-        CentreTabs.TabItems.Add(item);
+        AddTab(item);
         UpdateEmptyState();
         return entry;
     }
@@ -2343,7 +2341,7 @@ public sealed partial class WorkspacePage : Page
 
         if (_terminalTabs.FirstOrDefault(t => ReferenceEquals(t.Terminal, terminal)) is { } existing)
         {
-            CentreTabs.SelectedItem = existing.Item;
+            SelectTab(existing.Item);
             return;
         }
 
@@ -2355,7 +2353,7 @@ public sealed partial class WorkspacePage : Page
     {
         if (_terminalTabs.FirstOrDefault(t => ReferenceEquals(t.Terminal, terminal)) is { } existing)
         {
-            CentreTabs.SelectedItem = existing.Item;
+            SelectTab(existing.Item);
         }
     }
 
@@ -2642,7 +2640,7 @@ public sealed partial class WorkspacePage : Page
             return;
         }
 
-        if (_editorTabs.FirstOrDefault(t => ReferenceEquals(t.Item, CentreTabs.SelectedItem)) is { } editor)
+        if (_editorTabs.FirstOrDefault(t => ReferenceEquals(t.Item, ActiveTabItem)) is { } editor)
         {
             window.FocusSearch(editor.Tab.ViewModel.FileName ?? "this file");
             return;
@@ -2831,7 +2829,7 @@ public sealed partial class WorkspacePage : Page
         // Scoped with Ctrl+F: the editor in front marks what in its file relates to the
         // query, and keeps focus so F3 and Esc work straight away.
         if (submission.InFile &&
-            _editorTabs.FirstOrDefault(t => ReferenceEquals(t.Item, CentreTabs.SelectedItem)) is { } editor &&
+            _editorTabs.FirstOrDefault(t => ReferenceEquals(t.Item, ActiveTabItem)) is { } editor &&
             !string.IsNullOrWhiteSpace(query))
         {
             editor.Tab.FocusText();
