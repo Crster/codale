@@ -44,6 +44,37 @@ public class CliLocatorTests
     }
 
     [Fact]
+    public void ResolveNpmShim_only_resolves_the_shim_of_its_own_cli()
+    {
+        var dir = Directory.CreateTempSubdirectory("codale-shim-").FullName;
+        try
+        {
+            var codexExe = Path.Combine(dir, "node_modules", "@openai", "codex", "bin", "codex.exe");
+            Directory.CreateDirectory(Path.GetDirectoryName(codexExe)!);
+            File.WriteAllText(codexExe, "");
+
+            // npm.cmd lives beside codex.cmd in %AppData%\npm; it must stay npm.
+            Assert.Null(CliLocator.ResolveNpmShim("npm", Path.Combine(dir, "npm.cmd")));
+            Assert.Equal(codexExe, CliLocator.ResolveNpmShim("codex", Path.Combine(dir, "codex.cmd")));
+            Assert.Null(CliLocator.ResolveNpmShim("claude", Path.Combine(dir, "claude.cmd")));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Find_takes_a_bare_command_name()
+    {
+        // PATHEXT is appended to the name, so "npm.cmd" would look for "npm.cmd.cmd".
+        if (CliLocator.Find("npm") is { } npm)
+        {
+            Assert.EndsWith("npm.cmd", npm, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
     public void ToStandardMcpConfig_generates_valid_mcp_servers_json()
     {
         var spec = new McpServerSpec

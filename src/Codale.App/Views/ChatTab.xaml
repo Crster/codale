@@ -2686,7 +2686,6 @@
 
     <views:AgentSessionPanel
         x:Name="SessionPanel"
-        Grid.Column="1"
-        Width="380" />
+        Grid.Column="1" />
 </Grid>
 </UserControl>

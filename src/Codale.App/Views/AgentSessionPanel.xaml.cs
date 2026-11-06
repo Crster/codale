@@ -33,6 +33,12 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     public AgentSessionPanel()
     {
         InitializeComponent();
+        Rail.Glyph = "";
+        Rail.ShowConnection = true;
+        Rail.CliUpdate = CliUpdate;
+        Rail.UseStatusMeters();
+        Rail.ShowModel = false;
+        ApplyCollapsed();
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
     }
@@ -56,6 +62,8 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             }
 
             _session = value;
+            Rail.Session = value;
+            Rail.ShowModel = ShowSessionPickers;
             _todoCountSeen = 0;
 
             if (_session is not null)
@@ -195,6 +203,10 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        AppSettings.Changed -= OnAppSettingsChanged;
+        AppSettings.Changed += OnAppSettingsChanged;
+        ApplyCollapsed();
+
         // Unloaded detached everything (a tab switch unloads the panel): listen again and
         // catch up on what changed meanwhile, or the live sections stay as they were.
         if (_session is not null)
@@ -230,6 +242,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        AppSettings.Changed -= OnAppSettingsChanged;
         _elapsedTimer?.Stop();
         if (_session is not null)
         {
@@ -773,4 +786,16 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     }
 
     #endregion
+
+    // ---- Collapse ---------------------------------------------------------------------------
+
+    /// <summary>The header icon collapses the panel to its rail; the rail's icon expands it again.</summary>
+    private void OnPanelToggleClick(object sender, RoutedEventArgs e) => SessionPanelRail.Toggle();
+
+    private void OnRailExpandRequested(object? sender, EventArgs e) => SessionPanelRail.Toggle();
+
+    /// <summary>Every session panel follows the one setting, so toggling one updates the others.</summary>
+    private void OnAppSettingsChanged(object? sender, EventArgs e) => ApplyCollapsed();
+
+    private void ApplyCollapsed() => Rail.Apply(this, ExpandedView);
 }

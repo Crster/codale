@@ -78,6 +78,12 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
     public TerminalAgentSessionPanel()
     {
         InitializeComponent();
+        Rail.Glyph = "";
+        Rail.ShowConnection = false;
+        Rail.CliUpdate = CliUpdate;
+        Rail.Meters = Vitals;
+        Rail.ShowModel = false;
+        ApplyCollapsed();
         _timer = DispatcherQueue.CreateTimer();
         _timer.Interval = ProbeInterval;
         _timer.Tick += (_, _) => OnTick();
@@ -133,6 +139,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
             }
 
             _session = value;
+            Rail.Session = value;
             _reader = null;
             StopWatchingHistory();
 
@@ -251,6 +258,10 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        AppSettings.Changed -= OnAppSettingsChanged;
+        AppSettings.Changed += OnAppSettingsChanged;
+        ApplyCollapsed();
+
         if (Session is { } session)
         {
             Detach(session);
@@ -268,6 +279,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        AppSettings.Changed -= OnAppSettingsChanged;
         _timer.Stop();
         _elapsedTimer.Stop();
         StopWatchingHistory();
@@ -653,4 +665,16 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
     }
 
     #endregion
+
+    // ---- Collapse ---------------------------------------------------------------------------
+
+    /// <summary>The header icon collapses the panel to its rail; the rail's icon expands it again.</summary>
+    private void OnPanelToggleClick(object sender, RoutedEventArgs e) => SessionPanelRail.Toggle();
+
+    private void OnRailExpandRequested(object? sender, EventArgs e) => SessionPanelRail.Toggle();
+
+    /// <summary>Every session panel follows the one setting, so toggling one updates the others.</summary>
+    private void OnAppSettingsChanged(object? sender, EventArgs e) => ApplyCollapsed();
+
+    private void ApplyCollapsed() => Rail.Apply(this, ExpandedView);
 }

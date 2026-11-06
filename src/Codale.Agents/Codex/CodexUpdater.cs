@@ -10,7 +10,7 @@ public static class CodexUpdater
 {
     public static async Task StartAfterExitAsync(string logPath)
     {
-        var npm = CliLocator.Find("npm.cmd")
+        var npm = CliLocator.Find("npm")
             ?? throw new InvalidOperationException("npm was not found. Install Node.js before updating Codex.");
         Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
         var readyPath = logPath + ".ready-" + Guid.NewGuid().ToString("N");
