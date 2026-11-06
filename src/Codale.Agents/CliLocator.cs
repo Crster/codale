@@ -172,7 +172,7 @@ public static class CliLocator
             }
         }
 
-        return shim is null ? null : ResolveNpmShim(shim) ?? shim;
+        return shim is null ? null : ResolveNpmShim(name, shim) ?? shim;
     }
 
     /// <summary>
@@ -180,7 +180,7 @@ public static class CliLocator
     /// versions of that package ship the native binary under <c>bin</c>, which can be launched
     /// directly without cmd.exe in between.
     /// </summary>
-    private static string? ResolveNpmShim(string shim)
+    internal static string? ResolveNpmShim(string name, string shim)
     {
         try
         {
@@ -189,20 +189,27 @@ public static class CliLocator
                 return null;
             }
 
+            // Only resolve a shim to the binary of the CLI it belongs to: npm.cmd sits in the
+            // same folder as claude.cmd/codex.cmd and must not resolve to their binaries.
+            if (string.Equals(name, "codex", StringComparison.OrdinalIgnoreCase))
+            {
+                var codexNative = Path.Combine(dir, "node_modules", "@openai", "codex", "bin", "codex.exe");
+                if (File.Exists(codexNative))
+                {
+                    return codexNative;
+                }
+
+                var codexVendor = Path.Combine(dir, "node_modules", "@openai", "codex", "node_modules", "@openai", "codex-win32-x64", "vendor", "x86_64-pc-windows-msvc", "bin", "codex.exe");
+                return File.Exists(codexVendor) ? codexVendor : null;
+            }
+
+            if (!string.Equals(name, Executable, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
             var native = Path.Combine(dir, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe");
-            if (File.Exists(native))
-            {
-                return native;
-            }
-
-            var codexNative = Path.Combine(dir, "node_modules", "@openai", "codex", "bin", "codex.exe");
-            if (File.Exists(codexNative))
-            {
-                return codexNative;
-            }
-
-            var codexVendor = Path.Combine(dir, "node_modules", "@openai", "codex", "node_modules", "@openai", "codex-win32-x64", "vendor", "x86_64-pc-windows-msvc", "bin", "codex.exe");
-            return File.Exists(codexVendor) ? codexVendor : null;
+            return File.Exists(native) ? native : null;
         }
         catch (ArgumentException)
         {
