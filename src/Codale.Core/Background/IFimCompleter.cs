@@ -91,21 +91,28 @@ public static class FimText
     /// </summary>
     public static string ShellPrefix(string shell, string cwd, IEnumerable<string> recent, IEnumerable<string> files, string typed)
     {
-        var comment = shell.Equals("cmd", StringComparison.OrdinalIgnoreCase) ? "::" : "#";
+        var isCmd = shell.Equals("cmd", StringComparison.OrdinalIgnoreCase);
+        var isPowerShell = shell.Contains("pwsh", StringComparison.OrdinalIgnoreCase) ||
+            shell.Contains("powershell", StringComparison.OrdinalIgnoreCase);
+        var comment = isCmd ? "::" : "#";
+        var name = isCmd ? "Windows Command Prompt (cmd.exe)" : isPowerShell ? "Windows PowerShell" : shell;
+        var prompt = isCmd ? $"{cwd}>" : isPowerShell ? $"PS {cwd}>" : $"{cwd}$";
+
+        // A terminal session transcript: the model continues the last prompt line with one shell command.
         var builder = new System.Text.StringBuilder();
-        builder.Append(comment).Append(" shell: ").Append(shell).Append('\n');
-        builder.Append(comment).Append(" cwd: ").Append(cwd).Append('\n');
+        builder.Append(comment).Append(" Transcript of an interactive ").Append(name).Append(" session on Windows.\n");
+        builder.Append(comment).Append(" Every line after a prompt is one real command typed by the user, never prose.\n");
         if (string.Join(", ", files) is { Length: > 0 } names)
         {
-            builder.Append(comment).Append(" files here: ").Append(Clip(names, 1200, fromEnd: false)).Append('\n');
+            builder.Append(comment).Append(" Files in the current folder: ").Append(Clip(names, 1200, fromEnd: false)).Append('\n');
         }
 
         foreach (var command in recent.Where(c => !string.IsNullOrWhiteSpace(c)))
         {
-            builder.Append(command.Replace('\n', ' ').Replace('\r', ' ')).Append('\n');
+            builder.Append(prompt).Append(' ').Append(command.Replace('\n', ' ').Replace('\r', ' ')).Append('\n');
         }
 
-        return builder.Append(typed).ToString();
+        return builder.Append(prompt).Append(' ').Append(typed).ToString();
     }
 
     /// <summary>

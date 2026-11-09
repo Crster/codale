@@ -1943,6 +1943,7 @@
                             UpdateTextOnSelect="False"
                             TextChanged="OnStatusBarCommandBoxTextChanged"
                             QuerySubmitted="OnStatusBarCommandBoxQuerySubmitted"
+                            PreviewKeyDown="OnStatusBarCommandBoxKeyDown"
                             KeyDown="OnStatusBarCommandBoxKeyDown">
                             <AutoSuggestBox.Resources>
                                 <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="{ThemeResource TextFillColorDisabled}" Opacity="0.7" />

@@ -3828,6 +3828,21 @@ public sealed partial class WorkspacePage : Page
     {
         switch (e.Key)
         {
+            case Windows.System.VirtualKey.Tab
+                when StatusBarCommandBox.Text.Length > 0:
+                e.Handled = true;
+                if (FindTemplateChild(StatusBarCommandBox, "TextBox") is TextBox { SelectionLength: > 0 } inner &&
+                    StatusBarCommandBox.Text == _shellCurrent)
+                {
+                    // A suggestion is showing as a selected remainder: Tab accepts it.
+                    inner.Select(inner.Text.Length, 0);
+                }
+                else
+                {
+                    _ = CycleShellSuggestionAsync();
+                }
+
+                return;
             case Windows.System.VirtualKey.Space
                 when Microsoft.UI.Input.InputKeyboardSource
                     .GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control)
