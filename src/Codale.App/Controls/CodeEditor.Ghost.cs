@@ -14,7 +14,7 @@ namespace Codale.App.Controls;
 /// </summary>
 public sealed partial class CodeEditor
 {
-    private const int GhostPrefixChars = 4500;
+    private const int GhostPrefixChars = 3000;
     private const int GhostSuffixChars = 1500;
 
     private string _ghostText = "";
@@ -25,6 +25,12 @@ public sealed partial class CodeEditor
 
     /// <summary>Where the buffer's file lives, for the model's prompt; null for an unsaved buffer.</summary>
     public Func<string?>? FilePathProvider { get; set; }
+
+    /// <summary>
+    /// Comment header for the model's prompt, from the code just before the caret and the language id:
+    /// the file's path and language and what the project index knows about the names used nearby.
+    /// </summary>
+    public Func<string, string?, string>? GhostContext { get; set; }
 
     private bool GhostVisible => _ghostText.Length > 0 && _ghostAt == _caret && _anchor == _caret;
 
@@ -83,6 +89,19 @@ public sealed partial class CodeEditor
             return;
         }
 
+        // The project's context (file, language, declarations used nearby) leads the prompt as comments.
+        var nearby = prefix.Length > 1500 ? prefix[^1500..] : prefix;
+        string header;
+        try
+        {
+            header = GhostContext?.Invoke(nearby, _languageId) ?? "";
+        }
+        catch (Exception)
+        {
+            header = "";
+        }
+
+        prefix = header + prefix;
         var suffix = SuffixAfter(at);
         var cts = _ghostCts = new CancellationTokenSource();
         _ = RunGhostAsync(model, prefix, suffix, at, cts);

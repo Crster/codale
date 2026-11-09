@@ -27,7 +27,8 @@ public static class FimText
     /// </summary>
     public static string FirstLine(string raw, string suffix)
     {
-        var text = raw.Replace("\r\n", "\n");
+        // A model asked to fill an empty line often opens with a line break; the proposal is the first line with text.
+        var text = raw.Replace("\r\n", "\n").TrimStart('\n');
         var newline = text.IndexOf('\n');
         if (newline >= 0)
         {

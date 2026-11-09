@@ -14,7 +14,7 @@ public sealed class OpenRouterFimCompleter(OpenRouterClient client, string model
 {
     private const int MaxTokens = 64;
     private const int MaxRetries = 2;
-    private const int PrefixChars = 4000;
+    private const int PrefixChars = 5000; // the editor's project-context header plus its code window
     private const int SuffixChars = 1000;
 
     private const string ChatSystem =

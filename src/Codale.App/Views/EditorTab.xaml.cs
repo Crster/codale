@@ -395,7 +395,16 @@ public sealed partial class EditorTab : UserControl
         Bindings.Update();
         ViewModel.Saved += (_, _) => _ = RefreshDiffMarkersAsync(refetchHead: true);
         FileEditor.WorkspaceSuggest = ProjectSuggestions;
+        FileEditor.GhostContext = GhostHeader;
         return this;
+    }
+
+    /// <summary>The model prompt's header: this file's path and language plus declarations from the project index.</summary>
+    private string GhostHeader(string nearby, string? languageId)
+    {
+        var hasProject = !string.IsNullOrEmpty(ProjectRoot) && Directory.Exists(ProjectRoot);
+        var snapshot = hasProject ? Codale.Search.SourceIndex.For(ProjectRoot!).Current : null;
+        return Codale.Search.CompletionContext.Build(snapshot, ProjectRoot ?? "", ViewModel?.FilePath, languageId, nearby);
     }
 
     /// <summary>
