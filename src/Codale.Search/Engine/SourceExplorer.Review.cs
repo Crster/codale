@@ -7,7 +7,7 @@ using Codale.Core.Text;
 namespace Codale.Search;
 
 /// <summary>
-/// The background provider's review of what context enrichment retrieved. Retrieval
+/// The helper model's review of what context enrichment retrieved. Retrieval
 /// decides which files are related; the provider reads their numbered source and keeps
 /// only the files that answer the question, in order, each with the exact rows and the
 /// literal words to mark. Every row and word is checked against the file on disk: a row

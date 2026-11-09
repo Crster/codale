@@ -10,7 +10,7 @@ namespace Codale.Search;
 
 /// <summary>Local project retrieval. Indexing is asynchronous; retrieval uses only committed rows and fresh source.</summary>
 /// <remarks>
-/// <paramref name="semantic"/> supplies the background provider's embedding model (null when none is set
+/// <paramref name="semantic"/> supplies an optional embedding model (null when none is set
 /// up, and in tests); the hashed embedder always runs beside it for identifier fragments and inflections.
 /// The semantic model sits behind a server, so it is asked in batches off the retrieval path, and a query
 /// it cannot embed within <see cref="QueryEmbedWait"/> is ranked without it.

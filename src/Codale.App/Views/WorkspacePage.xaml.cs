@@ -102,7 +102,6 @@ public sealed partial class WorkspacePage : Page
             window.McpToolsRequested += OnTitleBarMcpToolsRequested;
             window.LeftPanelToggled += OnTitleBarLeftPanelToggled;
             window.SearchSubmitted += OnTitleBarSearchSubmitted;
-            window.SearchTyping += OnTitleBarSearchTyping;
             window.ShortcutInvoked += OnShortcutInvoked;
 
             if (window.Content is UIElement root)
@@ -142,7 +141,6 @@ public sealed partial class WorkspacePage : Page
             window.McpToolsRequested -= OnTitleBarMcpToolsRequested;
             window.LeftPanelToggled -= OnTitleBarLeftPanelToggled;
             window.SearchSubmitted -= OnTitleBarSearchSubmitted;
-            window.SearchTyping -= OnTitleBarSearchTyping;
             window.ShortcutInvoked -= OnShortcutInvoked;
             window.Activated -= OnWindowActivated;
 
@@ -301,27 +299,10 @@ public sealed partial class WorkspacePage : Page
                 LanguageFlyout.Hide();
                 _ = SyntaxDialogs.ShowCatalogAsync(XamlRoot);
             });
-            LanguagePickerControl.AddAction("Generate with AI…", () =>
-            {
-                LanguageFlyout.Hide();
-                _ = GenerateGrammarForActiveFileAsync();
-            });
         }
     }
 
     private bool _languageActionsAdded;
-
-    /// <summary>Opens the AI generator pre-filled from the file in front: its extension, and its text as the sample.</summary>
-    private async Task GenerateGrammarForActiveFileAsync()
-    {
-        if (ActiveEditorTab() is not { } tab || !tab.ViewModel.HasFile)
-        {
-            return;
-        }
-
-        var ext = Path.GetExtension(tab.ViewModel.FileName ?? string.Empty).TrimStart('.');
-        await SyntaxDialogs.ShowGenerateAsync(XamlRoot, ViewModel.Helper, ext.ToUpperInvariant(), ext, tab.GetEditorText());
-    }
 
     private void OnLanguageChosen(string? languageId)
     {
@@ -1813,7 +1794,7 @@ public sealed partial class WorkspacePage : Page
 
         // A save changes the working tree, so git re-colours the file tree now rather than on the next poll.
         editor.Saved += (_, _) => _ = ViewModel.Git.RefreshAsync();
-        var tab = new EditorTab { Helper = ViewModel.Helper, ProjectRoot = ViewModel.ProjectPath }.WithViewModel(editor);
+        var tab = new EditorTab { ProjectRoot = ViewModel.ProjectPath }.WithViewModel(editor);
         var item = new TabViewItem { IsClosable = true };
         item.Content = tab;
         item.DoubleTapped += OnEditorTabDoubleTapped;
@@ -2415,7 +2396,7 @@ public sealed partial class WorkspacePage : Page
         PeekPane.Visibility = Visibility.Visible;
         var owner = ViewModel.Chats.Concat(ViewModel.TerminalSessions)
             .FirstOrDefault(chat => chat.RunningTasks.Contains(task)) ?? ViewModel.Panel;
-        PeekPane.Show(task, owner.Helper, ViewModel.ProjectPath, ViewModel.ExtraFolders.Folders);
+        PeekPane.Show(task, ViewModel.ProjectPath, ViewModel.ExtraFolders.Folders);
     }
 
     private void OpenSideColumn()
@@ -2799,7 +2780,6 @@ public sealed partial class WorkspacePage : Page
         return null;
     }
 
-    private void OnTitleBarSearchTyping(object? sender, bool inFile) => ViewModel.Search.Prewarm(inFile);
 
     private async void OnTitleBarSearchSubmitted(object? sender, SearchSubmission submission)
     {
@@ -2815,7 +2795,7 @@ public sealed partial class WorkspacePage : Page
 
             try
             {
-                var found = await editor.Tab.FocusOnQueryAsync(query, ViewModel.Search.ConnectModelAsync);
+                var found = await editor.Tab.FocusOnQueryAsync(query);
 
                 // Several results are stepped through with the arrows, so the box is free for the next search.
                 if (found > 1 && sender is MainWindow window)
@@ -3512,12 +3492,7 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>Ctrl+Enter in the message box commits, the way a chat draft sends.</summary>
-    private void OnGenerateCommitAccelerator(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
-        Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
-    {
-        args.Handled = true;
-        _ = ViewModel.Git.GenerateCommitMessageAsync();
-    }
+
 
     private void OnCommitAccelerator(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
         Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
@@ -3912,33 +3887,30 @@ public sealed partial class WorkspacePage : Page
         _commandHistory.InsertRange(0, CommandHistory.Recent(ViewModel.ProjectPath).Reverse());
     }
 
-    private CancellationTokenSource? _shellSuggestCts;
     private string _shellTyped = "";
     private string _shellCurrent = "";
     private List<string> _shellCandidates = [];
     private int _shellIndex;
-    private readonly List<string> _shellSeen = [];
 
     /// <summary>
     /// Ctrl+Space in the command box: completes what is typed from the newest matching history entry, then
-    /// older ones, then the helper model. Each press shows the next one as a selected remainder, so typing
+    /// older ones. Each press shows the next one as a selected remainder, so typing
     /// on replaces it. A box that changed since the last suggestion starts over from what is there.
     /// </summary>
-    private async Task CycleShellSuggestionAsync()
+    private Task CycleShellSuggestionAsync()
     {
         EnsureCommandHistoryLoaded();
         var box = StatusBarCommandBox;
         var text = box.Text;
         if (text.Length == 0)
         {
-            return;
+            return Task.CompletedTask;
         }
 
         if (text != _shellCurrent)
         {
             _shellTyped = text;
             _shellIndex = -1;
-            _shellSeen.Clear();
             _shellCandidates = _commandHistory
                 .AsEnumerable().Reverse()
                 .Where(h => h.Length > text.Length && h.StartsWith(text, StringComparison.OrdinalIgnoreCase))
@@ -3950,17 +3922,11 @@ public sealed partial class WorkspacePage : Page
         if (_shellIndex < _shellCandidates.Count)
         {
             ShowShellSuggestion(box, _shellTyped, _shellCandidates[_shellIndex]);
-            return;
+            return Task.CompletedTask;
         }
 
         _shellIndex = _shellCandidates.Count - 1;
-        if (await SuggestShellCompletionAsync(box, _shellTyped) is { Length: > 0 } rest)
-        {
-            _shellSeen.Add(rest);
-            _shellIndex++;
-            _shellCandidates.Add(_shellTyped + rest);
-            ShowShellSuggestion(box, _shellTyped, _shellTyped + rest);
-        }
+        return Task.CompletedTask;
     }
 
     private void ShowShellSuggestion(AutoSuggestBox box, string typed, string full)
@@ -3978,63 +3944,6 @@ public sealed partial class WorkspacePage : Page
     /// request cancels an older one. Empty when there is nothing to add, the box no longer holds
     /// <paramref name="typed"/>, or the finished command would be dangerous when what is typed is not.
     /// </summary>
-    private async Task<string> SuggestShellCompletionAsync(AutoSuggestBox box, string typed)
-    {
-        _shellSuggestCts?.Cancel();
-        if (BackgroundProviders.Completions is not { } model)
-        {
-            return "";
-        }
-
-        var cts = _shellSuggestCts = new CancellationTokenSource();
-        try
-        {
-            var cwd = _terminalCwd;
-            var shell = Path.GetFileNameWithoutExtension(Codale.Terminal.TerminalSession.ResolveShell(AppSettings.TerminalShell));
-            var recent = _commandHistory.TakeLast(5).ToList();
-            var files = await Task.Run(() => ListShellFiles(cwd), cts.Token);
-            var prefix = Codale.Core.Background.FimText.ShellPrefix(shell, cwd, recent, files, typed);
-            var rest = await model.CompleteAsync(prefix, "", _shellSeen.ToList(), cts.Token);
-
-            if (Codale.Core.Background.FimText.LooksLikeProse(rest))
-            {
-                return "";
-            }
-
-            // A completion must never be what turns a command destructive (a recursive delete, a force push).
-            if (rest.Length > 0 &&
-                Codale.Core.Shell.ShellCommandAnalyzer.Assess(typed + rest, cwd).Risk == Codale.Core.Shell.ShellRisk.Danger &&
-                Codale.Core.Shell.ShellCommandAnalyzer.Assess(typed, cwd).Risk != Codale.Core.Shell.ShellRisk.Danger)
-            {
-                return "";
-            }
-
-            return cts.IsCancellationRequested || (box.Text != typed && box.Text != _shellCurrent) ? "" : rest;
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception)
-        {
-        }
-
-        return "";
-    }
-    /// <summary>Up to 40 names in the folder, for the model to complete paths against.</summary>
-    private static List<string> ListShellFiles(string cwd)
-    {
-        try
-        {
-            return Directory.Exists(cwd)
-                ? Directory.EnumerateFileSystemEntries(cwd).Select(Path.GetFileName).OfType<string>().Take(40).ToList()
-                : [];
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return [];
-        }
-    }
-
     private void SetStatusBarCommandText(string text)
     {
         StatusBarCommandBox.Text = text;
@@ -4121,11 +4030,6 @@ public sealed partial class WorkspacePage : Page
         AppDialog.Apply(dialog, DialogTone.Danger);
         SetRiskyCommandHeader(dialog, assessment.Risk);
 
-        if (ViewModel?.Helper is { IsAvailable: true } model)
-        {
-            _ = RefineRiskyCommandDialogAsync(model, command, dialog, descriptionBlock, safetyBlock);
-        }
-
         return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
 
@@ -4139,38 +4043,6 @@ public sealed partial class WorkspacePage : Page
         else
         {
             AppDialog.SetHeader(dialog, "Run this command?", DialogTone.Warning, AppDialog.Glyphs.Terminal);
-        }
-    }
-
-    private async Task RefineRiskyCommandDialogAsync(
-        Codale.Core.Helper.IHelperModel model,
-        string command,
-        ContentDialog dialog,
-        TextBlock descriptionBlock,
-        TextBlock safetyBlock)
-    {
-        try
-        {
-            var assessment = await Codale.Core.Shell.ShellCommandAnalyzer.AssessAsync(model, command, _terminalCwd).ConfigureAwait(false);
-            DispatcherQueue.TryEnqueue(() =>
-            {
-                if (assessment.Description.Length > 0)
-                {
-                    descriptionBlock.Text = assessment.Description;
-                }
-
-                SetRiskyCommandHeader(dialog, assessment.Risk);
-                safetyBlock.Text = $"Safety: {assessment.FormatAssessment()}";
-                safetyBlock.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[assessment.Risk switch
-                {
-                    Codale.Core.Shell.ShellRisk.Danger => "SystemFillColorCriticalBrush",
-                    Codale.Core.Shell.ShellRisk.Caution => "SystemFillColorCautionBrush",
-                    _ => "SystemFillColorSuccessBrush",
-                }];
-            });
-        }
-        catch (Exception)
-        {
         }
     }
 

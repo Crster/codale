@@ -421,7 +421,6 @@ public sealed partial class CodeEditor : UserControl
         _caretTimer.Stop();
         _autoScrollTimer?.Stop();
         _occurrenceTimer?.Stop();
-        _ghostCts?.Cancel();
         CloseCompletion();
         ClearLayouts();
         _textFormat?.Dispose();
@@ -1189,7 +1188,6 @@ public sealed partial class CodeEditor : UserControl
             args.DrawingSession.FillRectangle((float)x, (float)y, CaretWidth, (float)_lineHeight, _caretBrush!);
         }
 
-        DrawGhost(args.DrawingSession, x, y - LineHighlightOffset);
     }
 
     private void OnCanvasDraw(CanvasControl sender, CanvasDrawEventArgs args)
@@ -1779,25 +1777,6 @@ public sealed partial class CodeEditor : UserControl
 
     private void OnEditorKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Key == VirtualKey.Tab && !CompletionOpen && AcceptGhost())
-        {
-            e.Handled = true;
-            return;
-        }
-
-        if (e.Key == VirtualKey.Space && IsCtrlDown())
-        {
-            CloseCompletion();
-            RequestGhost();
-            e.Handled = true;
-            return;
-        }
-
-        if (e.Key is not (VirtualKey.Shift or VirtualKey.Control or VirtualKey.Menu))
-        {
-            ClearGhost();
-        }
-
         if (HandleCompletionKey(e))
         {
             e.Handled = true;

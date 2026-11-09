@@ -16,7 +16,6 @@ namespace Codale.App.Services;
 public sealed class FeatureService : IDisposable
 {
     private readonly string _projectPath;
-    private readonly IHelperModel _helper;
     private readonly FeatureStore _store;
     private readonly ProjectKnowledgeIndex _knowledge;
     public ProjectKnowledgeIndex Knowledge => _knowledge;
@@ -26,16 +25,13 @@ public sealed class FeatureService : IDisposable
     /// <summary>Shared with every other window on the project: open chats, running summaries, the create gate.</summary>
     private readonly FeatureActivity _activity;
 
-    public FeatureService(string projectPath, IHelperModel helper)
+    public FeatureService(string projectPath)
     {
         _projectPath = projectPath;
-        _helper = helper;
         _store = OpenStore(projectPath);
-        // The background provider's embedding model, as Settings has it now; picking another one
-        // re-embeds on the next refresh (vectors are stored per model).
-        _knowledge = new ProjectKnowledgeIndex(_store, () => BackgroundProviders.Current.Embedder);
+        _knowledge = new ProjectKnowledgeIndex(_store, () => null);
         _knowledge.Warm(projectPath);
-        _embeddingModel = BackgroundProviders.Current.Embedder?.Model;
+        _embeddingModel = null;
         AppSettings.Changed += OnAppSettingsChanged;
         _activity = FeatureActivity.For(projectPath);
         _activity.HistoryDeleted += OnHistoryDeleted;
@@ -81,54 +77,6 @@ public sealed class FeatureService : IDisposable
     public FeatureInfo? Get(string id) => _store.Get(id);
 
     public int FileCount(string id) => _store.FileCount(id);
-
-    /// <summary>Reevaluates history, compacts its logs, refreshes titles and rebuilds search indexes.</summary>
-    public async Task RebuildAndOptimizeAsync(string? featureId = null)
-    {
-        if (!_helper.IsAvailable)
-        {
-            throw new HelperModelException("A background model must be available to rebuild history and generate its title.");
-        }
-
-        await Task.Run(async () =>
-        {
-            var features = featureId is null ? _store.List() : _store.List().Where(f => f.Id == featureId).ToList();
-            foreach (var candidate in features)
-            {
-                var gate = _activity.SummaryGate(candidate.Id);
-                await gate.WaitAsync();
-                try
-                {
-                    if (_store.Get(candidate.Id) is not { } feature)
-                    {
-                        continue;
-                    }
-
-                    var log = LogOf(feature.Id);
-                    var (entries, length) = log.ReadAllSnapshot();
-                    using var budget = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-                    var (summary, title) = await FeatureHistoryRebuilder.RebuildAsync(
-                        _helper, feature, entries, _activity.RunningOn(feature.Id), budget.Token);
-                    // Commit only after both model results succeed; retain concurrent appends as progress.
-                    if (length > 0)
-                    {
-                        log.ArchiveUpTo(length);
-                    }
-                    _store.SetSummary(feature.Id, summary, logOffset: 0, logBytes: log.Length);
-                    SaveSummaryKnowledge(feature.Id, summary);
-                    _store.Rename(feature.Id, title);
-                    Changed?.Invoke(this, EventArgs.Empty);
-                }
-                finally
-                {
-                    gate.Release();
-                }
-            }
-
-            _store.RebuildAndOptimize();
-        });
-        Changed?.Invoke(this, EventArgs.Empty);
-    }
 
     public IReadOnlyList<FeatureInfo> Search(string text, int limit) => _store.Search(text, limit);
 
@@ -196,7 +144,7 @@ public sealed class FeatureService : IDisposable
     /// <summary>A newly picked embedding model (or provider) embeds the project now, not on the next prompt.</summary>
     private void OnAppSettingsChanged(object? sender, EventArgs e)
     {
-        var model = BackgroundProviders.Current.Embedder?.Model;
+        string? model = null;
         if (model == _embeddingModel) return;
         _embeddingModel = model;
         _knowledge.Warm(_projectPath);
@@ -256,84 +204,6 @@ public sealed class FeatureService : IDisposable
         var relative = Path.GetRelativePath(root, Path.GetFullPath(path));
         if (ProjectPaths.IsInside(root, path) && ProjectKnowledgeIndex.Eligible(relative)) _store.RecordSessionFile(sessionId, relative);
         _knowledge.Warm(root);
-    }
-
-    private void SaveSummaryKnowledge(string sessionId, string summary)
-    {
-        if (_store.GetProviderSession(sessionId) is not { } mapping) return;
-        _store.PutKnowledge(new KnowledgeHit("summary:" + sessionId, sessionId, mapping.Provider, mapping.Worktree,
-            ProjectKnowledgeIndex.Revision(mapping.Worktree), summary.Length > 2400 ? summary[..2400] : summary, _store.SessionReferences(sessionId)));
-    }
-
-    /// <summary>
-    /// Brings a feature's summary up to date in the background when enough has happened since the
-    /// last one (or <paramref name="force"/>), and archives the log once it has grown past 1 MB.
-    /// A failed model call keeps the old summary. One summary per feature runs at a time across
-    /// every window on the project; an ask that arrives meanwhile runs once that one is done.
-    /// </summary>
-    public void Summarize(string featureId, bool force = false)
-    {
-        if (!_helper.IsAvailable || !_activity.TryBeginSummary(featureId, force))
-        {
-            return;
-        }
-
-        _ = Task.Run(async () =>
-        {
-            var gate = _activity.SummaryGate(featureId);
-            await gate.WaitAsync();
-            try
-            {
-                if (_store.Get(featureId) is not { } feature)
-                {
-                    return;
-                }
-
-                var log = LogOf(featureId);
-                var length = log.Length;
-                var start = Math.Min(feature.SummaryOffset, length);
-                var (entries, turns) = log.ReadSince(start);
-                var compact = length >= FeatureSummarizer.CompactBytes;
-
-                if (!entries.Any(e => e.Role != HandoffRole.TurnEnd) ||
-                    (!force && !compact && !FeatureSummarizer.IsDue(length - start, turns)))
-                {
-                    return;
-                }
-
-                var summary = await FeatureSummarizer.UpdateAsync(_helper, feature.Name, feature.Summary, entries, _activity.RunningOn(featureId));
-                if (summary.Length == 0)
-                {
-                    return;
-                }
-
-                if (compact)
-                {
-                    // Only what this summary read is archived: other chats' lines written meanwhile start the new log.
-                    log.ArchiveUpTo(length);
-                    _store.SetSummary(featureId, summary, logOffset: 0, logBytes: log.Length);
-                }
-                else
-                {
-                    _store.SetSummary(featureId, summary, length);
-                }
-
-                SaveSummaryKnowledge(featureId, summary);
-                Changed?.Invoke(this, EventArgs.Empty);
-            }
-            catch (Exception ex) when (ex is HelperModelException or IOException or UnauthorizedAccessException or OperationCanceledException or Microsoft.Data.Sqlite.SqliteException)
-            {
-            }
-            finally
-            {
-                gate.Release();
-                // A chat's turn that ended while this one was being written asked for its own: run it now.
-                if (_activity.EndSummary(featureId) is { Again: true } again)
-                {
-                    Summarize(featureId, again.Force);
-                }
-            }
-        });
     }
 
     public void Dispose()

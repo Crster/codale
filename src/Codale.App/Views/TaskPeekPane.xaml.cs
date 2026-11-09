@@ -28,11 +28,8 @@ public sealed partial class TaskPeekPane : UserControl
     private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
     private RunningTaskItem? _task;
     private FileTailer? _tailer;
-    private IHelperModel? _assessmentModel;
     private string? _cwd;
     private IReadOnlyList<string> _extraRoots = [];
-    private CancellationTokenSource? _assessmentCancellation;
-    private string? _assessmentCommand;
 
     public TaskPeekPane()
     {
@@ -44,10 +41,9 @@ public sealed partial class TaskPeekPane : UserControl
 
     public RunningTaskItem? Task => _task;
 
-    public void Show(RunningTaskItem task, IHelperModel? model, string? cwd, IReadOnlyList<string> extraRoots)
+    public void Show(RunningTaskItem task, string? cwd, IReadOnlyList<string> extraRoots)
     {
         Detach();
-        _assessmentModel = model;
         _cwd = cwd;
         _extraRoots = extraRoots.ToArray();
         _task = task;
@@ -78,74 +74,6 @@ public sealed partial class TaskPeekPane : UserControl
 
         Refresh(stickToEnd: true);
         StartTailing();
-        RequestAssessment();
-    }
-
-    /// <summary>Only an open peek requests a helper assessment; closing or switching cancels it.</summary>
-    private void RequestAssessment()
-    {
-        if (_task is not { IsShell: true } task)
-        {
-            return;
-        }
-
-        var command = task.CommandOf();
-        if (command == _assessmentCommand)
-        {
-            return;
-        }
-
-        CancelAssessment();
-        if (command.Length == 0 || _assessmentModel is not { IsAvailable: true } model)
-        {
-            return;
-        }
-
-        _assessmentCommand = command;
-        var cancellation = new CancellationTokenSource();
-        _assessmentCancellation = cancellation;
-        _ = RefineAssessmentAsync(model, task, command, _cwd, _extraRoots, cancellation);
-    }
-
-    private async System.Threading.Tasks.Task RefineAssessmentAsync(
-        IHelperModel model, RunningTaskItem task, string command, string? cwd,
-        IReadOnlyList<string> extraRoots, CancellationTokenSource cancellation)
-    {
-        try
-        {
-            var assessment = await ShellCommandAnalyzer.AssessAsync(
-                model, command, cwd, task.Description, cancellation.Token, extraRoots).ConfigureAwait(false);
-            _dispatcher.TryEnqueue(() =>
-            {
-                if (!ReferenceEquals(_assessmentCancellation, cancellation) || !ReferenceEquals(_task, task))
-                {
-                    return;
-                }
-
-                if (assessment.Description.Length > 0)
-                {
-                    task.Description = assessment.Description;
-                }
-                task.Risk = assessment.Risk;
-                task.RiskReason = assessment.Reason;
-            });
-        }
-        catch (OperationCanceledException)
-        {
-            // The pane closed or moved to another command.
-        }
-        catch (Exception)
-        {
-        }
-    }
-
-    private void CancelAssessment()
-    {
-        var cancellation = _assessmentCancellation;
-        _assessmentCancellation = null;
-        cancellation?.Cancel();
-        cancellation?.Dispose();
-        _assessmentCommand = null;
     }
 
     /// <summary>
@@ -194,8 +122,6 @@ public sealed partial class TaskPeekPane : UserControl
 
     public void Detach()
     {
-        CancelAssessment();
-        _assessmentModel = null;
         _cwd = null;
         _extraRoots = [];
         if (_task is not null)
@@ -245,8 +171,7 @@ public sealed partial class TaskPeekPane : UserControl
                     if (_task is not null)
                     {
                         ShowDetails(_task);
-                        RequestAssessment();
-                    }
+                                    }
 
                     Refresh(stickToEnd: false);
                     break;

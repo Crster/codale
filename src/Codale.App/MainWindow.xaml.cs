@@ -148,7 +148,6 @@ public sealed partial class MainWindow : Window
     public event EventHandler<SearchSubmission>? SearchSubmitted;
 
     /// <summary>The user is typing a search - true when it is scoped to the open file - so the model can get ready.</summary>
-    public event EventHandler<bool>? SearchTyping;
 
     /// <summary>The open file's name while the box is scoped to it (Ctrl+F in an editor); null for the project.</summary>
     private string? _searchFileScope;
@@ -352,14 +351,6 @@ public sealed partial class MainWindow : Window
 
     private void OnSearchQuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args) =>
         SearchSubmitted?.Invoke(this, new SearchSubmission(args.QueryText, InFile: _searchFileScope is not null));
-
-    private void OnSearchTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
-    {
-        if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput && sender.Text.Length > 0)
-        {
-            SearchTyping?.Invoke(this, _searchFileScope is not null);
-        }
-    }
 
     /// <summary>Puts the caret in the title bar search box; the one place a search starts.</summary>
     public void FocusSearch() => FocusSearch(fileName: null);

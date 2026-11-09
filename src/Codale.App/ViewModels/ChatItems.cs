@@ -741,7 +741,7 @@ public sealed partial class ApprovalRequestItem : ObservableObject
 
     public bool IsGeneric => !IsAskUserQuestion && !IsPlan;
 
-    /// <summary>What the shell command is going to do, described briefly by the agent or helper model.</summary>
+    /// <summary>What the shell command is going to do, described briefly by the agent.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasDescription))]
     public partial string Description { get; set; } = "";

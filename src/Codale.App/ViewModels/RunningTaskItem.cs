@@ -112,7 +112,7 @@ public sealed partial class RunningTaskItem : ObservableObject
     /// <summary>Command line or subagent description.</summary>
     public string Title { get; init; } = "";
 
-    /// <summary>What the command does: from the agent or the helper model; empty when none has arrived yet.</summary>
+    /// <summary>What the command does: from the agent; empty when none has arrived yet.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DisplayTitle))]
     public partial string Description { get; set; } = "";

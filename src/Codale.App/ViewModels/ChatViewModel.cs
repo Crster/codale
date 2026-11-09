@@ -166,7 +166,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         (RequestedModel, RequestedEffort) = TierConfig(AppSettings.DefaultTierFor(CliId));
-        RefreshCustomProviderName();
     }
 
     /// <summary>The CLI descriptor behind <see cref="CliId"/>.</summary>
@@ -183,7 +182,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _endpointSettings = endpointSettings;
         _mcpSettings = mcpSettings;
         EndpointName = AppSettings.CliProviderFor(CliId);
-        RefreshCustomProviderName();
 
         // A new chat starts where the user last left this CLI: the saved tier (resolved
         // to model/effort), or the CLI's own default when nothing has been chosen yet.
@@ -304,22 +302,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>This conversation's own status: model, context, cost and the files it changed.</summary>
     public StatusViewModel Status => _status;
-
-    /// <summary>
-    /// Labels the background-task usage button with the provider Settings picks: "Off" or "OpenRouter".
-    /// Never follows the chat's CLI provider override: the button counts what that provider serves.
-    /// </summary>
-    public void RefreshCustomProviderName()
-    {
-        _status.CustomProviderName = AppSettings.BackgroundProvider switch
-        {
-            AppSettings.OpenRouterBackgroundProvider => "OpenRouter",
-            _ => "Off",
-        };
-
-        OnPropertyChanged(nameof(ProviderName));
-        OnPropertyChanged(nameof(TabTitle));
-    }
 
     /// <summary>
     /// A name for the conversation's tab: the history entry's title. Null until the chat
@@ -1446,14 +1428,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         OnPropertyChanged(nameof(ShowSuggestionHint));
 
-        // Automatic mode reads the message on send; starting the reader while the user
-        // types takes its few seconds of start-up off the wait. A busy turn counts too:
-        // the next message is often typed while the agent works and sent once it is done.
-        if (IsAutomaticMode && value.Length > 0 && !value.StartsWith('/') &&
-            MessageRouting.TryRouteLocally(value) is null && Router is { } router)
-        {
-            router.Prewarm(Features);
-        }
+
     }
 
     /// <summary>Puts the suggestion into the composer for editing or sending; false when there is none or the user already typed.</summary>
@@ -1473,7 +1448,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     [NotifyPropertyChangedFor(nameof(ModeDisplayText))]
     public partial string PermissionMode { get; set; } = AppSettings.DefaultChatMode;
 
-    /// <summary>The mode a fresh chat starts in when Settings does not say otherwise: Auto, which is plain Full without an agent CLI for the helper model.</summary>
+    /// <summary>The mode a fresh chat starts in when Settings does not say otherwise: Auto.</summary>
     public const string DefaultMode = AutomaticMode;
 
     /// <summary>
@@ -1490,9 +1465,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public bool IsFullMode => PermissionMode is "auto" or "dontAsk" or "bypassPermissions";
 
     /// <summary>
-    /// The host's routed mode: each message is classified by the helper model, sent as an
-    /// ask, plan or act turn as it reads, and moved to a new session when it changes
-    /// the subject. Between turns the CLI runs "auto", which act turns use as-is.
+    /// The CLI's automatic permission mode.
     /// </summary>
     // NOTE: Auto is Claude's own auto mode (--permission-mode auto): the model evaluates each
     // action's risk and only asks or denies the risky ones. This is already handled; do not
@@ -1530,18 +1503,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         "auto" or "dontAsk" => reported is "bypassPermissions" or "dontAsk",
         _ => false,
     };
-
-    /// <summary>Picks each message's mode and session in <see cref="AutomaticMode"/>; null sends every message as a plain turn.</summary>
-    public MessageRouter? Router { get; init; }
-
-    /// <summary>
-    /// The background-task model, which names sessions and writes summaries. Null turns those off.
-    /// </summary>
-    public IHelperModel? Helper { get; init; }
-
-    /// <summary>The helper model is reading the message before it goes out.</summary>
-    [ObservableProperty]
-    public partial bool IsRouting { get; set; }
 
     /// <summary>The chip label for the raw CLI mode vocabulary.</summary>
     public string ModeDisplayText => ModeDisplay(PermissionMode);
@@ -1994,7 +1955,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         _connectedProvider = SelectedProviderName();
         _status.IsCustomProvider = endpointEnv is not null;
-        RefreshCustomProviderName();
         var endpointModels = endpointEnv is not null ? EndpointModels() : [];
         if (endpointModels.Count > 0)
         {
@@ -3414,32 +3374,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         return ShellCommandAnalyzer.Assess(command, _projectPath, hint, ExtraRoots);
     }
 
-    private async Task UpdateShellApprovalAsync(
-        IHelperModel model,
-        ApprovalRequestItem item,
-        string command,
-        string? cwd,
-        string? hint)
-    {
-        try
-        {
-            var assessment = await ShellCommandAnalyzer.AssessAsync(model, command, cwd, hint, extraRoots: ExtraRoots).ConfigureAwait(false);
-            _dispatcher.TryEnqueue(() =>
-            {
-                if (assessment.Description.Length > 0)
-                {
-                    item.Description = assessment.Description;
-                }
-
-                item.Risk = assessment.Risk;
-                item.RiskNote = assessment.FormatRiskNote();
-            });
-        }
-        catch (Exception)
-        {
-        }
-    }
-
     private bool _phoneOffered;
 
     /// <summary>
@@ -3675,13 +3609,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 .ToArray(),
         };
         pending.Approval = approvalItem;
-
-        if (ToolCallItem.IsShellName(approval.ToolName) &&
-            !string.IsNullOrWhiteSpace(shellCommand) &&
-            Helper is { IsAvailable: true } model)
-        {
-            _ = UpdateShellApprovalAsync(model, approvalItem, shellCommand, _projectPath, shellHint);
-        }
 
         // The turn is blocked on the reader from here: say so, in case they are elsewhere.
         AttentionNeeded?.Invoke(this, pending.Approval switch
@@ -4031,7 +3958,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         var text = Draft.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
         var attachments = Attachments.Select(a => a.ToTurnAttachment()).ToList();
 
-        if ((text.Length == 0 && attachments.Count == 0) || _session is null || !IsConnected || IsRouting || _briefing is not null)
+        if ((text.Length == 0 && attachments.Count == 0) || _session is null || !IsConnected || _briefing is not null)
         {
             return;
         }
@@ -4056,26 +3983,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             // Every fresh prompt in Auto is read on its own: an ask turn Auto routed
             // earlier that never handed the mode back is undone before this one goes out.
             await ReturnFromRoutedAskAsync();
-        }
-
-        // Automatic mode reads the message first. Slash commands are the CLI's own
-        // syntax and go out untouched; so does anything sent mid-turn, which the
-        // running turn's mode already covers.
-        if (IsAutomaticMode && !planOnly && !IsBusy && text.Length > 0 && !text.StartsWith('/') && Router is { } router)
-        {
-            RouteDecision decision;
-            IsRouting = true;
-            try
-            {
-                decision = await router.RouteAsync(text, this);
-            }
-            finally
-            {
-                IsRouting = false;
-            }
-
-            await SendRoutedAsync(decision.Text, attachments, decision.Intent);
-            return;
         }
 
         await SendTurnAsync(text, attachments, planOnly, askOnly: IsAskMode && !planOnly);
@@ -4460,7 +4367,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         EndpointName = name;
         OnPropertyChanged(nameof(EndpointName));
-        RefreshCustomProviderName();
 
         if (!IsConnected || _session is null || _connecting)
         {
@@ -5081,10 +4987,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         Features?.ClearChatActivity(_chatId);
-        if (SmartHistory && _recording && FeatureId is { } featureId)
-        {
-            Features!.Summarize(featureId, force: true);
-        }
     }
 
     /// <summary>

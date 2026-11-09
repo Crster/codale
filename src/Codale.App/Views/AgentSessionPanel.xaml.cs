@@ -378,9 +378,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
                 }, flyout));
 
         Add(ChatViewModel.AutomaticMode, "\uE82F", "Auto",
-            chat.Router?.IsAvailable == true
-                ? "Plans new, large or unclear work before making changes"
-                : "Needs the Claude CLI to pick modes",
+            "Uses the CLI automatic permission mode",
             current == ChatViewModel.AutomaticMode);
         Add("manual", "\uE7C9", "Interactive",
             "Reads freely; edits, shell and deletes ask first",
@@ -660,33 +658,6 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         catch (Exception ex)
         {
             await ShowErrorAsync("Could not rename history", ex.Message);
-        }
-    }
-
-    private async void OnRebuildHistoryClick(object sender, RoutedEventArgs e)
-    {
-        if (Workspace?.Sessions is not { } sessions || sessions.IsOptimizing)
-        {
-            return;
-        }
-
-        try
-        {
-            var item = (sender as FrameworkElement)?.DataContext as SessionListItem;
-            await sessions.RebuildAndOptimizeAsync(item?.SessionId);
-            await AppDialog.Apply(new ContentDialog
-            {
-                XamlRoot = XamlRoot,
-                Title = "History optimized",
-                Content = item is null
-                    ? "Project history has been reevaluated and compacted, titles refreshed, and search indexes rebuilt."
-                    : "This history has been reevaluated and compacted, its title refreshed, and search indexes rebuilt.",
-                CloseButtonText = "OK",
-            }, DialogTone.Success).ShowAsync();
-        }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync("Could not rebuild and optimize history", ex.Message);
         }
     }
 

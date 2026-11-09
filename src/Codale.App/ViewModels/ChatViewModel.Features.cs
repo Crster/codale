@@ -42,7 +42,6 @@ public sealed partial class ChatViewModel
     /// <summary>Events of a history shown when it opens. The transcript is not virtualized (that made the
     /// scroll jump), so the window is what bounds its memory; the rest stays in the session log.</summary>
     private const int HistoryWindowEvents = 120;
-    private bool SmartHistory => Features is not null;
 
 
     /// <summary>Only opening a history row resumes it. Prompts never select a different session.</summary>
@@ -289,7 +288,6 @@ public sealed partial class ChatViewModel
                     _turnFindings.ToString(), @"(?:[A-Za-z0-9_.-]+[/\\])+[A-Za-z0-9_.-]+")) CaptureReference(match.Value);
                 features.RecordFinding(id, CliId, _projectPath,
                     _featureRequest + "\n" + _turnFindings, _turnReferences.Values.ToList());
-                features.Summarize(id);
             }
             _turnFindings.Clear();
             _turnReferences.Clear();
@@ -316,27 +314,10 @@ public sealed partial class ChatViewModel
         .OfType<AssistantMessageItem>().FirstOrDefault(i => !i.IsStreaming)?.Text;
 
     /// <summary>
-    /// Topic detection on the background provider's embedding model when it answers within
-    /// <see cref="ProjectKnowledgeIndex.QueryEmbedWait"/>; on the local hashed vectors otherwise.
+    /// Topic detection on local hashed vectors.
     /// </summary>
     private static async Task<bool> IsNewTopicAsync(string text, IReadOnlyList<string> earlier, string? lastReply, CancellationToken ct)
     {
-        if (BackgroundProviders.Current.Embedder is { } semantic)
-        {
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            deadline.CancelAfter(ProjectKnowledgeIndex.QueryEmbedWait);
-            try
-            {
-                return await TopicShift.IsNewTopicAsync(text, earlier, semantic, lastReply, deadline.Token).WaitAsync(deadline.Token);
-            }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-            {
-            }
-            catch (HelperModelException)
-            {
-            }
-        }
-
         return await TopicShift.IsNewTopicAsync(text, earlier, HashedTextEmbedder.Instance, lastReply, ct);
     }
 

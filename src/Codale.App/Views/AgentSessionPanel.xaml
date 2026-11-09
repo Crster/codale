@@ -996,15 +996,6 @@
                             Click="OnHistorySectionClick"
                             IsChecked="True"
                             Style="{StaticResource SectionHeader}">
-                            <ToggleButton.ContextFlyout>
-                                <MenuFlyout>
-                                    <MenuFlyoutItem Click="OnRebuildHistoryClick" Text="Rebuild &amp; Optimize">
-                                        <MenuFlyoutItem.Icon>
-                                            <FontIcon Glyph="&#xE895;" />
-                                        </MenuFlyoutItem.Icon>
-                                    </MenuFlyoutItem>
-                                </MenuFlyout>
-                            </ToggleButton.ContextFlyout>
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <TextBlock Text="History" />
                                 <Border
@@ -1021,11 +1012,7 @@
                                     Width="12"
                                     Height="12"
                                     IsActive="{x:Bind Workspace.Sessions.IsLoading, Mode=OneWay}" />
-                                <ProgressRing
-                                    Width="12"
-                                    Height="12"
-                                    IsActive="{x:Bind Workspace.Sessions.IsOptimizing, Mode=OneWay}"
-                                    ToolTipService.ToolTip="Rebuilding and optimizing history database" />
+
                             </StackPanel>
                         </ToggleButton>
 
@@ -1075,11 +1062,6 @@
                                             <MenuFlyoutItem Click="OnRetitleSessionClick" Text="Rename history">
                                                 <MenuFlyoutItem.Icon>
                                                     <FontIcon Glyph="&#xE70F;" />
-                                                </MenuFlyoutItem.Icon>
-                                            </MenuFlyoutItem>
-                                            <MenuFlyoutItem Click="OnRebuildHistoryClick" Text="Rebuild &amp; Optimize">
-                                                <MenuFlyoutItem.Icon>
-                                                    <FontIcon Glyph="&#xE895;" />
                                                 </MenuFlyoutItem.Icon>
                                             </MenuFlyoutItem>
                                             <MenuFlyoutSeparator />

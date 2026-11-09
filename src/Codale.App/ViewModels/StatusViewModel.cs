@@ -167,54 +167,8 @@ public sealed partial class StatusViewModel : ObservableObject
         OnPropertyChanged(nameof(LongWindowLabel));
     }
 
-    /// <summary>The background-task provider's name ("Off", "OpenRouter"); labels its usage button.</summary>
-    [ObservableProperty]
-    public partial string CustomProviderName { get; set; } = "Off";
-
     /// <summary>The Claude CLI's subscription meter only applies while talking to Anthropic itself.</summary>
     public bool HasClaudeUsage => HasUsage;
-
-    /// <summary>Window-wide: shared by every chat, so it outlives any one session.</summary>
-    private readonly CustomUsageTally _custom;
-
-    public StatusViewModel() : this(new CustomUsageTally())
-    {
-    }
-
-    public StatusViewModel(CustomUsageTally custom)
-    {
-        _custom = custom;
-        _custom.Changed += OnCustomChanged;
-    }
-
-    private void OnCustomChanged()
-    {
-        OnPropertyChanged(nameof(CustomCalls));
-        OnPropertyChanged(nameof(CustomInputTokens));
-        OnPropertyChanged(nameof(CustomOutputTokens));
-        OnPropertyChanged(nameof(CustomCallsText));
-        OnPropertyChanged(nameof(CustomTokensText));
-        OnPropertyChanged(nameof(CustomTokensDetail));
-    }
-
-    /// <summary>API requests the custom provider has served since the window opened.</summary>
-    public int CustomCalls => _custom.Calls;
-
-    public long CustomInputTokens => _custom.InputTokens;
-
-    public long CustomOutputTokens => _custom.OutputTokens;
-
-    public long CustomCacheReadTokens => _custom.CacheReadTokens;
-
-    public long CustomCacheWriteTokens => _custom.CacheWriteTokens;
-
-    public string CustomCallsText => CustomCalls == 1 ? "1 call" : $"{CustomCalls} calls";
-
-    /// <summary>"↑12.3k ↓4.1k": fresh input and output, as the CLI counts them.</summary>
-    public string CustomTokensText => $"↑{FormatLong(CustomInputTokens)} ↓{FormatLong(CustomOutputTokens)}";
-
-    public string CustomTokensDetail =>
-        $"Input {CustomInputTokens:N0} · Output {CustomOutputTokens:N0} · Cache read {CustomCacheReadTokens:N0} · Cache write {CustomCacheWriteTokens:N0}";
 
     internal static string FormatLong(long tokens) => Format((int)Math.Min(tokens, int.MaxValue));
 

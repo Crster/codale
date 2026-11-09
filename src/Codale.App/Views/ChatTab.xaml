@@ -2628,26 +2628,8 @@
                             Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                             Text="Enter send · Shift+Enter newline · Ctrl+Enter plan"
                             TextTrimming="CharacterEllipsis"
-                            Visibility="{x:Bind ViewModel.IsRouting, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}" />
+                            />
 
-                        <!--  Automatic mode: the local model is reading the message before it goes out.  -->
-                        <StackPanel
-                            Grid.Column="3"
-                            Margin="8,0"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Center"
-                            Orientation="Horizontal"
-                            Spacing="6"
-                            Visibility="{x:Bind ViewModel.IsRouting, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                            <ProgressRing
-                                Width="12"
-                                Height="12"
-                                IsActive="{x:Bind ViewModel.IsRouting, Mode=OneWay}" />
-                            <TextBlock
-                                FontSize="11"
-                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                Text="Reading your message…" />
-                        </StackPanel>
 
                         <StackPanel
                             Grid.Column="4"

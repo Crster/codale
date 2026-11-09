@@ -78,7 +78,7 @@
                         LostFocus="OnSearchLostFocus"
                         QueryIcon="Find"
                         QuerySubmitted="OnSearchQuerySubmitted"
-                        TextChanged="OnSearchTextChanged" />
+                        />
                     <Button
                         x:Name="CommandsButton"
                         Width="40"

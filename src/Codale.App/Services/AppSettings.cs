@@ -268,66 +268,6 @@ public static class AppSettings
         set => Set("terminal.scrollback", Math.Clamp(value, 100, 1_000_000), FormatInt);
     }
 
-    /// <summary>What <see cref="BackgroundProvider"/> reads for Off, the default: no background task runs.</summary>
-    public const string OffBackgroundProvider = Codale.Core.Background.OffBackgroundProvider.ProviderId;
-
-    /// <summary>The OpenRouter provider.</summary>
-    public const string OpenRouterBackgroundProvider = Codale.Agents.OpenRouter.OpenRouterBackgroundProvider.ProviderId;
-
-    private static bool IsBackgroundProvider(string raw) => raw is OffBackgroundProvider or OpenRouterBackgroundProvider;
-
-    /// <summary>
-    /// What background jobs (titles, commit messages, routing, search, embeddings, ghost text) run on:
-    /// "off" or "openrouter". Never picked is Off: background tasks only run once the user chooses a provider.
-    /// Independent of the status bar's agent provider picker.
-    /// </summary>
-    public static string BackgroundProvider
-    {
-        get => Get("background.provider", () => Read("background.provider", OffBackgroundProvider).Trim().ToLowerInvariant() is var raw && IsBackgroundProvider(raw) ? raw : OffBackgroundProvider);
-        set => Set("background.provider", value?.Trim().ToLowerInvariant() is { } clean && IsBackgroundProvider(clean) ? clean : OffBackgroundProvider, FormatText);
-    }
-
-    public static bool BackgroundEnabled => BackgroundProvider != OffBackgroundProvider;
-
-    /// <summary>The OpenRouter API key, DPAPI-protected in settings.json.</summary>
-    public static string OpenRouterApiKey
-    {
-        get => Get("background.openrouter.apiKey", () => SecretProtector.Unprotect(Read("background.openrouter.apiKey", "").Trim()));
-        set => Set("background.openrouter.apiKey", (value ?? "").Trim(), v => SecretProtector.Protect(v));
-    }
-
-    /// <summary>The OpenRouter chat model for background jobs (titles, commit messages, summaries, search, routing).</summary>
-    public static string OpenRouterModel
-    {
-        get => Get("background.openrouter.model", () => Read("background.openrouter.model", "").Trim());
-        set => Set("background.openrouter.model", value?.Trim() ?? "", FormatText);
-    }
-
-    /// <summary>The OpenRouter embedding model for project retrieval; blank leaves only the local hashed vectors.</summary>
-    public static string OpenRouterEmbeddingModel
-    {
-        get => Get("background.openrouter.embeddingModel", () => Read("background.openrouter.embeddingModel", "").Trim());
-        set => Set("background.openrouter.embeddingModel", value?.Trim() ?? "", FormatText);
-    }
-
-    /// <summary>The OpenRouter model for editor and shell ghost text; blank turns ghost text off.</summary>
-    public static string OpenRouterCompletionModel
-    {
-        get => Get("background.openrouter.completionModel", () => Read("background.openrouter.completionModel", "").Trim());
-        set => Set("background.openrouter.completionModel", value?.Trim() ?? "", FormatText);
-    }
-
-    /// <summary>Whether reasoning models think before answering. Off by default: background jobs want speed.</summary>
-    public static bool OpenRouterReasoning
-    {
-        get => Get("background.openrouter.reasoning", () => ReadFlag("background.openrouter.reasoning", false));
-        set => Set("background.openrouter.reasoning", value, FormatFlag);
-    }
-
-    /// <summary>A snapshot of the OpenRouter settings, for building the provider.</summary>
-    public static Codale.Agents.OpenRouter.OpenRouterSettings OpenRouterSettings => new(
-        OpenRouterApiKey, OpenRouterModel, OpenRouterEmbeddingModel, OpenRouterCompletionModel, OpenRouterReasoning);
-
     private static bool ReadFlag(string name, bool fallback) => Read(name, fallback ? "1" : "0") == "1";
 
     private static bool IsChatMode(string? mode) =>

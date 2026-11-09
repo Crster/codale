@@ -66,7 +66,6 @@ public sealed partial class EditorTab : UserControl
         Unloaded += (_, _) => Codale.Core.Syntax.SyntaxService.Store.Changed -= OnSyntaxStoreChanged;
 
         BuildContextMenu();
-        FileEditor.FilePathProvider = () => ViewModel?.FilePath;
         FileEditor.SelectionChanged += OnEditorSelectionChanged;
         FileEditor.TextChanged += _ => OnEditorTextChanged();
         FileEditor.ZoomChanged += (_, _) => OnZoomChanged();
@@ -120,8 +119,6 @@ public sealed partial class EditorTab : UserControl
     {
         _wordCountTimer.Stop();
         _zoomSettleTimer.Stop();
-        _focusSearch?.Cancel();
-        CloseAskPanel();
         FileEditor.Close();
     }
 
@@ -135,7 +132,6 @@ public sealed partial class EditorTab : UserControl
     private IReadOnlyList<LineSpan> _highlights = [];
     private int _currentHighlight = -1;
     private string _highlightLabel = "";
-    private CancellationTokenSource? _focusSearch;
     private string _focusQuery = "";
     private IReadOnlyList<string> _focusLines = [];
 
@@ -204,7 +200,6 @@ public sealed partial class EditorTab : UserControl
 
     public void ClearHighlights()
     {
-        _focusSearch?.Cancel();
         _highlights = [];
         _focusQuery = "";
         _currentHighlight = -1;
@@ -219,60 +214,15 @@ public sealed partial class EditorTab : UserControl
             _highlights.Select(span => (Math.Max(0, span.Start - 1), Math.Max(0, span.End - 1))).ToList(),
             _currentHighlight);
 
-    /// <summary>
-    /// Highlights what in this file relates to <paramref name="query"/>: the search's own
-    /// words at once, then the ranges the helper model picks after reading the whole file.
-    /// </summary>
-    public async Task<int> FocusOnQueryAsync(string query, Func<CancellationToken, Task<ISearchModel?>> connectModel)
+    /// <summary>Highlights matching words in the open file.</summary>
+    public Task<int> FocusOnQueryAsync(string query)
     {
-        var found = 0;
-        _focusSearch?.Cancel();
-        var cts = new CancellationTokenSource();
-        _focusSearch = cts;
-
         var lines = FileEditor.GetText().Split('\n').Select(l => l.TrimEnd('\r')).ToList();
         _focusQuery = query;
         _focusLines = lines;
-
-        // Semantic only: no keyword pass to flash misleading bands while the model reads.
-        ShowHighlights([], "Searching the file…", reveal: false, busy: true);
-
-        try
-        {
-            var model = await connectModel(cts.Token);
-            var spans = model is null
-                ? null
-                : await FileFocus.AskAsync(model, query, ViewModel.FileName ?? "", lines, cts.Token);
-
-            if (cts.IsCancellationRequested)
-            {
-                return 0;
-            }
-
-            if (spans is { Count: > 0 })
-            {
-                found = spans.Count;
-                ShowHighlights(spans, spans.Count == 1 ? "1 related part" : $"{spans.Count} related parts", reveal: true);
-            }
-            else
-            {
-                ShowHighlights([], model is null ? "No Claude CLI found" : spans is null ? "Search failed" : "Nothing related", reveal: false);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        finally
-        {
-            if (_focusSearch == cts)
-            {
-                _focusSearch = null;
-            }
-
-            cts.Dispose();
-        }
-
-        return found;
+        var spans = FileFocus.Instant(query, lines);
+        ShowHighlights(spans, spans.Count == 1 ? "1 match" : $"{spans.Count} matches", reveal: spans.Count > 0);
+        return Task.FromResult(spans.Count);
     }
 
     private void OnPreviousHighlightClick(object sender, Microsoft.UI.Xaml.RoutedEventArgs e) => MoveHighlight(-1);
@@ -395,16 +345,7 @@ public sealed partial class EditorTab : UserControl
         Bindings.Update();
         ViewModel.Saved += (_, _) => _ = RefreshDiffMarkersAsync(refetchHead: true);
         FileEditor.WorkspaceSuggest = ProjectSuggestions;
-        FileEditor.GhostContext = GhostHeader;
         return this;
-    }
-
-    /// <summary>The model prompt's header: this file's path and language plus declarations from the project index.</summary>
-    private string GhostHeader(string nearby, string? languageId)
-    {
-        var hasProject = !string.IsNullOrEmpty(ProjectRoot) && Directory.Exists(ProjectRoot);
-        var snapshot = hasProject ? Codale.Search.SourceIndex.For(ProjectRoot!).Current : null;
-        return Codale.Search.CompletionContext.Build(snapshot, ProjectRoot ?? "", ViewModel?.FilePath, languageId, nearby);
     }
 
     /// <summary>

@@ -1050,7 +1050,7 @@
                                     MaxHeight="130"
                                     MinHeight="60"
                                     Padding="10,6,34,6"
-                                    PlaceholderText="Commit message (Ctrl+Space to suggest)"
+                                    PlaceholderText="Commit message"
                                     Text="{x:Bind ViewModel.Git.CommitMessage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                     TextWrapping="Wrap">
                                     <TextBox.KeyboardAccelerators>
@@ -1058,23 +1058,10 @@
                                             Key="Enter"
                                             Invoked="OnCommitAccelerator"
                                             Modifiers="Control" />
-                                        <KeyboardAccelerator
-                                            Key="Space"
-                                            Invoked="OnGenerateCommitAccelerator"
-                                            Modifiers="Control" />
+
                                     </TextBox.KeyboardAccelerators>
                                 </TextBox>
 
-                                <!--  Ctrl+Space asks the helper model for the subject; a ring shows while it runs.  -->
-                                <ProgressRing
-                                    Width="14"
-                                    Height="14"
-                                    Margin="0,8,10,0"
-                                    HorizontalAlignment="Right"
-                                    VerticalAlignment="Top"
-                                    IsActive="{x:Bind ViewModel.Git.IsGeneratingMessage, Mode=OneWay}"
-                                    IsHitTestVisible="False"
-                                    Visibility="{x:Bind ViewModel.Git.IsGeneratingMessage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                             </Grid>
                             <Button
                                 HorizontalAlignment="Stretch"
@@ -1998,7 +1985,7 @@
                     </Grid>
                 </Border>
 
-                <!--  Right: the indexer and the background worker  -->
+                <!--  Right: the indexer  -->
                 <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="16">
                 <!--  Indexer: what the project index holds for this workspace, or that it is scanning  -->
                 <StackPanel
@@ -2012,26 +1999,6 @@
                         FontSize="12"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Text="{x:Bind ViewModel.Health.IndexText, Mode=OneWay}" />
-                </StackPanel>
-
-                <Rectangle
-                    VerticalAlignment="Center"
-                    Width="1"
-                    Height="14"
-                    Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
-
-                <!--  Background worker: its provider and the jobs running now  -->
-                <StackPanel
-                    VerticalAlignment="Center"
-                    Orientation="Horizontal"
-                    Spacing="6"
-                    ToolTipService.ToolTip="{x:Bind ViewModel.Health.WorkerTooltip, Mode=OneWay}">
-                    <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="10" Glyph="&#xE968;" Opacity="0.6" />
-                    <TextBlock
-                        VerticalAlignment="Center"
-                        FontSize="12"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="{x:Bind ViewModel.Health.WorkerText, Mode=OneWay}" />
                 </StackPanel>
 
                     <!--  Built-in MCP servers: a browser to verify work in, and desktop control  -->

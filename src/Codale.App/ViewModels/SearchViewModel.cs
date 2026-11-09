@@ -130,25 +130,18 @@ public sealed class SearchFileItem
 
 /// <summary>
 /// Code discovery, driven from the title bar box. Keywords search the source index
-/// directly; global searches also use the background-task model to pick
-/// the files that answer them and add the code those files use and are used by.
-/// <see cref="SourceExplorer"/> ranks the project's source index. The result is files and
-/// code only - no write-up. Provisional matches stream in first so the list fills while
-/// the model is still working. Without a helper model the ranked pass runs alone, so the
-/// box is never a dead end.
+/// directly. <see cref="SourceExplorer"/> ranks the project's source index.
 /// </summary>
 public sealed partial class SearchViewModel : ObservableObject
 {
-    private readonly IHelperModel _helper;
     private readonly SourceIndex _index;
     private readonly ProjectKnowledgeIndex? _knowledge;
     private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
 
     private CancellationTokenSource? _inFlight;
 
-    public SearchViewModel(string projectPath, IHelperModel helper, ProjectKnowledgeIndex? knowledge = null)
+    public SearchViewModel(string projectPath, ProjectKnowledgeIndex? knowledge = null)
     {
-        _helper = helper;
         _knowledge = knowledge;
 
         // The scan runs in the background from the moment the project opens, so the
@@ -205,7 +198,7 @@ public sealed partial class SearchViewModel : ObservableObject
             // refinement. Explicit references stay exhaustive and use local matches.
             var wantsEditLocation = !keywordOnly && SearchQueryIntent.WantsEditLocation(Query);
             var naturalLanguage = !keywordOnly && SearchQueryIntent.IsNaturalLanguage(Query);
-            ISearchModel? model = _helper.IsAvailable && !keywordOnly ? new HelperSearchModel(_helper) : null;
+            ISearchModel? model = null;
 
             Status = "Searching…";
 
@@ -314,32 +307,6 @@ public sealed partial class SearchViewModel : ObservableObject
 
         HasFiles = Files.Count > 0;
     }
-
-    /// <summary>
-    /// A search is being typed: start the model's CLI now so its start-up is over by the
-    /// time the search is submitted. Cheap per keystroke; does nothing without Claude.
-    /// </summary>
-    public void Prewarm(bool inFile)
-    {
-        var model = new HelperSearchModel(_helper);
-        if (inFile)
-        {
-            FileFocus.Prewarm(model);
-        }
-        else
-        {
-            SourceExplorer.Prewarm(_index, model);
-        }
-    }
-
-    /// <summary>
-    /// The helper model for a one-file search in the editor, or null when no agent CLI is
-    /// installed - the editor then keeps its plain keyword highlights.
-    /// </summary>
-    public ISearchModel? CreateFileModel() => _helper.IsAvailable ? new HelperSearchModel(_helper) : null;
-
-    /// <summary>Task-shaped <see cref="CreateFileModel"/> for the editor's search hook, which takes a cancellable async factory.</summary>
-    public Task<ISearchModel?> ConnectModelAsync(CancellationToken _) => Task.FromResult(CreateFileModel());
 
     private async Task CancelInFlightAsync()
     {

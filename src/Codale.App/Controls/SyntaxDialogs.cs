@@ -10,7 +10,7 @@ namespace Codale.App.Controls;
 
 /// <summary>
 /// The dialogs behind the status bar's language picker and the Syntax settings: installing from
-/// the built-in catalog, having the helper model write a grammar, and importing one from disk.
+/// the built-in catalog and importing one from disk.
 /// Built in code (they are small and share one shape) rather than as separate XAML files.
 /// </summary>
 public static class SyntaxDialogs
@@ -102,101 +102,6 @@ public static class SyntaxDialogs
         await dialog.ShowAsync();
     }
 
-    /// <summary>
-    /// Asks the helper model for a grammar for one file type, shows what came back, and saves it on
-    /// confirmation. <paramref name="sample"/> is the file's text, which the model reads to learn the language.
-    /// </summary>
-    public static async Task ShowGenerateAsync(XamlRoot root, IHelperModel helper, string suggestedName, string extension, string sample)
-    {
-        var store = SyntaxService.Store;
-        var generator = new SyntaxGenerator(helper);
-        var nameBox = new TextBox { Header = "Language name", Text = suggestedName, PlaceholderText = "e.g. Kotlin" };
-        var extBox = new TextBox { Header = "File extension", Text = extension.TrimStart('.'), PlaceholderText = "e.g. kt" };
-        var status = Note(generator.IsAvailable
-            ? "The helper model reads a sample of the open file and writes a grammar. You can review it before it is saved."
-            : "No helper model is available. Add a provider in Settings, or install the Claude CLI.");
-        var progress = new ProgressBar { IsIndeterminate = true, Visibility = Visibility.Collapsed };
-        var body = new StackPanel { Spacing = 10, Width = 420 };
-        body.Children.Add(nameBox);
-        body.Children.Add(extBox);
-
-        // From Settings there is no open file to learn from, so a short sample can be pasted instead.
-        var sampleBox = sample.Length == 0
-            ? new TextBox { Header = "Sample code (optional, helps accuracy)", AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap, Height = 110 }
-            : null;
-        if (sampleBox is not null)
-        {
-            body.Children.Add(sampleBox);
-        }
-
-        body.Children.Add(progress);
-        body.Children.Add(status);
-
-        GeneratedGrammar? generated = null;
-        CancellationTokenSource? cts = null;
-        var dialog = NewDialog(root, "Generate syntax with AI", body, "Generate", "Cancel", AppDialog.Glyphs.Sparkle);
-        dialog.IsPrimaryButtonEnabled = generator.IsAvailable;
-        dialog.Closing += (_, _) => cts?.Cancel();
-        dialog.PrimaryButtonClick += async (_, args) =>
-        {
-            if (generated is not null)
-            {
-                // Second click: save what was previewed.
-                store.Add(new LanguageEntry
-                {
-                    Id = generated.Name,
-                    Name = generated.Name,
-                    ScopeName = generated.Meta.ScopeName,
-                    Extensions = generated.Extensions,
-                    FirstLine = generated.Meta.FirstLineMatch,
-                    Source = GrammarSource.Generated,
-                }, generated.Json);
-                return;
-            }
-
-            var language = nameBox.Text.Trim();
-            var ext = extBox.Text.Trim().TrimStart('.');
-            if (language.Length == 0 || ext.Length == 0)
-            {
-                status.Text = "Give the language a name and a file extension.";
-                args.Cancel = true;
-                return;
-            }
-
-            var deferral = args.GetDeferral();
-            args.Cancel = true;
-            dialog.IsPrimaryButtonEnabled = false;
-            nameBox.IsEnabled = extBox.IsEnabled = false;
-            progress.Visibility = Visibility.Visible;
-            cts = new CancellationTokenSource();
-            var shownSample = sampleBox?.Text ?? sample;
-            try
-            {
-                generated = await Task.Run(() => generator.GenerateAsync(language, ext, shownSample, m => dialog.DispatcherQueue.TryEnqueue(() => status.Text = m), cts.Token));
-                var rules = generated.Json.Split('\n').Length;
-                status.Text = $"Ready: {generated.Name} ({generated.Meta.ScopeName}), colours .{string.Join(", .", generated.Extensions)} · {rules} lines. Save it to use it now.";
-                dialog.PrimaryButtonText = "Save";
-            }
-            catch (OperationCanceledException)
-            {
-                // The dialog is closing.
-            }
-            catch (Exception ex) when (ex is InvalidDataException or HelperModelException)
-            {
-                status.Text = ex.Message;
-                nameBox.IsEnabled = extBox.IsEnabled = true;
-                dialog.PrimaryButtonText = "Try again";
-            }
-
-            progress.Visibility = Visibility.Collapsed;
-            dialog.IsPrimaryButtonEnabled = true;
-            deferral.Complete();
-        };
-
-        await dialog.ShowAsync();
-    }
-
-    /// <summary>Lets the user pick a .tmLanguage.json from disk and installs it.</summary>
     public static async Task ImportAsync(XamlRoot root, IntPtr hwnd)
     {
         var picker = new FileOpenPicker();
