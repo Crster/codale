@@ -117,16 +117,12 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     public bool ShowSessionPickers => Session is not null && !Session.IsTerminalSession;
 
-    public string WorkingDirectory => Session?.WorktreePath ?? Workspace?.ProjectPath ?? "";
-
-    public bool IsIsolated => Session?.IsIsolated ?? false;
+    public string WorkingDirectory => Workspace?.ProjectPath ?? "";
 
     // Events raised to parent container
     public event EventHandler<string>? FileDiffRequested;
     public event EventHandler<SessionArtifact>? ArtifactRequested;
     public event EventHandler<string>? UpdateCliRequested;
-    public event EventHandler? MergeIsolatedRequested;
-    public event EventHandler? DiscardIsolatedRequested;
 
     private void NotifySessionProperties()
     {
@@ -134,14 +130,11 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EndpointLabel)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowSessionPickers)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(WorkingDirectory)));
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsIsolated)));
     }
 
     private void OnSessionPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(ChatViewModel.IsIsolated) or
-            nameof(ChatViewModel.WorktreePath) or
-            nameof(ChatViewModel.IsTerminalSession) or
+        if (e.PropertyName is nameof(ChatViewModel.IsTerminalSession) or
             nameof(ChatViewModel.TerminalCli))
         {
             NotifySessionProperties();
@@ -160,10 +153,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void OnWorkspacePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(WorkspaceViewModel.ProjectPath) or
-            nameof(WorkspaceViewModel.IsStartingWorktree) or
-            nameof(WorkspaceViewModel.IsMergingWithAgent) or
-            nameof(WorkspaceViewModel.WorktreeError))
+        if (e.PropertyName is nameof(WorkspaceViewModel.ProjectPath))
         {
             NotifySessionProperties();
         }
@@ -449,56 +439,6 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         radio.Click += (_, _) => flyout.Hide();
         radio.Checked += (_, _) => apply();
         return radio;
-    }
-
-    #endregion
-
-    #region Isolated and New Session
-
-    private async void OnMergeIsolatedClick(object sender, RoutedEventArgs e)
-    {
-        if (Session?.IsBusy == true)
-        {
-            if (Workspace is not null)
-            {
-                Workspace.WorktreeError = "Wait for the current turn to finish before merging.";
-            }
-            return;
-        }
-
-        if (MergeIsolatedRequested is not null)
-        {
-            MergeIsolatedRequested.Invoke(this, EventArgs.Empty);
-        }
-        else if (Workspace is not null)
-        {
-            await Workspace.LeaveIsolationAsync(merge: true);
-        }
-    }
-
-    private async void OnDiscardIsolatedClick(object sender, RoutedEventArgs e)
-    {
-        var dialog = AppDialog.Apply(new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = "Discard the isolated session?",
-            Content = "The work done in the worktree is thrown away and this chat starts a fresh session in the project.",
-            PrimaryButtonText = "Discard",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close,
-        }, DialogTone.Danger, AppDialog.Glyphs.Delete);
-
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
-        {
-            if (DiscardIsolatedRequested is not null)
-            {
-                DiscardIsolatedRequested.Invoke(this, EventArgs.Empty);
-            }
-            else if (Workspace is not null)
-            {
-                await Workspace.LeaveIsolationAsync(merge: false);
-            }
-        }
     }
 
     #endregion

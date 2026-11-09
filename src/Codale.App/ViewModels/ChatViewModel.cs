@@ -306,39 +306,20 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public StatusViewModel Status => _status;
 
     /// <summary>
-    /// Labels the custom-provider usage button with the background-task provider: "Off" when disabled, else "Claude".
+    /// Labels the background-task usage button with the provider Settings picks: "Off" or "OpenRouter".
     /// Never follows the chat's CLI provider override: the button counts what that provider serves.
     /// </summary>
     public void RefreshCustomProviderName()
     {
-        var helperName = AppSettings.HelperApiProvider?.Provider.Name.Trim();
-        if (!AppSettings.HelperEnabled)
+        _status.CustomProviderName = AppSettings.BackgroundProvider switch
         {
-            _status.CustomProviderName = "Off";
-        }
-        else if (helperName is { Length: > 0 })
-        {
-            _status.CustomProviderName = helperName;
-        }
-        else if (string.Equals(AppSettings.HelperProvider, "codex", StringComparison.OrdinalIgnoreCase))
-        {
-            _status.CustomProviderName = "Codex";
-        }
-        else
-        {
-            // Settings' "Claude" entry is stored as "": background tasks run on the Claude CLI.
-            _status.CustomProviderName = "Claude";
-        }
+            AppSettings.OpenRouterBackgroundProvider => "OpenRouter",
+            _ => "Off",
+        };
 
         OnPropertyChanged(nameof(ProviderName));
         OnPropertyChanged(nameof(TabTitle));
     }
-
-    /// <summary>True when this chat's turns go to the same BYOK provider background tasks use, so they share its tally.</summary>
-    private bool ServedByHelperProvider() =>
-        AppSettings.FindByok(EndpointName) is { } byok &&
-        AppSettings.HelperApiProvider?.Provider is { } helper &&
-        string.Equals(byok.Name.Trim(), helper.Name.Trim(), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// A name for the conversation's tab: the history entry's title. Null until the chat
@@ -455,7 +436,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         if (_taskManager is not null && !string.Equals(_taskManagerDir, workingDirectory, StringComparison.OrdinalIgnoreCase))
         {
-            StopTaskHost(); // the project moved (worktree): its tasks belong to the old folder
+            StopTaskHost(); // the project moved: its tasks belong to the old folder
         }
 
         if (_taskManager is null)
@@ -495,7 +476,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         var servers = WithBrowserControl(_mcpSettings.Servers());
-        var workingDirectory = WorktreePath ?? _projectPath;
+        var workingDirectory = _projectPath;
         if (_mcpSettings.TasksAvailable &&
             EnsureTaskHost(workingDirectory) is { } host &&
             _mcpSettings.TasksSpec(host.Pipe, host.Token, workingDirectory, pushToPanel: true) is { } tasks)
@@ -1919,14 +1900,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    /// <summary>Working directory for the agent: the project, or a session worktree.</summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsIsolated))]
-    public partial string? WorktreePath { get; set; }
-
-    /// <summary>True while the agent works in its own worktree rather than the project.</summary>
-    public bool IsIsolated => WorktreePath is { Length: > 0 };
-
     /// <summary>
     /// Standing instruction appended to every Claude session's system prompt: the task
     /// panel and the "N/M tasks" counter can only show steps the CLI emits as task
@@ -2056,7 +2029,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         IAgentSession? starting = null;
         try
         {
-            var workingDirectory = WorktreePath ?? _projectPath;
+            var workingDirectory = _projectPath;
             IReadOnlyList<McpServerSpec> mcpServers = _mcpSettings is null ? [] : await Task.Run(_mcpSettings.Servers);
 
             // Long-running commands go through Codale's own task server; only when it
@@ -2284,7 +2257,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>
     /// Pumps one session's events onto the transcript. Scoped to the session instance:
-    /// once it has been replaced (resume, isolated restart), its
+    /// once it has been replaced (resume, restart), its
     /// trailing events - the killed process's SessionEnded, say - must not touch the
     /// new session's transcript or state, so the pump walks away instead.
     /// </summary>
@@ -2404,11 +2377,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             case AssistantMessageCompleted done:
-                if (_status.IsCustomProvider && done.Usage is { } served && ServedByHelperProvider())
-                {
-                    _status.RecordCustomCall(served);
-                }
-
                 // Codex reports its own session total (SessionTokensUpdated); Claude's has
                 // to be summed here, subagents' requests included.
                 if (done.Usage is { } spent)
@@ -3006,7 +2974,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         try
         {
-            return Path.IsPathRooted(path) ? path : Path.GetFullPath(Path.Combine(WorktreePath ?? _projectPath, path));
+            return Path.IsPathRooted(path) ? path : Path.GetFullPath(Path.Combine(_projectPath, path));
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
@@ -3443,7 +3411,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return new ShellAssessment("", ShellRisk.Caution, "");
         }
 
-        return ShellCommandAnalyzer.Assess(command, WorktreePath ?? _projectPath, hint, ExtraRoots);
+        return ShellCommandAnalyzer.Assess(command, _projectPath, hint, ExtraRoots);
     }
 
     private async Task UpdateShellApprovalAsync(
@@ -3712,7 +3680,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             !string.IsNullOrWhiteSpace(shellCommand) &&
             Helper is { IsAvailable: true } model)
         {
-            _ = UpdateShellApprovalAsync(model, approvalItem, shellCommand, WorktreePath ?? _projectPath, shellHint);
+            _ = UpdateShellApprovalAsync(model, approvalItem, shellCommand, _projectPath, shellHint);
         }
 
         // The turn is blocked on the reader from here: say so, in case they are elsewhere.
@@ -4074,10 +4042,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             text.Equals("/clear", StringComparison.OrdinalIgnoreCase))
         {
             Draft = "";
-            var worktreePath = WorktreePath;
             await DisposeSessionAsync();
             ResetForNewSession();
-            WorktreePath = worktreePath;
             await ConnectAsync();
             return;
         }
@@ -4186,11 +4152,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        // Claude reads --add-dir only at spawn, so a folder added or removed since then
-        // restarts the CLI (resuming the same conversation) before this turn goes out.
-        // Codex takes its folders with every turn and needs no restart.
+        // MCP servers are configured at process start. Refresh them before the next
+        // turn, preserving the conversation and leaving a running turn uninterrupted.
+        // Claude also reads --add-dir only at spawn; Codex reads it on every turn.
         await _browserViewportRestore;
-        if (!IsCodexSession && _session is not null && !_connectedFolders.SequenceEqual(ExtraRoots, StringComparer.OrdinalIgnoreCase))
+        var toolsChanged = _mcpSettings is not null &&
+            !_sessionMcpServers.Where(s => s.Name is McpServerSettings.BrowserName or McpServerSettings.ComputerName or McpServerSettings.PhoneName)
+                .Select(s => s.Name).OrderBy(n => n, StringComparer.Ordinal)
+                .SequenceEqual(_mcpSettings.Servers().Select(s => s.Name).OrderBy(n => n, StringComparer.Ordinal), StringComparer.Ordinal);
+        if (_session is not null && (toolsChanged ||
+            (!IsCodexSession && !_connectedFolders.SequenceEqual(ExtraRoots, StringComparer.OrdinalIgnoreCase))))
         {
             await RestartWithCurrentConfigAsync();
         }
@@ -4712,7 +4683,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _loadingWorkspaceFiles = true;
         try
         {
-            var root = WorktreePath ?? _projectPath;
+            var root = _projectPath;
             var files = await Task.Run(() => WorkspaceFileIndex.Enumerate(root));
 
             if (_workspaceFiles is null)
@@ -4833,7 +4804,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _status.SessionTokens = 0;
         ResumeSessionId = null;
         ClearFeature();
-        WorktreePath = null;
     }
 
     /// <summary>The prose being streamed: a narration step in the running turn, or a bare message outside one.</summary>

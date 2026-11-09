@@ -268,98 +268,72 @@ public static class AppSettings
         set => Set("terminal.scrollback", Math.Clamp(value, 100, 1_000_000), FormatInt);
     }
 
-    /// <summary>
-    /// The endpoint background jobs call, or null to use a CLI: Settings picks Claude or
-    /// Codex, or the picked provider lacks a base URL, key and flash model. Only the flash model
-    /// is used - these jobs are short, and latency and cost are what the user feels.
-    /// </summary>
-    public static (string BaseUrl, string ApiKey, string Model)? HelperApiEndpoint =>
-        HelperApiProvider is { } found ? found.Endpoint : null;
+    /// <summary>What <see cref="BackgroundProvider"/> reads for Off, the default: no background task runs.</summary>
+    public const string OffBackgroundProvider = Codale.Core.Background.OffBackgroundProvider.ProviderId;
+
+    /// <summary>The OpenRouter provider.</summary>
+    public const string OpenRouterBackgroundProvider = Codale.Agents.OpenRouter.OpenRouterBackgroundProvider.ProviderId;
+
+    private static bool IsBackgroundProvider(string raw) => raw is OffBackgroundProvider or OpenRouterBackgroundProvider;
 
     /// <summary>
-    /// What background jobs run on: "" for the Claude CLI, "Codex" for the Codex CLI,
-    /// else the name of a BYOK provider. Never picked, it is Claude.
+    /// What background jobs (titles, commit messages, routing, search, embeddings, ghost text) run on:
+    /// "off" or "openrouter". Never picked is Off: background tasks only run once the user chooses a provider.
     /// Independent of the status bar's agent provider picker.
     /// </summary>
-    public static string HelperProvider
+    public static string BackgroundProvider
     {
-        get
-        {
-            var stored = Read("helper.provider", "").Trim();
-
-            // Never picked is Off: background tasks only run once the user chooses a provider.
-            if (stored.Length == 0 || string.Equals(stored, OffHelperProvider, StringComparison.OrdinalIgnoreCase))
-            {
-                return OffHelperProvider;
-            }
-
-            if (string.Equals(stored, ClaudeHelperProvider, StringComparison.OrdinalIgnoreCase))
-            {
-                return "";
-            }
-
-            // A "Local" pick from a build that ran a model in-process names no provider now; it falls back to Claude.
-            return string.Equals(stored, "Local", StringComparison.OrdinalIgnoreCase) ? "" : stored;
-        }
-        set
-        {
-            // Claude is stored by name: an empty value would read back as "never picked".
-            var clean = value?.Trim() ?? "";
-            var stored = clean.Length == 0 ? ClaudeHelperProvider : clean;
-            if (string.Equals(Read("helper.provider", "").Trim(), stored, StringComparison.Ordinal))
-            {
-                return;
-            }
-
-            Write("helper.provider", stored);
-            OnChanged();
-        }
+        get => Get("background.provider", () => Read("background.provider", OffBackgroundProvider).Trim().ToLowerInvariant() is var raw && IsBackgroundProvider(raw) ? raw : OffBackgroundProvider);
+        set => Set("background.provider", value?.Trim().ToLowerInvariant() is { } clean && IsBackgroundProvider(clean) ? clean : OffBackgroundProvider, FormatText);
     }
 
-    /// <summary>What <see cref="HelperProvider"/> stores for an explicit pick of the Claude CLI.</summary>
-    private const string ClaudeHelperProvider = "Claude";
+    public static bool BackgroundEnabled => BackgroundProvider != OffBackgroundProvider;
 
-    /// <summary>What <see cref="HelperProvider"/> reads for Off, the default: no background task runs.</summary>
-    public const string OffHelperProvider = "Off";
-
-    public static bool HelperEnabled => !string.Equals(HelperProvider, OffHelperProvider, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// The BYOK provider background jobs call: only the one named by <see cref="HelperProvider"/>,
-    /// and only when it has a base URL, key and flash model. Null otherwise - Claude or Codex was
-    /// picked, or the provider is incomplete - and jobs run on the CLI. Never picks a provider
-    /// on its own, and never follows the agent provider picked in the status bar.
-    /// </summary>
-    public static (ByokProvider Provider, (string BaseUrl, string ApiKey, string Model) Endpoint)? HelperApiProvider
+    /// <summary>The OpenRouter API key, DPAPI-protected in settings.json.</summary>
+    public static string OpenRouterApiKey
     {
-        get
-        {
-            var wanted = HelperProvider;
-            if (wanted.Length == 0 || !HelperEnabled)
-            {
-                return null;
-            }
-
-            foreach (var provider in ByokProviders.Where(p => string.Equals(p.Name.Trim(), wanted, StringComparison.OrdinalIgnoreCase)))
-            {
-                // Background jobs only ever run the flash model: a provider with only a pro model is not set up for them.
-                var model = provider.FlashModel;
-                if (!string.IsNullOrWhiteSpace(provider.BaseUrl) && !string.IsNullOrWhiteSpace(provider.ApiKey) && !string.IsNullOrWhiteSpace(model))
-                {
-                    return (provider, (provider.BaseUrl.Trim(), provider.ApiKey.Trim(), model.Trim()));
-                }
-            }
-
-            return null;
-        }
+        get => Get("background.openrouter.apiKey", () => SecretProtector.Unprotect(Read("background.openrouter.apiKey", "").Trim()));
+        set => Set("background.openrouter.apiKey", (value ?? "").Trim(), v => SecretProtector.Protect(v));
     }
+
+    /// <summary>The OpenRouter chat model for background jobs (titles, commit messages, summaries, search, routing).</summary>
+    public static string OpenRouterModel
+    {
+        get => Get("background.openrouter.model", () => Read("background.openrouter.model", "").Trim());
+        set => Set("background.openrouter.model", value?.Trim() ?? "", FormatText);
+    }
+
+    /// <summary>The OpenRouter embedding model for project retrieval; blank leaves only the local hashed vectors.</summary>
+    public static string OpenRouterEmbeddingModel
+    {
+        get => Get("background.openrouter.embeddingModel", () => Read("background.openrouter.embeddingModel", "").Trim());
+        set => Set("background.openrouter.embeddingModel", value?.Trim() ?? "", FormatText);
+    }
+
+    /// <summary>The OpenRouter model for editor and shell ghost text; blank turns ghost text off.</summary>
+    public static string OpenRouterCompletionModel
+    {
+        get => Get("background.openrouter.completionModel", () => Read("background.openrouter.completionModel", "").Trim());
+        set => Set("background.openrouter.completionModel", value?.Trim() ?? "", FormatText);
+    }
+
+    /// <summary>Whether reasoning models think before answering. Off by default: background jobs want speed.</summary>
+    public static bool OpenRouterReasoning
+    {
+        get => Get("background.openrouter.reasoning", () => ReadFlag("background.openrouter.reasoning", false));
+        set => Set("background.openrouter.reasoning", value, FormatFlag);
+    }
+
+    /// <summary>A snapshot of the OpenRouter settings, for building the provider.</summary>
+    public static Codale.Agents.OpenRouter.OpenRouterSettings OpenRouterSettings => new(
+        OpenRouterApiKey, OpenRouterModel, OpenRouterEmbeddingModel, OpenRouterCompletionModel, OpenRouterReasoning);
 
     private static bool ReadFlag(string name, bool fallback) => Read(name, fallback ? "1" : "0") == "1";
 
     private static bool IsChatMode(string? mode) =>
         mode is "automatic" or "ask" or "plan" or "manual" or "acceptEdits" or "auto";
 
-    /// <summary>The permission mode a fresh chat starts in: "automatic" (Auto), "ask", "plan", "manual", "acceptEdits" or "auto" (Full). Unset (or the retired "CLI default", stored as "") is Auto: a CLI left in its own default asks about every edit.</summary>
+    /// <summary>The permission mode a fresh chat starts in: "automatic" (Auto), "ask", "plan", "manual", "acceptEdits" or "auto" (Full). Unset is Auto: a CLI left in its own default asks about every edit.</summary>
     public static string DefaultChatMode
     {
         get => Get("chat.defaultMode", () => Read("chat.defaultMode", "") is var raw && IsChatMode(raw) ? raw : "automatic");
@@ -481,17 +455,7 @@ public static class AppSettings
     /// <summary>The cached providers (decrypted); callers copy before handing them out. Call under <see cref="FileLock"/>.</summary>
     private static List<ByokProvider> Providers() => Get(ProvidersKey, LoadProviders);
 
-    private static List<ByokProvider> LoadProviders()
-    {
-        var parsed = ParseProviders(Read(ProvidersKey, "[]"), out var hadPlaintextKey);
-        if (hadPlaintextKey)
-        {
-            // A key typed or migrated in the clear: wrap it now rather than at the next edit.
-            Write(ProvidersKey, SerializeProviders(parsed, protect: true));
-        }
-
-        return parsed;
-    }
+    private static List<ByokProvider> LoadProviders() => ParseProviders(Read(ProvidersKey, "[]"));
 
     /// <summary>
     /// The BYOK providers listed in settings.json. Nameless or duplicate entries are
@@ -524,16 +488,14 @@ public static class AppSettings
         }
     }
 
-    private static List<ByokProvider> ParseProviders(string json, out bool hadPlaintextKey)
+    private static List<ByokProvider> ParseProviders(string json)
     {
-        hadPlaintextKey = false;
         try
         {
             var parsed = Normalize(JsonSerializer.Deserialize<List<ByokProvider>>(json, ProviderJson) ?? []);
             foreach (var provider in parsed)
             {
                 var stored = provider.ApiKey ?? "";
-                hadPlaintextKey |= stored.Length > 0 && !SecretProtector.IsProtected(stored);
                 provider.ApiKey = SecretProtector.Unprotect(stored);
             }
 
@@ -642,7 +604,7 @@ public static class AppSettings
                 {
                     _uiQueue ??= DispatcherQueue.GetForCurrentThread();
 
-                    _values = LoadFile() ?? SeedFromDatabase();
+                    _values = LoadFile() ?? SeedDefaults();
                     StartWatching();
                 }
 
@@ -681,12 +643,7 @@ public static class AppSettings
                         result[property.Name] = property.Value.GetRawText();
                         break;
                     case JsonValueKind.String:
-                        var str = property.Value.GetString() ?? "";
-
-                        // A hand-typed "true"/"false" for a toggle means what it says.
-                        result[property.Name] = BoolKeys.Contains(property.Name) && bool.TryParse(str, out var flag)
-                            ? (flag ? "1" : "0")
-                            : str;
+                        result[property.Name] = property.Value.GetString() ?? "";
                         break;
                     case JsonValueKind.Array when property.Name == ProvidersKey:
                         result[property.Name] = property.Value.GetRawText();
@@ -700,61 +657,14 @@ public static class AppSettings
         catch (Exception)
         {
             // Half-typed JSON mid-edit: keep the current values (or defaults on first load).
-            if (_values is null)
-            {
-                // The next write would replace the file with defaults; keep the broken text recoverable.
-                try
-                {
-                    File.Copy(FilePath, FilePath + ".broken", overwrite: true);
-                }
-                catch (Exception)
-                {
-                    // Best effort.
-                }
-            }
-
             return _values ?? new SortedDictionary<string, string>(StringComparer.Ordinal);
         }
     }
 
-    /// <summary>First run with the file: carry over what the old database-backed settings held.</summary>
-    private static SortedDictionary<string, string> SeedFromDatabase()
+    /// <summary>First run: a settings file with every key spelled out, so it shows what can be configured.</summary>
+    private static SortedDictionary<string, string> SeedDefaults()
     {
         var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        var providers = new List<ByokProvider>();
-        try
-        {
-            using var store = new CodaleStore(CodaleStore.DefaultDatabasePath);
-            foreach (var key in BoolKeys.Concat(NumberKeys).Concat(
-                ["app.theme", "terminal.shell", "terminal.fontFamily", "chat.fontFamily", "chat.defaultMode", "chat.defaultModel", "chat.defaultEffort"]))
-            {
-                if (store.GetSetting(key) is { Length: > 0 } raw)
-                {
-                    result[key] = raw;
-                }
-            }
-
-            // The single endpoint the old status-bar flyout held becomes the first provider.
-            if (store.GetSetting("endpoint.baseUrl") is { Length: > 0 } legacyUrl)
-            {
-                providers.Add(new ByokProvider
-                {
-                    Name = "Custom endpoint",
-                    BaseUrl = legacyUrl,
-                    ApiKey = store.GetSetting("endpoint.apiKey") ?? "",
-                    FlashModel = store.GetSetting("endpoint.model") ?? "",
-                    ProModel = store.GetSetting("endpoint.smartModel") ?? "",
-                });
-            }
-        }
-        catch (StoreSchemaException)
-        {
-            // A database from a newer Codale: leave it alone and start from defaults.
-        }
-        catch (Exception)
-        {
-            // No database yet: start from defaults.
-        }
 
         // Spell out every key so the freshly created file shows what can be configured.
         foreach (var (key, value) in new[]
@@ -774,7 +684,7 @@ public static class AppSettings
         result["chat.defaultModel"] = result["chat.defaultModel"].Trim();
         result["chat.defaultEffort"] = result["chat.defaultEffort"].Trim();
 
-        result[ProvidersKey] = SerializeProviders(providers, protect: true);
+        result[ProvidersKey] = "[]";
         Persist(result);
         return result;
     }

@@ -112,7 +112,7 @@ public sealed class SearchAgentLoopIndexTests : IDisposable
     }
 
     [Fact]
-    public async Task A_pattern_the_index_cannot_compile_still_reports_ripgreps_error()
+    public async Task A_pattern_the_index_cannot_compile_still_reports_the_search_error()
     {
         var model = new ScriptedModel(
             """{"tool":"grep","arguments":{"pattern":"("}}""",

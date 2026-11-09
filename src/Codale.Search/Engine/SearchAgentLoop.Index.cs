@@ -19,7 +19,7 @@ public sealed partial class SearchAgentLoop
         IReadOnlyList<SearchHit> Hits,
         IReadOnlyList<(string Path, int Start, int End, string Reason)> Ranges);
 
-    /// <summary>The index's snapshot, or null - no index, or it could not be built - so the loop falls back to ripgrep.</summary>
+    /// <summary>The index's snapshot, or null - no index, or it could not be built - so the loop falls back to the managed search.</summary>
     private async Task<SourceSnapshot?> SnapshotAsync(CancellationToken ct)
     {
         if (Index is null)
@@ -121,8 +121,8 @@ public sealed partial class SearchAgentLoop
 
     /// <summary>
     /// The model's grep, in memory over the index - line by line and case-insensitive as
-    /// ripgrep runs it. Null hands the pattern to ripgrep: no index, a pattern .NET does
-    /// not accept (ripgrep reports its own error), or one too slow to finish.
+    /// the workspace search runs it. Null hands the pattern to the same search: no index, a pattern .NET does
+    /// not accept (the search reports its own error), or one too slow to finish.
     /// </summary>
     private IReadOnlyList<SearchHit>? GrepIndex(string pattern, string? glob, int max, CancellationToken ct)
     {

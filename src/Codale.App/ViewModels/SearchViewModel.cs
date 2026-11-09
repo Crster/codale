@@ -178,7 +178,7 @@ public sealed partial class SearchViewModel : ObservableObject
     [RelayCommand]
     private async Task RunAsync()
     {
-        // A new search supersedes the old one; ripgrep and generation are both abandoned.
+        // A new search supersedes the old one; the search and generation are both abandoned.
         await CancelInFlightAsync();
 
         var keywordOnly = _keywordOnly;

@@ -2,7 +2,7 @@ namespace Codale.Agents.Claude;
 
 public sealed record ClaudeSessionOptions
 {
-    /// <summary>Working directory for the agent: the project root, or a session worktree.</summary>
+    /// <summary>Working directory for the agent: the project root.</summary>
     public required string WorkingDirectory { get; init; }
 
     /// <summary>The CLI to launch: the located install (npm, ~/.local/bin, PATHEXT) or, failing that, the bare command name.</summary>

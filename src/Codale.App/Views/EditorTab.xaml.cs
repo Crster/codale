@@ -394,7 +394,22 @@ public sealed partial class EditorTab : UserControl
         ViewModel = viewModel;
         Bindings.Update();
         ViewModel.Saved += (_, _) => _ = RefreshDiffMarkersAsync(refetchHead: true);
+        FileEditor.WorkspaceSuggest = ProjectSuggestions;
         return this;
+    }
+
+    /// <summary>
+    /// Names from the project's workspace model, ranked with the word before the cursor. The model loads
+    /// with the first scan, so until then there is nothing to offer.
+    /// </summary>
+    private IReadOnlyList<Codale.Search.WorkspaceSuggestion> ProjectSuggestions(string prefix, string? previousWord)
+    {
+        if (string.IsNullOrEmpty(ProjectRoot) || !Directory.Exists(ProjectRoot))
+        {
+            return [];
+        }
+
+        return Codale.Search.SourceIndex.For(ProjectRoot).Suggest(prefix, previousWord);
     }
 
     // ------------------------------------------------------------------ diff gutter

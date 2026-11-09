@@ -12,8 +12,7 @@ namespace Codale.Git;
 internal sealed record GitResult(bool Success, string StandardOutput, string StandardError, bool Truncated = false);
 
 /// <summary>
-/// The one place git is spawned, shared by <see cref="GitRepository"/> and
-/// <see cref="GitWorktrees"/> so timeout, prompt and output-size handling cannot drift.
+/// The one place git is spawned, so timeout, prompt and output-size handling cannot drift.
 /// </summary>
 internal static class GitProcess
 {

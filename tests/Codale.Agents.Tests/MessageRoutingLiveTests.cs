@@ -1,20 +1,23 @@
 using System.Diagnostics;
+using Codale.Agents.OpenRouter;
 using Codale.Core.Helper;
 using Xunit.Abstractions;
 
 namespace Codale.Agents.Tests;
 
-// Opt in separately from tests that ask agents to edit files.
+// Opt in: needs an OpenRouter API key.
+// CODALE_OPENROUTER_LIVE_TESTS=1, optionally CODALE_OPENROUTER_MODEL (with CODALE_OPENROUTER_KEY).
 public sealed class MessageRoutingLiveTests(ITestOutputHelper output)
 {
     [Theory]
-    [InlineData("Claude")]
-    [InlineData("Codex")]
-    public async Task Real_helper_classifies_the_routing_corpus(string provider)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Real_decision_model_classifies_the_routing_corpus(bool thinking)
     {
-        if (Environment.GetEnvironmentVariable("CODALE_ROUTING_LIVE_TESTS") != "1") return;
-        using var helper = new HelperModel(provider: () => provider);
-        Assert.True(helper.IsAvailable, $"{provider} CLI unavailable");
+        if (Environment.GetEnvironmentVariable("CODALE_OPENROUTER_LIVE_TESTS") != "1") return;
+        var model = Environment.GetEnvironmentVariable("CODALE_OPENROUTER_MODEL") is { Length: > 0 } m ? m : "google/gemini-2.5-flash-lite";
+        var helper = new OpenRouterHelperModel(new OpenRouterClient(Environment.GetEnvironmentVariable("CODALE_OPENROUTER_KEY")), model, thinking);
+        var provider = $"{model}{(thinking ? " (thinking)" : "")}";
         (string Message, RouteIntent Expected)[] cases =
         [
             ("the header is ugly", RouteIntent.Act),
@@ -35,13 +38,13 @@ public sealed class MessageRoutingLiveTests(ITestOutputHelper output)
         var failures = new List<string>();
         foreach (var (message, expected) in cases)
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
             var timer = Stopwatch.StartNew();
             var call = await helper.CallToolAsync(MessageRouting.SystemPrompt,
                 MessageRouting.BuildConversation(message, "The login redirect handler loses its OAuth state. Would you like me to fix it?"),
                 [MessageRouting.RouteTool], cts.Token);
             Assert.NotNull(call); // A fallback must not conceal a provider failure.
-            var actual = MessageRouting.Interpret(call, message, false).Intent;
+            var actual = MessageRouting.Interpret(call, message).Intent;
             output.WriteLine($"{provider}: {timer.ElapsedMilliseconds}ms {actual} expected {expected}: {message}");
             if (actual != expected) failures.Add($"{message}: expected {expected}, got {actual}");
         }

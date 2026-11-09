@@ -7,6 +7,15 @@ namespace Codale.Search;
 /// <summary>Where a symbol is declared.</summary>
 public sealed record SymbolLocation(SourceFile File, SourceSymbol Symbol);
 
+/// <summary>A line that matches a text, with the function, type or property whose body contains it (null at file level).</summary>
+public sealed record CodeLocation(SourceFile File, int Line, string Text, SourceSymbol? Symbol);
+
+/// <summary>
+/// A name offered while typing: a declared symbol (<see cref="Kind"/> set) or an identifier the
+/// project uses (<see cref="Kind"/> null). <see cref="Files"/> counts the files that use it.
+/// </summary>
+public sealed record WorkspaceSuggestion(string Text, SourceSymbolKind? Kind, int Files);
+
 /// <summary>
 /// The project as of one scan: every listed path, the text files with their tokens and
 /// declarations, and the inverted index over them. Immutable and safe to share between
@@ -18,6 +27,7 @@ public sealed class SourceSnapshot
     private readonly Dictionary<string, Posting> _postings;
     private readonly Dictionary<string, List<SymbolLocation>> _definitions;
     private readonly string[] _vocabulary;
+    private readonly string[] _symbolNames;
 
     internal sealed class Posting(string term)
     {
@@ -80,6 +90,8 @@ public sealed class SourceSnapshot
         AverageTokens = files.Count == 0 ? 1 : Math.Max(1, (double)tokens / files.Count);
         _vocabulary = [.. _postings.Keys];
         Array.Sort(_vocabulary, StringComparer.Ordinal);
+        _symbolNames = [.. _definitions.Keys];
+        Array.Sort(_symbolNames, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>Every file the listing found, root-relative: text, binary and oversized alike.</summary>
@@ -143,6 +155,100 @@ public sealed class SourceSnapshot
         _definitions.TryGetValue(name, out var list) ? list : [];
 
     /// <summary>
+    /// The innermost function, type or property whose body holds <paramref name="line"/> of
+    /// <paramref name="file"/>, or null at file level. Variables do not enclose anything.
+    /// </summary>
+    public SourceSymbol? Enclosing(SourceFile file, int line)
+    {
+        SourceSymbol? best = null;
+        foreach (var symbol in file.Symbols)
+        {
+            if (symbol.Kind == SourceSymbolKind.Variable || line < symbol.Line || line > symbol.EndLine)
+            {
+                continue;
+            }
+
+            // Nested declarations start later, so the latest start is the innermost; ties go to the smaller body.
+            if (best is null || symbol.Line > best.Line || (symbol.Line == best.Line && symbol.EndLine < best.EndLine))
+            {
+                best = symbol;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// Every line that contains <paramref name="text"/> (literal, either case unless
+    /// <paramref name="matchCase"/>), each with the body it sits in: exact code locations, not
+    /// just file names.
+    /// </summary>
+    public IReadOnlyList<CodeLocation> Locate(string text, int max = 100, bool matchCase = false, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        var pattern = new Regex(Regex.Escape(text), (matchCase ? RegexOptions.None : RegexOptions.IgnoreCase) | RegexOptions.CultureInvariant);
+        var locations = new List<CodeLocation>();
+        foreach (var hit in Grep(pattern, maxResults: max, ct: ct))
+        {
+            var file = Find(hit.RelativePath);
+            if (file is null)
+            {
+                continue;
+            }
+
+            locations.Add(new CodeLocation(file, hit.LineNumber, hit.Line.Trim(), Enclosing(file, hit.LineNumber)));
+        }
+
+        return locations;
+    }
+
+    /// <summary>
+    /// Names to offer while the user types <paramref name="prefix"/>: declared symbols first,
+    /// most widely used first, then the other identifiers the project uses.
+    /// </summary>
+    public IReadOnlyList<WorkspaceSuggestion> Suggest(string prefix, int max = 30)
+    {
+        if (string.IsNullOrEmpty(prefix))
+        {
+            return [];
+        }
+
+        var suggestions = new List<WorkspaceSuggestion>();
+        var declared = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var first = Array.BinarySearch(_symbolNames, prefix, StringComparer.OrdinalIgnoreCase);
+        for (var i = first < 0 ? ~first : first; i < _symbolNames.Length && _symbolNames[i].StartsWith(prefix, StringComparison.OrdinalIgnoreCase); i++)
+        {
+            var name = _symbolNames[i];
+            var definitions = _definitions[name];
+            suggestions.Add(new WorkspaceSuggestion(
+                name,
+                definitions[0].Symbol.Kind,
+                definitions.Select(d => d.File.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count()));
+            declared.Add(name);
+        }
+
+        foreach (var token in TokensWithPrefix(prefix.ToLowerInvariant(), max))
+        {
+            if (declared.Add(token))
+            {
+                suggestions.Add(new WorkspaceSuggestion(token, null, DocumentFrequency(token)));
+            }
+        }
+
+        return suggestions
+            .OrderByDescending(s => s.Kind is not null)
+            .ThenByDescending(s => s.Files)
+            .ThenBy(s => s.Text.Length)
+            .Take(max)
+            .ToList();
+    }
+
+    /// <summary>
     /// Types declared in a file named after something else - <c>HelperToolCalls</c> inside
     /// IHelperModel.cs - which a file list alone cannot show. Tests and docs are left out.
     /// </summary>
@@ -181,7 +287,7 @@ public sealed class SourceSnapshot
 
     /// <summary>
     /// Line-by-line regex search over the indexed files, in parallel, in path order -
-    /// ripgrep's semantics (one line at a time, so <c>^</c> and <c>$</c> are line anchors)
+    /// line-by-line semantics (one line at a time, so <c>^</c> and <c>$</c> are line anchors)
     /// without starting a process.
     /// </summary>
     /// <param name="include">Optional glob a path must match, e.g. <c>**/*.cs</c> or <c>*.ts</c>.</param>
@@ -279,7 +385,7 @@ public sealed class SourceSnapshot
         return AllFiles.Where(f => Matches(matcher, f)).Take(max).ToList();
     }
 
-    /// <summary>A glob without a folder part ("*.cs") matches at any depth, as ripgrep's --glob does.</summary>
+    /// <summary>A glob without a folder part ("*.cs") matches at any depth.</summary>
     private static Matcher GlobMatcher(string glob)
     {
         var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);

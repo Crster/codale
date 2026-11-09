@@ -14,7 +14,8 @@ public static class TopicShift
     /// a go-ahead, a one-word reply), shares no topic term with them or the agent's reply, and its embedding is not close
     /// to any of them. Every signal must agree: a false "New" costs context, a missed one costs little.
     /// </summary>
-    public static bool IsNewTopic(string prompt, IReadOnlyList<string> earlier, ITextEmbedder embedder, string? lastAgentMessage = null)
+    public static async Task<bool> IsNewTopicAsync(string prompt, IReadOnlyList<string> earlier, ITextEmbedder embedder,
+        string? lastAgentMessage = null, CancellationToken ct = default)
     {
         // "commit all changes" shares no term with the feature it commits, yet changes no subject.
         if (earlier.Count == 0 || MessageRouting.IsFollowUp(prompt) || !SearchText.HasTopic(prompt)) return false;
@@ -35,11 +36,12 @@ public static class TopicShift
                 return false;
         }
 
-        var query = embedder.Embed(string.Join(' ', terms));
-        foreach (var text in context)
+        // One request for all of them: a model behind a server pays per round trip, not per text.
+        var texts = context.Select(text => string.Join(' ', SearchText.RetrievalTerms(text))).Prepend(string.Join(' ', terms)).ToList();
+        var vectors = await embedder.EmbedAsync(texts, EmbedRole.Query, ct).ConfigureAwait(false);
+        for (var i = 1; i < vectors.Count; i++)
         {
-            var other = embedder.Embed(string.Join(' ', SearchText.RetrievalTerms(text)));
-            if (VectorMath.Dot(query, other) >= embedder.RelatedSimilarity) return false;
+            if (VectorMath.Dot(vectors[0], vectors[i]) >= embedder.RelatedSimilarity) return false;
         }
         return true;
     }

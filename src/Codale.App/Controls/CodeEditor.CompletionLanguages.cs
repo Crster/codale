@@ -22,11 +22,11 @@ public sealed partial class CodeEditor
     [GeneratedRegex(@"\$?[A-Za-z_]\w*")]
     private static partial Regex PhpWordRegex();
 
-    private bool IsCss => _languageId is "css" or "scss" or "less" || (_languageId is null && _syntax == CodeSyntax.CSS);
+    private bool IsCss => _languageId is "css" or "scss" or "less";
 
-    private bool IsJson => _languageId is "json" or "jsonc" || (_languageId is null && _syntax == CodeSyntax.Json);
+    private bool IsJson => _languageId is "json" or "jsonc";
 
-    private bool IsBatch => _languageId is "bat" || (_languageId is null && _syntax == CodeSyntax.Batch);
+    private bool IsBatch => _languageId is "bat";
 
     private Regex? DocWordRegex() => IsCss ? CssWordRegex() : _languageId is "php" ? PhpWordRegex() : null;
 

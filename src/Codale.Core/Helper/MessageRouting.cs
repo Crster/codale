@@ -1,6 +1,8 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
+using Codale.Core.Background;
 using Codale.Core.Text;
 
 namespace Codale.Core.Helper;
@@ -30,6 +32,86 @@ public static partial class MessageRouting
     private const int MaxMessageChars = 4000;
     private const int MaxAssistantChars = 800;
 
+    /// <summary>How long a native decision model may take: it scores rather than writes, so this is generous.</summary>
+    public static readonly TimeSpan DecisionModelTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Fast local decisions first; then the native decision model, when there is one; then a bounded call
+    /// to the chat model when there is none or it failed. Whatever answers, <see cref="Interpret"/> has the
+    /// last word, so a decision model is held to the same rules as the chat model.
+    /// </summary>
+    /// <param name="timeout">How long the chat model may take, when it is asked.</param>
+    public static async Task<RouteDecision> RouteAsync(IDecisionModel? decision, IHelperModel fallback, string message,
+        string? lastAssistantText = null, CancellationToken ct = default, TimeSpan? timeout = null)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (TryRouteLocally(message) is { } local) return local;
+        if (decision is not null)
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            deadline.CancelAfter(DecisionModelTimeout);
+            try
+            {
+                var answers = await decision.DecideAsync(BuildState(message, lastAssistantText), [IntentQuestion], deadline.Token)
+                    .WaitAsync(deadline.Token).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
+                if (answers.TryGetValue(IntentQuestion.Id, out var answer))
+                {
+                    return Interpret(IntentCall(answer.Choice), message);
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception)
+            {
+                // Not running, not a decision model, too slow: the chat model decides instead.
+            }
+        }
+
+        return await RouteAsync(fallback, message, lastAssistantText, ct, timeout).ConfigureAwait(false);
+    }
+
+    /// <summary>What a decision model reads: the agent's last reply, when there is one, then the new message.</summary>
+    public static IReadOnlyDictionary<string, string> BuildState(string message, string? lastAssistantText)
+    {
+        var state = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (lastAssistantText is { Length: > 0 })
+        {
+            state["last_agent_message"] = Clip(lastAssistantText, MaxAssistantChars);
+        }
+
+        state["new_message"] = Clip(message, MaxMessageChars);
+        return state;
+    }
+
+    /// <summary>A decision model's pick, in the shape <see cref="Interpret"/> reads.</summary>
+    internal static ToolCall IntentCall(string choice)
+    {
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(new Dictionary<string, string> { ["intent"] = choice }));
+        return new ToolCall(RouteTool.Name, document.RootElement.Clone());
+    }
+
+    /// <summary>The routing question as a decision model gets it: the same rules as <see cref="SystemPrompt"/>, one option each.</summary>
+    public static readonly DecisionQuestion IntentQuestion = new(
+        "intent",
+        "Classify new_message by the mode the agent's turn should run in. Do not answer it. " +
+        "Use last_agent_message only to resolve replies such as approvals or answers to questions. " +
+        "Never change sessions. When uncertain choose act.",
+        [
+            new("act",
+                "The default. Requests to change, fix, add, adjust, test or run something; bug reports; complaints about " +
+                "something specific (spacing, layout, a broken flow); approvals; answers to the agent's questions; continuation. " +
+                "A feature request that says what to add and where is act, even when it adds new UI, a column, a toolbar or a field. " +
+                "Polite questions like 'can you fix X?' are act, and so is 'Why is X slow? Fix it'."),
+            new("plan",
+                "Only when the user asks for a plan, proposal or design before implementation; or the work is large and " +
+                "cross-cutting: a new subsystem such as authentication or billing, a migration, or a rewrite spanning many files; " +
+                "or the target or desired result cannot be identified at all ('make it better'). Size, the word new, or a " +
+                "missing detail the agent can reasonably choose never means plan."),
+            new("ask",
+                "Explanation, investigation, review or comparison with no requested changes. 'How do I fix X?' is ask. " +
+                "An acknowledgment followed by a question ('yes, why is it broken?') is ask, not approval to edit."),
+        ]);
+
     /// <summary>Fast local decisions first; a bounded helper call only for ambiguous messages.</summary>
     public static async Task<RouteDecision> RouteAsync(IHelperModel client, string message,
         string? lastAssistantText = null, CancellationToken ct = default, TimeSpan? timeout = null)
@@ -44,7 +126,7 @@ public static partial class MessageRouting
             var call = await client.CallToolAsync(SystemPrompt, BuildConversation(message, lastAssistantText),
                 [RouteTool], deadline.Token).WaitAsync(deadline.Token).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
-            return Interpret(call, message, canMoveTopic: false);
+            return Interpret(call, message);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception)
@@ -174,10 +256,9 @@ public static partial class MessageRouting
 
     /// <summary>
     /// Turns the model's call into a decision for the message as typed, distrusting it
-    /// wherever it could hurt. The legacy <paramref name="canMoveTopic"/> argument is ignored:
-    /// only explicit user actions control session boundaries.
+    /// wherever it could hurt. Only explicit user actions control session boundaries.
     /// </summary>
-    public static RouteDecision Interpret(ToolCall? call, string original, bool canMoveTopic)
+    public static RouteDecision Interpret(ToolCall? call, string original)
     {
         if (call is null || call.Tool != RouteTool.Name)
         {

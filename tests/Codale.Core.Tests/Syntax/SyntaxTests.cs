@@ -109,7 +109,7 @@ public sealed class SyntaxTests : IDisposable
     }
 
     [Fact]
-    public void A_corrupt_manifest_is_set_aside_and_start_up_continues()
+    public void A_corrupt_manifest_is_ignored_and_start_up_continues()
     {
         Directory.CreateDirectory(_root);
         File.WriteAllText(Path.Combine(_root, "languages.json"), "{ not json");
@@ -117,7 +117,7 @@ public sealed class SyntaxTests : IDisposable
         var store = new SyntaxStore(_root);
 
         Assert.Empty(store.Languages);
-        Assert.True(File.Exists(Path.Combine(_root, "languages.json.broken")));
+        Assert.False(File.Exists(Path.Combine(_root, "languages.json.broken")));
     }
 
     [Theory]

@@ -257,14 +257,80 @@ public sealed class SourceIndexTests : IDisposable
     [InlineData("        return Execute(action);")]
     [InlineData("            new Dictionary<string, int>(),")]
     public void Calls_and_statements_are_not_declarations(string line) =>
-        Assert.Empty(SourceSymbols.Extract(line));
+        Assert.Empty(SourceSymbols.Extract(line).Where(s => s.Kind != SourceSymbolKind.Variable));
 
     [Fact]
     public void Declarations_carry_their_line_numbers()
     {
         var symbols = SourceSymbols.Extract("using System;\n\nnamespace A;\n\npublic class Foo\n{\n    public void Bar() { }\n}\n");
 
-        Assert.Contains(new SourceSymbol("Foo", SourceSymbolKind.Type, 5), symbols);
-        Assert.Contains(new SourceSymbol("Bar", SourceSymbolKind.Function, 7), symbols);
+        Assert.Contains(new SourceSymbol("Foo", SourceSymbolKind.Type, 5, 8), symbols);
+        Assert.Contains(new SourceSymbol("Bar", SourceSymbolKind.Function, 7, 7), symbols);
+    }
+
+    [Fact]
+    public void A_brace_body_ends_where_its_braces_balance_even_with_braces_in_strings()
+    {
+        var symbols = SourceSymbols.Extract(
+            "public class Outer\n{\n    public int Run()\n    {\n        var s = \"}\";\n        if (s != null)\n        {\n        }\n        return 1;\n    }\n}\n");
+
+        Assert.Contains(new SourceSymbol("Outer", SourceSymbolKind.Type, 1, 11), symbols);
+        Assert.Contains(new SourceSymbol("Run", SourceSymbolKind.Function, 3, 10), symbols);
+    }
+
+    [Fact]
+    public void A_python_def_runs_over_the_lines_indented_past_it()
+    {
+        var symbols = SourceSymbols.Extract("def load(path):\n    text = open(path).read()\n\n    return text\n\nx = load('a')\n");
+
+        Assert.Contains(new SourceSymbol("load", SourceSymbolKind.Function, 1, 4), symbols);
+    }
+
+    [Fact]
+    public void Locals_fields_and_script_variables_are_declarations()
+    {
+        var symbols = SourceSymbols.Extract(
+            "public class Store\n{\n    private readonly int retryLimit = 3;\n    public void Save()\n    {\n        var pendingCount = 0;\n    }\n}\n");
+        Assert.Contains(new SourceSymbol("retryLimit", SourceSymbolKind.Variable, 3, 3), symbols);
+        Assert.Contains(new SourceSymbol("pendingCount", SourceSymbolKind.Variable, 6, 6), symbols);
+
+        var script = SourceSymbols.Extract("$serverName = 'web'\n");
+        Assert.Contains(new SourceSymbol("serverName", SourceSymbolKind.Variable, 1, 1), script);
+    }
+
+    [Fact]
+    public async Task Enclosing_finds_the_innermost_function_around_a_line_and_locate_reports_it()
+    {
+        Write("svc/Uploader.cs",
+            "public class Uploader\n{\n    public void Send(string file)\n    {\n        var target = file.Trim();\n        Post(target);\n    }\n\n    public void Other()\n    {\n    }\n}\n");
+        using var index = Index();
+        var snapshot = await index.GetSnapshotAsync();
+        var file = snapshot.Find(P("svc/Uploader.cs"))!;
+
+        Assert.Equal("Send", snapshot.Enclosing(file, 6)?.Name);
+        Assert.Equal("Uploader", snapshot.Enclosing(file, 1)?.Name);
+        Assert.Null(snapshot.Enclosing(file, 13));
+
+        var location = Assert.Single(snapshot.Locate("Post(target)"));
+        Assert.Equal(6, location.Line);
+        Assert.Equal("Send", location.Symbol?.Name);
+    }
+
+    [Fact]
+    public async Task Suggest_offers_declared_names_then_the_identifiers_the_project_uses()
+    {
+        Write("a/Retry.cs", "public class RetryPolicy\n{\n    public int maxRetries = 2;\n}\n");
+        Write("b/use.cs", "var retryCount = maxRetries + 1;\nvar retryCount2 = retryCount;\n");
+        using var index = Index();
+        var snapshot = await index.GetSnapshotAsync();
+
+        var suggestions = snapshot.Suggest("retr");
+        Assert.Equal("RetryPolicy", suggestions[0].Text);
+        Assert.Equal(SourceSymbolKind.Type, suggestions[0].Kind);
+        Assert.Contains(suggestions, s => s.Text == "retryCount" && s.Kind == SourceSymbolKind.Variable);
+        Assert.Contains(suggestions, s => s.Text == "retry" && s.Kind is null);
+
+        var variables = snapshot.Suggest("maxR");
+        Assert.Contains(variables, s => s.Text == "maxRetries" && s.Kind == SourceSymbolKind.Variable);
     }
 }

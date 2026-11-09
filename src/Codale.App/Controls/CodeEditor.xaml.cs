@@ -55,7 +55,6 @@ public sealed partial class CodeEditor : UserControl
     private DocumentPosition _caret;
     private DocumentPosition _anchor;
 
-    private CodeSyntax _syntax = CodeSyntax.None;
     private string? _languageId;
 
     /// <summary>Whether the gutter draws line numbers (Settings).</summary>
@@ -197,6 +196,52 @@ public sealed partial class CodeEditor : UserControl
     private (int RowInLine, int ColInRow) Fold(int expandedCol) => (expandedCol / _wrapCols, expandedCol % _wrapCols);
 
     /// <summary>
+    /// X offset (from the text origin) of a column within a visual row. Fixed-cell maths is
+    /// right for plain text, but emoji and other surrogate pairs are laid out wider than
+    /// their UTF-16 length, so those lines ask the real text layout instead.
+    /// </summary>
+    private double ColumnX(int line, int rowInLine, int colInRow)
+    {
+        if (line >= 0 && line < _lineCache.Count)
+        {
+            var entry = _lineCache[line];
+            var display = entry.Display;
+            if (entry.Source != null && display.Length > 0 && HasSurrogate(display))
+            {
+                EnsureRowLayouts(entry);
+                if (rowInLine < entry.RowLayouts.Count)
+                {
+                    var layout = entry.RowLayouts[rowInLine];
+                    var rowStart = rowInLine * _wrapCols;
+                    var rowLen = Math.Min(_wrapCols, display.Length - rowStart);
+                    if (rowLen > 0)
+                    {
+                        var index = Math.Clamp(colInRow, 0, rowLen);
+                        return index == rowLen
+                            ? layout.GetCaretPosition(rowLen - 1, true).X
+                            : layout.GetCaretPosition(index, false).X;
+                    }
+                }
+            }
+        }
+
+        return colInRow * _charWidth;
+    }
+
+    private static bool HasSurrogate(string text)
+    {
+        foreach (var c in text)
+        {
+            if (char.IsSurrogate(c))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Rebuilds the row map when dirty. The wrap width follows the viewport, so a
     /// resize that changes it also drops the layout cache; only the layouts are
     /// affected, tokens are per logical line and stay.
@@ -273,7 +318,7 @@ public sealed partial class CodeEditor : UserControl
         line = Math.Clamp(line, 0, _doc.LineCount - 1);
         var rawLine = _doc.GetLine(line);
         var (rowInLine, colInRow) = Fold(TextDocument.ExpandedColFromRaw(rawLine, Math.Clamp(col, 0, rawLine.Length)));
-        var x = TextX + colInRow * _charWidth - _horizontalOffset;
+        var x = TextX + ColumnX(line, rowInLine, colInRow) - _horizontalOffset;
         var y = (_rowOffsets[line] + rowInLine) * _lineHeight - _verticalOffset;
         return new Windows.Foundation.Rect(x, y, CaretWidth, _lineHeight);
     }
@@ -582,7 +627,6 @@ public sealed partial class CodeEditor : UserControl
     public void SelectSyntaxHighlightingById(string? languageId)
     {
         _languageId = languageId;
-        _syntax = LegacySyntax.For(languageId);
         ClearTokens();
         InvalidateAll();
     }
@@ -991,7 +1035,7 @@ public sealed partial class CodeEditor : UserControl
             entry.Source = source;
             entry.StateIn = state;
             entry.Display = TextDocument.ExpandTabs(source);
-            entry.StateOut = CodeTokenizer.TokenizeLine(entry.Display, _languageId, _syntax, state, entry.Tokens);
+            entry.StateOut = CodeTokenizer.TokenizeLine(entry.Display, _languageId, state, entry.Tokens);
             state = entry.StateOut;
         }
 
@@ -1138,7 +1182,7 @@ public sealed partial class CodeEditor : UserControl
 
         var rawLine = _doc.GetLine(caretLine);
         var (caretRowInLine, caretColInRow) = Fold(TextDocument.ExpandedColFromRaw(rawLine, _caret.Col));
-        var x = TextX + caretColInRow * _charWidth - _horizontalOffset;
+        var x = TextX + ColumnX(caretLine, caretRowInLine, caretColInRow) - _horizontalOffset;
         var y = (_rowOffsets[caretLine] + caretRowInLine) * _lineHeight - _verticalOffset + LineHighlightOffset;
         if (_caretVisible)
         {
@@ -1201,8 +1245,8 @@ public sealed partial class CodeEditor : UserControl
                     var rowStart = r * _wrapCols;
                     var s = Math.Max(fromCol, rowStart);
                     var e = Math.Min(toCol, rowStart + _wrapCols);
-                    var x1 = TextX + (s - rowStart) * _charWidth - _horizontalOffset;
-                    var x2 = TextX + (e - rowStart) * _charWidth - _horizontalOffset;
+                    var x1 = TextX + ColumnX(line, r, s - rowStart) - _horizontalOffset;
+                    var x2 = TextX + ColumnX(line, r, e - rowStart) - _horizontalOffset;
                     var y = (offset + r) * _lineHeight - _verticalOffset + LineHighlightOffset;
                     session.FillRectangle((float)x1, (float)y, (float)Math.Max(2, x2 - x1), (float)_lineHeight, Brush(session, _selectionColor));
                 }
@@ -1385,7 +1429,7 @@ public sealed partial class CodeEditor : UserControl
         EnsureRowMap();
         var rawLine = _doc.GetLine(_caret.Line);
         var (rowInLine, colInRow) = Fold(TextDocument.ExpandedColFromRaw(rawLine, _caret.Col));
-        var x = TextX + colInRow * _charWidth;
+        var x = TextX + ColumnX(_caret.Line, rowInLine, colInRow);
         var y = (_rowOffsets[_caret.Line] + rowInLine) * _lineHeight;
 
         var targetVertical = _verticalOffset;
@@ -1667,6 +1711,23 @@ public sealed partial class CodeEditor : UserControl
         var rowLen = Math.Max(0, Math.Min(_wrapCols, lineLen - rowStart));
         var colInRow = Math.Clamp(
             (int)Math.Round((point.X - TextX + _horizontalOffset) / _charWidth), 0, rowLen);
+        if (line < _lineCache.Count && _lineCache[line].Source != null && HasSurrogate(_lineCache[line].Display))
+        {
+            var target = point.X - TextX + _horizontalOffset;
+            var best = 0;
+            var bestDist = double.MaxValue;
+            for (var c = 0; c <= rowLen; c++)
+            {
+                var dist = Math.Abs(ColumnX(line, rowInLine, c) - target);
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    best = c;
+                }
+            }
+
+            colInRow = best;
+        }
 
         var col = TextDocument.RawColFromExpanded(rawLine, rowStart + colInRow);
         return new DocumentPosition(line, Math.Min(col, rawLine.Length));

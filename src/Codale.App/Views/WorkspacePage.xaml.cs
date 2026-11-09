@@ -90,7 +90,6 @@ public sealed partial class WorkspacePage : Page
         ViewModel = workspace;
         ViewModel.PropertyChanged += OnWorkspacePropertyChanged;
         ViewModel.ChatActivationRequested += OnChatActivationRequested;
-        ViewModel.HelperLoginRequired += OnChatLoginRequired;
         Bindings.Update();
 
         SetTerminalCwd(ViewModel.WorkingDirectory);
@@ -157,7 +156,6 @@ public sealed partial class WorkspacePage : Page
         {
             ViewModel.PropertyChanged -= OnWorkspacePropertyChanged;
             ViewModel.ChatActivationRequested -= OnChatActivationRequested;
-            ViewModel.HelperLoginRequired -= OnChatLoginRequired;
             if (_planWatchedChat is not null)
             {
                 _planWatchedChat.PlanReplaced -= OnPlanReplaced;
@@ -678,8 +676,6 @@ public sealed partial class WorkspacePage : Page
                 Header = ChatTabHeader(chat),
                 Content = tab,
             };
-            ApplyIsolationTint(item, chat);
-
             entry = new ChatTabEntry(item, tab, chat);
             _chatTabs.Add(entry);
             AddTab(item);
@@ -690,25 +686,8 @@ public sealed partial class WorkspacePage : Page
         SelectTab(entry.Item);
     }
 
-    /// <summary>The tab's chat icon is blue while its chat works in an isolated worktree.</summary>
-    private static void ApplyIsolationTint(TabViewItem item, ChatViewModel chat)
-    {
-        if (item.IconSource is FontIconSource icon)
-        {
-            icon.Foreground = chat.IsIsolated
-                ? new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0x3B, 0x82, 0xF6))
-                : ChatPaletteTheme.Brush("TextFillColorPrimaryBrush");
-        }
-    }
-
     private void OnChatPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(ChatViewModel.IsIsolated) &&
-            _chatTabs.FirstOrDefault(t => ReferenceEquals(t.Chat, sender)) is { } isolated)
-        {
-            ApplyIsolationTint(isolated.Item, isolated.Chat);
-        }
-
         if (e.PropertyName == nameof(ChatViewModel.IsWaitingForYou) &&
             _chatTabs.FirstOrDefault(t => ReferenceEquals(t.Chat, sender)) is { } entry)
         {
@@ -2436,7 +2415,7 @@ public sealed partial class WorkspacePage : Page
         PeekPane.Visibility = Visibility.Visible;
         var owner = ViewModel.Chats.Concat(ViewModel.TerminalSessions)
             .FirstOrDefault(chat => chat.RunningTasks.Contains(task)) ?? ViewModel.Panel;
-        PeekPane.Show(task, owner.Helper, owner.WorktreePath ?? ViewModel.ProjectPath, ViewModel.ExtraFolders.Folders);
+        PeekPane.Show(task, owner.Helper, ViewModel.ProjectPath, ViewModel.ExtraFolders.Folders);
     }
 
     private void OpenSideColumn()
@@ -3858,6 +3837,7 @@ public sealed partial class WorkspacePage : Page
                 return;
             case Windows.System.VirtualKey.Up:
             case Windows.System.VirtualKey.Down:
+                EnsureCommandHistoryLoaded();
                 if (_commandHistory.Count > 0)
                 {
                     e.Handled = true;
@@ -3897,7 +3877,24 @@ public sealed partial class WorkspacePage : Page
         if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
         {
             _historyCursor = -1;
+
+            // The project's earlier commands that start with what is typed, from the local history.
+            sender.ItemsSource = CommandHistory.Suggest(ViewModel.ProjectPath, sender.Text);
         }
+    }
+
+    private bool _commandHistoryLoaded;
+
+    /// <summary>Loads the project's saved commands into the recall list once, oldest first, ahead of this session's.</summary>
+    private void EnsureCommandHistoryLoaded()
+    {
+        if (_commandHistoryLoaded)
+        {
+            return;
+        }
+
+        _commandHistoryLoaded = true;
+        _commandHistory.InsertRange(0, CommandHistory.Recent(ViewModel.ProjectPath).Reverse());
     }
 
     private CancellationTokenSource? _shellSuggestCts;
@@ -3914,6 +3911,7 @@ public sealed partial class WorkspacePage : Page
     /// </summary>
     private async Task CycleShellSuggestionAsync()
     {
+        EnsureCommandHistoryLoaded();
         var box = StatusBarCommandBox;
         var text = box.Text;
         if (text.Length == 0)
@@ -3961,13 +3959,14 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>
-    /// Asks the helper model to finish the command, steering clear of earlier answers. A newer request
-    /// cancels an older one. Empty when there is nothing to add or the box no longer holds <paramref name="typed"/>.
+    /// Asks the fill-in-the-middle model to finish the command, steering clear of earlier answers. A newer
+    /// request cancels an older one. Empty when there is nothing to add, the box no longer holds
+    /// <paramref name="typed"/>, or the finished command would be dangerous when what is typed is not.
     /// </summary>
     private async Task<string> SuggestShellCompletionAsync(AutoSuggestBox box, string typed)
     {
         _shellSuggestCts?.Cancel();
-        if (BackgroundHelper.Completions is not { } model)
+        if (BackgroundProviders.Completions is not { } model)
         {
             return "";
         }
@@ -3979,7 +3978,17 @@ public sealed partial class WorkspacePage : Page
             var shell = Path.GetFileNameWithoutExtension(Codale.Terminal.TerminalSession.ResolveShell(AppSettings.TerminalShell));
             var recent = _commandHistory.TakeLast(5).ToList();
             var files = await Task.Run(() => ListShellFiles(cwd), cts.Token);
-            var rest = await model.CompleteShellAsync(shell, cwd, recent, files, typed, _shellSeen.ToList(), cts.Token);
+            var prefix = Codale.Core.Background.FimText.ShellPrefix(shell, cwd, recent, files, typed);
+            var rest = await model.CompleteAsync(prefix, "", _shellSeen.ToList(), cts.Token);
+
+            // A completion must never be what turns a command destructive (a recursive delete, a force push).
+            if (rest.Length > 0 &&
+                Codale.Core.Shell.ShellCommandAnalyzer.Assess(typed + rest, cwd).Risk == Codale.Core.Shell.ShellRisk.Danger &&
+                Codale.Core.Shell.ShellCommandAnalyzer.Assess(typed, cwd).Risk != Codale.Core.Shell.ShellRisk.Danger)
+            {
+                return "";
+            }
+
             return cts.IsCancellationRequested || (box.Text != typed && box.Text != _shellCurrent) ? "" : rest;
         }
         catch (OperationCanceledException)
@@ -4160,8 +4169,10 @@ public sealed partial class WorkspacePage : Page
             return;
         }
 
+        EnsureCommandHistoryLoaded();
         _commandHistory.Remove(command);
         _commandHistory.Add(command);
+        CommandHistory.Record(ViewModel.ProjectPath, command, "shell");
 
         StatusBarCommandBox.Text = "";
 

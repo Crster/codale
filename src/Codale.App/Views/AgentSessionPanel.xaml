@@ -317,25 +317,6 @@
                     Orientation="Horizontal"
                     Spacing="6">
                     <Border
-                        VerticalAlignment="Center"
-                        Background="{ThemeResource AccentFillColorSecondaryBrush}"
-                        CornerRadius="10"
-                        Padding="8,2"
-                        Margin="0,0,4,0"
-                        Visibility="{x:Bind IsIsolated, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon
-                                FontSize="10"
-                                Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
-                                Glyph="&#xE8EA;" />
-                            <TextBlock
-                                FontSize="11"
-                                FontWeight="SemiBold"
-                                Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
-                                Text="Isolated" />
-                        </StackPanel>
-                    </Border>
-                    <Border
                         Padding="8,3"
                         VerticalAlignment="Center"
                         Background="{ThemeResource SubtleFillColorSecondaryBrush}"
@@ -501,66 +482,6 @@
                                     </Grid>
                                 </Button>
                             </Grid>
-
-                            <!--  Isolated: merge back or discard  -->
-                            <StackPanel Spacing="8" Visibility="{x:Bind IsIsolated, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                <Grid ColumnSpacing="8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-
-                                    <Button
-                                        HorizontalAlignment="Stretch"
-                                        Click="OnMergeIsolatedClick"
-                                        CornerRadius="8"
-                                        FontSize="12"
-                                        IsEnabled="{x:Bind Workspace.IsStartingWorktree, Mode=OneWay, Converter={StaticResource NotBool}}"
-                                        Padding="10,8"
-                                        Style="{StaticResource AccentButtonStyle}"
-                                        ToolTipService.ToolTip="Merge this session's branch into your project and remove the worktree">
-                                        <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="8">
-                                            <FontIcon FontSize="12" Glyph="&#xEA3C;" />
-                                            <TextBlock Text="Merge back" TextTrimming="CharacterEllipsis" />
-                                        </StackPanel>
-                                    </Button>
-
-                                    <Button
-                                        Grid.Column="1"
-                                        HorizontalAlignment="Stretch"
-                                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                        Click="OnDiscardIsolatedClick"
-                                        CornerRadius="8"
-                                        FontSize="12"
-                                        IsEnabled="{x:Bind Workspace.IsStartingWorktree, Mode=OneWay, Converter={StaticResource NotBool}}"
-                                        Padding="10,8"
-                                        ToolTipService.ToolTip="Throw away the work done in this worktree">
-                                        <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="8">
-                                            <FontIcon FontSize="12" Glyph="&#xE74D;" />
-                                            <TextBlock Text="Discard" TextTrimming="CharacterEllipsis" />
-                                        </StackPanel>
-                                    </Button>
-                                </Grid>
-                            </StackPanel>
-
-                            <StackPanel
-                                Orientation="Horizontal"
-                                Spacing="8"
-                                Visibility="{x:Bind Workspace.IsMergingWithAgent, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                <ProgressRing Width="14" Height="14" IsActive="True" />
-                                <TextBlock
-                                    FontSize="11"
-                                    Text="Git could not merge cleanly - an agent is merging it for you..."
-                                    TextWrapping="Wrap" />
-                            </StackPanel>
-
-                            <TextBlock
-                                FontSize="11"
-                                Foreground="{ThemeResource SystemFillColorCriticalBrush}"
-                                Text="{x:Bind Workspace.WorktreeError, Mode=OneWay}"
-                                TextWrapping="Wrap"
-                                Visibility="{x:Bind Workspace.WorktreeError, Mode=OneWay, Converter={StaticResource NullToVisibility}}" />
 
                             <!--  Vitals: context ring beside the usage limits  -->
                             <Grid ColumnSpacing="14">

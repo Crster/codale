@@ -23,20 +23,16 @@ namespace Codale.App.ViewModels;
 public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly CodaleStore _store;
-    private readonly string _databasePath;
     private readonly CliEndpointSettings _endpoints;
     private readonly McpServerSettings _mcp;
 
     /// <summary>Sessions this window has already tried to title, so each is attempted once.</summary>
 
     /// <summary>
-    /// Background jobs (titles, commit messages, routing, search, feature handoffs) answered by
-    /// one-shot calls to a CLI, or to a BYOK provider's API when Settings says so.
+    /// Background jobs (titles, commit messages, routing, search, feature handoffs) on the provider
+    /// Settings picks ("Background tasks"); unavailable when that is Off.
     /// </summary>
-    private readonly HelperModel _helper = BackgroundHelper.Create();
-
-    /// <summary>Raised when a background task fails due to missing CLI authentication.</summary>
-    public event EventHandler<string?>? HelperLoginRequired;
+    private readonly BackgroundHelperModel _helper = BackgroundProviders.Create();
 
     /// <summary>The project's features: the history every chat in the window shares.</summary>
     public FeatureService Features { get; }
@@ -49,10 +45,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         ProjectPath = ProjectPaths.Normalize(projectPath);
         DisplayName = ProjectPaths.DisplayName(ProjectPath);
 
-        (_store, _databasePath, StorageWarning) = OpenStore();
+        _store = new CodaleStore(CodaleStore.DefaultDatabasePath);
 
         ExtraFolders = new WorkspaceFolders(_store, ProjectPath);
-        _helper.LoginRequired += cli => HelperLoginRequired?.Invoke(this, cli);
         Files = new FileTreeViewModel(ProjectPath, ExtraFolders);
         Git = new GitViewModel(ProjectPath, _helper);
         Features = new FeatureService(ProjectPath, _helper);
@@ -67,7 +62,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         _mcp.SyncWorkspaceMcpConfig();
         McpTools = new McpToolsViewModel(_mcp, FolderServers, ProjectPath);
         CliEndpoint = new CliEndpointViewModel();
-        _router = new MessageRouter(_helper);
+        _router = new MessageRouter(_helper, () => _helper.Decider, () => _helper.DecisionTimeout);
         PrewarmBackgroundHelper();
         CliEndpoint.PropertyChanged += (_, e) =>
         {
@@ -81,7 +76,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         // provider picker - none of which are the chat in front.
         AppSettings.Changed += OnAppSettingsChanged;
         StartElapsedTimer();
-        _helper.ApiRequestServed += OnBackgroundRequestServed;
+        _helper.RequestServed += OnBackgroundRequestServed;
 
         Sessions.SessionOpened += OnSessionOpened;
         Git.SnapshotRefreshed += OnGitSnapshotRefreshed;
@@ -90,25 +85,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
         Chat = CreateChat();
         Panel = Chat;
-    }
-
-    /// <summary>
-    /// Set when the database could not be used (written by a newer Codale): the window runs
-    /// on a throwaway one, so history, titles and recovery do not persist. Null when all is well.
-    /// </summary>
-    public string? StorageWarning { get; }
-
-    private static (CodaleStore Store, string Path, string? Warning) OpenStore()
-    {
-        try
-        {
-            return (new CodaleStore(CodaleStore.DefaultDatabasePath), CodaleStore.DefaultDatabasePath, null);
-        }
-        catch (StoreSchemaException ex)
-        {
-            var temporary = Path.Combine(Path.GetTempPath(), "codale-temporary", $"{Environment.ProcessId}.db");
-            return (new CodaleStore(temporary), temporary, ex.Message + " Session history will not be saved in this window.");
-        }
     }
 
     public string ProjectPath { get; }
@@ -131,7 +107,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(Status))]
     [NotifyPropertyChangedFor(nameof(WorkingDirectory))]
-    [NotifyPropertyChangedFor(nameof(IsIsolated))]
     [NotifyPropertyChangedFor(nameof(EndpointLabel))]
     public partial ChatViewModel Chat { get; set; }
 
@@ -142,7 +117,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WorkingDirectory))]
-    [NotifyPropertyChangedFor(nameof(IsIsolated))]
     [NotifyPropertyChangedFor(nameof(EndpointLabel))]
     [NotifyPropertyChangedFor(nameof(ShowSessionPickers))]
     public partial ChatViewModel Panel { get; set; }
@@ -212,11 +186,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         }
     }
 
-    private void PrewarmBackgroundHelper()
-    {
-        _router.Prewarm(Features);
-        _helper.Prewarm(SessionNamePrompt);
-    }
+    /// <summary>Loads the provider's models so the first routing and session title skip the load. Nothing when Off.</summary>
+    private void PrewarmBackgroundHelper() => _helper.Prewarm();
 
     private readonly SynchronizationContext? _uiContext = SynchronizationContext.Current;
 
@@ -360,11 +331,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         if (e.PropertyName is nameof(ChatViewModel.IsBusy) or nameof(ChatViewModel.IsConnected) or nameof(ChatViewModel.FeatureId))
         {
             PublishOpenSessions();
-        }
-        else if (e.PropertyName == nameof(ChatViewModel.WorktreePath) && ReferenceEquals(sender, Panel))
-        {
-            OnPropertyChanged(nameof(WorkingDirectory));
-            OnPropertyChanged(nameof(IsIsolated));
         }
     }
 
@@ -684,228 +650,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         await Diff.RefreshAsync();
     }
 
-    /// <summary>
-    /// Starts a fresh session in its own git worktree on a new branch.
-    /// </summary>
-    /// <remarks>
-    /// Opt-in rather than the default: running every session in a worktree would mean
-    /// the agent's edits never appear in the project the user is looking at, which is
-    /// surprising. It earns its place when you want the agent working on something
-    /// without touching your working tree, or two sessions running at once.
-    /// </remarks>
-    public async Task StartIsolatedSessionAsync()
-    {
-        IsStartingWorktree = true;
-
-        try
-        {
-            var worktrees = new GitWorktrees(ProjectPath);
-            var sessionId = Guid.NewGuid().ToString();
-            var created = await worktrees.TryCreateAsync(sessionId);
-
-            if (created.Path is not { } path)
-            {
-                WorktreeError = created.Error is { Length: > 0 } error
-                    ? $"Could not create a worktree: {error}"
-                    : "Could not create a worktree. Is this a git repository with at least one commit?";
-                return;
-            }
-
-            WorktreeError = null;
-
-            // Same rule as New session: its own tab unless the chat in front holds nothing.
-            // The reused chat is reset below, so anything on screen - a notice, a task,
-            // an artifact - counts as something, not just a conversation.
-            var chat = IsBlank(Chat) ? Chat
-                : Chats.FirstOrDefault(c => IsBlank(c) && !c.IsConnected) ?? CreateChat();
-            await chat.DisposeSessionAsync();
-            chat.ResetForNewSession();
-            chat.PermissionMode = AppSettings.DefaultModeFor(chat.CliId);
-            chat.WorktreePath = path;
-            ChatActivationRequested?.Invoke(this, chat);
-
-            await chat.ConnectAsync();
-            await Diff.RefreshAsync();
-        }
-        finally
-        {
-            IsStartingWorktree = false;
-        }
-    }
-
-    /// <summary>True when resetting the chat would lose nothing: no conversation, no running turn, an empty transcript.</summary>
-    private static bool IsBlank(ChatViewModel chat) => !chat.HasConversation && !chat.IsBusy && chat.Items.Count == 0;
-
-    /// <summary>True while the session on the panel works in its own worktree.</summary>
-    public bool IsIsolated => Panel.IsIsolated;
-
-    /// <summary>
-    /// Leaves isolation for the chat in front. Merging first brings the worktree's
-    /// branch into the project; either way the worktree is removed and the chat
-    /// starts a fresh session in the project directory.
-    /// </summary>
-    public async Task LeaveIsolationAsync(bool merge)
-    {
-        var chat = Chat;
-        if (chat.WorktreePath is not { } path)
-        {
-            return;
-        }
-
-        IsStartingWorktree = true;
-
-        var sessionStopped = false;
-
-        try
-        {
-            var worktrees = new GitWorktrees(ProjectPath);
-
-            // The agent runs with the worktree as its working directory; Windows will not
-            // delete a folder a live process is sitting in ("Permission denied").
-            if (!merge)
-            {
-                await chat.DisposeSessionAsync();
-                sessionStopped = true;
-            }
-
-            var result = merge
-                ? await worktrees.MergeBackAsync(path)
-                : await worktrees.RemoveAsync(path, force: true);
-
-            // A plain git merge gives up on a dirty project or a conflict; hand it to an agent.
-            if (!result.Success && merge)
-            {
-                IsMergingWithAgent = true;
-                WorktreeError = null;
-                result = await MergeWithAgentAsync(worktrees, path, result.Error);
-            }
-
-            if (!result.Success)
-            {
-                WorktreeError = merge
-                    ? $"Could not merge back: {result.Error}"
-                    : $"Could not remove the worktree: {result.Error}";
-
-                if (sessionStopped)
-                {
-                    // Still isolated: bring the agent back in the worktree.
-                    await chat.ConnectAsync();
-                }
-
-                return;
-            }
-
-            WorktreeError = null;
-
-            await chat.DisposeSessionAsync();
-            chat.ResetForNewSession();
-            await chat.ConnectAsync();
-            await Diff.RefreshAsync();
-            await Git.RefreshAsync();
-            await Sessions.RefreshAsync();
-        }
-        finally
-        {
-            IsStartingWorktree = false;
-            IsMergingWithAgent = false;
-        }
-    }
-
-    /// <summary>
-    /// Merges an isolated branch with an agent working in the project directory, for the
-    /// cases plain git refuses: uncommitted local changes the merge would overwrite, or
-    /// conflicts. The result is checked with git rather than trusted from the agent's reply.
-    /// </summary>
-    private async Task<GitRepository.GitWriteResult> MergeWithAgentAsync(GitWorktrees worktrees, string worktreePath, string? gitError)
-    {
-        var branch = await worktrees.BranchOfAsync(worktreePath);
-        if (branch is null)
-        {
-            return new GitRepository.GitWriteResult(false, "That worktree has no Codale branch to merge.");
-        }
-
-        // The agent merges the branch, so the session's pending edits must be on it.
-        if (await worktrees.CommitPendingAsync(worktreePath) is { } commitError)
-        {
-            return new GitRepository.GitWriteResult(false, commitError);
-        }
-
-        var worker = new ChatViewModel(ProjectPath, new StatusViewModel(), _endpoints)
-        {
-            PermissionMode = "auto",
-        };
-
-        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        worker.TurnFinished += (_, _) => finished.TrySetResult();
-        worker.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(ChatViewModel.IsConnected) && !worker.IsConnected)
-            {
-                finished.TrySetResult();
-            }
-        };
-
-        try
-        {
-            await worker.ConnectAsync();
-            if (!worker.IsConnected)
-            {
-                return new GitRepository.GitWriteResult(false, $"Could not start a {worker.ProviderName} session to merge. {gitError}");
-            }
-
-            worker.Draft = MergePrompt(branch, gitError);
-            await worker.SendCommand.ExecuteAsync(null);
-            await finished.Task.WaitAsync(TimeSpan.FromMinutes(10));
-
-            if (!await worktrees.IsMergedAsync(branch))
-            {
-                var reply = worker.Items.OfType<AssistantMessageItem>().LastOrDefault()?.Text.Trim();
-                return new GitRepository.GitWriteResult(false, reply is { Length: > 0 }
-                    ? $"The agent could not finish the merge: {reply}"
-                    : "The agent could not finish the merge.");
-            }
-
-            return await worktrees.RemoveAsync(worktreePath, force: true);
-        }
-        catch (TimeoutException)
-        {
-            return new GitRepository.GitWriteResult(false, "The agent took too long to merge; the worktree was kept.");
-        }
-        finally
-        {
-            await worker.DisposeAsync();
-        }
-    }
-
-    private static string MergePrompt(string branch, string? gitError) =>
-        $"""
-        Merge the git branch `{branch}` into the branch currently checked out in this directory. It holds the work of an isolated session and everything on it is committed.
-
-        A plain `git merge --no-ff {branch}` already failed with: {gitError ?? "an unknown error"}
-
-        Do this carefully so nothing is lost:
-        1. Run `git status` first. If there are uncommitted local changes, keep them: stash them (`git stash push -u`), merge, then `git stash pop` and resolve anything that clashes. Never discard them.
-        2. Merge with `git merge --no-ff {branch}`.
-        3. Resolve every conflict by reading both sides and keeping the intent of both changes. Do not just take one side. Stage the files and complete the merge commit.
-        4. If the project has a quick build or test command, run it to check the result.
-        5. Finish with no merge in progress and no leftover stash.
-
-        Do not use `git reset --hard`, `git checkout -- .`, `git clean`, or force anything. Do not delete the branch or the worktree; that is handled afterwards. Reply with one short line saying what you did.
-        """;
-
-    [ObservableProperty]
-    public partial bool IsStartingWorktree { get; set; }
-
-    /// <summary>True while an agent is merging an isolated branch back, for the card to say so.</summary>
-    [ObservableProperty]
-    public partial bool IsMergingWithAgent { get; set; }
-
-    [ObservableProperty]
-    public partial string? WorktreeError { get; set; }
-
-
-    /// <summary>Where the agent on the panel is working: the project, or an isolated worktree.</summary>
-    public string WorkingDirectory => Panel.WorktreePath ?? ProjectPath;
+    /// <summary>Where the agent on the panel is working: the project.</summary>
+    public string WorkingDirectory => ProjectPath;
 
     /// <summary>Leaves history and returns to the live conversation.</summary>
     public void ReturnToLiveSession()
@@ -1360,8 +1106,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         Git.Dispose();
         Files.Dispose();
 
-        // A warm helper CLI waiting for Automatic mode's next message goes with the window.
-        _helper.Dispose();
+        _helper.RequestServed -= OnBackgroundRequestServed;
 
         try
         {
@@ -1374,21 +1119,5 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
         Features.Dispose();
         _store.Dispose();
-
-        if (StorageWarning is not null)
-        {
-            // The throwaway database (see OpenStore) has no use after the window.
-            foreach (var suffix in new[] { "", "-wal", "-shm" })
-            {
-                try
-                {
-                    File.Delete(_databasePath + suffix);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    // A leftover temp file is harmless.
-                }
-            }
-        }
     }
 }

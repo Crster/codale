@@ -36,8 +36,9 @@ public sealed partial class CliTerminalTab : UserControl, ITerminalHost
         SessionPanel.UpdateCliRequested += (_, command) => UpdateCliRequested?.Invoke(this, command);
         SessionPanel.ResumeRequested += (_, resume) => ResumeRequested?.Invoke(this, resume);
 
-        PointerPressed += (_, _) => FocusTerminal();
-        GotFocus += (_, _) => FocusTerminal();
+        // Keep panel buttons and keyboard navigation focused in the panel.
+        TerminalCard.PointerPressed += (_, _) => FocusTerminal();
+        TerminalCard.GotFocus += (_, _) => FocusTerminal();
     }
 
     public event EventHandler<LinkMatch>? LinkActivated;

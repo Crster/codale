@@ -8,13 +8,14 @@ using Microsoft.UI.Xaml;
 namespace Codale.App.Controls;
 
 /// <summary>
-/// Ghost text: Ctrl+Space asks the helper model for the rest of the line, drawn dimmed after the caret.
-/// Tab accepts it; Ctrl+Space again asks for a different one; any other key or a click drops it.
-/// Only runs when Settings runs background jobs on an API model.
+/// Ghost text: Ctrl+Space asks the fill-in-the-middle model for the rest of the line, drawn dimmed after
+/// the caret. The model sees the code on both sides of the caret. Tab accepts it; Ctrl+Space again asks
+/// for a different one; any other key or a click drops it. Only runs when Settings sets a completion model.
 /// </summary>
 public sealed partial class CodeEditor
 {
     private const int GhostPrefixChars = 4500;
+    private const int GhostSuffixChars = 1500;
 
     private string _ghostText = "";
     private DocumentPosition _ghostAt;
@@ -59,7 +60,7 @@ public sealed partial class CodeEditor
     private void RequestGhost()
     {
         _ghostCts?.Cancel();
-        if (_languageId is null || BackgroundHelper.Completions is not { } model || _anchor != _caret)
+        if (_languageId is null || BackgroundProviders.Completions is not { } model || _anchor != _caret)
         {
             return;
         }
@@ -82,19 +83,17 @@ public sealed partial class CodeEditor
             return;
         }
 
-        var path = FilePathProvider?.Invoke();
-        var name = string.IsNullOrEmpty(path) ? "untitled" : Path.GetFileName(path);
-        var language = _languageId;
+        var suffix = SuffixAfter(at);
         var cts = _ghostCts = new CancellationTokenSource();
-        _ = RunGhostAsync(model, name, language, prefix, at, cts);
+        _ = RunGhostAsync(model, prefix, suffix, at, cts);
     }
 
     private async Task RunGhostAsync(
-        Codale.Agents.Completion.InlineCompleter model, string name, string language, string prefix, DocumentPosition at, CancellationTokenSource cts)
+        Codale.Core.Background.IFimCompleter model, string prefix, string suffix, DocumentPosition at, CancellationTokenSource cts)
     {
         try
         {
-            var text = await model.CompleteCodeAsync(name, language, prefix, _ghostSeen.ToList(), cts.Token);
+            var text = await model.CompleteAsync(prefix, suffix, _ghostSeen.ToList(), cts.Token);
             if (text.Length == 0 || cts.IsCancellationRequested || _caret != at)
             {
                 return;
@@ -129,6 +128,18 @@ public sealed partial class CodeEditor
         for (var i = 0; i < lines.Count; i++)
         {
             builder.Append(i == 0 ? "" : "\n").Append(lines[i]);
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>The buffer's text from <paramref name="at"/> on, at most <see cref="GhostSuffixChars"/> characters, whole lines where it can.</summary>
+    private string SuffixAfter(DocumentPosition at)
+    {
+        var builder = new StringBuilder(_doc.GetLine(at.Line)[at.Col..]);
+        for (var i = at.Line + 1; i < _doc.LineCount && builder.Length < GhostSuffixChars; i++)
+        {
+            builder.Append('\n').Append(_doc.GetLine(i));
         }
 
         return builder.ToString();

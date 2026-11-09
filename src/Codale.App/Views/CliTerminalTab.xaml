@@ -17,6 +17,7 @@
 
         <!--  The CLI's TUI in a rounded card, matching the session panel beside it  -->
         <Border
+            x:Name="TerminalCard"
             Margin="8,8,8,8"
             Padding="10,8,4,8"
             Background="#0C0C0C"

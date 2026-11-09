@@ -150,7 +150,7 @@ public sealed partial class SearchAgentLoop
     /// </summary>
     public static readonly TimeSpan DefaultBudget = TimeSpan.FromMinutes(5);
 
-    private readonly RipgrepSearch _search;
+    private readonly WorkspaceSearch _search;
     private readonly string _root;
     private readonly ISearchModel _model;
 
@@ -158,7 +158,7 @@ public sealed partial class SearchAgentLoop
     {
         _root = root;
         _model = model;
-        _search = new RipgrepSearch(root);
+        _search = new WorkspaceSearch(root);
     }
 
     public int MaxSteps { get; init; } = DefaultMaxSteps;
@@ -172,7 +172,7 @@ public sealed partial class SearchAgentLoop
     /// The project's source index. With it the opening move is the index's ranking of the
     /// whole project - matches plus the code they use and are used by - instead of one
     /// grep; grep and find_files run in memory; and the model gets a symbol tool to jump
-    /// from a name to its declaration and its users. Null keeps the ripgrep-only loop.
+    /// from a name to its declaration and its users. Null keeps the search-only loop.
     /// </summary>
     public SourceIndex? Index { get; init; }
 
@@ -748,7 +748,7 @@ public sealed partial class SearchAgentLoop
 
     /// <summary>README, manifests and entry points within four levels of the root, shallowest first.</summary>
     /// <remarks>
-    /// One ripgrep listing glob-matched in memory, rather than a managed tree walk:
+    /// One listing glob-matched in memory, rather than a tree walk per glob:
     /// the walk ignored .gitignore, so .venv, target and dist were traversed on every
     /// landmark scan - up to thirteen full walks per search against the budget.
     /// </remarks>
@@ -959,7 +959,7 @@ public sealed partial class SearchAgentLoop
         catch (OperationCanceledException)
         {
         }
-        catch (RipgrepSearchException ex)
+        catch (WorkspaceSearchException ex)
         {
             onError?.Invoke(ex.Message);
         }
@@ -1027,7 +1027,7 @@ public sealed partial class SearchAgentLoop
         try
         {
             // The model likes this tool; a managed walk per step burned the search budget
-            // enumerating ignored trees. One ripgrep listing, glob-matched in memory.
+            // enumerating ignored trees. One listing, glob-matched in memory.
             var files = await _search.ListFilesAsync(ct: ct).ConfigureAwait(false);
             var matcher = new Microsoft.Extensions.FileSystemGlobbing.Matcher();
             matcher.AddInclude(glob);
@@ -1103,7 +1103,7 @@ public sealed partial class SearchAgentLoop
         }
     }
 
-    private static string Summarise(IReadOnlyList<SearchHit> hits)
+    private string Summarise(IReadOnlyList<SearchHit> hits)
     {
         if (hits.Count == 0)
         {
@@ -1118,7 +1118,12 @@ public sealed partial class SearchAgentLoop
         foreach (var hit in hits.Take(15))
         {
             var line = hit.Line.Trim();
-            builder.AppendLine($"{hit.RelativePath}:{hit.LineNumber}: {TextClip.Truncate(line, 100)}");
+
+            // The function or type the line sits in, so the model knows where the code is, not only which file.
+            var owner = _snapshot?.Find(hit.RelativePath) is { } file && _snapshot.Enclosing(file, hit.LineNumber) is { } symbol
+                ? $" in {symbol.Name}"
+                : "";
+            builder.AppendLine($"{hit.RelativePath}:{hit.LineNumber}{owner}: {TextClip.Truncate(line, 100)}");
         }
 
         if (hits.Count > 15)

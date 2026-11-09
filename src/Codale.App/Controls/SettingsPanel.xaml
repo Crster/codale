@@ -382,14 +382,67 @@
                                     </StackPanel>
                                     <ComboBox x:Name="CodexProviderBox" Grid.Column="1" VerticalAlignment="Center" Width="200" SelectionChanged="OnCliProviderChanged" />
                                 </Grid>
-                                <Rectangle Style="{StaticResource Divider}" />
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="Background tasks" />
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
                                 <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
                                     <StackPanel VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Style="{StaticResource RowTitle}" Text="Background task provider" />
-                                        <TextBlock Style="{StaticResource RowDesc}" Text="Powers commit messages, session naming, and fast background tasks." />
+                                        <TextBlock Style="{StaticResource RowTitle}" Text="Provider" />
+                                        <TextBlock Style="{StaticResource RowDesc}" Text="Powers commit messages, session naming, Auto mode routing, project search and ghost text." />
                                     </StackPanel>
-                                    <ComboBox x:Name="HelperProviderBox" Grid.Column="1" VerticalAlignment="Center" Width="200" SelectionChanged="OnHelperProviderChanged" />
+                                    <ComboBox x:Name="BackgroundProviderBox" Grid.Column="1" VerticalAlignment="Center" Width="220" SelectionChanged="OnBackgroundProviderChanged">
+                                        <ComboBoxItem Content="Off" Tag="off" />
+                                        <ComboBoxItem Content="OpenRouter" Tag="openrouter" />
+                                    </ComboBox>
                                 </Grid>
+                                <StackPanel x:Name="OpenRouterPanel" Visibility="Collapsed">
+                                    <Rectangle Style="{StaticResource Divider}" />
+                                    <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="OpenRouter API key" />
+                                            <TextBlock x:Name="OpenRouterStatusText" Style="{StaticResource RowDesc}" TextWrapping="Wrap" Text="" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                            <PasswordBox x:Name="OpenRouterKeyBox" Width="220" PlaceholderText="sk-or-..." LostFocus="OnOpenRouterKeyCommitted" KeyDown="OnOpenRouterKeyKeyDown" />
+                                            <Button Content="Refresh" Click="OnOpenRouterRefreshClick" ToolTipService.ToolTip="Reload the model lists" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <Rectangle Style="{StaticResource Divider}" />
+                                    <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="Model" />
+                                            <TextBlock Style="{StaticResource RowDesc}" Text="Commit messages, session names, summaries, search, editor actions and Auto mode routing. A small fast model is plenty." />
+                                        </StackPanel>
+                                        <ComboBox x:Name="OpenRouterModelBox" Grid.Column="1" VerticalAlignment="Center" Width="220" IsEditable="True" PlaceholderText="e.g. google/gemini-2.5-flash-lite" SelectionChanged="OnOpenRouterModelChanged" TextSubmitted="OnOpenRouterModelSubmitted" />
+                                    </Grid>
+                                    <Rectangle Style="{StaticResource Divider}" />
+                                    <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="Embedding model" />
+                                            <TextBlock Style="{StaticResource RowDesc}" Text="Project retrieval and topic detection. Changing it re-embeds the project." />
+                                        </StackPanel>
+                                        <ComboBox x:Name="OpenRouterEmbeddingModelBox" Grid.Column="1" VerticalAlignment="Center" Width="220" IsEditable="True" PlaceholderText="None (keyword search only)" SelectionChanged="OnOpenRouterModelChanged" TextSubmitted="OnOpenRouterModelSubmitted" />
+                                    </Grid>
+                                    <Rectangle Style="{StaticResource Divider}" />
+                                    <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="Completion model" />
+                                            <TextBlock Style="{StaticResource RowDesc}" Text="One-line ghost text in the editor (Ctrl+Space). A fill-in-the-middle model works best: Codestral, Qwen2.5-Coder or DeepSeek-Coder." />
+                                        </StackPanel>
+                                        <ComboBox x:Name="OpenRouterCompletionModelBox" Grid.Column="1" VerticalAlignment="Center" Width="220" IsEditable="True" PlaceholderText="None (ghost text off)" SelectionChanged="OnOpenRouterModelChanged" TextSubmitted="OnOpenRouterModelSubmitted" />
+                                    </Grid>
+                                    <Rectangle Style="{StaticResource Divider}" />
+                                    <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="Reasoning" />
+                                            <TextBlock Style="{StaticResource RowDesc}" Text="Reasoning models think before answering: better answers, slower and costlier replies." />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="OpenRouterReasoningToggle" Grid.Column="1" MinWidth="0" Toggled="OnOpenRouterReasoningToggled" />
+                                    </Grid>
+                                </StackPanel>
                             </StackPanel>
                         </Border>
                     </StackPanel>

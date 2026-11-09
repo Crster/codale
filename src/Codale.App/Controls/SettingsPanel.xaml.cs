@@ -146,6 +146,7 @@ public sealed partial class SettingsPanel : UserControl
         _providers.Clear();
         _providers.AddRange(AppSettings.ByokProviders);
         BuildProviderEditors();
+        LoadBackgroundSettings();
 
         _loading = false;
     }
@@ -403,40 +404,6 @@ public sealed partial class SettingsPanel : UserControl
             ProvidersPanel.Children.Add(BuildProviderEditor(provider, expanded: false));
         }
 
-        RefreshHelperProviderBox();
-    }
-
-    /// <summary>Rebuilds the background-task provider list: Claude, Codex, then each BYOK provider by name.</summary>
-    private void RefreshHelperProviderBox()
-    {
-        var wasLoading = _loading;
-        _loading = true;
-        try
-        {
-            var wanted = AppSettings.HelperProvider;
-            HelperProviderBox.Items.Clear();
-            HelperProviderBox.IsEnabled = true;
-
-            HelperProviderBox.Items.Add(AppSettings.OffHelperProvider);
-            HelperProviderBox.Items.Add("Claude");
-            HelperProviderBox.Items.Add("Codex");
-
-            var named = _providers.Where(p => p.Name.Trim().Length > 0).ToList();
-            foreach (var provider in named)
-            {
-                HelperProviderBox.Items.Add(provider.Name.Trim());
-            }
-
-            var index = wanted.Length == 0
-                ? 1
-                : HelperProviderBox.Items.ToList().FindIndex(i => string.Equals(i as string, wanted, StringComparison.OrdinalIgnoreCase));
-            HelperProviderBox.SelectedIndex = Math.Max(index, 0); // a deleted provider falls back to Off
-        }
-        finally
-        {
-            _loading = wasLoading;
-        }
-
         RefreshCliProviderBoxes();
     }
 
@@ -484,14 +451,193 @@ public sealed partial class SettingsPanel : UserControl
         WriteSettings(() => AppSettings.SetCliProvider(cli, item.Tag as string));
     }
 
-    private void OnHelperProviderChanged(object sender, SelectionChangedEventArgs e)
+    /// <summary>Shows the background-task settings: the provider, and for OpenRouter its key and models.</summary>
+    private void LoadBackgroundSettings()
     {
-        if (!_loading && HelperProviderBox.SelectedIndex >= 0)
+        var wasLoading = _loading;
+        _loading = true;
+        try
         {
-            var selected = HelperProviderBox.SelectedItem as string ?? "";
-            var name = string.Equals(selected, "Claude", StringComparison.OrdinalIgnoreCase) ? "" : selected;
-            WriteSettings(() => AppSettings.HelperProvider = name);
+            var provider = AppSettings.BackgroundProvider;
+            BackgroundProviderBox.SelectedIndex = Math.Max(0,
+                BackgroundProviderBox.Items.ToList().FindIndex(i => (i as ComboBoxItem)?.Tag as string == provider));
+            OpenRouterKeyBox.Password = AppSettings.OpenRouterApiKey;
+            OpenRouterReasoningToggle.IsOn = AppSettings.OpenRouterReasoning;
+            ShowModel(OpenRouterModelBox, AppSettings.OpenRouterModel);
+            ShowModel(OpenRouterEmbeddingModelBox, AppSettings.OpenRouterEmbeddingModel);
+            ShowModel(OpenRouterCompletionModelBox, AppSettings.OpenRouterCompletionModel);
+            OpenRouterPanel.Visibility = provider == AppSettings.OpenRouterBackgroundProvider ? Visibility.Visible : Visibility.Collapsed;
         }
+        finally
+        {
+            _loading = wasLoading;
+        }
+
+        if (OpenRouterPanel.Visibility == Visibility.Visible)
+        {
+            _ = RefreshOpenRouterAsync();
+        }
+    }
+
+    /// <summary>Puts a stored model name in a picker whose list may not be loaded yet.</summary>
+    private static void ShowModel(ComboBox box, string model)
+    {
+        var index = box.Items.ToList().FindIndex(i => string.Equals(i as string, model, StringComparison.OrdinalIgnoreCase));
+        if (index >= 0)
+        {
+            box.SelectedIndex = index;
+        }
+        else
+        {
+            box.SelectedIndex = -1;
+            box.Text = model;
+        }
+    }
+
+    private void OnBackgroundProviderChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || BackgroundProviderBox.SelectedItem is not ComboBoxItem { Tag: string provider })
+        {
+            return;
+        }
+
+        WriteSettings(() => AppSettings.BackgroundProvider = provider);
+        var openRouter = provider == AppSettings.OpenRouterBackgroundProvider;
+        OpenRouterPanel.Visibility = openRouter ? Visibility.Visible : Visibility.Collapsed;
+        if (openRouter)
+        {
+            _ = RefreshOpenRouterAsync();
+        }
+    }
+
+    private void OnOpenRouterKeyCommitted(object sender, RoutedEventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        var before = AppSettings.OpenRouterApiKey;
+        WriteSettings(() => AppSettings.OpenRouterApiKey = OpenRouterKeyBox.Password);
+        if (before != AppSettings.OpenRouterApiKey)
+        {
+            _ = RefreshOpenRouterAsync();
+        }
+    }
+
+    private void OnOpenRouterKeyKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Enter)
+        {
+            OnOpenRouterKeyCommitted(sender, e);
+            e.Handled = true;
+        }
+    }
+
+    private void OnOpenRouterRefreshClick(object sender, RoutedEventArgs e)
+    {
+        Codale.Agents.OpenRouter.OpenRouterClient.ForgetModels();
+        _ = RefreshOpenRouterAsync();
+    }
+
+    private void OnOpenRouterReasoningToggled(object sender, RoutedEventArgs e)
+    {
+        if (!_loading)
+        {
+            WriteSettings(() => AppSettings.OpenRouterReasoning = OpenRouterReasoningToggle.IsOn);
+        }
+    }
+
+    private void OnOpenRouterModelChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_loading && sender is ComboBox { SelectedItem: string model } box)
+        {
+            SaveOpenRouterModel(box, model);
+        }
+    }
+
+    private void OnOpenRouterModelSubmitted(ComboBox sender, ComboBoxTextSubmittedEventArgs e)
+    {
+        if (!_loading)
+        {
+            SaveOpenRouterModel(sender, e.Text);
+        }
+    }
+
+    private void SaveOpenRouterModel(ComboBox box, string model)
+    {
+        model = model.Trim();
+        if (ReferenceEquals(box, OpenRouterModelBox))
+        {
+            WriteSettings(() => AppSettings.OpenRouterModel = model);
+        }
+        else if (ReferenceEquals(box, OpenRouterEmbeddingModelBox))
+        {
+            WriteSettings(() => AppSettings.OpenRouterEmbeddingModel = model);
+        }
+        else if (ReferenceEquals(box, OpenRouterCompletionModelBox))
+        {
+            WriteSettings(() => AppSettings.OpenRouterCompletionModel = model);
+        }
+    }
+
+    private int _openRouterRefresh;
+
+    /// <summary>
+    /// Loads OpenRouter's model lists into the pickers: chat models for the model and completion pickers,
+    /// embedding models for the embedding one. A stored name the list lacks is still shown as typed.
+    /// </summary>
+    private async Task RefreshOpenRouterAsync()
+    {
+        var run = ++_openRouterRefresh;
+        var client = new Codale.Agents.OpenRouter.OpenRouterClient(AppSettings.OpenRouterApiKey);
+        OpenRouterStatusText.Text = "Loading models…";
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            var chat = await client.ListModelsAsync(timeout.Token);
+            var embedding = await client.ListEmbeddingModelsAsync(timeout.Token);
+            if (run != _openRouterRefresh)
+            {
+                return;
+            }
+
+            var wasLoading = _loading;
+            _loading = true;
+            try
+            {
+                var chatIds = chat.Select(m => m.Id).ToList();
+                FillModels(OpenRouterModelBox, chatIds, AppSettings.OpenRouterModel);
+                FillModels(OpenRouterCompletionModelBox, chatIds, AppSettings.OpenRouterCompletionModel);
+                FillModels(OpenRouterEmbeddingModelBox, embedding.Select(m => m.Id).ToList(), AppSettings.OpenRouterEmbeddingModel);
+            }
+            finally
+            {
+                _loading = wasLoading;
+            }
+
+            OpenRouterStatusText.Text = AppSettings.OpenRouterApiKey.Length == 0
+                ? $"{chat.Count} models available. Paste an API key from openrouter.ai/keys to use them."
+                : $"{chat.Count} chat models · {embedding.Count} embedding models";
+        }
+        catch (Exception ex) when (ex is Codale.Core.Helper.HelperModelException or OperationCanceledException)
+        {
+            if (run == _openRouterRefresh)
+            {
+                OpenRouterStatusText.Text = ex is OperationCanceledException ? "OpenRouter did not answer." : ex.Message;
+            }
+        }
+    }
+
+    private static void FillModels(ComboBox box, IReadOnlyList<string> models, string current)
+    {
+        box.Items.Clear();
+        foreach (var model in models)
+        {
+            box.Items.Add(model);
+        }
+
+        ShowModel(box, current);
     }
 
     private Expander BuildProviderEditor(ByokProvider provider, bool expanded)
@@ -520,23 +666,7 @@ public sealed partial class SettingsPanel : UserControl
             return box;
         }
 
-        var previousName = provider.Name;
-        Field("Name", "Shown in the status bar", provider.Name, v => provider.Name = v, () =>
-        {
-            header.Text = provider.Name;
-
-            if (string.Equals(AppSettings.HelperProvider, previousName, StringComparison.OrdinalIgnoreCase) &&
-                provider.Name.Length > 0)
-            {
-                WriteSettings(() => AppSettings.HelperProvider = provider.Name);
-            }
-
-            // A blank name is transient while retyping; keep matching on the last real one.
-            if (provider.Name.Length > 0)
-            {
-                previousName = provider.Name;
-            }
-        });
+        Field("Name", "Shown in the status bar", provider.Name, v => provider.Name = v, () => header.Text = provider.Name);
 
         Field("OpenAI-compatible base URL", "https://api.example.com/v1 (used by Codex CLI)", provider.BaseUrl, v => provider.BaseUrl = v);
         Field("Anthropic-compatible base URL", "https://api.example.com (used by Claude CLI)", provider.AnthropicBaseUrl, v => provider.AnthropicBaseUrl = v);
@@ -594,11 +724,6 @@ public sealed partial class SettingsPanel : UserControl
         remove.Click += (_, _) =>
         {
             _providers.Remove(provider);
-            if (string.Equals(AppSettings.HelperProvider, provider.Name, StringComparison.OrdinalIgnoreCase))
-            {
-                WriteSettings(() => AppSettings.HelperProvider = "");
-            }
-
             SaveProviders();
             BuildProviderEditors();
         };
@@ -716,8 +841,8 @@ public sealed partial class SettingsPanel : UserControl
         {
             WriteSettings(() => AppSettings.ByokProviders = _providers);
 
-            // The background-task list mirrors the providers: add, rename and remove show up at once.
-            RefreshHelperProviderBox();
+            // The CLI provider lists mirror the providers: add, rename and remove show up at once.
+            RefreshCliProviderBoxes();
         }
     }
 
@@ -943,8 +1068,7 @@ public sealed partial class SettingsPanel : UserControl
     private async void OnSyntaxGenerateClick(object sender, RoutedEventArgs e)
     {
         // Settings has no file in front, so the dialog asks for the language and an optional sample.
-        using var helper = BackgroundHelper.Create();
-        await SyntaxDialogs.ShowGenerateAsync(XamlRoot, helper, "", "", "");
+        await SyntaxDialogs.ShowGenerateAsync(XamlRoot, BackgroundProviders.Create(), "", "", "");
     }
 
     private void OnSyntaxImportClick(object sender, RoutedEventArgs e)

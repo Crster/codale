@@ -28,7 +28,6 @@ public sealed partial class FeatureStore
             worktree TEXT PRIMARY KEY, chunk_version INTEGER NOT NULL
         );
         CREATE VIRTUAL TABLE IF NOT EXISTS source_fts USING fts5(chunk_id UNINDEXED, tokens);
-        DROP TABLE IF EXISTS source_vectors;
         CREATE TABLE IF NOT EXISTS chunk_vectors (
             chunk_id INTEGER NOT NULL, model TEXT NOT NULL, vector BLOB NOT NULL, PRIMARY KEY(chunk_id, model)
         ) WITHOUT ROWID;

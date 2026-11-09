@@ -4,7 +4,7 @@ namespace Codale.Search.Tests;
 
 /// <summary>
 /// What the model may and may not be shown: nothing outside the project, no credentials
-/// files, and an honest error when ripgrep rejects a pattern.
+/// files, and an honest error when a pattern is rejected.
 /// </summary>
 public sealed class SearchHardeningTests : IDisposable
 {
@@ -17,7 +17,7 @@ public sealed class SearchHardeningTests : IDisposable
         Directory.CreateDirectory(_root);
         File.WriteAllText(Path.Combine(_root, "app.cs"), "class App { string Name = \"hunter2marker\"; }");
 
-        // No .gitignore anywhere: ripgrep would happily search these.
+        // No .gitignore anywhere: these files are searched anyway.
         File.WriteAllText(Path.Combine(_root, ".env"), "API_KEY=hunter2marker\n");
         File.WriteAllText(Path.Combine(_root, "server.pem"), "-----BEGIN PRIVATE KEY-----hunter2marker\n");
 
@@ -126,11 +126,11 @@ public sealed class SearchHardeningTests : IDisposable
     }
 
     [Fact(Timeout = 30_000)]
-    public async Task Ripgrep_rejecting_a_pattern_surfaces_as_an_error()
+    public async Task Rejected_pattern_surfaces_as_an_error()
     {
-        var search = new RipgrepSearch(_root);
+        var search = new WorkspaceSearch(_root);
 
-        await Assert.ThrowsAsync<RipgrepSearchException>(async () =>
+        await Assert.ThrowsAsync<WorkspaceSearchException>(async () =>
         {
             await foreach (var _ in search.SearchAsync(new SearchQuery { Text = "(", IsRegex = true }))
             {
@@ -142,7 +142,7 @@ public sealed class SearchHardeningTests : IDisposable
     public async Task A_search_with_no_matches_is_still_just_empty()
     {
         var hits = new List<SearchHit>();
-        await foreach (var hit in new RipgrepSearch(_root).SearchAsync(new SearchQuery { Text = "zzzznomatchzzzz" }))
+        await foreach (var hit in new WorkspaceSearch(_root).SearchAsync(new SearchQuery { Text = "zzzznomatchzzzz" }))
         {
             hits.Add(hit);
         }
@@ -153,7 +153,7 @@ public sealed class SearchHardeningTests : IDisposable
     [Fact(Timeout = 30_000)]
     public async Task Hits_carry_absolute_and_root_relative_paths()
     {
-        var hit = await new RipgrepSearch(_root).SearchAsync(new SearchQuery { Text = "class App" }).SingleAsync();
+        var hit = await new WorkspaceSearch(_root).SearchAsync(new SearchQuery { Text = "class App" }).SingleAsync();
 
         Assert.Equal("app.cs", hit.RelativePath);
         Assert.Equal(Path.Combine(_root, "app.cs"), hit.FilePath);

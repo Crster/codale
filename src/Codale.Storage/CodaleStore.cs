@@ -6,9 +6,6 @@ using Microsoft.Data.Sqlite;
 
 namespace Codale.Storage;
 
-/// <summary>The database was written by a newer Codale than this one; opening it for writes could corrupt it.</summary>
-public sealed class StoreSchemaException(string message) : InvalidOperationException(message);
-
 /// <summary>
 /// Codale's own database: the task lists agents showed, and what the user arranged (panel
 /// sizes, per-project settings).
@@ -30,9 +27,6 @@ public sealed class CodaleStore : IDisposable
 
     /// <summary>Serialises migration so two stores opened at once on a fresh file do not both build the schema.</summary>
     private static readonly object MigrateLock = new();
-
-    /// <summary>The schema this build understands. A database stamped higher was written by a newer Codale.</summary>
-    public const int SupportedSchemaVersion = 1;
 
     public CodaleStore(string databasePath)
     {
@@ -86,8 +80,6 @@ public sealed class CodaleStore : IDisposable
     private void Migrate()
     {
         Execute("""
-            CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
-
             CREATE TABLE IF NOT EXISTS todos (
                 session_id TEXT NOT NULL,
                 position   INTEGER NOT NULL,
@@ -102,22 +94,102 @@ public sealed class CodaleStore : IDisposable
                 value       TEXT NOT NULL,
                 PRIMARY KEY (project_key, name)
             );
+
+            CREATE TABLE IF NOT EXISTS command_history (
+                project_key TEXT NOT NULL,
+                text        TEXT NOT NULL,
+                source      TEXT NOT NULL,
+                uses        INTEGER NOT NULL DEFAULT 1,
+                last_used   INTEGER NOT NULL,
+                PRIMARY KEY (project_key, text)
+            );
             """);
+    }
+
+    /// <summary>Commands kept per project; the least recently used beyond this are dropped.</summary>
+    public const int MaxCommandsPerProject = 2000;
+
+    /// <summary>
+    /// Records a command typed in a project's shell box or terminal: a new one is kept, a repeat
+    /// counts another use and moves to the front of the recent list.
+    /// </summary>
+    public void RecordCommand(string projectPath, string command, string source, DateTimeOffset when)
+    {
+        var key = ProjectPaths.InstanceKey(projectPath);
+        using var transaction = _connection.BeginTransaction();
+
+        using (var upsert = _connection.CreateCommand())
+        {
+            upsert.Transaction = transaction;
+            upsert.CommandText = """
+                INSERT INTO command_history (project_key, text, source, uses, last_used) VALUES ($key, $text, $source, 1, $at)
+                ON CONFLICT (project_key, text) DO UPDATE SET uses = uses + 1, last_used = excluded.last_used, source = excluded.source;
+                """;
+            upsert.Parameters.AddWithValue("$key", key);
+            upsert.Parameters.AddWithValue("$text", command);
+            upsert.Parameters.AddWithValue("$source", source);
+            upsert.Parameters.AddWithValue("$at", when.ToUnixTimeMilliseconds());
+            upsert.ExecuteNonQuery();
+        }
+
+        using (var prune = _connection.CreateCommand())
+        {
+            prune.Transaction = transaction;
+            prune.CommandText = """
+                DELETE FROM command_history WHERE project_key = $key AND text NOT IN (
+                    SELECT text FROM command_history WHERE project_key = $key ORDER BY last_used DESC LIMIT $keep);
+                """;
+            prune.Parameters.AddWithValue("$key", key);
+            prune.Parameters.AddWithValue("$keep", MaxCommandsPerProject);
+            prune.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
+    /// <summary>The project's commands, most recently used first.</summary>
+    public IReadOnlyList<string> RecentCommands(string projectPath, int max = 500)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT text FROM command_history WHERE project_key = $key ORDER BY last_used DESC LIMIT $max;";
+        command.Parameters.AddWithValue("$key", ProjectPaths.InstanceKey(projectPath));
+        command.Parameters.AddWithValue("$max", max);
+        return ReadTexts(command);
+    }
+
+    /// <summary>
+    /// The project's commands that begin with <paramref name="prefix"/> (case-insensitively), the most
+    /// often used first and then the most recent.
+    /// </summary>
+    public IReadOnlyList<string> CommandsStartingWith(string projectPath, string prefix, int max = 8)
+    {
+        var escaped = prefix.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
 
         using var command = _connection.CreateCommand();
-        command.CommandText = "SELECT COALESCE(MAX(version), 0) FROM schema_version;";
-        var version = Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+        command.CommandText = """
+            SELECT text FROM command_history
+            WHERE project_key = $key AND text LIKE $pattern ESCAPE '\' AND text <> $typed
+            ORDER BY uses DESC, last_used DESC LIMIT $max;
+            """;
+        command.Parameters.AddWithValue("$key", ProjectPaths.InstanceKey(projectPath));
+        command.Parameters.AddWithValue("$pattern", escaped + "%");
+        command.Parameters.AddWithValue("$typed", prefix);
+        command.Parameters.AddWithValue("$max", max);
+        return ReadTexts(command);
+    }
 
-        if (version > SupportedSchemaVersion)
+    private static List<string> ReadTexts(SqliteCommand command)
+    {
+        var texts = new List<string>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
         {
-            throw new StoreSchemaException(
-                $"This database uses schema version {version}, but this Codale only understands up to {SupportedSchemaVersion}. Update Codale to open it.");
+            texts.Add(reader.GetString(0));
         }
 
-        if (version == 0)
-        {
-            Execute($"INSERT INTO schema_version (version) VALUES ({SupportedSchemaVersion});");
-        }
+        return texts;
     }
 
     public void SaveTodos(string sessionId, IReadOnlyList<(string Content, string Status)> todos)

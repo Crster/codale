@@ -209,29 +209,4 @@ public sealed class GitDiffParserTests
         Assert.Empty(GitDiffParser.Parse(""));
         Assert.Empty(GitDiffParser.Parse("   \n  "));
     }
-
-    [Fact]
-    public void Worktree_list_porcelain_is_parsed()
-    {
-        var porcelain = """
-            worktree X:/repo
-            HEAD abc123
-            branch refs/heads/main
-
-            worktree X:/repo/.codale/worktrees/1a2b3c4d
-            HEAD def456
-            branch refs/heads/codale/1a2b3c4d
-
-            """;
-
-        var worktrees = GitWorktrees.ParseList(porcelain);
-
-        Assert.Equal(2, worktrees.Count);
-        Assert.True(worktrees[0].IsMain);
-        Assert.Equal("main", worktrees[0].Branch);
-
-        Assert.False(worktrees[1].IsMain);
-        Assert.Equal("codale/1a2b3c4d", worktrees[1].Branch);
-        Assert.EndsWith("1a2b3c4d", worktrees[1].Path);
-    }
 }

@@ -4,7 +4,7 @@ namespace Codale.Search;
 
 /// <summary>
 /// Files whose contents are credentials. What the search model reads is sent to whatever
-/// endpoint backs it, and ripgrep's .gitignore handling is no protection outside a git
+/// endpoint backs it, and the .gitignore handling is no protection outside a git
 /// repository, so these are refused by name before any content is read.
 /// </summary>
 public static class SensitivePaths

@@ -79,7 +79,7 @@ public sealed class McpServerSettings
     public bool TasksAvailable => File.Exists(ExePath("Codale.Mcp.Tasks"));
 
     /// <summary>The tasks server, wired to this chat's pipe; the exe finds the app through its environment.</summary>
-    /// <param name="runDirectory">Where the chat's tasks run (its worktree, when it has one); the command list itself is always the project's.</param>
+    /// <param name="runDirectory">Where the chat's tasks run; the command list itself is always the project's.</param>
     /// <param name="pushToPanel">For an agent CLI in a terminal, whose tool stream the app cannot read: todos_set and artifact_add are sent over the pipe.</param>
     public McpServerSpec? TasksSpec(string pipeName, string token, string? runDirectory = null, bool pushToPanel = false) => !TasksAvailable
         ? null
@@ -217,39 +217,31 @@ public sealed class McpServerSettings
     /// </summary>
     public static void WriteGlobalMcpConfig(IReadOnlyList<McpServerSpec> servers)
     {
-        var targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        var dir = CodaleDataRoot();
+        try
         {
-            CodaleDataRoot(),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale"),
-        };
+            var json = McpServerSpec.ToAgyConfig(servers);
+            var rootConfig = Path.Combine(dir, "mcp_config.json");
+            var agentsConfig = Path.Combine(dir, ".agents", "mcp_config.json");
 
-        foreach (var dir in targets)
+            if (json is { Length: > 0 })
+            {
+                Directory.CreateDirectory(dir);
+                File.WriteAllText(rootConfig, json);
+
+                Directory.CreateDirectory(Path.GetDirectoryName(agentsConfig)!);
+                File.WriteAllText(agentsConfig, json);
+            }
+            else
+            {
+                if (File.Exists(rootConfig)) File.Delete(rootConfig);
+                if (File.Exists(agentsConfig)) File.Delete(agentsConfig);
+            }
+
+            WriteAgyRules(Path.Combine(dir, ".agents", "rules", "codale.md"), servers);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            try
-            {
-                var json = McpServerSpec.ToAgyConfig(servers);
-                var rootConfig = Path.Combine(dir, "mcp_config.json");
-                var agentsConfig = Path.Combine(dir, ".agents", "mcp_config.json");
-
-                if (json is { Length: > 0 })
-                {
-                    Directory.CreateDirectory(dir);
-                    File.WriteAllText(rootConfig, json);
-
-                    Directory.CreateDirectory(Path.GetDirectoryName(agentsConfig)!);
-                    File.WriteAllText(agentsConfig, json);
-                }
-                else
-                {
-                    if (File.Exists(rootConfig)) File.Delete(rootConfig);
-                    if (File.Exists(agentsConfig)) File.Delete(agentsConfig);
-                }
-
-                WriteAgyRules(Path.Combine(dir, ".agents", "rules", "codale.md"), servers);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-            }
         }
     }
 
@@ -785,15 +777,6 @@ public sealed class McpServerSettings
 
             CopyDirectory(Path.GetDirectoryName(source)!, partial);
             Directory.Move(partial, target);
-
-            // Older builds' copies are dead weight (the browser one carries a Node runtime).
-            foreach (var old in Directory.GetDirectories(Path.Combine(StagingRoot(), name)))
-            {
-                if (!string.Equals(old, target, StringComparison.OrdinalIgnoreCase))
-                {
-                    try { Directory.Delete(old, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* in use by a running session */ }
-                }
-            }
 
             return staged;
         }

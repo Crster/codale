@@ -113,9 +113,20 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     /// </summary>
     public Func<string, string?>? LaunchRewriter { get; set; }
 
-    /// <summary>Applies <see cref="LaunchRewriter"/> to the prompt line typed into a live shell.</summary>
-    public string? RewriteSubmitted(string promptLine) =>
-        IsRunning ? LaunchRewriter?.Invoke(promptLine) : null;
+    /// <summary>
+    /// Applies <see cref="LaunchRewriter"/> to the prompt line typed into a live shell, and keeps the
+    /// typed command in the project's history for recall and autocomplete.
+    /// </summary>
+    public string? RewriteSubmitted(string promptLine)
+    {
+        if (!IsRunning)
+        {
+            return null;
+        }
+
+        CommandHistory.Record(_workingDirectory, Codale.Core.Shell.PromptLine.Command(promptLine), "terminal");
+        return LaunchRewriter?.Invoke(promptLine);
+    }
 
     /// <summary>Why the shell could not be started, shown in the terminal when set.</summary>
     public string StartupError { get; private set; } = "";

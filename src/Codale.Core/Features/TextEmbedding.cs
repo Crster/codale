@@ -3,6 +3,13 @@ using System.Text;
 
 namespace Codale.Core.Features;
 
+/// <summary>What a text is embedded as: models trained with task prefixes embed a search query apart from the text it should find.</summary>
+public enum EmbedRole
+{
+    Document,
+    Query,
+}
+
 /// <summary>
 /// Turns text into a dense, L2-normalised vector for similarity search. <see cref="Model"/> is stored
 /// beside every vector, so swapping the implementation re-embeds the index.
@@ -10,12 +17,16 @@ namespace Codale.Core.Features;
 public interface ITextEmbedder
 {
     string Model { get; }
-    int Dimension { get; }
 
     /// <summary>The cosine above which two short texts are on one subject, for this model.</summary>
     float RelatedSimilarity { get; }
 
-    float[] Embed(string text);
+    /// <summary>The cosine a neighbour needs to count as a match on its own, without lexical evidence beside it.</summary>
+    float MatchSimilarity { get; }
+
+    /// <summary>One unit vector per text, in order.</summary>
+    /// <exception cref="Helper.HelperModelException">A model behind a server could not be reached or answered badly.</exception>
+    Task<IReadOnlyList<float[]>> EmbedAsync(IReadOnlyList<string> texts, EmbedRole role, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -32,6 +43,10 @@ public sealed class HashedTextEmbedder : ITextEmbedder
     public string Model => "hashed-ngram-v1-384";
     public int Dimension => 384;
     public float RelatedSimilarity => 0.25f;
+    public float MatchSimilarity => 0.25f;
+
+    public Task<IReadOnlyList<float[]>> EmbedAsync(IReadOnlyList<string> texts, EmbedRole role, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<float[]>>(texts.Select(Embed).ToArray());
 
     public float[] Embed(string text)
     {

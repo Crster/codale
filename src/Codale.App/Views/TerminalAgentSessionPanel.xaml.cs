@@ -190,7 +190,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     private CliDescriptor Cli => Session?.TerminalCli ?? CliLocator.ActiveCli;
 
-    private string ProjectPath => Session?.WorktreePath ?? Workspace?.ProjectPath ?? "";
+    private string ProjectPath => Workspace?.ProjectPath ?? "";
 
     private void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 

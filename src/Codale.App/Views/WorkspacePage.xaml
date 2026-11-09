@@ -2062,7 +2062,7 @@
                                         <TextBlock
                                             FontSize="12"
                                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            Text="Applies to new sessions" />
+                                            Text="Changes apply on your next chat message" />
                                     </StackPanel>
 
                                     <StackPanel Spacing="8">
@@ -2097,7 +2097,7 @@
                                         <Button
                                             HorizontalAlignment="Stretch"
                                             Command="{x:Bind ViewModel.McpTools.OpenBrowserCommand}"
-                                            Content="Open browser window"
+                                            Content="Open browser"
                                             IsEnabled="{x:Bind ViewModel.McpTools.BrowserAvailable}" />
                                         <TextBlock
                                             FontSize="12"
@@ -2211,7 +2211,7 @@
                                             Glyph="&#xE7F4;"
                                             Opacity="0.8" />
                                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
-                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="Desktop control" />
+                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="Desktop" />
                                             <TextBlock
                                                 FontSize="12"
                                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -2243,7 +2243,7 @@
                                             Glyph="&#xE8EA;"
                                             Opacity="0.8" />
                                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
-                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="Phone (Android)" />
+                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="Android" />
                                             <TextBlock
                                                 FontSize="12"
                                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"

@@ -63,16 +63,12 @@ public sealed record UserTurn(string Text)
         "create or delete files or run commands that change anything. Say what you would do and why, " +
         "with code snippets where they help.\n\n";
 
-    private const string AskMarker = "[Ask mode] ";
-
     /// <summary>Planning exposes missing decisions for user correction before implementation.</summary>
     public const string PlanInstruction =
         "[Plan mode] Plan first; do not implement changes to application files. Inspect the relevant code, " +
         "identify missing requirements and ask focused questions about material scope, behavior or design decisions. " +
         "Do not invent requirements or silently fill gaps. Clearly distinguish confirmed requirements, open questions " +
         "and proposed assumptions. Present a concrete plan the user can correct, and wait for their approval before implementation.\n\n";
-
-    private const string PlanMarker = "[Plan mode] ";
 
     /// <summary>
     /// A feature's briefing (<see cref="SessionBriefing.ContextBlock"/>), carried on a session's
@@ -84,21 +80,18 @@ public sealed record UserTurn(string Text)
     public string ProviderText => (ContextPrefix ?? "") + (AskOnly ? AskInstruction + Text : PlanOnly ? PlanInstruction + Text : Text);
 
     /// <summary>
-    /// The user's own words from a recorded prompt: any ask-mode prefix removed. Matched
-    /// by its marker up to the blank line, so prompts recorded under an older wording of
-    /// the instruction come back clean too.
+    /// The user's own words from a recorded prompt: the briefing and any ask- or plan-mode
+    /// prefix removed, exactly as <see cref="ProviderText"/> wrote them.
     /// </summary>
     public static string StripHostInstructions(string text)
     {
         text = SessionBriefing.StripContext(text);
-        if (!text.StartsWith(AskMarker, StringComparison.Ordinal) && !text.StartsWith(PlanMarker, StringComparison.Ordinal))
+        if (text.StartsWith(AskInstruction, StringComparison.Ordinal))
         {
-            return text;
+            return text[AskInstruction.Length..];
         }
 
-        var normalized = text.ReplaceLineEndings("\n");
-        var end = normalized.IndexOf("\n\n", StringComparison.Ordinal);
-        return end < 0 ? text : normalized[(end + 2)..];
+        return text.StartsWith(PlanInstruction, StringComparison.Ordinal) ? text[PlanInstruction.Length..] : text;
     }
 }
 

@@ -7,7 +7,7 @@ namespace Codale.App.Services;
 /// Wraps a secret (a BYOK API key) for storage in settings.json with the Windows Data
 /// Protection API, CurrentUser scope: only the same Windows account can read the blob
 /// back, so a copied or synced settings file does not leak the key. Stored values are
-/// <c>enc:</c> plus base64; anything without that prefix is a legacy plaintext value.
+/// <c>enc:</c> plus base64; a value without that prefix is not a stored secret and reads as empty.
 /// </summary>
 /// <remarks>
 /// Calls crypt32 directly: the managed ProtectedData class ships as a separate package.
@@ -19,7 +19,7 @@ internal static class SecretProtector
 
     public static bool IsProtected(string stored) => stored.StartsWith(Prefix, StringComparison.Ordinal);
 
-    /// <summary>Encrypts <paramref name="secret"/>; empty stays empty, and a failure returns the plaintext (logged) so the key is never lost.</summary>
+    /// <summary>Encrypts <paramref name="secret"/>; empty stays empty.</summary>
     public static string Protect(string secret)
     {
         if (secret.Length == 0 || IsProtected(secret))
@@ -27,22 +27,15 @@ internal static class SecretProtector
             return secret;
         }
 
-        try
-        {
-            return Prefix + Convert.ToBase64String(Transform(Encoding.UTF8.GetBytes(secret), protect: true));
-        }
-        catch (Exception)
-        {
-            return secret;
-        }
+        return Prefix + Convert.ToBase64String(Transform(Encoding.UTF8.GetBytes(secret), protect: true));
     }
 
-    /// <summary>Reverses <see cref="Protect"/>. Plaintext (legacy) passes through; a blob from another account or machine yields "".</summary>
+    /// <summary>Reverses <see cref="Protect"/>. A value that is not protected, or a blob from another account or machine, yields "".</summary>
     public static string Unprotect(string stored)
     {
         if (!IsProtected(stored))
         {
-            return stored;
+            return "";
         }
 
         try

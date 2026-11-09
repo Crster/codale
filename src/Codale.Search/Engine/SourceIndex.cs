@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 
+using Codale.Core.Projects;
+
 namespace Codale.Search;
 
 public sealed record SourceIndexOptions
@@ -20,16 +22,19 @@ public sealed record SourceIndexOptions
     public TimeSpan MaxRefreshWait { get; init; } = TimeSpan.FromSeconds(2);
 
     public bool Watch { get; init; } = true;
+
+    /// <summary>Where the workspace model is saved between runs; null keeps it in memory for this session only.</summary>
+    public string? ModelPath { get; init; }
 }
 
 /// <summary>
 /// The project's source, scanned once and kept current: the whole tree is listed with
-/// ripgrep (so .gitignore holds), every text file is read and tokenised in parallel, and a
+/// the workspace listing (so .gitignore holds), every text file is read and tokenised in parallel, and a
 /// file watcher marks the snapshot stale so the next search re-reads only what changed.
 /// </summary>
 /// <remarks>
 /// A search then costs dictionary lookups and a few in-memory regex passes instead of a
-/// ripgrep process per keyword. The first scan runs in the background as soon as a project
+/// file scan per keyword. The first scan runs in the background as soon as a project
 /// opens (<see cref="Warm"/>); a search that arrives before it finishes awaits it.
 /// </remarks>
 public sealed class SourceIndex : IDisposable
@@ -43,6 +48,7 @@ public sealed class SourceIndex : IDisposable
 
     private readonly Lock _gate = new();
     private readonly SourceIndexOptions _options;
+    private readonly WorkspaceModel _model;
 
     /// <summary>Files found binary, by size and write time, so a refresh does not read them again.</summary>
     private readonly ConcurrentDictionary<string, (long Length, DateTime Written)> _binary = new(StringComparer.OrdinalIgnoreCase);
@@ -57,6 +63,7 @@ public sealed class SourceIndex : IDisposable
     {
         Root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         _options = options ?? new SourceIndexOptions();
+        _model = new WorkspaceModel(_options.ModelPath);
     }
 
     /// <summary>
@@ -68,7 +75,7 @@ public sealed class SourceIndex : IDisposable
     {
         var key = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         var used = Interlocked.Increment(ref _useClock);
-        var entry = Shared.AddOrUpdate(key, k => (new SourceIndex(k), used), (_, e) => (e.Index, used));
+        var entry = Shared.AddOrUpdate(key, k => (new SourceIndex(k, new SourceIndexOptions { ModelPath = ModelPathFor(k) }), used), (_, e) => (e.Index, used));
 
         if (Shared.Count > MaxShared)
         {
@@ -86,8 +93,24 @@ public sealed class SourceIndex : IDisposable
 
     public string Root { get; }
 
+    /// <summary>The model file for a project, beside its knowledge database.</summary>
+    private static string ModelPathFor(string root) => Path.Combine(ProjectPaths.KnowledgeDirectory(root), "workspace-model.json");
+
     /// <summary>The latest finished snapshot, or null before the first scan completes.</summary>
     public SourceSnapshot? Current => Volatile.Read(ref _current);
+
+    /// <summary>The workspace model: learned from this project's files and kept current as they change.</summary>
+    public WorkspaceModel Model => _model;
+
+    /// <summary>
+    /// The names to offer at the cursor: the model's suggestions for <paramref name="prefix"/>, ranked with the
+    /// word before the cursor. Starts a scan when one is due; empty until the first scan has loaded the model.
+    /// </summary>
+    public IReadOnlyList<WorkspaceSuggestion> Suggest(string prefix, string? previousWord = null)
+    {
+        Warm();
+        return _model.Suggest(prefix, previousWord);
+    }
 
     /// <summary>Starts the scan now if one is due, without waiting for it. Cheap to call often.</summary>
     public void Warm()
@@ -158,6 +181,7 @@ public sealed class SourceIndex : IDisposable
     private async Task<SourceSnapshot> BuildAsync()
     {
         EnsureWatcher();
+        _model.Load();
 
         var version = Interlocked.Read(ref _version);
         var reloadAll = Interlocked.Exchange(ref _reloadAll, 0) == 1;
@@ -205,6 +229,13 @@ public sealed class SourceIndex : IDisposable
                 return;
             }
 
+            // Stored by the workspace model and unchanged since: its statistics stand, nothing is read.
+            if (!reloadAll && _model.Rehydrate(relative, full, info.Length, info.LastWriteTimeUtc) is { } stored)
+            {
+                files[i] = stored;
+                return;
+            }
+
             if (Load(relative, full, info, ref retained) is { } file)
             {
                 files[i] = file;
@@ -216,6 +247,20 @@ public sealed class SourceIndex : IDisposable
         var snapshot = new SourceSnapshot(listed, indexed, version, read);
 
         Volatile.Write(ref _current, snapshot);
+
+        // Only what changed is folded into the model: each file replaces its own contribution.
+        foreach (var file in indexed)
+        {
+            _model.Put(file);
+        }
+
+        var kept = new HashSet<string>(indexed.Select(f => f.RelativePath), StringComparer.OrdinalIgnoreCase);
+        foreach (var gone in _model.Paths().Where(p => !kept.Contains(p)))
+        {
+            _model.Remove(gone);
+        }
+
+        _model.Save();
         return snapshot;
     }
 
@@ -239,18 +284,19 @@ public sealed class SourceIndex : IDisposable
 
         var (keys, counts, total) = SourceTokens.Count(text);
         var symbols = SourceSymbols.Extract(text);
+        var transitions = SourceTokens.Transitions(text);
         var keep = Interlocked.Add(ref retained, text.Length) <= _options.MaxRetainedChars;
         if (!keep)
         {
             Interlocked.Add(ref retained, -text.Length);
         }
 
-        return new SourceFile(relative, full, info.Length, info.LastWriteTimeUtc, keep ? text : null, keys, counts, total, symbols);
+        return new SourceFile(relative, full, info.Length, info.LastWriteTimeUtc, keep ? text : null, keys, counts, total, symbols, transitions);
     }
 
-    /// <summary>ripgrep's listing, .gitignore applied. ripgrep ships beside the app, so there is no fallback walk.</summary>
+    /// <summary>The workspace listing, .gitignore applied.</summary>
     private Task<IReadOnlyList<string>> ListAsync() =>
-        new RipgrepSearch(Root).ListFilesAsync(CodeDiscovery.NoiseGlobs, _options.MaxFiles);
+        new WorkspaceSearch(Root).ListFilesAsync(CodeDiscovery.NoiseGlobs, _options.MaxFiles);
 
     private void EnsureWatcher()
     {

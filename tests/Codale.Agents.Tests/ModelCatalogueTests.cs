@@ -27,11 +27,11 @@ public sealed class ModelCatalogueTests
     }
 
     [Fact]
-    public void An_older_ask_instruction_is_stripped_too()
+    public void An_older_ask_instruction_wording_is_not_stripped()
     {
-        const string recorded = "[Ask mode] Answer this with a detailed explanation only. Older wording.\r\n\r\nwhy is it slow?";
+        const string recorded = "[Ask mode] Answer this with a detailed explanation only. Older wording.\n\nwhy is it slow?";
 
-        Assert.Equal("why is it slow?", UserTurn.StripHostInstructions(recorded));
+        Assert.Equal(recorded, UserTurn.StripHostInstructions(recorded));
         Assert.Equal("[Ask mode] alone", UserTurn.StripHostInstructions("[Ask mode] alone"));
     }
 }

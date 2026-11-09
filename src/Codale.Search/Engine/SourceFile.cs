@@ -9,10 +9,15 @@ public enum SourceSymbolKind
     Type,
     Function,
     Property,
+    Variable,
 }
 
-/// <summary>A declaration found by the scan: a type, function or property and the line it starts on (1-based).</summary>
-public sealed record SourceSymbol(string Name, SourceSymbolKind Kind, int Line);
+/// <summary>
+/// A declaration found by the scan: a type, function, property or variable. <see cref="Line"/>
+/// is where it starts and <see cref="EndLine"/> where its body ends (both 1-based, equal for a
+/// variable or a declaration with no block).
+/// </summary>
+public sealed record SourceSymbol(string Name, SourceSymbolKind Kind, int Line, int EndLine);
 
 /// <summary>
 /// One text file of the project as the scan saw it: its identifier counts, its
@@ -35,7 +40,8 @@ public sealed class SourceFile
         string[] termKeys,
         int[] termCounts,
         int tokenCount,
-        SourceSymbol[] symbols)
+        SourceSymbol[] symbols,
+        WordPair[]? transitions = null)
     {
         RelativePath = relativePath;
         FullPath = fullPath;
@@ -46,6 +52,7 @@ public sealed class SourceFile
         TermCounts = termCounts;
         TokenCount = tokenCount;
         Symbols = symbols;
+        Transitions = transitions ?? [];
         NameKey = Path.GetFileNameWithoutExtension(relativePath).ToLowerInvariant();
         DirectoryKey = (Path.GetDirectoryName(relativePath) ?? "").ToLowerInvariant();
         IsTestOrDoc = CodeDiscovery.IsTestOrDoc(relativePath);
@@ -61,6 +68,9 @@ public sealed class SourceFile
     public DateTime LastWriteUtc { get; }
 
     public IReadOnlyList<SourceSymbol> Symbols { get; }
+
+    /// <summary>The identifier pairs written next to each other in the file, with their counts (the model's transition channel).</summary>
+    internal IReadOnlyList<WordPair> Transitions { get; }
 
     /// <summary>Identifiers (and their camelCase/snake_case parts) in the file: its length for ranking.</summary>
     public int TokenCount { get; }
@@ -144,7 +154,7 @@ internal static class SourceText
         return starts;
     }
 
-    /// <summary>A NUL in the opening stretch: what git and ripgrep both take to mean binary.</summary>
+    /// <summary>A NUL in the opening stretch: what git takes to mean binary.</summary>
     public static bool LooksBinary(string text) => text.AsSpan(0, Math.Min(text.Length, 8000)).Contains('\0');
 }
 
@@ -265,6 +275,56 @@ internal static class SourceTokens
 
     public static bool IsStart(char c) => char.IsLetter(c) || c == '_' || c == '$';
 
+    /// <summary>The most identifier pairs one file contributes to the model; the most frequent are kept.</summary>
+    public const int MaxTransitions = 500;
+
+    /// <summary>
+    /// The identifier pairs written one straight after the other, most frequent first: the words a
+    /// model learns what tends to follow what from. Only identifiers of at least <see cref="MinLength"/>
+    /// letters count, and a short word breaks the chain.
+    /// </summary>
+    public static WordPair[] Transitions(string text)
+    {
+        var counts = new Dictionary<(string, string), int>();
+        string? previous = null;
+        var i = 0;
+        while (i < text.Length)
+        {
+            if (!IsStart(text[i]))
+            {
+                i++;
+                continue;
+            }
+
+            var start = i++;
+            while (i < text.Length && IsPart(text[i]))
+            {
+                i++;
+            }
+
+            var word = text[start..i];
+            if (word.Length < MinLength)
+            {
+                previous = null;
+                continue;
+            }
+
+            if (previous is not null)
+            {
+                counts.TryGetValue((previous, word), out var seen);
+                counts[(previous, word)] = seen + 1;
+            }
+
+            previous = word;
+        }
+
+        return counts
+            .OrderByDescending(p => p.Value)
+            .Take(MaxTransitions)
+            .Select(p => new WordPair(p.Key.Item1, p.Key.Item2, p.Value))
+            .ToArray();
+    }
+
     public static bool IsPart(char c) => char.IsLetterOrDigit(c) || c == '_' || c == '$';
 
     /// <summary>
@@ -315,10 +375,14 @@ internal static class SourceTokens
 /// </summary>
 internal static partial class SourceSymbols
 {
+    /// <summary>A block cannot run longer than this many lines; past it the body is cut short rather than scanned on.</summary>
+    private const int MaxBodyLines = 5000;
+
     public static SourceSymbol[] Extract(string text)
     {
         var symbols = new List<SourceSymbol>();
         var lineStarts = SourceText.LineStarts(text);
+        var lines = SourceText.SplitLines(text);
         var seen = new HashSet<(string, int)>();
 
         void Add(Match match, SourceSymbolKind kind)
@@ -332,7 +396,9 @@ internal static partial class SourceSymbols
             var line = SourceText.LineOf(lineStarts, match.Groups["name"].Index);
             if (seen.Add((name, line)))
             {
-                symbols.Add(new SourceSymbol(name, kind, line));
+                // A variable is one line; a type or function runs to the end of the block it opens.
+                var end = kind == SourceSymbolKind.Variable ? line : BodyEnd(lines, line);
+                symbols.Add(new SourceSymbol(name, kind, line, end));
             }
         }
 
@@ -356,9 +422,156 @@ internal static partial class SourceSymbols
             Add(match, SourceSymbolKind.Function);
         }
 
+        // Variables come last so a name bound to a function on the same line stays a function.
+        foreach (Match match in VariableDeclaration().Matches(text))
+        {
+            Add(match, SourceSymbolKind.Variable);
+        }
+
+        foreach (Match match in FieldDeclaration().Matches(text))
+        {
+            Add(match, SourceSymbolKind.Variable);
+        }
+
+        foreach (Match match in ScriptVariable().Matches(text))
+        {
+            Add(match, SourceSymbolKind.Variable);
+        }
+
         symbols.Sort((a, b) => a.Line.CompareTo(b.Line));
         return [.. symbols];
     }
+
+    /// <summary>
+    /// The last line (1-based) of the body a declaration on <paramref name="line"/> opens. A brace
+    /// block ends where its braces balance; a declaration ending in <c>:</c> (a Python def or
+    /// class) runs over the lines indented past it. One with no block ends on its own line.
+    /// </summary>
+    internal static int BodyEnd(string[] lines, int line)
+    {
+        var start = line - 1;
+        if (start < 0 || start >= lines.Length)
+        {
+            return line;
+        }
+
+        var declaration = Code(lines[start]).TrimEnd();
+        if (declaration.EndsWith(':'))
+        {
+            var indent = Indent(lines[start]);
+            var last = line;
+            for (var i = start + 1; i < lines.Length && i - start < MaxBodyLines; i++)
+            {
+                if (lines[i].Trim().Length == 0)
+                {
+                    continue;
+                }
+
+                if (Indent(lines[i]) <= indent)
+                {
+                    break;
+                }
+
+                last = i + 1;
+            }
+
+            return last;
+        }
+
+        var depth = 0;
+        var opened = false;
+        for (var i = start; i < lines.Length && i - start < MaxBodyLines; i++)
+        {
+            var code = Code(lines[i]);
+            foreach (var c in code)
+            {
+                if (c == '{')
+                {
+                    depth++;
+                    opened = true;
+                }
+                else if (c == '}' && opened && --depth == 0)
+                {
+                    return i + 1;
+                }
+            }
+
+            if (!opened && (i - start >= 2 || code.TrimEnd().EndsWith(';')))
+            {
+                return line;
+            }
+        }
+
+        return line;
+    }
+
+    /// <summary>The line without its string literals and trailing // comment, so braces inside them do not count.</summary>
+    private static string Code(string line)
+    {
+        var sb = new StringBuilder(line.Length);
+        var quote = '\0';
+        for (var i = 0; i < line.Length; i++)
+        {
+            var c = line[i];
+            if (quote != '\0')
+            {
+                if (c == '\\')
+                {
+                    i++;
+                }
+                else if (c == quote)
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (c is '"' or '\'' or '`')
+            {
+                quote = c;
+                continue;
+            }
+
+            if (c == '/' && i + 1 < line.Length && line[i + 1] == '/')
+            {
+                break;
+            }
+
+            sb.Append(c);
+        }
+
+        return sb.ToString();
+    }
+
+    private static int Indent(string line)
+    {
+        var n = 0;
+        while (n < line.Length && (line[n] == ' ' || line[n] == '\t'))
+        {
+            n++;
+        }
+
+        return n;
+    }
+
+    /// <summary>Locals and constants: <c>var x =</c>, <c>let x</c>, <c>const x</c>, <c>val x</c>, <c>my $x</c>.</summary>
+    [GeneratedRegex(
+        @"^[ \t]*(?:(?:export|public|private|protected|internal|static|readonly|final|const|pub|mut|declare)[ \t]+)*" +
+        @"(?:var|let|const|val|auto|local|my|our)[ \t]+(?<name>[A-Za-z_$][\w$]*)",
+        RegexOptions.Multiline | RegexOptions.CultureInvariant)]
+    private static partial Regex VariableDeclaration();
+
+    /// <summary>A class field: at least one modifier, a type, a name, then <c>=</c> or <c>;</c>.</summary>
+    [GeneratedRegex(
+        @"^[ \t]*(?:(?:public|private|protected|internal|static|readonly|volatile|final|const)[ \t]+)+" +
+        @"[\w.<>\[\],?]+(?:[ \t]*<[^>\n]*>)?[?\[\]]*[ \t]+(?<name>[A-Za-z_]\w*)[ \t]*(?:=[^=]|;)",
+        RegexOptions.Multiline | RegexOptions.CultureInvariant)]
+    private static partial Regex FieldDeclaration();
+
+    /// <summary>PowerShell script variables: <c>$total = ...</c>.</summary>
+    [GeneratedRegex(@"^[ \t]*\$(?<name>[A-Za-z_]\w*)[ \t]*=(?!=)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
+    private static partial Regex ScriptVariable();
 
     /// <summary>Words a loose pattern may take for a name.</summary>
     private static readonly HashSet<string> Reserved = new(StringComparer.Ordinal)

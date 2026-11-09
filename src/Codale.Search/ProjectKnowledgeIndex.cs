@@ -10,8 +10,10 @@ namespace Codale.Search;
 
 /// <summary>Local project retrieval. Indexing is asynchronous; retrieval uses only committed rows and fresh source.</summary>
 /// <remarks>
-/// <paramref name="semantic"/> supplies the semantic model once it is loaded (null until then, and in tests);
-/// the hashed embedder always runs beside it for identifier fragments and inflections.
+/// <paramref name="semantic"/> supplies the background provider's embedding model (null when none is set
+/// up, and in tests); the hashed embedder always runs beside it for identifier fragments and inflections.
+/// The semantic model sits behind a server, so it is asked in batches off the retrieval path, and a query
+/// it cannot embed within <see cref="QueryEmbedWait"/> is ranked without it.
 /// </remarks>
 public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder?>? semantic = null) : IDisposable
 {
@@ -22,6 +24,12 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
     private const int MaxFiles = 6;
     /// <summary>Within the caller's two-second retrieval budget, leaving room for the search itself.</summary>
     private static readonly TimeSpan StaleRefreshWait = TimeSpan.FromMilliseconds(900);
+    /// <summary>How long a query may wait for the semantic model; past it, retrieval runs on BM25 and n-grams alone.</summary>
+    public static readonly TimeSpan QueryEmbedWait = TimeSpan.FromMilliseconds(700);
+    /// <summary>After the semantic model failed (server down, model missing), indexing leaves it alone this long.</summary>
+    private static readonly TimeSpan EmbedRetryAfter = TimeSpan.FromMinutes(1);
+    /// <summary>Chunks embedded per database round: one model request each.</summary>
+    private const int EmbedBatch = 32;
     private const double RrfK = 60;
     private const double DocWeight = 0.5;
     private static readonly string[] DocOrTestTerms = ["doc", "readme", "markdown", "md", "test", "spec", "changelog", "licen"];
@@ -35,6 +43,9 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
     // Keyed by worktree + "\n" + model: one packed int8 matrix per pair.
     private readonly ConcurrentDictionary<string, QuantizedMatrix> _vectors = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, bool> _embedded = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DateTime> _embedFailed = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Cancelled on dispose, so a closing window never waits on a model request.</summary>
+    private readonly CancellationTokenSource _stopping = new();
     private readonly object _gate = new();
     private readonly Dictionary<string, Task> _refreshes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DateTime> _snapshots = new(StringComparer.OrdinalIgnoreCase);
@@ -72,7 +83,7 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
                 {
                     // A model that became ready after the last refresh (or an index built before vectors
                     // existed) is embedded once, without re-chunking.
-                    EmbedPending(worktree);
+                    await EmbedPendingAsync(worktree).ConfigureAwait(false);
                     return;
                 }
                 var old = store.SourceHashes(worktree);
@@ -106,7 +117,7 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
                 }
                 store.SetSourceChunkVersion(worktree, FileChunker.Version);
                 foreach (var embedder in Embedders()) _embedded.TryRemove(worktree + "\n" + embedder.Model, out _);
-                EmbedPending(worktree);
+                await EmbedPendingAsync(worktree).ConfigureAwait(false);
                 lock (_gate) _snapshots[worktree] = snapshot.BuiltAt;
             });
         }
@@ -118,26 +129,45 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
             CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
     }
 
-    /// <summary>Embeds chunks that have no vector from the current model yet, in batches so the database lock is held briefly.</summary>
-    private void EmbedPending(string worktree)
+    /// <summary>
+    /// Embeds chunks that have no vector from the current model yet, in batches so the database lock is
+    /// held briefly. A model that fails is left alone for <see cref="EmbedRetryAfter"/> and its chunks
+    /// stay pending: the next refresh after that picks up where this one stopped.
+    /// </summary>
+    private async Task EmbedPendingAsync(string worktree)
     {
         var embedders = Embedders();
+        var complete = true;
         foreach (var embedder in embedders)
         {
             var key = worktree + "\n" + embedder.Model;
             if (_embedded.ContainsKey(key)) continue;
-            while (!_disposed)
+            if (_embedFailed.TryGetValue(key, out var failed) && DateTime.UtcNow - failed < EmbedRetryAfter) { complete = false; continue; }
+            try
             {
-                var pending = store.ChunksMissingVectors(worktree, embedder.Model, 256);
-                if (pending.Count == 0) break;
-                store.PutVectors(embedder.Model, pending.Select(c => (c.Id, embedder.Embed(c.Path + "\n" + c.Text))).ToList());
-                _vectors.TryRemove(key, out _);
+                while (!_disposed)
+                {
+                    var pending = store.ChunksMissingVectors(worktree, embedder.Model, EmbedBatch);
+                    if (pending.Count == 0) break;
+                    var vectors = await embedder.EmbedAsync(pending.Select(c => c.Path + "\n" + c.Text).ToList(), EmbedRole.Document, _stopping.Token).ConfigureAwait(false);
+                    store.PutVectors(embedder.Model, pending.Select((c, i) => (c.Id, vectors[i])).ToList());
+                    _vectors.TryRemove(key, out _);
+                }
             }
+            catch (Exception ex) when (ex is Core.Helper.HelperModelException or HttpRequestException or OperationCanceledException)
+            {
+                Trace.TraceWarning($"Embedding with {embedder.Model} paused: {ex.Message}");
+                _embedFailed[key] = DateTime.UtcNow;
+                _vectors.TryRemove(key, out _);
+                complete = false;
+                continue;
+            }
+            _embedFailed.TryRemove(key, out _);
             _vectors.TryRemove(key, out _);
-            _embedded[key] = true;
+            if (!_disposed) _embedded[key] = true;
         }
-        // Once the semantic model is in use, vectors of retired models are dead weight.
-        if (embedders.Count > 1) store.DeleteVectorsExcept(embedders.Select(e => e.Model).ToList());
+        // Once every current model has its vectors, vectors of retired models are dead weight.
+        if (complete && !_disposed) store.DeleteVectorsExcept(embedders.Select(e => e.Model).ToList());
     }
 
     private IReadOnlyList<ITextEmbedder> Embedders() =>
@@ -147,13 +177,43 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
         _vectors.GetOrAdd(worktree + "\n" + embedder.Model, _ => store.SourceVectors(worktree, embedder.Model));
 
     /// <summary>Shared hybrid retrieval for discovery and prompt enrichment; only fresh source is returned.</summary>
-    public IReadOnlyList<SourceChunk> Search(string worktree, string prompt, string recent = "", int maxFiles = 12, int maxChunksPerFile = 1) =>
-        Search(worktree, prompt, recent, maxFiles, maxChunksPerFile, null, out _);
+    /// <param name="query">The prompt's semantic vector from <see cref="EmbedQueryAsync"/>; null ranks without the semantic model.</param>
+    public IReadOnlyList<SourceChunk> Search(string worktree, string prompt, string recent = "", int maxFiles = 12, int maxChunksPerFile = 1,
+        QueryVector? query = null) =>
+        Search(worktree, prompt, recent, maxFiles, maxChunksPerFile, null, query, out _);
+
+    /// <summary><see cref="Search(string, string, string, int, int, QueryVector?)"/> with the prompt embedded by the semantic model first, within <see cref="QueryEmbedWait"/>.</summary>
+    public async Task<IReadOnlyList<SourceChunk>> SearchAsync(string worktree, string prompt, string recent = "", int maxFiles = 12, int maxChunksPerFile = 1,
+        CancellationToken ct = default)
+    {
+        var query = await EmbedQueryAsync(prompt, ct).ConfigureAwait(false);
+        return await Task.Run(() => Search(worktree, prompt, recent, maxFiles, maxChunksPerFile, query), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The prompt's topic as the semantic model embeds it, or null: no model, no topic words, or no answer
+    /// within <see cref="QueryEmbedWait"/>. Never throws for a model failure.
+    /// </summary>
+    public async Task<QueryVector?> EmbedQueryAsync(string prompt, CancellationToken ct = default)
+    {
+        if (semantic?.Invoke() is not { } model) return null;
+        var terms = SearchText.RetrievalTerms(prompt);
+        if (terms.Count == 0) return null;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(QueryEmbedWait);
+        try
+        {
+            var vectors = await model.EmbedAsync([string.Join(' ', terms)], EmbedRole.Query, deadline.Token).WaitAsync(deadline.Token).ConfigureAwait(false);
+            return vectors.Count == 1 ? new QueryVector(model.Model, vectors[0]) : null;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return null; }
+        catch (Exception ex) when (ex is Core.Helper.HelperModelException or HttpRequestException) { return null; }
+    }
 
     /// <param name="workingSet">Files the current session wrote, newest first; boosted with decay.</param>
     /// <param name="stale">True when a candidate was dropped because its file changed after indexing.</param>
     private IReadOnlyList<SourceChunk> Search(string worktree, string prompt, string recent, int maxFiles, int maxChunksPerFile,
-        IReadOnlyList<string>? workingSet, out bool stale)
+        IReadOnlyList<string>? workingSet, QueryVector? query, out bool stale)
     {
         worktree = ProjectPaths.Normalize(worktree);
         Warm(worktree);
@@ -176,13 +236,17 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
             var topic = string.Join(' ', terms);
             foreach (var embedder in Embedders())
             {
+                // The hashed embedder is local and instant; the semantic one was asked before the search began.
+                var queryVector = embedder is HashedTextEmbedder hashed ? hashed.Embed(topic)
+                    : query is { } q && q.Model == embedder.Model ? q.Vector : null;
+                if (queryVector is null) continue;
                 var vectors = Vectors(worktree, embedder);
                 if (vectors.Count == 0) continue;
-                var similar = vectors.Top(embedder.Embed(topic), 40);
+                var similar = vectors.Top(queryVector, 40);
                 // Relative cut: keep near-best neighbours only, so unrelated files never ride in on noise.
                 // Relative similarity alone always supplies neighbours, even for an absent topic.
                 // Lexical evidence can support weaker semantic matches; otherwise require confidence.
-                var minimum = embedder is HashedTextEmbedder ? 0.25f : 0.4f;
+                var minimum = embedder.MatchSimilarity;
                 var floor = similar.Count > 0 ? Math.Max(0.08f, similar[0].Score * 0.5f) : 1f;
                 // The semantic model leads; the hashed one adds fragments and inflections at lower weight.
                 Fuse(similar.Where(v => v.Score >= floor && (lexicalIds.Contains(v.Id) || v.Score >= minimum)).Select(v => v.Id),
@@ -273,7 +337,7 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
     /// </summary>
     /// <param name="workingSet">Files the current session wrote, newest first; empty on a new topic.</param>
     public RetrievalResult Retrieve(string worktree, string prompt, string recent, IReadOnlySet<string> delivered, string? currentSessionId = null,
-        IReadOnlyList<string>? workingSet = null)
+        IReadOnlyList<string>? workingSet = null, QueryVector? query = null)
     {
         var timer = Stopwatch.StartNew();
         worktree = ProjectPaths.Normalize(worktree);
@@ -294,12 +358,12 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
         }
 
         var terms = SearchText.RetrievalTerms(prompt);
-        var legs = new List<string> { "BM25", semantic?.Invoke() is null ? "n-gram vectors" : "semantic vectors" };
-        var ranked = Search(worktree, prompt, recent, MaxFiles + 2, 2, workingSet, out var stale);
+        var legs = new List<string> { "BM25", query is null ? "n-gram vectors" : "semantic vectors" };
+        var ranked = Search(worktree, prompt, recent, MaxFiles + 2, 2, workingSet, query, out var stale);
         // Mid-turn the agent is editing the very files a steer is about. Their rows are stale until the
         // index catches up, and stale files are dropped, so wait briefly for that rather than lose them.
         if ((stale || ranked.Count == 0) && CaughtUp(worktree))
-            ranked = Search(worktree, prompt, recent, MaxFiles + 2, 2, workingSet, out _);
+            ranked = Search(worktree, prompt, recent, MaxFiles + 2, 2, workingSet, query, out _);
         // The CLI already loaded its instruction files into the conversation.
         var topFiles = ranked.Where(c => !AgentInstructions.IsMatch(c.Path))
             .GroupBy(c => c.Path, StringComparer.OrdinalIgnoreCase).Take(MaxFiles).ToList();
@@ -494,7 +558,11 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
     {
         Task[] running;
         lock (_gate) { _disposed = true; running = _refreshes.Values.ToArray(); }
+        _stopping.Cancel();
         try { Task.WhenAll(running).GetAwaiter().GetResult(); }
         catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"Project indexing stopped: {ex.Message}"); }
     }
 }
+
+/// <summary>A query embedded by the semantic model named <paramref name="Model"/>; it only ranks vectors of that model.</summary>
+public sealed record QueryVector(string Model, float[] Vector);

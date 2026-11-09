@@ -74,7 +74,7 @@ internal static class CodeDiscovery
     /// <summary>
     /// Dependencies, build output, lock files, minified bundles and source maps: they
     /// match everything and answer nothing. Excluded outright rather than trusted to
-    /// .gitignore, which ripgrep ignores outside a git repository and which many
+    /// .gitignore, which may be missing outside a git repository and which many
     /// projects never write for node_modules at all.
     /// </summary>
     internal static readonly string[] NoiseGlobs =

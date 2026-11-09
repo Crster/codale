@@ -71,7 +71,7 @@ public abstract record MarkdownInline
 }
 
 /// <summary>
-/// Hand-rolled rather than a package: the app vendors its surface (xterm.js, ripgrep)
+/// Hand-rolled rather than a package: the app vendors its surface (xterm.js)
 /// and the chat only needs the subset above, so the parser stays small, testable,
 /// and free to degrade. No raw HTML is ever produced, so agent output cannot smuggle
 /// markup into the transcript.

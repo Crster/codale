@@ -23,7 +23,7 @@ public sealed class AutoPlanningTests
         foreach (var intent in new[] { "act", "ask", "invalid" })
         {
             var call = new ToolCall("route", JsonSerializer.SerializeToElement(new { intent }));
-            var result = MessageRouting.Interpret(call, text, false);
+            var result = MessageRouting.Interpret(call, text);
             Assert.Equal(RouteIntent.Plan, result.Intent);
             Assert.Equal(text, result.Text);
         }
@@ -48,7 +48,7 @@ public sealed class AutoPlanningTests
         Assert.NotEqual(RouteIntent.Plan, MessageRouting.TryRouteLocally(text)?.Intent);
         Assert.Equal(RouteIntent.Act, MessageRouting.RouteWithoutModel(text).Intent);
         var call = new ToolCall("route", JsonSerializer.SerializeToElement(new { intent = "act" }));
-        Assert.Equal(RouteIntent.Act, MessageRouting.Interpret(call, text, false).Intent);
+        Assert.Equal(RouteIntent.Act, MessageRouting.Interpret(call, text).Intent);
     }
 
     [Theory]
@@ -58,7 +58,7 @@ public sealed class AutoPlanningTests
     public void A_plan_verdict_on_bounded_work_is_overruled(string text)
     {
         var call = new ToolCall("route", JsonSerializer.SerializeToElement(new { intent = "plan" }));
-        Assert.Equal(RouteIntent.Act, MessageRouting.Interpret(call, text, false).Intent);
+        Assert.Equal(RouteIntent.Act, MessageRouting.Interpret(call, text).Intent);
     }
 
     [Theory]

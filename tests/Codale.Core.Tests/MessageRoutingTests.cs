@@ -12,7 +12,7 @@ public sealed class MessageRoutingTests
     [Fact]
     public void No_call_sends_the_original_as_a_plain_turn()
     {
-        var decision = MessageRouting.Interpret(null, "fix teh bug", canMoveTopic: true);
+        var decision = MessageRouting.Interpret(null, "fix teh bug");
 
         Assert.Equal(new RouteDecision("fix teh bug", RouteIntent.Act, NewTopic: false), decision);
     }
@@ -24,7 +24,7 @@ public sealed class MessageRoutingTests
         var call = new ToolCall("route", JsonSerializer.SerializeToElement(
             new { message = "What does SendCoreAsync do?", intent = "ask", related = "yes" }));
 
-        var decision = MessageRouting.Interpret(call, "what does SendCoreAsync do", canMoveTopic: true);
+        var decision = MessageRouting.Interpret(call, "what does SendCoreAsync do");
 
         Assert.Equal("what does SendCoreAsync do", decision.Text);
         Assert.Equal(RouteIntent.Ask, decision.Intent);
@@ -34,7 +34,7 @@ public sealed class MessageRoutingTests
     [Fact]
     public void Plan_intent_keeps_the_explicit_session()
     {
-        var decision = MessageRouting.Interpret(Call("plan", "no"), "refactor the git panel", canMoveTopic: true);
+        var decision = MessageRouting.Interpret(Call("plan", "no"), "refactor the git panel");
 
         Assert.Equal(RouteIntent.Plan, decision.Intent);
         Assert.False(decision.NewTopic);
@@ -43,7 +43,7 @@ public sealed class MessageRoutingTests
     [Fact]
     public void Without_an_agent_summary_the_message_never_moves()
     {
-        var decision = MessageRouting.Interpret(Call("act", "no"), "add a dark theme to the settings page", canMoveTopic: false);
+        var decision = MessageRouting.Interpret(Call("act", "no"), "add a dark theme to the settings page");
 
         Assert.False(decision.NewTopic);
     }
@@ -52,7 +52,7 @@ public sealed class MessageRoutingTests
     public void A_change_request_the_model_calls_ask_is_sent_as_act()
     {
         var decision = MessageRouting.Interpret(
-            Call("ask", "yes"), "lets make the snake design more snake. not like a stitch balloon", canMoveTopic: true);
+            Call("ask", "yes"), "lets make the snake design more snake. not like a stitch balloon");
 
         Assert.Equal(RouteIntent.Act, decision.Intent);
     }
@@ -78,7 +78,7 @@ public sealed class MessageRoutingTests
     [InlineData("I want the center panel to fill the window")]
     public void A_statement_or_mixed_request_the_model_calls_ask_is_sent_as_act(string original)
     {
-        var decision = MessageRouting.Interpret(Call("ask", "yes"), original, canMoveTopic: true);
+        var decision = MessageRouting.Interpret(Call("ask", "yes"), original);
 
         Assert.Equal(RouteIntent.Act, decision.Intent);
     }
@@ -91,7 +91,7 @@ public sealed class MessageRoutingTests
     [InlineData("why does the terminal flicker")]
     public void A_pure_question_stays_ask_when_the_model_says_ask(string original)
     {
-        var decision = MessageRouting.Interpret(Call("ask", "yes"), original, canMoveTopic: true);
+        var decision = MessageRouting.Interpret(Call("ask", "yes"), original);
 
         Assert.Equal(RouteIntent.Ask, decision.Intent);
     }
@@ -99,7 +99,7 @@ public sealed class MessageRoutingTests
     [Fact]
     public void An_unknown_intent_becomes_act()
     {
-        var decision = MessageRouting.Interpret(Call("maybe", "yes"), "do it", canMoveTopic: true);
+        var decision = MessageRouting.Interpret(Call("maybe", "yes"), "do it");
 
         Assert.Equal(RouteIntent.Act, decision.Intent);
     }
@@ -124,8 +124,8 @@ public sealed class MessageRoutingTests
     [Fact]
     public void Without_a_model_a_pure_question_is_ask_and_a_request_is_act()
     {
-        Assert.Equal(RouteIntent.Ask, MessageRouting.Interpret(null, "how does the router decide?", true).Intent);
-        Assert.Equal(RouteIntent.Act, MessageRouting.Interpret(null, "can you add a dark theme?", true).Intent);
+        Assert.Equal(RouteIntent.Ask, MessageRouting.Interpret(null, "how does the router decide?").Intent);
+        Assert.Equal(RouteIntent.Act, MessageRouting.Interpret(null, "can you add a dark theme?").Intent);
         Assert.Equal(RouteIntent.Act, MessageRouting.RouteWithoutModel("the header is ugly").Intent);
     }
 
@@ -139,7 +139,7 @@ public sealed class MessageRoutingTests
     [InlineData("nope")]
     public void A_follow_up_never_moves_to_a_new_session(string original)
     {
-        var decision = MessageRouting.Interpret(Call("act", "no"), original, canMoveTopic: true);
+        var decision = MessageRouting.Interpret(Call("act", "no"), original);
 
         Assert.False(decision.NewTopic);
     }
@@ -149,7 +149,7 @@ public sealed class MessageRoutingTests
     [InlineData("write unit tests for the git status parser")]
     public void An_unrelated_task_keeps_the_explicit_session(string original)
     {
-        var decision = MessageRouting.Interpret(Call("act", "no"), original, canMoveTopic: true);
+        var decision = MessageRouting.Interpret(Call("act", "no"), original);
 
         Assert.False(decision.NewTopic);
     }
@@ -277,7 +277,7 @@ public sealed class MessageRoutingTests
     [Fact]
     public void An_acknowledged_question_is_not_permission_to_edit()
     {
-        Assert.Equal(RouteIntent.Ask, MessageRouting.Interpret(Call("act", "yes"), "yes, why is it broken?", false).Intent);
+        Assert.Equal(RouteIntent.Ask, MessageRouting.Interpret(Call("act", "yes"), "yes, why is it broken?").Intent);
     }
 
     [Fact]

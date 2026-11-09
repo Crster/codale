@@ -3,6 +3,7 @@ using Codale.Agents.History;
 using Codale.App.Services;
 using Codale.Core.Agents;
 using Codale.Core.Features;
+using Codale.Core.Helper;
 using Codale.Core.Projects;
 using Codale.Search;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -43,19 +44,6 @@ public sealed partial class ChatViewModel
     private const int HistoryWindowEvents = 120;
     private bool SmartHistory => Features is not null;
 
-    private bool IsSeparateWorktree(string? worktree)
-    {
-        if (string.IsNullOrWhiteSpace(worktree) || !Directory.Exists(worktree)) return false;
-        try
-        {
-            return !string.Equals(ProjectPaths.Normalize(worktree), ProjectPaths.Normalize(_projectPath),
-                StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception)
-        {
-            return false;
-        }
-    }
 
     /// <summary>Only opening a history row resumes it. Prompts never select a different session.</summary>
     public async Task<bool> AttachFeatureAsync(FeatureInfo feature, string? cliId = null)
@@ -70,7 +58,6 @@ public sealed partial class ChatViewModel
         if (handoff)
         {
             CliId = cliId!;
-            WorktreePath = IsSeparateWorktree(mapping!.Worktree) ? mapping.Worktree : null;
             ResumeSessionId = null;
             _needsResumeContext = true;
             OnPropertyChanged(nameof(EndpointName));
@@ -79,9 +66,6 @@ public sealed partial class ChatViewModel
         {
             CliId = mapping.Provider;
             EndpointName = mapping.Endpoint;
-            // The mapping always stores a root (the project itself when not isolated); only a
-            // separate, still-existing directory means this history ran in an isolated worktree.
-            WorktreePath = IsSeparateWorktree(mapping.Worktree) ? mapping.Worktree : null;
             ResumeSessionId = mapping.ProviderSessionId;
             OnPropertyChanged(nameof(EndpointName));
             foreach (var key in features.DeliveredContext(mapping.ProviderSessionId)) _deliveredContext.Add(key);
@@ -219,7 +203,7 @@ public sealed partial class ChatViewModel
     private void BindHistoryProvider()
     {
         if (FeatureId is { } id && SessionId is { Length: > 0 } native)
-            Features?.BindProviderSession(id, CliId, native, WorktreePath ?? _projectPath, EndpointName);
+            Features?.BindProviderSession(id, CliId, native, _projectPath, EndpointName);
     }
 
     private void PublishFeatureActivity(bool busy)
@@ -256,7 +240,7 @@ public sealed partial class ChatViewModel
 
     private void CaptureReference(string path)
     {
-        var root = WorktreePath ?? _projectPath;
+        var root = _projectPath;
         try
         {
             var relative = Path.IsPathRooted(path) ? Path.GetRelativePath(root, path) : path;
@@ -297,13 +281,13 @@ public sealed partial class ChatViewModel
             if (FeatureId is { } id)
             {
                 foreach (var path in _turnEditedPaths)
-                    features.RecordLearnedEdit(id, WorktreePath ?? _projectPath, path, _featureRequest ?? "");
+                    features.RecordLearnedEdit(id, _projectPath, path, _featureRequest ?? "");
                 // Shell edits (sed, scripts) only show on disk: credit them to this history's working set.
                 if (_turnStartedUtc is { } started)
-                    _ = features.RecordTurnChangesAsync(id, WorktreePath ?? _projectPath, started);
+                    _ = features.RecordTurnChangesAsync(id, _projectPath, started);
                 foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
                     _turnFindings.ToString(), @"(?:[A-Za-z0-9_.-]+[/\\])+[A-Za-z0-9_.-]+")) CaptureReference(match.Value);
-                features.RecordFinding(id, CliId, WorktreePath ?? _projectPath,
+                features.RecordFinding(id, CliId, _projectPath,
                     _featureRequest + "\n" + _turnFindings, _turnReferences.Values.ToList());
                 features.Summarize(id);
             }
@@ -331,6 +315,31 @@ public sealed partial class ChatViewModel
     internal string? LastRoutingReply => Items.Reverse().TakeWhile(i => i is not UserMessageItem)
         .OfType<AssistantMessageItem>().FirstOrDefault(i => !i.IsStreaming)?.Text;
 
+    /// <summary>
+    /// Topic detection on the background provider's embedding model when it answers within
+    /// <see cref="ProjectKnowledgeIndex.QueryEmbedWait"/>; on the local hashed vectors otherwise.
+    /// </summary>
+    private static async Task<bool> IsNewTopicAsync(string text, IReadOnlyList<string> earlier, string? lastReply, CancellationToken ct)
+    {
+        if (BackgroundProviders.Current.Embedder is { } semantic)
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            deadline.CancelAfter(ProjectKnowledgeIndex.QueryEmbedWait);
+            try
+            {
+                return await TopicShift.IsNewTopicAsync(text, earlier, semantic, lastReply, deadline.Token).WaitAsync(deadline.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+            }
+            catch (HelperModelException)
+            {
+            }
+        }
+
+        return await TopicShift.IsNewTopicAsync(text, earlier, HashedTextEmbedder.Instance, lastReply, ct);
+    }
+
     private async Task<RetrievalResult?> RetrieveProjectContextAsync(string text, UserMessageItem? sent = null)
     {
         _retrievalId = null;
@@ -348,15 +357,14 @@ public sealed partial class ChatViewModel
                 .TakeLast(3).Select(i => i.Text).ToList();
             var lastReply = priorItems.AsEnumerable().Reverse().TakeWhile(i => i is not UserMessageItem)
                 .OfType<AssistantMessageItem>().FirstOrDefault(i => !i.IsStreaming)?.Text;
-            var newTopic = sent is not null && await Task.Run(() =>
-                TopicShift.IsNewTopic(text, earlier, SemanticModel.Best, lastReply), cts.Token);
+            var newTopic = sent is not null && await IsNewTopicAsync(text, earlier, lastReply, cts.Token);
             cts.Token.ThrowIfCancellationRequested();
             if (!ReferenceEquals(session, _session)) throw new OperationCanceledException();
             if (newTopic) sent!.IsNewTopic = true;
             if (Features is not { } features || !AppSettings.ProjectKnowledge) return null;
             var recent = newTopic ? "" : string.Join("\n", earlier.TakeLast(2).Append(text));
             // A new topic leaves the files the session has been editing behind.
-            var result = await features.RetrieveAsync(WorktreePath ?? _projectPath, text, recent, new HashSet<string>(_deliveredContext),
+            var result = await features.RetrieveAsync(_projectPath, text, recent, new HashSet<string>(_deliveredContext),
                 _needsResumeContext ? null : FeatureId, newTopic ? null : FeatureId).WaitAsync(TimeSpan.FromSeconds(2), cts.Token);
             if (newTopic) result = result with { NewTopic = true };
             if (!ReferenceEquals(session, _session)) throw new OperationCanceledException();

@@ -208,7 +208,8 @@ public static class OpenAiApiClient
         return Encoding.UTF8.GetString(buffer.WrittenSpan);
     }
 
-    private static void WriteTool(Utf8JsonWriter json, ToolDefinition tool)
+    /// <summary>A tool in the function-calling shape both OpenAI-compatible APIs.</summary>
+    internal static void WriteTool(Utf8JsonWriter json, ToolDefinition tool)
     {
         json.WriteStartObject();
         json.WriteString("type", "function");
@@ -216,7 +217,16 @@ public static class OpenAiApiClient
         json.WriteString("name", tool.Name);
         json.WriteString("description", tool.Description);
 
-        json.WriteStartObject("parameters");
+        json.WritePropertyName("parameters");
+        WriteParameters(json, tool);
+        json.WriteEndObject();
+        json.WriteEndObject();
+    }
+
+    /// <summary>The JSON schema of a tool's arguments object.</summary>
+    internal static void WriteParameters(Utf8JsonWriter json, ToolDefinition tool)
+    {
+        json.WriteStartObject();
         json.WriteString("type", "object");
         json.WriteStartObject("properties");
         foreach (var parameter in tool.Parameters)
@@ -253,8 +263,6 @@ public static class OpenAiApiClient
         }
 
         json.WriteEndArray();
-        json.WriteEndObject();
-        json.WriteEndObject();
         json.WriteEndObject();
     }
 

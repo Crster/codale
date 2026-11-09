@@ -63,6 +63,9 @@ public sealed class HelperModelException : Exception
     public HelperModelException(string message) : base(message) { }
 
     public HelperModelException(string message, Exception inner) : base(message, inner) { }
+
+    /// <summary>The HTTP status the server answered with, when the failure was a refusal rather than a network error.</summary>
+    public int? StatusCode { get; init; }
 }
 
 /// <summary>Turns a model's text reply into a <see cref="ToolCall"/>, so every backend shares one contract.</summary>

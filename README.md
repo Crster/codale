@@ -21,7 +21,7 @@ Modern AI coding CLIs are formidable agents, but standard terminal TUIs are a po
   - [Supported AI Coding Agent CLIs in Terminal](#supported-ai-coding-agent-clis-in-terminal)
   - [Built-in Model Context Protocol (MCP) Servers](#built-in-model-context-protocol-mcp-servers)
   - [Helper Model](#helper-model)
-  - [Git Panel & Worktree Isolation](#git-panel--worktree-isolation)
+  - [Git Panel](#git-panel)
   - [Fast Code Editor & Syntax Highlighting](#fast-code-editor--syntax-highlighting)
   - [Search & Autonomous Ask Mode](#search--autonomous-ask-mode)
 - [Repository Layout](#repository-layout)
@@ -163,14 +163,13 @@ Routing regression tests run with `dotnet test tests/Codale.Core.Tests`. To exer
 
 ---
 
-### Git Panel & Worktree Isolation
+### Git Panel
 
 ![Git panel and the built-in editor](docs/git-editor.png)
 
 - **Status & Branch Synchronization**: Clear visual representation of modified, untracked, deleted, and staged files. One-click commit creation with optional helper-model generated commit messages.
 - **Commit Graph (`GitGraph`)**: Visual revision history showing branches, tags, commit authors, and timestamps.
 - **Side-by-Side & Inline Diffs**: High-performance diff inspector showing exact line additions and deletions.
-- **Worktree Session Isolation**: Launch an agent session in an isolated Git worktree ("New isolated session"). The agent works in an independent branch and directory, leaving your current working tree completely untouched until you review and merge.
 
 ---
 
@@ -184,9 +183,12 @@ Routing regression tests run with `dotnet test tests/Codale.Core.Tests`. To exer
 
 ### Search & Autonomous Ask Mode
 
-Ripgrep powers Codale's search engine for instantaneous query matching across massive codebases.
+Codale searches with its own managed engine, so no external binary is needed. A workspace index keeps the project's keywords, variables and function bodies in memory, so suggestions and results point at the exact function that holds a match.
 
-- **Grep Mode**: Literal and regular expression searching with file filtering and match previews.
+- **Grep Mode**: Literal and regular expression searching with file filtering and match previews. Each match names the function or type its line sits in.
+- **Completion**: While typing, the editor offers the project's declared names (types, functions, variables) and the identifiers the project uses, not only what is in the open file.
+- **Workspace model**: A model trained from the project's own files: its identifiers, declared names and which identifier tends to follow which. It is kept per project beside the knowledge database, updated one file at a time as files change, and reloaded on restart so unchanged files are not read again. Suggestions use it, ranked by the word before the cursor.
+- **Command history**: Commands typed in the shell box and in terminals are kept per project on this computer and offered as you type.
 - **Ask Mode**: An autonomous agent loop (`SearchAgentLoop`) that answers natural language questions about your codebase. A background helper model iteratively greps, finds, and reads relevant source files, streaming its steps and file citations live with per-step execution timings.
 
 ---
@@ -197,20 +199,19 @@ Ripgrep powers Codale's search engine for instantaneous query matching across ma
 Codale.slnx                     .NET 10 solution specification
 run.ps1                         Build, sign, install MSIX package, and launch
 docs/                           Documentation assets and screenshots
-tools/rg/                       Bundled ripgrep binaries (auto-extracted by run.ps1)
 src/
   Codale.App/                   WinUI 3 application shell (Mica, views, viewmodels, single-project MSIX)
   Codale.Core/                  Core domain models (AgentEvent union, models, Markdown, syntax tokenizers)
   Codale.Agents/                Agent drivers (Claude stream-json session, CLI locator, Antigravity history, OpenAI bridge)
   Codale.Terminal/              ConPTY P/Invoke interop, VT parsing, and TerminalSession
   Codale.Commands/              Saved project commands catalog (.codale, .vscode, package.json)
-  Codale.Git/                   Git CLI wrapper (status, graph, diffs, commits, worktrees)
+  Codale.Git/                   Git CLI wrapper (status, graph, diffs, commits)
   Codale.Mcp.Tasks/             codale-tasks MCP server (process management, todos, terminals, explore)
   Codale.Mcp.Browser/           codale-browser MCP server (Playwright Chromium browser automation)
   Codale.Mcp.Computer/          codale-computer MCP server (Windows desktop control)
   Codale.Mcp.Phone/             codale-phone MCP server (Android device/emulator control over adb)
   Codale.Mcp.Common/            Shared MCP protocol definitions and JSON-RPC primitives
-  Codale.Search/                Ripgrep wrapper, file indexing, and autonomous SearchAgentLoop
+  Codale.Search/                Workspace search, file indexing, and autonomous SearchAgentLoop
   Codale.Storage/               SQLite database engine (sessions, todos, artifacts, settings)
   Codale.ShellExt/              C++ IExplorerCommand Windows 11 shell context menu extension (vcxproj)
 tests/
@@ -219,7 +220,7 @@ tests/
   Codale.Core.Tests/            Domain logic, tokenizers, and Markdown parser tests
   Codale.Git.Tests/             Git CLI integration and diff parsing tests
   Codale.Mcp.Tests/             MCP servers and tool invocation tests
-  Codale.Search.Tests/          Ripgrep and search loop tests
+  Codale.Search.Tests/          Workspace search and search loop tests
   Codale.Storage.Tests/         SQLite persistence and migrations tests
   Codale.Terminal.Tests/        ConPTY and terminal session unit tests
   fixtures/                     Offline byte-for-byte CLI wire captures and test fixtures
@@ -234,7 +235,7 @@ flowchart TD
     subgraph UI ["WinUI 3 Fluent Shell (Codale.App)"]
         ChatTab["Chat Panel"]
         TerminalTab["Terminal Drawer (ConPTY)"]
-        GitTab["Git & Worktrees"]
+        GitTab["Git"]
         EditorTab["Code Editor"]
         SearchTab["Search & Ask Agent"]
     end

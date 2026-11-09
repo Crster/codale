@@ -140,7 +140,7 @@ public static class FeatureRouting
         }
 
         // The mode rules (ask must be earned) are the router's own; there is no "related" here.
-        var route = MessageRouting.Interpret(call, original, canMoveTopic: false);
+        var route = MessageRouting.Interpret(call, original);
         var feature = call.GetString("feature")?.Trim() ?? Current;
         var pinned = currentId is not null && MessageRouting.IsFollowUp(original);
 

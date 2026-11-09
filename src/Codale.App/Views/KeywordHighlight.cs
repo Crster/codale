@@ -178,8 +178,7 @@ public static class KeywordHighlight
         }
 
         var languageId = Services.SyntaxSelection.IdFor(path);
-        var fallback = LegacySyntax.For(languageId);
-        if (languageId is null && fallback == CodeSyntax.None)
+        if (languageId is null)
         {
             return;
         }
@@ -199,7 +198,7 @@ public static class KeywordHighlight
             }
 
             var line = content[start..end].TrimEnd('\r');
-            state = CodeTokenizer.TokenizeLine(line, languageId, fallback, state, tokens);
+            state = CodeTokenizer.TokenizeLine(line, languageId, state, tokens);
             foreach (var token in tokens)
             {
                 if (token.Kind == CodeTokenKind.Plain || token.Length <= 0)

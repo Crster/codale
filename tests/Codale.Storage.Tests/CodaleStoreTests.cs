@@ -57,28 +57,6 @@ public sealed class CodaleStoreTests : IDisposable
     }
 
     [Fact]
-    public void A_database_from_a_newer_schema_is_refused()
-    {
-        var path = Path.Combine(_directory, "newer.db");
-
-        using (var raw = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path}"))
-        {
-            raw.Open();
-            using var command = raw.CreateCommand();
-            command.CommandText = "CREATE TABLE schema_version (version INTEGER NOT NULL); INSERT INTO schema_version VALUES (999);";
-            command.ExecuteNonQuery();
-        }
-
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-
-        var ex = Assert.Throws<StoreSchemaException>(() => new CodaleStore(path));
-        Assert.Contains("999", ex.Message);
-
-        // The failed attempt is not remembered as migrated: it is refused again, not waved through.
-        Assert.Throws<StoreSchemaException>(() => new CodaleStore(path));
-    }
-
-    [Fact]
     public void A_global_setting_round_trips_and_clears()
     {
         // The dotted keys are the agent endpoint settings; "" is how they clear.

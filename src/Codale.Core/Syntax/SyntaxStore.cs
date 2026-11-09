@@ -6,8 +6,8 @@ namespace Codale.Core.Syntax;
 /// The on-disk home of user-installed grammars: <c>languages.json</c> (the manifest) plus
 /// <c>grammars\&lt;id&gt;.tmLanguage.json</c>. Built-in languages are not stored here; they
 /// come from the grammars the app ships. Every write is temp-file-then-replace so a crash
-/// never leaves a half-written manifest, and a manifest that cannot be read is set aside as
-/// <c>.broken</c> rather than blocking start-up.
+/// never leaves a half-written manifest, and a manifest that cannot be read is ignored
+/// rather than blocking start-up.
 /// </summary>
 public sealed class SyntaxStore
 {
@@ -162,7 +162,6 @@ public sealed class SyntaxStore
         }
         catch (Exception)
         {
-            try { File.Copy(ManifestPath, ManifestPath + ".broken", overwrite: true); } catch { /* best effort */ }
             _languages = [];
         }
     }

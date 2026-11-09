@@ -31,19 +31,12 @@ public sealed class FeatureService : IDisposable
         _projectPath = projectPath;
         _helper = helper;
         _store = OpenStore(projectPath);
-        _knowledge = new ProjectKnowledgeIndex(_store, () => SemanticModel.Current);
+        // The background provider's embedding model, as Settings has it now; picking another one
+        // re-embeds on the next refresh (vectors are stored per model).
+        _knowledge = new ProjectKnowledgeIndex(_store, () => BackgroundProviders.Current.Embedder);
         _knowledge.Warm(projectPath);
-        if (AppSettings.ProjectKnowledge)
-        {
-            // Fetched once, then loaded from disk; the index embeds with it on the next refresh.
-            _ = SemanticModel.EnsureLoadedAsync().ContinueWith(t =>
-            {
-                if (t.Result is { } model)
-                {
-                    _knowledge.Warm(projectPath);
-                }
-            }, TaskScheduler.Default);
-        }
+        _embeddingModel = BackgroundProviders.Current.Embedder?.Model;
+        AppSettings.Changed += OnAppSettingsChanged;
         _activity = FeatureActivity.For(projectPath);
         _activity.HistoryDeleted += OnHistoryDeleted;
         _historyRefresh = new Timer(_ => Changed?.Invoke(this, EventArgs.Empty));
@@ -190,10 +183,24 @@ public sealed class FeatureService : IDisposable
     }
 
     /// <param name="workingSessionId">The history whose recently written files get a ranking boost; null on a new topic.</param>
-    public Task<RetrievalResult> RetrieveAsync(string worktree, string prompt, string recent, IReadOnlySet<string> delivered, string? currentSessionId,
-        string? workingSessionId = null) =>
-        Task.Run(() => _knowledge.Retrieve(worktree, prompt, recent, delivered, currentSessionId,
-            workingSessionId is null ? null : _store.FilesOf(workingSessionId, WorkingSetFiles)));
+    public async Task<RetrievalResult> RetrieveAsync(string worktree, string prompt, string recent, IReadOnlySet<string> delivered, string? currentSessionId,
+        string? workingSessionId = null)
+    {
+        var query = await _knowledge.EmbedQueryAsync(prompt).ConfigureAwait(false);
+        return await Task.Run(() => _knowledge.Retrieve(worktree, prompt, recent, delivered, currentSessionId,
+            workingSessionId is null ? null : _store.FilesOf(workingSessionId, WorkingSetFiles), query)).ConfigureAwait(false);
+    }
+
+    private string? _embeddingModel;
+
+    /// <summary>A newly picked embedding model (or provider) embeds the project now, not on the next prompt.</summary>
+    private void OnAppSettingsChanged(object? sender, EventArgs e)
+    {
+        var model = BackgroundProviders.Current.Embedder?.Model;
+        if (model == _embeddingModel) return;
+        _embeddingModel = model;
+        _knowledge.Warm(_projectPath);
+    }
 
     private const int WorkingSetFiles = 8;
 
@@ -334,6 +341,7 @@ public sealed class FeatureService : IDisposable
         _databaseWatcher?.Dispose();
         _historyRefresh.Dispose();
         _activity.HistoryDeleted -= OnHistoryDeleted;
+        AppSettings.Changed -= OnAppSettingsChanged;
         _knowledge.Dispose();
         _store.Dispose();
     }

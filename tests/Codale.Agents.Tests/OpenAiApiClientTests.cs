@@ -180,17 +180,6 @@ public sealed class OpenAiApiClientTests
     public void An_error_body_is_reduced_to_its_message(string body, string expected) =>
         Assert.Equal(expected, OpenAiApiClient.ErrorMessage(body));
 
-    [Fact]
-    public void The_helper_is_available_through_the_api_without_any_cli()
-    {
-        using var helper = new HelperModel(() => Endpoint);
-
-        Assert.True(helper.IsAvailable);
-
-        // Nothing to start: a warm-up request must not spawn anything or throw.
-        helper.Prewarm(MessageRouting.SystemPrompt, [MessageRouting.RouteTool]);
-    }
-
     /// <summary>A loopback Chat Completions API: records the request and answers with a canned reply.</summary>
     private sealed class FakeApi : IDisposable
     {
@@ -308,14 +297,13 @@ public sealed class OpenAiApiClientTests
     }
 
     [Fact]
-    public async Task The_helper_model_uses_the_api_when_an_endpoint_is_set()
+    public async Task A_forced_tool_call_comes_back_validated()
     {
         using var api = new FakeApi(200, Reply("""
             {"tool_calls":[{"function":{"name":"route","arguments":"{\"message\":\"Hi.\",\"intent\":\"ask\",\"related\":\"no\"}"}}]}
             """));
-        using var helper = new HelperModel(() => new OpenAiEndpoint(api.BaseUrl, "k", "m"));
 
-        var call = await helper.CallToolAsync("sys", "hi", [MessageRouting.RouteTool]);
+        var call = await OpenAiApiClient.CallToolAsync(new OpenAiEndpoint(api.BaseUrl, "k", "m"), "sys", "hi", [MessageRouting.RouteTool], CancellationToken.None);
 
         Assert.Equal("ask", call!.GetString("intent"));
     }

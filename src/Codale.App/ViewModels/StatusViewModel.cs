@@ -167,9 +167,9 @@ public sealed partial class StatusViewModel : ObservableObject
         OnPropertyChanged(nameof(LongWindowLabel));
     }
 
-    /// <summary>The background-task provider's name (or "Claude"); labels its usage button.</summary>
+    /// <summary>The background-task provider's name ("Off", "OpenRouter"); labels its usage button.</summary>
     [ObservableProperty]
-    public partial string CustomProviderName { get; set; } = "Claude";
+    public partial string CustomProviderName { get; set; } = "Off";
 
     /// <summary>The Claude CLI's subscription meter only applies while talking to Anthropic itself.</summary>
     public bool HasClaudeUsage => HasUsage;
@@ -215,9 +215,6 @@ public sealed partial class StatusViewModel : ObservableObject
 
     public string CustomTokensDetail =>
         $"Input {CustomInputTokens:N0} · Output {CustomOutputTokens:N0} · Cache read {CustomCacheReadTokens:N0} · Cache write {CustomCacheWriteTokens:N0}";
-
-    /// <summary>Tallies one request served by the custom endpoint.</summary>
-    public void RecordCustomCall(UsageSnapshot usage) => _custom.Record(usage);
 
     internal static string FormatLong(long tokens) => Format((int)Math.Min(tokens, int.MaxValue));
 

@@ -18,7 +18,7 @@ namespace Codale.Search;
 /// fallback. The background-task model reviews those files directly before trying
 /// keyword exploration (<see cref="CodeDiscovery"/>'s prompts). Ranking is BM25 over identifier
 /// tokens with boosts for file names, declarations and the model's path hints, and it
-/// covers the whole project in milliseconds instead of a ripgrep process per keyword.
+/// covers the whole project in milliseconds instead of a file scan per keyword.
 ///
 /// Reliability rules: refinement never empties the results - a failed, slow or unsure
 /// model leaves the ranked result; a keyword missing from the code falls back to the
@@ -99,7 +99,7 @@ public sealed partial class SourceExplorer
             // Search committed, hash-verified chunks just as context enrichment does.
             // Search warms the index itself; cold model loading and full refreshes must
             // never hold up the first visible results.
-            var hybrid = await Task.Run(() => Knowledge.Search(_index.Root, query, maxFiles: MaxRankedResults), ct).ConfigureAwait(false);
+            var hybrid = await Knowledge.SearchAsync(_index.Root, query, maxFiles: MaxRankedResults, ct: ct).ConfigureAwait(false);
             var retrieved = new List<Ranked>();
             foreach (var chunk in hybrid)
             {

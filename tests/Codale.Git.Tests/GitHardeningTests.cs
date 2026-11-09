@@ -198,43 +198,6 @@ public sealed class GitHardeningTests : IDisposable
         Assert.EndsWith("\0", result.StandardOutput);
     }
 
-    [Fact]
-    public async Task Worktrees_report_git_errors_and_remove_takes_their_branch_along()
-    {
-        var repoDir = Path.Combine(_root, "my repo");
-        InitRepo(repoDir);
-        await File.WriteAllTextAsync(Path.Combine(repoDir, "a.txt"), "v1");
-        CommitAll(repoDir);
-
-        var worktrees = new GitWorktrees(repoDir);
-
-        var bad = await worktrees.TryCreateAsync("session1", "--detach");
-        Assert.Null(bad.Path);
-        Assert.False(string.IsNullOrWhiteSpace(bad.Error));
-
-        var missing = await worktrees.TryCreateAsync("session2", "no-such-ref");
-        Assert.Null(missing.Path);
-        Assert.False(string.IsNullOrWhiteSpace(missing.Error));
-
-        var path = await worktrees.CreateAsync("abcd1234-0000");
-        Assert.NotNull(path);
-        Assert.True(Directory.Exists(path));
-
-        var listed = await worktrees.ListAsync();
-        Assert.Contains(listed, w => w.Branch == "codale/abcd1234");
-
-        var removed = await worktrees.RemoveAsync(path!);
-        Assert.True(removed.Success, removed.Error);
-        Assert.False(Directory.Exists(path));
-
-        var branches = (await new GitRepository(repoDir).GetSnapshotAsync()).Branches;
-        Assert.DoesNotContain(branches, b => b.Name.StartsWith("codale/", StringComparison.Ordinal));
-
-        var again = await worktrees.RemoveAsync(path!);
-        Assert.False(again.Success);
-        Assert.False(string.IsNullOrWhiteSpace(again.Error));
-    }
-
     public void Dispose()
     {
         try

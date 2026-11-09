@@ -86,17 +86,6 @@ public static class ProjectPaths
     public static string ClaudeHistoryDirectory(string projectPath) =>
         Path.Combine(Agents.CodaleAccount.ClaudeHome, "projects", ClaudeHistoryFolderName(projectPath));
 
-    /// <summary>
-    /// Where Codale keeps what it knows of a project, whichever CLI worked on it:
-    /// <c>%LocalAppData%\Codale\project\{project-path}</c>, named like <see cref="ClaudeHistoryFolderName"/>.
-    /// </summary>
-    public static string ProjectDataDirectory(string projectPath) =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Codale",
-            "project",
-            ClaudeHistoryFolderName(projectPath));
-
     /// <summary>The project's feature database: features, summaries and the index of the files written for them.</summary>
     public static string FeatureDatabasePath(string projectPath) =>
         Path.Combine(KnowledgeDirectory(projectPath), "project.db");

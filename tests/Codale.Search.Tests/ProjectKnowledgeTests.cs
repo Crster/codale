@@ -38,13 +38,13 @@ public sealed class ProjectKnowledgeTests : IDisposable
     [InlineData(true)]
     public async Task Unknown_topic_does_not_send_unrelated_neighbours(bool semantic)
     {
-        var model = semantic ? await SemanticModel.EnsureLoadedAsync() : null;
-        if (semantic) Assert.NotNull(model);
+        ITextEmbedder? model = semantic ? new ConceptEmbedder() : null;
         using var retrieval = new ProjectKnowledgeIndex(_store, () => model);
         Write("src/Authentication.cs", "class Authentication { bool RefreshCredential() => true; }");
         Write("src/RevenueChart.cs", "class RevenueChart { void DrawMonthlyGraph() {} }");
         await retrieval.RefreshAsync(Root);
-        Assert.Empty(retrieval.Retrieve(Root, "zygomorphic quasar submarine teleportation", "", new HashSet<string>()).Text);
+        const string query = "zygomorphic quasar submarine teleportation";
+        Assert.Empty(retrieval.Retrieve(Root, query, "", new HashSet<string>(), query: await retrieval.EmbedQueryAsync(query)).Text);
     }
 
     [Fact]
@@ -63,15 +63,30 @@ public sealed class ProjectKnowledgeTests : IDisposable
     [Fact]
     public async Task Confident_semantic_paraphrases_still_work_without_lexical_matches()
     {
-        var model = await SemanticModel.EnsureLoadedAsync();
-        Assert.NotNull(model);
+        var model = new ConceptEmbedder();
         using var retrieval = new ProjectKnowledgeIndex(_store, () => model);
         Write("vault.cs", "// Protect saved credentials with encryption.\nclass Vault { void Seal() {} }");
         Write("chart.cs", "// Draw monthly revenue totals in a bar graph.\nclass Chart { void Paint() {} }");
         await retrieval.RefreshAsync(Root);
         const string query = "secure stored passwords";
         Assert.Empty(_store.SearchSourceTerms(query, Root));
-        Assert.Contains("vault.cs", retrieval.Retrieve(Root, query, "", new HashSet<string>()).Files);
+        var vector = await retrieval.EmbedQueryAsync(query);
+        Assert.NotNull(vector);
+        Assert.Contains("vault.cs", retrieval.Retrieve(Root, query, "", new HashSet<string>(), query: vector).Files);
+        Assert.Contains(EmbedRole.Query, model.Roles);
+        Assert.Contains(EmbedRole.Document, model.Roles);
+    }
+
+    [Fact]
+    public async Task A_semantic_model_that_fails_leaves_retrieval_to_bm25_and_ngrams()
+    {
+        var model = new ConceptEmbedder { Fail = true };
+        using var retrieval = new ProjectKnowledgeIndex(_store, () => model);
+        Write("Auth.cs", "class Authentication { void RefreshToken() {} }");
+        await retrieval.RefreshAsync(Root);
+        Assert.Null(await retrieval.EmbedQueryAsync("RefreshToken"));
+        Assert.Contains("Auth.cs", retrieval.Retrieve(Root, "RefreshToken", "", new HashSet<string>()).Files);
+        Assert.Contains("Auth.cs", (await retrieval.SearchAsync(Root, "RefreshToken")).Select(c => c.Path));
     }
 
     [Fact]
@@ -161,14 +176,13 @@ public sealed class ProjectKnowledgeTests : IDisposable
     [InlineData(true)]
     public async Task Discovery_and_enrichment_share_fresh_hybrid_candidates(bool semantic)
     {
-        using var retrieval = new ProjectKnowledgeIndex(_store, semantic ? () => SemanticModel.Current : null);
-        if (semantic) Assert.NotNull(await SemanticModel.EnsureLoadedAsync());
+        using var retrieval = new ProjectKnowledgeIndex(_store, semantic ? () => new ConceptEmbedder() : null);
         Write("Auth.cs", "class Authentication { void RefreshToken() {} }");
         Write("Charts.cs", "class RevenueChart { void RenderGraph() {} }");
         await retrieval.RefreshAsync(Root);
         foreach (var (query, expected) in new[] { ("where is RefreshToken implemented", "Auth.cs"), ("where is RevenueChart rendered", "Charts.cs") })
         {
-            Assert.Equal(expected, retrieval.Search(Root, query)[0].Path);
+            Assert.Equal(expected, (await retrieval.SearchAsync(Root, query))[0].Path);
             var explorer = new SourceExplorer(SourceIndex.For(Root), null) { Knowledge = retrieval, MaxRelated = 0 };
             var result = await explorer.RunAsync(query);
             Assert.Equal(expected, result.Files[0].RelativePath);
@@ -461,3 +475,49 @@ public sealed class ProjectKnowledgeTests : IDisposable
         try { Directory.Delete(_directory, true); } catch (IOException) { }
     }
 }
+
+/// <summary>
+/// A semantic model in miniature: words of one concept land on one dimension, so a paraphrase with no
+/// shared word still scores high, and a text of unknown words scores nothing.
+/// </summary>
+internal sealed class ConceptEmbedder : ITextEmbedder
+{
+    private static readonly string[][] Concepts =
+    [
+        ["secure", "protect", "password", "passwords", "credential", "credentials", "encryption", "vault", "seal", "stored", "saved", "authentication", "token", "refreshtoken"],
+        ["chart", "graph", "revenue", "draw", "paint", "render", "rendered", "monthly", "bar", "revenuechart", "rendergraph"],
+    ];
+
+    public bool Fail { get; init; }
+
+    public List<EmbedRole> Roles { get; } = [];
+
+    public string Model => "concept-test";
+
+    public float RelatedSimilarity => 0.5f;
+
+    public float MatchSimilarity => 0.5f;
+
+    public Task<IReadOnlyList<float[]>> EmbedAsync(IReadOnlyList<string> texts, EmbedRole role, CancellationToken ct = default)
+    {
+        lock (Roles) Roles.Add(role);
+        if (Fail) throw new Codale.Core.Helper.HelperModelException("Ollama is not reachable.");
+        return Task.FromResult<IReadOnlyList<float[]>>(texts.Select(Embed).ToArray());
+    }
+
+    private static float[] Embed(string text)
+    {
+        var vector = new float[Concepts.Length];
+        foreach (var word in System.Text.RegularExpressions.Regex.Split(text.ToLowerInvariant(), "[^a-z]+"))
+        {
+            for (var i = 0; i < Concepts.Length; i++)
+            {
+                if (Concepts[i].Contains(word)) vector[i] += 1;
+            }
+        }
+
+        var norm = MathF.Sqrt(vector.Sum(v => v * v));
+        return norm == 0 ? vector : vector.Select(v => v / norm).ToArray();
+    }
+}
+

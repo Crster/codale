@@ -131,7 +131,7 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
     public bool PhoneAvailable => _settings.PhoneAvailable;
 
     public string PhoneNote => PhoneAvailable
-        ? "Android device or emulator over adb"
+        ? "Use an Android device or emulator"
         : "Not installed with this build.";
 
     public bool BrowserAvailable => _settings.BrowserAvailable;
@@ -147,11 +147,11 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
     }.OfType<string>());
 
     public string BrowserNote => BrowserAvailable
-        ? "Open, click and screenshot pages"
+        ? "Browse and check web pages"
         : "Not installed with this build.";
 
     public string ComputerNote => ComputerAvailable
-        ? "Mouse and keyboard, asks every time"
+        ? "Use the mouse and keyboard"
         : "Not installed with this build.";
 
     /// <summary>

@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 
 using Codale.Core.Syntax;
+using Codale.Search;
 
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -59,7 +60,7 @@ public sealed partial class CodeEditor
     private readonly HashSet<string> _docTags = new(StringComparer.Ordinal);
     private readonly HashSet<string> _docAttrs = new(StringComparer.Ordinal);
 
-    private bool IsMarkup => _languageId is "html" or "xml" or "xsl" or "vue" or "svelte" || _syntax is CodeSyntax.Html or CodeSyntax.XML;
+    private bool IsMarkup => _languageId is "html" or "xml" or "xsl" or "vue" or "svelte";
 
     /// <summary>Tag when the caret names an element (just after '&lt;' or '&lt;/'), Attribute inside an open tag, else null.</summary>
     private static CompletionKind? MarkupContext(string line, int start)
@@ -156,6 +157,11 @@ public sealed partial class CodeEditor
 
     private static readonly Dictionary<string, string[]> ExtraKeywords = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["csharp"] = ["abstract", "as", "async", "await", "base", "bool", "break", "byte", "case", "catch", "char", "checked", "class", "const", "continue", "decimal", "default", "delegate", "do", "double", "dynamic", "else", "enum", "event", "explicit", "extern", "false", "finally", "fixed", "float", "for", "foreach", "get", "goto", "if", "implicit", "in", "init", "int", "interface", "internal", "is", "lock", "long", "namespace", "new", "nint", "not", "nuint", "null", "object", "operator", "or", "out", "override", "params", "private", "protected", "public", "readonly", "record", "ref", "return", "sbyte", "sealed", "set", "short", "sizeof", "stackalloc", "static", "string", "struct", "switch", "this", "throw", "true", "try", "typeof", "uint", "ulong", "unchecked", "unsafe", "ushort", "using", "var", "virtual", "void", "volatile", "when", "where", "while", "with", "yield"],
+        ["cpp"] = ["NULL", "alignas", "alignof", "and", "asm", "auto", "bool", "break", "case", "catch", "char", "char16_t", "char32_t", "char8_t", "class", "co_await", "co_return", "co_yield", "const", "const_cast", "consteval", "constexpr", "constinit", "continue", "decltype", "default", "delete", "do", "double", "dynamic_cast", "else", "enum", "explicit", "export", "extern", "false", "float", "for", "friend", "goto", "if", "inline", "int", "int16_t", "int32_t", "int64_t", "int8_t", "long", "mutable", "namespace", "new", "noexcept", "not", "nullptr", "operator", "or", "private", "protected", "public", "register", "reinterpret_cast", "requires", "return", "short", "signed", "size_t", "sizeof", "static", "static_cast", "struct", "switch", "template", "this", "thread_local", "throw", "true", "try", "typedef", "typeid", "typename", "uint16_t", "uint32_t", "uint64_t", "uint8_t", "union", "unsigned", "using", "virtual", "void", "volatile", "wchar_t", "while"],
+        ["python"] = ["False", "None", "True", "__main__", "__name__", "and", "as", "assert", "async", "await", "bool", "break", "bytes", "class", "cls", "continue", "def", "del", "dict", "elif", "else", "except", "finally", "float", "for", "from", "global", "if", "import", "in", "int", "is", "lambda", "list", "match", "nonlocal", "not", "object", "or", "pass", "raise", "return", "self", "set", "str", "try", "tuple", "while", "with", "yield"],
+        ["javascript"] = ["Infinity", "NaN", "abstract", "any", "as", "async", "await", "bigint", "boolean", "break", "case", "catch", "class", "const", "continue", "debugger", "declare", "default", "delete", "do", "else", "enum", "export", "extends", "false", "finally", "for", "from", "function", "get", "if", "implements", "import", "in", "infer", "instanceof", "interface", "is", "keyof", "let", "namespace", "never", "new", "null", "number", "object", "of", "private", "protected", "public", "readonly", "return", "satisfies", "set", "static", "string", "super", "switch", "symbol", "this", "throw", "true", "try", "type", "typeof", "undefined", "unknown", "var", "void", "while", "with", "yield"],
+        ["sql"] = ["add", "all", "alter", "and", "as", "asc", "between", "by", "case", "check", "column", "commit", "constraint", "create", "cross", "current_date", "current_time", "current_timestamp", "database", "default", "delete", "desc", "distinct", "drop", "else", "end", "exists", "false", "foreign", "from", "full", "group", "having", "in", "index", "inner", "insert", "into", "is", "join", "key", "left", "like", "limit", "not", "null", "offset", "on", "or", "order", "outer", "primary", "references", "right", "rollback", "select", "set", "table", "then", "top", "true", "truncate", "union", "unique", "update", "values", "view", "when", "where", "with"],
         ["java"] = ["abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const", "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally", "float", "for", "if", "implements", "import", "instanceof", "int", "interface", "long", "new", "null", "package", "private", "protected", "public", "return", "short", "static", "super", "switch", "synchronized", "this", "throw", "throws", "true", "false", "try", "var", "void", "volatile", "while"],
         ["go"] = ["break", "case", "chan", "const", "continue", "default", "defer", "else", "fallthrough", "for", "func", "go", "goto", "if", "import", "interface", "map", "package", "range", "return", "select", "struct", "switch", "type", "var", "bool", "byte", "error", "float32", "float64", "int", "int32", "int64", "rune", "string", "uint", "nil", "true", "false"],
         ["rust"] = ["as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use", "where", "while", "bool", "char", "i32", "i64", "u8", "u32", "u64", "usize", "f32", "f64", "str", "String", "Vec", "Option", "Result", "Some", "None", "Ok", "Err"],
@@ -165,20 +171,20 @@ public sealed partial class CodeEditor
         ["swift"] = ["actor", "as", "associatedtype", "async", "await", "break", "case", "catch", "class", "continue", "default", "defer", "do", "else", "enum", "extension", "false", "fileprivate", "for", "func", "guard", "if", "import", "in", "init", "inout", "internal", "is", "let", "nil", "open", "operator", "private", "protocol", "public", "return", "self", "static", "struct", "subscript", "super", "switch", "throw", "throws", "true", "try", "typealias", "var", "where", "while", "Int", "String", "Bool", "Double", "Float", "Array", "Dictionary", "Optional"],
     };
 
+    /// <summary>The keyword table a grammar id shares with its family.</summary>
+    private static string KeywordKey(string languageId) => languageId switch
+    {
+        "c" => "cpp",
+        "typescript" or "javascriptreact" or "typescriptreact" => "javascript",
+        _ => languageId,
+    };
+
     private List<(string Text, CompletionKind Kind)> LanguageEntries()
     {
         var list = new List<(string, CompletionKind)>();
-        foreach (var word in CodeTokenizer.KeywordsOf(_syntax))
-        {
-            list.Add((word, CompletionKind.Keyword));
-        }
 
-        foreach (var word in CodeTokenizer.TypesOf(_syntax))
-        {
-            list.Add((word, CompletionKind.Type));
-        }
 
-        if (_languageId is not null && ExtraKeywords.TryGetValue(_languageId, out var extra))
+        if (_languageId is not null && ExtraKeywords.TryGetValue(KeywordKey(_languageId), out var extra))
         {
             foreach (var word in extra)
             {
@@ -456,8 +462,49 @@ public sealed partial class CodeEditor
             }
         }
 
+        // Then the whole project's index: declared names first, then the identifiers it uses.
+        if (prefix.Length > 0 && WorkspaceSuggest?.Invoke(prefix, PreviousWord(line, start)) is { } workspace)
+        {
+            foreach (var suggestion in workspace)
+            {
+                Offer(suggestion.Text, WorkspaceKind(suggestion.Kind));
+            }
+        }
+
         ShowItems(found, start);
     }
+
+    /// <summary>
+    /// The project's names for a prefix, ranked with the word before it on the line (the workspace
+    /// model's learned order). Null when no project is open.
+    /// </summary>
+    public Func<string, string?, IReadOnlyList<WorkspaceSuggestion>>? WorkspaceSuggest { get; set; }
+
+    /// <summary>The identifier that ends just before <paramref name="start"/> on the line, skipping blanks; null when there is none.</summary>
+    private static string? PreviousWord(string line, int start)
+    {
+        var end = start;
+        while (end > 0 && line[end - 1] is ' ' or '\t')
+        {
+            end--;
+        }
+
+        var begin = end;
+        while (begin > 0 && (char.IsLetterOrDigit(line[begin - 1]) || line[begin - 1] == '_'))
+        {
+            begin--;
+        }
+
+        return end > begin ? line[begin..end] : null;
+    }
+
+    private static CompletionKind WorkspaceKind(SourceSymbolKind? kind) => kind switch
+    {
+        SourceSymbolKind.Type => CompletionKind.Class,
+        SourceSymbolKind.Function => CompletionKind.Function,
+        SourceSymbolKind.Property => CompletionKind.Property,
+        _ => CompletionKind.Variable,
+    };
 
     private void ShowItems(Dictionary<string, CompletionItem> found, int start)
     {
