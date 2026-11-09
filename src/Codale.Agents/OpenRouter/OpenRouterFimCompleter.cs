@@ -46,17 +46,56 @@ public sealed class OpenRouterFimCompleter(OpenRouterClient client, string model
     {
         try
         {
-            return await client.FillAsync(model, before, after, MaxTokens, temperature, ct).ConfigureAwait(false);
+            var raw = await client.FillAsync(model, before, after, MaxTokens, temperature, ct).ConfigureAwait(false);
+            if (!FimText.LooksLikeProse(raw))
+            {
+                return raw;
+            }
+
+            // A chat-only model answered the raw prompt as a chat message ("It looks like you've shared...").
+            return await ChatFillAsync(FimTokens.Wrap(model, before, after) ?? MarkerPrompt(before, after), before, after, temperature, ct)
+                .ConfigureAwait(false);
         }
         catch (HelperModelException ex) when (ex.StatusCode is 400 or 404 or 405 && FimTokens.Wrap(model, before, after) is not null)
         {
             // No infill route for this model: the same gap, asked for as chat with the model's own infill tokens.
-            using var reply = await client.ChatAsync(
-                new OpenRouterChatRequest(model, ChatSystem, FimTokens.Wrap(model, before, after)!, MaxTokens, Reasoning: false, Temperature: temperature),
-                ct).ConfigureAwait(false);
-            return OpenRouterClient.Message(reply.RootElement)?.Str("content") ?? "";
+            return await ChatFillAsync(FimTokens.Wrap(model, before, after)!, before, after, temperature, ct).ConfigureAwait(false);
         }
     }
+
+    private async Task<string> ChatFillAsync(string prompt, string before, string after, double temperature, CancellationToken ct)
+    {
+        using var reply = await client.ChatAsync(
+            new OpenRouterChatRequest(model, ChatSystem, prompt, MaxTokens, Reasoning: false, Temperature: temperature),
+            ct).ConfigureAwait(false);
+        var text = OpenRouterClient.Message(reply.RootElement)?.Str("content") ?? "";
+        if (FimText.LooksLikeProse(text) && prompt.StartsWith("[PREFIX]", StringComparison.Ordinal))
+        {
+            // The infill tokens did not take in chat either: spell the gap out in words instead.
+            using var again = await client.ChatAsync(
+                new OpenRouterChatRequest(model, ChatSystem, MarkerPrompt(before, after), MaxTokens, Reasoning: false, Temperature: temperature),
+                ct).ConfigureAwait(false);
+            text = OpenRouterClient.Message(again.RootElement)?.Str("content") ?? "";
+        }
+
+        // Never hand prose or a code fence to the caret.
+        text = text.Trim();
+        if (text.StartsWith("```", StringComparison.Ordinal))
+        {
+            var nl = text.IndexOf('\n');
+            text = nl < 0 ? "" : text[(nl + 1)..];
+            var close = text.IndexOf("```", StringComparison.Ordinal);
+            if (close >= 0)
+            {
+                text = text[..close];
+            }
+        }
+
+        return FimText.LooksLikeProse(text) ? "" : text;
+    }
+
+    private static string MarkerPrompt(string before, string after) =>
+        $"<prefix>\n{before}</prefix>\n<suffix>\n{after}</suffix>\nWrite exactly the text that goes at the caret between the prefix and the suffix.";
 }
 
 /// <summary>

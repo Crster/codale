@@ -58,6 +58,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         Sessions = new SessionsViewModel(ProjectPath, Features);
         _endpoints = new CliEndpointSettings();
         _mcp = new McpServerSettings(_store, ProjectPath);
+        Health = new WorkspaceHealthViewModel(ProjectPath, _customUsage);
         _mcp.TerminalServersProvider = () => Panel is { IsTerminalSession: true } session ? session.ServersForTerminalCli() : _mcp.Servers();
         _mcp.SyncWorkspaceMcpConfig();
         McpTools = new McpToolsViewModel(_mcp, FolderServers, ProjectPath);
@@ -75,7 +76,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         // The background-task provider follows Settings ("Background tasks"), the BYOK
         // provider picker - none of which are the chat in front.
         AppSettings.Changed += OnAppSettingsChanged;
-        StartElapsedTimer();
         _helper.RequestServed += OnBackgroundRequestServed;
 
         Sessions.SessionOpened += OnSessionOpened;
@@ -93,6 +93,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
     /// <summary>The status of the chat in front: each conversation keeps its own.</summary>
     public StatusViewModel Status => Chat.Status;
+
+    /// <summary>The status bar's indexer and background worker for this workspace.</summary>
+    public WorkspaceHealthViewModel Health { get; }
 
     public FileTreeViewModel Files { get; }
 
@@ -1027,45 +1030,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     private ChatViewModel? FindOpenChat(string featureId) =>
         Chats.FirstOrDefault(c => c.FeatureId == featureId);
 
-    private static readonly DateTime WindowOpenedAt = DateTime.Now;
-
-    private Timer? _elapsedTimer;
-
-    /// <summary>When this run started, as a clock time: "9:41 AM".</summary>
-    public string StartedAtText => WindowOpenedAt.ToString("t");
-
-    /// <summary>How long the window has been open: "42s", "12m 05s", "1h 03m".</summary>
-    public string ElapsedText
-    {
-        get
-        {
-            var elapsed = DateTime.Now - WindowOpenedAt;
-            return elapsed.TotalHours >= 1
-                ? $"{(int)elapsed.TotalHours}h {elapsed.Minutes:00}m"
-                : elapsed.TotalMinutes >= 1
-                    ? $"{elapsed.Minutes}m {elapsed.Seconds:00}s"
-                    : $"{elapsed.Seconds}s";
-        }
-    }
-
-    private void StartElapsedTimer()
-    {
-        _elapsedTimer = new Timer(
-            _ =>
-            {
-                if (_uiContext is { } ui)
-                {
-                    ui.Post(_ => OnPropertyChanged(nameof(ElapsedText)), null);
-                }
-            },
-            null,
-            TimeSpan.FromSeconds(1),
-            TimeSpan.FromSeconds(1));
-    }
-
     public async ValueTask DisposeAsync()
     {
-        _elapsedTimer?.Dispose();
+        Health.Dispose();
         AppSettings.Changed -= OnAppSettingsChanged;
         CliEndpoint.Dispose();
         McpTools.Dispose();

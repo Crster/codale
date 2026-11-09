@@ -3981,6 +3981,11 @@ public sealed partial class WorkspacePage : Page
             var prefix = Codale.Core.Background.FimText.ShellPrefix(shell, cwd, recent, files, typed);
             var rest = await model.CompleteAsync(prefix, "", _shellSeen.ToList(), cts.Token);
 
+            if (Codale.Core.Background.FimText.LooksLikeProse(rest))
+            {
+                return "";
+            }
+
             // A completion must never be what turns a command destructive (a recursive delete, a force push).
             if (rest.Length > 0 &&
                 Codale.Core.Shell.ShellCommandAnalyzer.Assess(typed + rest, cwd).Risk == Codale.Core.Shell.ShellRisk.Danger &&

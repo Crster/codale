@@ -1997,59 +1997,41 @@
                     </Grid>
                 </Border>
 
-                <!--  Right: the background-task provider and its usage  -->
+                <!--  Right: the indexer and the background worker  -->
                 <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="16">
-                    <!--  Background-task provider: its name and what it has served since the window opened (background tasks and chats on the same provider alike)  -->
-                    <StackPanel
+                <!--  Indexer: what the project index holds for this workspace, or that it is scanning  -->
+                <StackPanel
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="6"
+                    ToolTipService.ToolTip="{x:Bind ViewModel.Health.IndexTooltip, Mode=OneWay}">
+                    <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="10" Glyph="&#xE721;" Opacity="0.6" />
+                    <TextBlock
                         VerticalAlignment="Center"
-                        Orientation="Horizontal"
-                        Spacing="10"
-                        ToolTipService.ToolTip="Provider used for background tasks: commit messages, titles, routing, search">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="10" Glyph="&#xE968;" Opacity="0.6" />
-                            <TextBlock
-                                VerticalAlignment="Center"
-                                FontSize="12"
-                                FontWeight="SemiBold"
-                                Opacity="0.85"
-                                Text="{x:Bind ViewModel.Status.CustomProviderName, Mode=OneWay}" />
-                        </StackPanel>
-                        <TextBlock
-                            VerticalAlignment="Center"
-                            FontSize="12"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="{x:Bind ViewModel.Status.CustomCallsText, Mode=OneWay}" />
-                        <TextBlock
-                            VerticalAlignment="Center"
-                            FontSize="12"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="{x:Bind ViewModel.Status.CustomTokensText, Mode=OneWay}" />
-                    </StackPanel>
+                        FontSize="12"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{x:Bind ViewModel.Health.IndexText, Mode=OneWay}" />
+                </StackPanel>
 
-                    <Rectangle
+                <Rectangle
+                    VerticalAlignment="Center"
+                    Width="1"
+                    Height="14"
+                    Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                <!--  Background worker: its provider and the jobs running now  -->
+                <StackPanel
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="6"
+                    ToolTipService.ToolTip="{x:Bind ViewModel.Health.WorkerTooltip, Mode=OneWay}">
+                    <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="10" Glyph="&#xE968;" Opacity="0.6" />
+                    <TextBlock
                         VerticalAlignment="Center"
-                        Width="1"
-                        Height="14"
-                        Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
-
-                    <!--  Run time: when this window started, and how long it has been running  -->
-                    <StackPanel
-                        Orientation="Horizontal"
-                        Spacing="6"
-                        ToolTipService.ToolTip="Run started at · time elapsed since">
-                        <FontIcon VerticalAlignment="Center" Margin="0,1.3,0,0" FontSize="10" Glyph="&#xE916;" Opacity="0.6" />
-                        <TextBlock
-                            VerticalAlignment="Center"
-                            FontSize="12"
-                            Opacity="0.6"
-                            Text="{x:Bind ViewModel.StartedAtText}" />
-                        <TextBlock
-                            MinWidth="0"
-                            VerticalAlignment="Center"
-                            FontSize="12"
-                            Opacity="0.8"
-                            Text="{x:Bind ViewModel.ElapsedText, Mode=OneWay}" />
-                    </StackPanel>
+                        FontSize="12"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{x:Bind ViewModel.Health.WorkerText, Mode=OneWay}" />
+                </StackPanel>
 
                     <!--  Built-in MCP servers: a browser to verify work in, and desktop control  -->
                     <!--  Opened from the title bar's Browser button; this host only owns the flyout  -->

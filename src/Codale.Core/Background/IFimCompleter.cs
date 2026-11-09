@@ -64,6 +64,28 @@ public static class FimText
     }
 
     /// <summary>
+    /// True when <paramref name="completion"/> reads as a chat reply rather than shell text: a model that
+    /// is not a code model answers "run" with "It looks like you're in...". Such text is never a command.
+    /// </summary>
+    public static bool LooksLikeProse(string completion)
+    {
+        var text = completion.Trim();
+        if (text.Length == 0)
+        {
+            return false;
+        }
+
+        string[] markers = ["it looks like", "you're", "you are", "i'll", "i can", "here's", "here is", "let me", "sure,", "this is", "i notice", "based on"];
+        if (markers.Any(m => text.Contains(m, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return words.Length > 6 && (text.EndsWith(':') || text.Contains(". ", StringComparison.Ordinal) || text.EndsWith('.'));
+    }
+
+    /// <summary>
     /// The text before the caret for shell autocomplete, written as the start of a script a code model
     /// knows how to continue: the context as comments, the recent commands as earlier lines, then what is typed.
     /// </summary>

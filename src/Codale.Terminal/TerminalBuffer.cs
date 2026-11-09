@@ -90,7 +90,7 @@ public sealed class TerminalBuffer
     public void SetAutowrap(bool on) => _autowrap = on;
 
     public int ScrollbackCount => _scrollback.Count;
-
+        
     /// <summary>
     /// Row <paramref name="index"/> of the combined buffer, where 0 is the oldest
     /// scrollback line and <see cref="ScrollbackCount"/> is the top of the live screen.

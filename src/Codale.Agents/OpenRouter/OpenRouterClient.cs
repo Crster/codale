@@ -277,6 +277,33 @@ public sealed class OpenRouterClient
     internal static JsonElement? Message(JsonElement reply) =>
         reply.Items("choices").FirstOrDefault().Prop("message") is { ValueKind: JsonValueKind.Object } message ? message : null;
 
+    /// <summary>
+    /// The error text, with the upstream provider's own words (<c>error.metadata.raw</c>, and which provider)
+    /// when OpenRouter only says "Provider returned error".
+    /// </summary>
+    internal static string DescribeError(string body)
+    {
+        var message = OpenAiApiClient.ErrorMessage(body);
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.Prop("error") is { ValueKind: JsonValueKind.Object } error &&
+                error.Prop("metadata") is { ValueKind: JsonValueKind.Object } metadata)
+            {
+                var raw = metadata.Prop("raw") is { ValueKind: JsonValueKind.String } r ? r.GetString() : null;
+                var provider = metadata.Str("provider_name");
+                var detail = string.IsNullOrWhiteSpace(raw) ? "" : $" {OpenAiApiClient.ErrorMessage(raw!)}";
+                var from = string.IsNullOrWhiteSpace(provider) ? "" : $" ({provider})";
+                return $"{message}{from}{detail}";
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return message;
+    }
+
     private Task<JsonDocument> PostAsync(string path, string body, CancellationToken ct) =>
         SendAsync(HttpMethod.Post, path, body, ct, ct, DefaultRequestTimeout);
 
@@ -287,31 +314,43 @@ public sealed class OpenRouterClient
         timeout.CancelAfter(limit);
         try
         {
-            using var request = new HttpRequestMessage(method, new Uri(BaseUrl + path, UriKind.Absolute));
-            if (_apiKey.Length > 0)
+            // A 429 is the upstream provider's rate limit (common on shared and free models): it clears in
+            // seconds, so wait and ask again before giving up.
+            for (var attempt = 0; ; attempt++)
             {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
-            }
+                using var request = new HttpRequestMessage(method, new Uri(BaseUrl + path, UriKind.Absolute));
+                if (_apiKey.Length > 0)
+                {
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+                }
 
-            request.Headers.TryAddWithoutValidation("X-Title", "Codale");
-            if (body is not null)
-            {
-                request.Content = new StringContent(body, Encoding.UTF8, new MediaTypeHeaderValue("application/json"));
-            }
+                request.Headers.TryAddWithoutValidation("X-Title", "Codale");
+                if (body is not null)
+                {
+                    request.Content = new StringContent(body, Encoding.UTF8, new MediaTypeHeaderValue("application/json"));
+                }
 
-            using var response = await _http.SendAsync(request, timeout.Token).ConfigureAwait(false);
-            var text = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
+                using var response = await _http.SendAsync(request, timeout.Token).ConfigureAwait(false);
+                var text = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+                if (response.IsSuccessStatusCode)
+                {
+                    return JsonDocument.Parse(text);
+                }
+
+                if ((int)response.StatusCode == 429 && attempt < 2)
+                {
+                    var wait = response.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(2 * (attempt + 1));
+                    await Task.Delay(wait > TimeSpan.FromSeconds(8) ? TimeSpan.FromSeconds(8) : wait, timeout.Token).ConfigureAwait(false);
+                    continue;
+                }
+
                 throw new HelperModelException(response.StatusCode == System.Net.HttpStatusCode.Unauthorized
                     ? "OpenRouter rejected the API key. Check it in Settings."
-                    : $"OpenRouter returned {(int)response.StatusCode}: {OpenAiApiClient.ErrorMessage(text)}")
+                    : $"OpenRouter returned {(int)response.StatusCode}: {DescribeError(text)}")
                 {
                     StatusCode = (int)response.StatusCode,
                 };
             }
-
-            return JsonDocument.Parse(text);
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or UriFormatException or ArgumentException or InvalidOperationException ||
                                    (ex is OperationCanceledException && !callerToken.IsCancellationRequested))

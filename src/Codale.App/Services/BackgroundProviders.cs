@@ -40,7 +40,7 @@ public static class BackgroundProviders
     }
 
     /// <summary>The fill-in-the-middle model for editor and shell ghost text, or null when none is set up.</summary>
-    public static IFimCompleter? Completions => Current.Fim;
+    public static IFimCompleter? Completions => Current.Fim is { } fim ? new TrackedCompleter(fim) : null;
 
     /// <summary>A window's handle on the provider's chat model, with its own usage tally.</summary>
     public static BackgroundHelperModel Create() => new();
@@ -67,20 +67,42 @@ public sealed class BackgroundHelperModel : IHelperModel
 
     public bool IsAvailable => Inner.IsAvailable;
 
-    public Task<string> CompleteAsync(string systemPrompt, string prompt, CancellationToken ct = default) =>
-        Inner.CompleteAsync(systemPrompt, prompt, ct);
+    public async Task<string> CompleteAsync(string systemPrompt, string prompt, CancellationToken ct = default)
+    {
+        using var job = BackgroundWorkers.Track();
+        return await Inner.CompleteAsync(systemPrompt, prompt, ct);
+    }
 
-    public Task<string> CompleteAsync(string systemPrompt, string prompt, int maxTokens, CancellationToken ct = default) =>
-        Inner.CompleteAsync(systemPrompt, prompt, maxTokens, ct);
+    public async Task<string> CompleteAsync(string systemPrompt, string prompt, int maxTokens, CancellationToken ct = default)
+    {
+        using var job = BackgroundWorkers.Track();
+        return await Inner.CompleteAsync(systemPrompt, prompt, maxTokens, ct);
+    }
 
-    public Task<ToolCall?> CallToolAsync(string systemPrompt, string conversation, IReadOnlyList<ToolDefinition> tools, CancellationToken ct = default) =>
-        Inner.CallToolAsync(systemPrompt, conversation, tools, ct);
+    public async Task<ToolCall?> CallToolAsync(string systemPrompt, string conversation, IReadOnlyList<ToolDefinition> tools, CancellationToken ct = default)
+    {
+        using var job = BackgroundWorkers.Track();
+        return await Inner.CallToolAsync(systemPrompt, conversation, tools, ct);
+    }
 
-    public Task<IReadOnlyList<ToolCall>> CallToolsAsync(string systemPrompt, string conversation, IReadOnlyList<ToolDefinition> tools, CancellationToken ct = default) =>
-        Inner.CallToolsAsync(systemPrompt, conversation, tools, ct);
+    public async Task<IReadOnlyList<ToolCall>> CallToolsAsync(string systemPrompt, string conversation, IReadOnlyList<ToolDefinition> tools, CancellationToken ct = default)
+    {
+        using var job = BackgroundWorkers.Track();
+        return await Inner.CallToolsAsync(systemPrompt, conversation, tools, ct);
+    }
 
     /// <summary>The model is about to be asked: get the provider's models loaded.</summary>
     public void Prewarm(string systemPrompt, IReadOnlyList<ToolDefinition> tools) => BackgroundProviders.Current.Prewarm();
 
     public void Prewarm() => BackgroundProviders.Current.Prewarm();
+}
+
+/// <summary>A ghost-text completer that counts each request as a background job while it is in flight.</summary>
+internal sealed class TrackedCompleter(IFimCompleter inner) : IFimCompleter
+{
+    public async Task<string> CompleteAsync(string prefix, string suffix, IReadOnlyList<string>? rejected, CancellationToken ct = default)
+    {
+        using var job = BackgroundWorkers.Track();
+        return await inner.CompleteAsync(prefix, suffix, rejected, ct);
+    }
 }

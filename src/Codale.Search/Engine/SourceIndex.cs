@@ -58,6 +58,7 @@ public sealed class SourceIndex : IDisposable
     private long _version;
     private int _reloadAll;
     private bool _disposed;
+    private int _scanning;
 
     public SourceIndex(string root, SourceIndexOptions? options = null)
     {
@@ -98,6 +99,12 @@ public sealed class SourceIndex : IDisposable
 
     /// <summary>The latest finished snapshot, or null before the first scan completes.</summary>
     public SourceSnapshot? Current => Volatile.Read(ref _current);
+
+    /// <summary>True while a scan is running: the first one, or a refresh after a change.</summary>
+    public bool IsScanning => Volatile.Read(ref _scanning) == 1;
+
+    /// <summary>Raised when a scan starts and when it ends. Raised on the scanning thread.</summary>
+    public event Action? StateChanged;
 
     /// <summary>The workspace model: learned from this project's files and kept current as they change.</summary>
     public WorkspaceModel Model => _model;
@@ -179,6 +186,21 @@ public sealed class SourceIndex : IDisposable
     }
 
     private async Task<SourceSnapshot> BuildAsync()
+    {
+        Interlocked.Exchange(ref _scanning, 1);
+        StateChanged?.Invoke();
+        try
+        {
+            return await BuildCoreAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _scanning, 0);
+            StateChanged?.Invoke();
+        }
+    }
+
+    private async Task<SourceSnapshot> BuildCoreAsync()
     {
         EnsureWatcher();
         _model.Load();
