@@ -1,6 +1,6 @@
 using Codale.Agents;
 using Codale.Agents.Claude;
-using Codale.Agents.OpenAi;
+using Codale.Core.Helper;
 using Codale.App.Services;
 using Codale.App.ViewModels;
 using Codale.Core.Syntax;
@@ -40,8 +40,8 @@ public sealed partial class SettingsPanel : UserControl
         InitializeComponent();
 
         // Only listen while in the visual tree: the settings event is static and windows come and go.
-        Loaded += (_, _) => AppSettings.Changed += OnAppSettingsChanged;
-        Unloaded += (_, _) => AppSettings.Changed -= OnAppSettingsChanged;
+        Loaded += (_, _) => { AppSettings.Changed += OnAppSettingsChanged; SmartExperienceHost.Instance.Changed += OnSmartStatusChanged; RefreshSmartStatus(); };
+        Unloaded += (_, _) => { AppSettings.Changed -= OnAppSettingsChanged; SmartExperienceHost.Instance.Changed -= OnSmartStatusChanged; };
 
         Reload();
     }
@@ -81,9 +81,30 @@ public sealed partial class SettingsPanel : UserControl
 
     private void OnAppSettingsChanged(object? sender, EventArgs e)
     {
+        RefreshSmartStatus();
         ReloadProvidersIfEditedElsewhere();
         RefreshShortcutRows();
     }
+
+    private void OnSmartStatusChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(RefreshSmartStatus);
+    private void RefreshSmartStatus()
+    {
+        var status = SmartExperienceHost.Instance.Status;
+        var loading = _loading; _loading = true;
+        SmartExperienceToggle.IsOn = AppSettings.SmartExperience;
+        _loading = loading;
+        SmartExperienceStatus.Text = status.Message;
+        SmartExperienceStatusPanel.Visibility = status.State is Codale.Smart.SmartState.Downloading or Codale.Smart.SmartState.Loading or Codale.Smart.SmartState.Error ? Visibility.Visible : Visibility.Collapsed;
+        SmartExperienceProgress.Value = status.Progress * 100;
+        SmartExperienceProgress.IsIndeterminate = status.State == Codale.Smart.SmartState.Loading;
+        SmartExperienceProgress.Visibility = status.State is Codale.Smart.SmartState.Downloading or Codale.Smart.SmartState.Loading ? Visibility.Visible : Visibility.Collapsed;
+        SmartExperienceCancel.Visibility = SmartExperienceProgress.Visibility;
+        SmartExperienceRetry.Visibility = status.State == Codale.Smart.SmartState.Error ? Visibility.Visible : Visibility.Collapsed;
+    }
+    private void OnSmartExperienceToggled(object sender, RoutedEventArgs e)
+    { if (!_loading) AppSettings.SmartExperience = SmartExperienceToggle.IsOn; }
+    private void OnSmartExperienceCancel(object sender, RoutedEventArgs e) => SmartExperienceHost.Cancel();
+    private void OnSmartExperienceRetry(object sender, RoutedEventArgs e) => SmartExperienceHost.Retry();
 
     /// <summary>Re-reads every setting into the controls; another window may have changed them since.</summary>
     public void Reload()
@@ -103,6 +124,7 @@ public sealed partial class SettingsPanel : UserControl
         WordWrapToggle.IsOn = AppSettings.EditorWordWrap;
         SuggestNextPromptToggle.IsOn = AppSettings.SuggestNextPrompt;
         SmartHistoryToggle.IsOn = AppSettings.ProjectKnowledge;
+        RefreshSmartStatus();
 
         ThemeBox.SelectedIndex = AppSettings.Theme switch
         {

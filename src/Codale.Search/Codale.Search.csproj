@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Codale.Core\Codale.Core.csproj" />
     <ProjectReference Include="..\Codale.Storage\Codale.Storage.csproj" />
+    <ProjectReference Include="..\Codale.Smart\Codale.Smart.csproj" />
   </ItemGroup>
 
   <ItemGroup>

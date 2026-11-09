@@ -20,6 +20,18 @@ public sealed class GitRepository
     private const int MaxUntrackedDiffFiles = 50;
     private const long MaxUntrackedDiffBytes = 4 * 1024 * 1024;
 
+    /// <summary>A complete staged snapshot: tree ID detects even changes outside a bounded prompt excerpt.</summary>
+    public async Task<StagedDiffSnapshot> GetStagedDiffAsync(CancellationToken ct = default)
+    {
+        var before = await RunReadAsync(["write-tree"], ct).ConfigureAwait(false);
+        if (!before.Success) throw new IOException(before.StandardError);
+        var diff = await RunReadAsync(["diff", "--cached", .. DiffFlags], ct).ConfigureAwait(false);
+        if (!diff.Success) throw new IOException(diff.StandardError);
+        var after = await RunReadAsync(["write-tree"], ct).ConfigureAwait(false);
+        if (!after.Success || before.StandardOutput != after.StandardOutput) throw new IOException("Staged changes changed. Generate again.");
+        return new StagedDiffSnapshot(after.StandardOutput.Trim(), diff.StandardOutput);
+    }
+
     private static readonly GitWriteResult InvalidRef = new(false, "That is not a valid branch or commit name.");
 
     private readonly string _workingDirectory;

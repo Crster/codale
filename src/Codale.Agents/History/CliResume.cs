@@ -16,7 +16,6 @@ public static class CliResume
         "codex" => $"resume {sessionId}",
         "copilot" => $"--resume {sessionId}",
         "opencode" => $"--session {sessionId}",
-        "agy" => $"--conversation {sessionId}",
         _ => null,
     };
 
@@ -28,7 +27,6 @@ public static class CliResume
     {
         "claude" => new ClaudeSessionHistoryReader(projectPath),
         "codex" => new CodexSessionHistoryReader(projectPath),
-        "agy" => new AgyHistoryReader(projectPath),
         _ => null,
     };
 }

@@ -13,6 +13,7 @@
     <Project Path="src/Codale.Mcp.Phone/Codale.Mcp.Phone.csproj" />
     <Project Path="src/Codale.Mcp.Tasks/Codale.Mcp.Tasks.csproj" />
     <Project Path="src/Codale.Search/Codale.Search.csproj" />
+    <Project Path="src/Codale.Smart/Codale.Smart.csproj" />
     <Project Path="src/Codale.Storage/Codale.Storage.csproj" />
     <Project Path="src/Codale.Terminal/Codale.Terminal.csproj" />
   </Folder>
@@ -23,6 +24,8 @@
     <Project Path="tests/Codale.Git.Tests/Codale.Git.Tests.csproj" />
     <Project Path="tests/Codale.Mcp.Tests/Codale.Mcp.Tests.csproj" />
     <Project Path="tests/Codale.Search.Tests/Codale.Search.Tests.csproj" />
+    <Project Path="tests/Codale.Smart.Smoke/Codale.Smart.Smoke.csproj" />
+    <Project Path="tests/Codale.Smart.Tests/Codale.Smart.Tests.csproj" />
     <Project Path="tests/Codale.Storage.Tests/Codale.Storage.Tests.csproj" />
     <Project Path="tests/Codale.Terminal.Tests/Codale.Terminal.Tests.csproj" />
   </Folder>

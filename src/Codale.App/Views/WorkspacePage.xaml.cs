@@ -914,7 +914,6 @@ public sealed partial class WorkspacePage : Page
             // Every CLI launch is its own agent session: its own task host for what the CLI reports, its
             // own changes, its own simple panel. The tab selecting itself is what brings that panel up.
             session = ViewModel.CreateTerminalSession(cli);
-            ViewModel.InjectMcpForTerminalCli(session);
 
             var command = ViewModel.RewriteCliLaunch(promptLine, session) ?? cli.Executable + args;
             var directory = PromptDirectory(promptLine);
@@ -3502,6 +3501,17 @@ public sealed partial class WorkspacePage : Page
         if (ViewModel.Git.CommitCommand.CanExecute(null))
         {
             ViewModel.Git.CommitCommand.Execute(null);
+        }
+    }
+
+    private void OnGenerateCommitAccelerator(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+        Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (!CommitMessageBox.FocusState.Equals(Microsoft.UI.Xaml.FocusState.Unfocused))
+        {
+            args.Handled = true;
+            if (ViewModel.Git.GenerateCommitMessageCommand.CanExecute(null))
+                ViewModel.Git.GenerateCommitMessageCommand.Execute(null);
         }
     }
 

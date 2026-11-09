@@ -34,6 +34,39 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
 
     /// <summary>Fingerprint of the snapshot currently applied; null until one is.</summary>
     private int? _lastFingerprint;
+    private CancellationTokenSource? _smartCommit;
+    private long _messageRevision;
+    partial void OnCommitMessageChanged(string value) => _messageRevision++;
+
+    [ObservableProperty]
+    public partial bool IsGeneratingCommitMessage { get; set; }
+
+    [RelayCommand]
+    private async Task GenerateCommitMessageAsync()
+    {
+        if (IsGeneratingCommitMessage || IsBusy) return;
+        if (SmartExperienceHost.Instance.Status.State != Codale.Smart.SmartState.Ready || !AppSettings.SmartExperience)
+        { ActionError = "Enable Smart experience in Settings and wait for LFM3 to be ready."; return; }
+        using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+        _smartCommit = cancel;
+        IsGeneratingCommitMessage = true;
+        ActionError = null;
+        var revision = _messageRevision;
+        try
+        {
+            var snapshot = await _repository.GetStagedDiffAsync(cancel.Token);
+            if (string.IsNullOrWhiteSpace(snapshot.Diff)) { ActionError = "Stage changes before generating a commit message."; return; }
+            var message = await SmartExperienceHost.Instance.CommitMessageAsync(snapshot.Diff, cancel.Token);
+            if (string.IsNullOrWhiteSpace(message)) { ActionError = "Could not generate a commit message. Try again."; return; }
+            var current = await _repository.GetStagedDiffAsync(cancel.Token);
+            if (revision != _messageRevision || current.TreeId != snapshot.TreeId)
+            { ActionError = "The message or staged changes changed during generation. Generate again."; return; }
+            if (AppSettings.SmartExperience) CommitMessage = message;
+        }
+        catch (OperationCanceledException) { ActionError = "Commit-message generation timed out or was cancelled."; }
+        catch (Exception ex) { ActionError = $"Commit-message generation failed: {ex.Message}"; }
+        finally { _smartCommit = null; IsGeneratingCommitMessage = false; }
+    }
 
     public GitViewModel(string projectPath)
     {
@@ -685,6 +718,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _smartCommit?.Cancel();
         _timer.Stop();
         _refreshing.Dispose();
     }

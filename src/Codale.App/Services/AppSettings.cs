@@ -186,6 +186,12 @@ public static class AppSettings
         set => Set("chat.projectKnowledge", value, FormatFlag);
     }
 
+    public static bool SmartExperience
+    {
+        get => Get("ai.smartExperience", () => ReadFlag("ai.smartExperience", false));
+        set => Set("ai.smartExperience", value, FormatFlag);
+    }
+
     /// <summary>Whether the editor draws the gutter with line numbers.</summary>
     public static bool EditorLineNumbers
     {

@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-using Codale.Agents.OpenAi;
+using Codale.Core.Helper;
 
 namespace Codale.Agents.Tests;
 

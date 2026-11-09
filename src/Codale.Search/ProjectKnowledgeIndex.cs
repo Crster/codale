@@ -15,7 +15,7 @@ namespace Codale.Search;
 /// The semantic model sits behind a server, so it is asked in batches off the retrieval path, and a query
 /// it cannot embed within <see cref="QueryEmbedWait"/> is ranked without it.
 /// </remarks>
-public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder?>? semantic = null) : IDisposable
+public sealed partial class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder?>? semantic = null) : IDisposable
 {
     // UTF-8 bytes are a conservative upper bound on byte-tokenizer tokens, including the briefing envelope.
     public const int MaxContextBytes = 3600;
@@ -84,6 +84,7 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
                     // A model that became ready after the last refresh (or an index built before vectors
                     // existed) is embedded once, without re-chunking.
                     await EmbedPendingAsync(worktree).ConfigureAwait(false);
+                    WarmSummaries(worktree);
                     return;
                 }
                 var old = store.SourceHashes(worktree);
@@ -119,6 +120,7 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
                 foreach (var embedder in Embedders()) _embedded.TryRemove(worktree + "\n" + embedder.Model, out _);
                 await EmbedPendingAsync(worktree).ConfigureAwait(false);
                 lock (_gate) _snapshots[worktree] = snapshot.BuiltAt;
+                WarmSummaries(worktree);
             });
         }
     }
@@ -337,7 +339,7 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
     /// </summary>
     /// <param name="workingSet">Files the current session wrote, newest first; empty on a new topic.</param>
     public RetrievalResult Retrieve(string worktree, string prompt, string recent, IReadOnlySet<string> delivered, string? currentSessionId = null,
-        IReadOnlyList<string>? workingSet = null, QueryVector? query = null)
+        IReadOnlyList<string>? workingSet = null, QueryVector? query = null, IReadOnlyList<string>? preferredChunkIds = null)
     {
         var timer = Stopwatch.StartNew();
         worktree = ProjectPaths.Normalize(worktree);
@@ -364,6 +366,11 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
         // index catches up, and stale files are dropped, so wait briefly for that rather than lose them.
         if ((stale || ranked.Count == 0) && CaughtUp(worktree))
             ranked = Search(worktree, prompt, recent, MaxFiles + 2, 2, workingSet, query, out _);
+        if (preferredChunkIds is not null)
+        {
+            var order = preferredChunkIds.Select((id, i) => (id, i)).ToDictionary(x => x.id, x => x.i);
+            ranked = ranked.OrderBy(c => order.GetValueOrDefault(c.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), int.MaxValue)).ToList();
+        }
         // The CLI already loaded its instruction files into the conversation.
         var topFiles = ranked.Where(c => !AgentInstructions.IsMatch(c.Path))
             .GroupBy(c => c.Path, StringComparer.OrdinalIgnoreCase).Take(MaxFiles).ToList();
@@ -557,7 +564,7 @@ public sealed class ProjectKnowledgeIndex(FeatureStore store, Func<ITextEmbedder
     public void Dispose()
     {
         Task[] running;
-        lock (_gate) { _disposed = true; running = _refreshes.Values.ToArray(); }
+        lock (_gate) { _disposed = true; running = _refreshes.Values.Concat(_summaryTasks.Values).ToArray(); }
         _stopping.Cancel();
         try { Task.WhenAll(running).GetAwaiter().GetResult(); }
         catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"Project indexing stopped: {ex.Message}"); }

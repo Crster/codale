@@ -33,15 +33,6 @@ public sealed class McpServerSettings
         _baseDirectory = baseDirectory ?? AppContext.BaseDirectory;
     }
 
-    /// <summary>
-    /// The servers to write into the global Codale config (%LOCALAPPDATA%\Codale) when no launch is
-    /// at hand, supplied by the workspace so they include the tasks server of the terminal session on the panel.
-    /// A launch itself passes its own session's servers (see <see cref="RewriteCliLaunch"/>). Unset, the servers started now are used.
-    /// </summary>
-    public Func<IReadOnlyList<McpServerSpec>>? TerminalServersProvider { get; set; }
-
-    private IReadOnlyList<McpServerSpec> TerminalServers() => ForTerminal(TerminalServersProvider?.Invoke() ?? Servers());
-
     /// <summary>On unless the user turned it off.</summary>
     public bool BrowserEnabled
     {
@@ -195,57 +186,6 @@ public sealed class McpServerSettings
     }
 
     /// <summary>
-    /// Injects Codale's global MCP configuration and rules into the app's local data folder
-    /// (<c>%LOCALAPPDATA%\Codale</c>) so they are available across all workspaces without dirtying
-    /// any project repository.
-    /// </summary>
-    public void SyncWorkspaceMcpConfig(string? targetDirectory = null, IReadOnlyList<McpServerSpec>? servers = null)
-    {
-        servers = ForTerminal(servers ?? TerminalServers());
-
-        try
-        {
-            WriteGlobalMcpConfig(servers);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
-
-    /// <summary>
-    /// Injects the global MCP configuration into the local app folder (<c>%LOCALAPPDATA%\Codale</c>).
-    /// </summary>
-    public static void WriteGlobalMcpConfig(IReadOnlyList<McpServerSpec> servers)
-    {
-        var dir = CodaleDataRoot();
-        try
-        {
-            var json = McpServerSpec.ToAgyConfig(servers);
-            var rootConfig = Path.Combine(dir, "mcp_config.json");
-            var agentsConfig = Path.Combine(dir, ".agents", "mcp_config.json");
-
-            if (json is { Length: > 0 })
-            {
-                Directory.CreateDirectory(dir);
-                File.WriteAllText(rootConfig, json);
-
-                Directory.CreateDirectory(Path.GetDirectoryName(agentsConfig)!);
-                File.WriteAllText(agentsConfig, json);
-            }
-            else
-            {
-                if (File.Exists(rootConfig)) File.Delete(rootConfig);
-                if (File.Exists(agentsConfig)) File.Delete(agentsConfig);
-            }
-
-            WriteAgyRules(Path.Combine(dir, ".agents", "rules", "codale.md"), servers);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
-
-    /// <summary>
     /// The servers as handed to a CLI in a terminal: each sends its usage instructions at connect
     /// (<see cref="McpInstructions"/>), which the panel's own session gets through its system prompt instead.
     /// </summary>
@@ -257,49 +197,6 @@ public sealed class McpServerSettings
                 [McpInstructions.EnvironmentVariable] = "1",
             },
         })];
-
-    /// <summary>
-    /// The same instructions as a workspace rule, for Antigravity: whether it reads a server's
-    /// instructions is not documented, and its rules folder is read at startup.
-    /// </summary>
-    private static void WriteAgyRules(string path, IReadOnlyList<McpServerSpec> servers)
-    {
-        var parts = new List<string>();
-        if (servers.Any(s => s.Name == TasksName))
-        {
-            parts.Add($"codale-tasks: {McpInstructions.Tasks}");
-        }
-
-        if (servers.Any(s => s.Name == BrowserName))
-        {
-            parts.Add($"{BrowserName}: {McpInstructions.Browser}");
-        }
-
-        if (servers.Any(s => s.Name == ComputerName))
-        {
-            parts.Add($"{ComputerName}: {McpInstructions.Computer}");
-        }
-
-        if (servers.Any(s => s.Name == PhoneName))
-        {
-            parts.Add($"{PhoneName}: {McpInstructions.Phone}");
-        }
-
-        if (parts.Count == 0)
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-
-            return;
-        }
-
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, "---\ntrigger: always_on\n---\n\n# Codale\n\n" + string.Join("\n\n", parts) + "\n");
-    }
-
-
 
     /// <summary>Arguments that run a CLI's housekeeping (setup, updates, its own MCP management) rather than a session.</summary>
     private static readonly HashSet<string> NonSessionArgs = new(StringComparer.OrdinalIgnoreCase)
@@ -332,7 +229,6 @@ public sealed class McpServerSettings
     /// Gemini CLI and Qwen Code: a system settings file named by <c>GEMINI_CLI_SYSTEM_SETTINGS_PATH</c> /
     /// <c>QWEN_CODE_SYSTEM_SETTINGS_PATH</c>, built on the machine's own system settings so none are lost.
     /// OpenCode: a config file named by <c>OPENCODE_CONFIG</c>, merged with the user's and project's.
-    /// Antigravity: <c>--add-dir</c> pointing to Codale's global app local folder.
     /// </remarks>
     public string? RewriteCliLaunch(string promptLine, IReadOnlyList<McpServerSpec> sessionServers, string key)
     {
@@ -367,7 +263,6 @@ public sealed class McpServerSettings
                     StageSettings("qwen", key, servers, Path.Combine(programData, "qwen-code", "settings.json"), "QWEN_CODE_SYSTEM_SETTINGS_PATH"),
                     "qwen" + tail),
                 "opencode" => WithEnv(powershell, "OPENCODE_CONFIG", StageOpenCode(key, servers), "opencode" + tail),
-                "agy" => StageAgy(key, servers, tail, powershell),
                 _ => null,
             };
         }
@@ -399,25 +294,6 @@ public sealed class McpServerSettings
         sb.Append(" --settings ");
         sb.Append(Quote(powershell, settingsPath));
         return sb.ToString();
-    }
-
-    private string StageAgy(string key, IReadOnlyList<McpServerSpec> servers, string tail, bool powershell)
-    {
-        var stageDir = Path.Combine(StagingRoot(), "cli", $"agy-{ProjectHash()}-{key}");
-        var agentsDir = Path.Combine(stageDir, ".agents");
-        Directory.CreateDirectory(agentsDir);
-
-        var json = McpServerSpec.ToAgyConfig(servers);
-        if (json is { Length: > 0 })
-        {
-            File.WriteAllText(Path.Combine(stageDir, "mcp_config.json"), json);
-            File.WriteAllText(Path.Combine(agentsDir, "mcp_config.json"), json);
-        }
-
-        WriteAgyRules(Path.Combine(agentsDir, "rules", "codale.md"), servers);
-
-        var skip = tail.Contains("--dangerously-skip-permissions", StringComparison.OrdinalIgnoreCase) ? "" : " --dangerously-skip-permissions";
-        return $"agy --add-dir {Quote(powershell, stageDir)}{skip}{tail}";
     }
 
     /// <summary>One file per project and session: each CLI carries its own pipe and token, so two launches must not share one.</summary>

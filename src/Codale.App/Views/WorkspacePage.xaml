@@ -1050,7 +1050,8 @@
                                     MaxHeight="130"
                                     MinHeight="60"
                                     Padding="10,6,34,6"
-                                    PlaceholderText="Commit message"
+                                    PlaceholderText="Commit message (Ctrl+Space to generate)"
+                                    ToolTipService.ToolTip="Generate from staged changes (Ctrl+Space)"
                                     Text="{x:Bind ViewModel.Git.CommitMessage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                     TextWrapping="Wrap">
                                     <TextBox.KeyboardAccelerators>
@@ -1058,7 +1059,7 @@
                                             Key="Enter"
                                             Invoked="OnCommitAccelerator"
                                             Modifiers="Control" />
-
+                                        <KeyboardAccelerator Key="Space" Invoked="OnGenerateCommitAccelerator" Modifiers="Control" />
                                     </TextBox.KeyboardAccelerators>
                                 </TextBox>
 

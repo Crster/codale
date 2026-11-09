@@ -54,7 +54,9 @@ public partial class App : Application
     protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
         Services.SyntaxSelection.Start();
+        SmartExperienceHost.Start();
         _window = new MainWindow(_request);
+        _window.Closed += async (_, _) => await SmartExperienceHost.Instance.DisposeAsync();
         _window.Activate();
     }
 

@@ -6,6 +6,13 @@ namespace Codale.Agents.Tests;
 public class CliLocatorTests
 {
     [Fact]
+    public void Antigravity_has_no_special_session_resume_or_history()
+    {
+        Assert.Null(Codale.Agents.History.CliResume.Arguments("agy", "session"));
+        Assert.Null(Codale.Agents.History.CliResume.CreateReader("agy", "."));
+    }
+
+    [Fact]
     public void KnownClis_contains_most_common_agentic_clis()
     {
         var ids = CliLocator.KnownClis.Select(c => c.Id).ToList();

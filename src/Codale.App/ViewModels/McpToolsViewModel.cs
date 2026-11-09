@@ -209,7 +209,6 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
         if (!_loading)
         {
             _settings.BrowserEnabled = value;
-            _settings.SyncWorkspaceMcpConfig();
         }
     }
 
@@ -218,7 +217,6 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
         if (!_loading)
         {
             _settings.ComputerEnabled = value;
-            _settings.SyncWorkspaceMcpConfig();
         }
     }
 
@@ -227,7 +225,6 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
         if (!_loading)
         {
             _settings.PhoneEnabled = value;
-            _settings.SyncWorkspaceMcpConfig();
         }
     }
 }

@@ -44,11 +44,8 @@ public sealed record McpServerSpec
                          toolName.StartsWith(PrefixOf(s.Name), StringComparison.Ordinal) &&
                          !s.AskTools.Contains(toolName[PrefixOf(s.Name).Length..], StringComparer.Ordinal));
 
-    /// <summary>Standard <c>mcp_config.json</c> document for servers, recognized by Antigravity and other MCP-compliant CLIs.</summary>
-    public static string? ToStandardMcpConfig(IReadOnlyList<McpServerSpec> servers) => ToAgyConfig(servers);
-
-    /// <summary>Generates <c>mcp_config.json</c> for Antigravity, marking all tools eager so they are directly exposed.</summary>
-    public static string? ToAgyConfig(IReadOnlyList<McpServerSpec> servers)
+    /// <summary>Standard <c>mcp_config.json</c> document for MCP-compliant CLIs.</summary>
+    public static string? ToStandardMcpConfig(IReadOnlyList<McpServerSpec> servers)
     {
         if (servers.Count == 0)
         {
@@ -62,7 +59,6 @@ public sealed record McpServerSpec
             {
                 ["command"] = server.Command,
                 ["args"] = new JsonArray(server.Args.Select(a => (JsonNode)a).ToArray()),
-                ["force_all_tools_eager"] = true,
             };
 
             if (server.Env is { Count: > 0 } env)

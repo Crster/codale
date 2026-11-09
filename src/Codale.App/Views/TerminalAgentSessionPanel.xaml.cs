@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 
 using Codale.Agents;
-using Codale.Agents.Agy;
 using Codale.Agents.Claude;
 using Codale.Agents.Codex;
 using Codale.Agents.History;
@@ -298,7 +297,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
     /// </summary>
     private async void OnTick()
     {
-        if (_probing || Session is not { TerminalCli.Id: "claude" or "codex" or "agy" } session || _reader?.HistorySourcePath is not { Length: > 0 } source)
+        if (_probing || Session is not { TerminalCli.Id: "claude" or "codex" } session || _reader?.HistorySourcePath is not { Length: > 0 } source)
         {
             return;
         }
@@ -322,18 +321,6 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
                     if (reading.Limits is { } codexLimits)
                     {
                         session.Status.Apply(codexLimits);
-                    }
-                }
-            }
-            else if (session.TerminalCli.Id == "agy")
-            {
-                var path = ProjectPath;
-                if (await Task.Run(() => AgyContextProbe.Read(source, path, since)) is { } reading)
-                {
-                    if (reading.ContextTokens > 0)
-                    {
-                        session.Status.ContextTokens = reading.ContextTokens;
-                        session.Status.ContextWindow = reading.ContextWindow;
                     }
                 }
             }

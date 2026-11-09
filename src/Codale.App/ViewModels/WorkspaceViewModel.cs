@@ -4,7 +4,6 @@ using System.ComponentModel;
 using Codale.Agents;
 using Codale.Agents.Claude;
 using Codale.Agents.History;
-using Codale.Agents.OpenAi;
 using Codale.App.Services;
 using Codale.Commands;
 using Codale.Core.Agents;
@@ -49,8 +48,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         _endpoints = new CliEndpointSettings();
         _mcp = new McpServerSettings(_store, ProjectPath);
         Health = new WorkspaceHealthViewModel(ProjectPath);
-        _mcp.TerminalServersProvider = () => Panel is { IsTerminalSession: true } session ? session.ServersForTerminalCli() : _mcp.Servers();
-        _mcp.SyncWorkspaceMcpConfig();
         McpTools = new McpToolsViewModel(_mcp, FolderServers, ProjectPath);
         CliEndpoint = new CliEndpointViewModel();
         CliEndpoint.PropertyChanged += (_, e) =>
@@ -173,12 +170,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
     /// <summary>Folders served on localhost from the Agent tools flyout or an agent's serve_folder; they live as long as this window.</summary>
     public FolderServerHost FolderServers { get; } = new();
-
-    /// <summary>
-    /// Writes the session's Codale MCP servers into the global Codale app local data config (shared across all workspaces).
-    /// </summary>
-    public void InjectMcpForTerminalCli(ChatViewModel session) =>
-        _mcp.SyncWorkspaceMcpConfig(servers: session.ServersForTerminalCli());
 
     /// <summary>
     /// Adds this session's Codale MCP servers to an agent CLI launch typed at a terminal prompt (its own pipe,

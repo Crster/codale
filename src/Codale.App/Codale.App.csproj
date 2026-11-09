@@ -129,11 +129,34 @@
     <ProjectReference Include="..\Codale.Terminal\Codale.Terminal.csproj" />
     <ProjectReference Include="..\Codale.Git\Codale.Git.csproj" />
     <ProjectReference Include="..\Codale.Search\Codale.Search.csproj" />
+    <ProjectReference Include="..\Codale.Smart\Codale.Smart.csproj" />
     <ProjectReference Include="..\Codale.Storage\Codale.Storage.csproj" />
+    <Content Include="..\Codale.Smart\licenses\*.txt">
+      <Link>SmartNative\licenses\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 
+  <Target Name="BuildSmartNative" BeforeTargets="PrepareForBuild" Condition="'$(DesignTimeBuild)' != 'true'"
+          Inputs="..\Codale.Smart\native\smart.cpp;..\Codale.Smart\native\build.ps1"
+          Outputs="..\Codale.Smart\native\bin\$(RuntimeIdentifier)\codale-smart.dll">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\Codale.Smart\native\build.ps1&quot; -Platform $([System.String]::Copy('$(RuntimeIdentifier)').Replace('win-', ''))" />
+  </Target>
+  <Target Name="IncludeSmartNative" BeforeTargets="AssignTargetPaths" DependsOnTargets="BuildSmartNative">
+    <ItemGroup>
+      <SmartNativeFile Include="..\Codale.Smart\native\bin\$(RuntimeIdentifier)\ggml*.dll;..\Codale.Smart\native\bin\$(RuntimeIdentifier)\llama.dll;..\Codale.Smart\native\bin\$(RuntimeIdentifier)\libomp.dll;..\Codale.Smart\native\bin\$(RuntimeIdentifier)\codale-smart.dll" />
+      <Content Include="@(SmartNativeFile)">
+        <Link>SmartNative\%(SmartNativeFile.Filename)%(SmartNativeFile.Extension)</Link>
+        <TargetPath>SmartNative\%(SmartNativeFile.Filename)%(SmartNativeFile.Extension)</TargetPath>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </Content>
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
-    <!-- The text Codale's MCP servers send as their instructions; the Antigravity rules file repeats it. -->
+    <!-- The text Codale's MCP servers send as their instructions. -->
     <Compile Include="..\Codale.Mcp.Common\McpInstructions.cs" Link="Services\McpInstructions.cs" />
   </ItemGroup>
 

@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace Codale.Agents.OpenAi;
+namespace Codale.Core.Helper;
 
 /// <summary>
 /// Parses model lists from OpenAI-compatible and Anthropic-compatible /models endpoints,

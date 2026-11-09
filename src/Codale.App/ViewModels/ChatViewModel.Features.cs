@@ -321,7 +321,7 @@ public sealed partial class ChatViewModel
         return await TopicShift.IsNewTopicAsync(text, earlier, HashedTextEmbedder.Instance, lastReply, ct);
     }
 
-    private async Task<RetrievalResult?> RetrieveProjectContextAsync(string text, UserMessageItem? sent = null)
+    private async Task<RetrievalResult?> RetrieveProjectContextAsync(string text, UserMessageItem? sent = null, CancellationToken preparationToken = default)
     {
         _retrievalId = null;
         if (text.StartsWith('/')) return null;
@@ -329,6 +329,7 @@ public sealed partial class ChatViewModel
         // conversation is about was enriched when it was asked. Matching the words alone adds noise.
         if (!SearchText.HasTopic(text)) return null;
         using var cts = new CancellationTokenSource();
+        using var smartDeadline = CancellationTokenSource.CreateLinkedTokenSource(preparationToken, cts.Token);
         _briefing = cts;
         var session = _session;
         try
@@ -345,8 +346,13 @@ public sealed partial class ChatViewModel
             if (Features is not { } features || !AppSettings.ProjectKnowledge) return null;
             var recent = newTopic ? "" : string.Join("\n", earlier.TakeLast(2).Append(text));
             // A new topic leaves the files the session has been editing behind.
-            var result = await features.RetrieveAsync(_projectPath, text, recent, new HashSet<string>(_deliveredContext),
-                _needsResumeContext ? null : FeatureId, newTopic ? null : FeatureId).WaitAsync(TimeSpan.FromSeconds(2), cts.Token);
+            var retrieval = features.RetrieveAsync(_projectPath, text, recent, new HashSet<string>(_deliveredContext),
+                _needsResumeContext ? null : FeatureId, newTopic ? null : FeatureId, smartDeadline.Token);
+            // Smart retrieval bounds inference itself and returns verified basic context on timeout.
+            // An outer timeout would discard that fallback just as it becomes available.
+            var result = AppSettings.SmartExperience
+                ? await retrieval.WaitAsync(cts.Token)
+                : await retrieval.WaitAsync(TimeSpan.FromSeconds(2), cts.Token);
             if (newTopic) result = result with { NewTopic = true };
             if (!ReferenceEquals(session, _session)) throw new OperationCanceledException();
             _retrievalId = Guid.NewGuid().ToString("N");

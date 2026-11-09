@@ -38,6 +38,25 @@ public sealed class GitRepositoryIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task Staged_message_snapshot_excludes_unstaged_edits_and_detects_index_changes()
+    {
+        Git(_root, "init -b main");
+        File.WriteAllText(Path.Combine(_root, "staged.txt"), "staged-only");
+        Git(_root, "add staged.txt");
+        File.WriteAllText(Path.Combine(_root, "staged.txt"), "unstaged-secret");
+        File.WriteAllText(Path.Combine(_root, "untracked.txt"), "untracked-secret");
+        var repo = new GitRepository(_root);
+        var first = await repo.GetStagedDiffAsync();
+        Assert.Contains("staged-only", first.Diff);
+        Assert.DoesNotContain("unstaged-secret", first.Diff);
+        Assert.DoesNotContain("untracked-secret", first.Diff);
+        Git(_root, "add staged.txt");
+        var second = await repo.GetStagedDiffAsync();
+        Assert.NotEqual(first.TreeId, second.TreeId);
+        Assert.Contains("unstaged-secret", second.Diff);
+    }
+
+    [Fact]
     public async Task A_real_repository_reports_its_branch_changes_and_history()
     {
         Git(_root, "init -b main");

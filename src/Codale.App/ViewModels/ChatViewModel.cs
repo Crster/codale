@@ -3395,7 +3395,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             Action = () =>
             {
                 settings.PhoneEnabled = true;
-                settings.SyncWorkspaceMcpConfig();
                 Add(new NoticeItem { Text = "Phone tools are on. They start with the next session; installing, clearing data and shell commands on the device still ask first." });
                 return Task.CompletedTask;
             },
@@ -3494,21 +3493,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         var shellAssessment = ShellApprovalAssessment(approval, out var shellCommand, out var shellHint);
         // Windows may request approval even for reads in Codex's planning sandbox.
         // Risk "Safe" is insufficient here: it also includes builds and unknown programs.
-        var requiresPlanApproval = IsCodexSession && PermissionMode == "plan" &&
-            approval.ToolName is "Edit" or "Write" or "MultiEdit" or "NotebookEdit" or "Bash" or "Permissions";
-        if (requiresPlanApproval)
+        var requiresPlanApproval = PermissionMode == "plan" &&
+            approval.ToolName is "Edit" or "Write" or "MultiEdit" or "NotebookEdit" or "Bash" or "PowerShell" or "Permissions";
+        if ((PermissionMode == "plan" || IsAutomaticMode) &&
+            PlanningShellPolicy.AllowsToolInspection(approval.ToolName, shellCommand))
         {
-            if (approval.ToolName == "Bash" && PlanningShellPolicy.AllowsInspection(shellCommand))
+            if (_session is { } planning)
             {
-                if (_session is { } planning)
-                {
-                    await planning.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
-                }
-                return;
+                await planning.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
             }
-
-            // An unrecognized command may still be a valid inspection. Keep the turn
-            // waiting on the normal approval card so the reader can decide.
+            return;
         }
 
         if (!requiresPlanApproval && shellAssessment.Risk == ShellRisk.Safe && AppSettings.AutoApproveSafeShell)
@@ -3985,6 +3979,37 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             await ReturnFromRoutedAskAsync();
         }
 
+        if (IsAutomaticMode && !IsBusy && !planOnly && !text.StartsWith('/'))
+        {
+            using var preparation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var stopped = new CancellationTokenSource();
+            using var routing = CancellationTokenSource.CreateLinkedTokenSource(preparation.Token, stopped.Token);
+            _briefing = stopped;
+            var decision = MessageRouting.RouteWithoutModel(text);
+            try
+            {
+                if (AppSettings.SmartExperience && SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready)
+                {
+                    var intent = await SmartExperienceHost.Instance.ClassifyAsync(text, LastRoutingReply, routing.Token).WaitAsync(routing.Token);
+                    if (intent is { } selected) decision = decision with { Intent = selected switch
+                    {
+                        Codale.Smart.SmartIntent.Ask => RouteIntent.Ask,
+                        Codale.Smart.SmartIntent.Plan => RouteIntent.Plan,
+                        _ => RouteIntent.Act,
+                    } };
+                }
+            }
+            catch (OperationCanceledException) { if (stopped.IsCancellationRequested) return; }
+            finally { _briefing = null; }
+            if (stopped.IsCancellationRequested) return;
+            if (!IsAutomaticMode)
+            {
+                await SendTurnAsync(text, attachments, planOnly: PermissionMode == "plan", askOnly: IsAskMode, preparation.Token);
+                return;
+            }
+            await SendRoutedAsync(text, attachments, decision.Intent, preparation.Token);
+            return;
+        }
         await SendTurnAsync(text, attachments, planOnly, askOnly: IsAskMode && !planOnly);
     }
 
@@ -3992,7 +4017,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// Sends a message the router already read: a plan turn, an explain-only turn, or
     /// a plain one - each in its own mode for the turn, back to Automatic after.
     /// </summary>
-    public async Task SendRoutedAsync(string text, IReadOnlyList<TurnAttachment> attachments, RouteIntent intent)
+    public async Task SendRoutedAsync(string text, IReadOnlyList<TurnAttachment> attachments, RouteIntent intent, CancellationToken preparationToken = default)
     {
         if (_session is null || !IsConnected)
         {
@@ -4004,7 +4029,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         switch (intent)
         {
             case RouteIntent.Plan:
-                await SendTurnAsync(text, attachments, planOnly: true, askOnly: false);
+                await SendTurnAsync(text, attachments, planOnly: true, askOnly: false, preparationToken);
                 break;
 
             case RouteIntent.Ask:
@@ -4013,11 +4038,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     return;
                 }
 
-                await SendTurnAsync(text, attachments, planOnly: false, askOnly: true);
+                await SendTurnAsync(text, attachments, planOnly: false, askOnly: true, preparationToken);
                 break;
 
             default:
-                await SendTurnAsync(text, attachments, planOnly: false, askOnly: false);
+                await SendTurnAsync(text, attachments, planOnly: false, askOnly: false, preparationToken);
                 break;
         }
     }
@@ -4040,7 +4065,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private async Task SendTurnAsync(string text, IReadOnlyList<TurnAttachment> attachments, bool planOnly, bool askOnly)
+    private async Task SendTurnAsync(string text, IReadOnlyList<TurnAttachment> attachments, bool planOnly, bool askOnly, CancellationToken preparationToken = default)
     {
         _idleCompactTimer.Stop();
         var compact = IsCompactCommand(text);
@@ -4109,7 +4134,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         RetrievalResult? retrieved;
         try
         {
-            retrieved = await RetrieveProjectContextAsync(text, compact ? null : sent);
+            retrieved = await RetrieveProjectContextAsync(text, compact ? null : sent, preparationToken);
         }
         catch (OperationCanceledException)
         {

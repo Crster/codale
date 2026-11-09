@@ -40,7 +40,7 @@ Modern AI coding CLIs are formidable agents, but standard terminal TUIs are a po
 2. **One Window Per Project**: Each project opens in its own window. Reopening an already open project focuses that window immediately. Windows Explorer integration allows right-clicking any folder and selecting **Open in Codale** via a native packaged C++ COM shell extension.
 3. **Structured Agent Protocols**: Codale does not scrape terminal screens for the primary agent conversation. It drives CLI agents via structured streams (such as `claude --output-format stream-json`), converting wire streams into strongly typed `AgentEvent` unions that the WinUI interface binds to natively.
 4. **Git as the Ultimate Source of Truth**: The application never guesses file diffs or repo states; it reads directly from the Git CLI, ensuring what you see in the diff inspector and changes panel is 100% faithful to the filesystem.
-5. **Seamless Terminal CLI Integration**: Beyond the primary GUI chat panel, Codale includes a full ConPTY terminal drawer. When you run an AI coding agent CLI (Claude, Antigravity, Copilot, Codex, Gemini, Qwen, OpenCode, Aider, Goose, or Cursor) in the terminal, Codale automatically detects the session, dynamically attaches its MCP servers and rules, mirrors task progress in the session panel, and monitors the terminal for interactive prompts.
+5. **Terminal CLI Integration**: Codale includes a ConPTY terminal drawer. Claude and Codex have full session integration; other detected CLIs have varying levels of integration and can also run in the terminal.
 
 ---
 
@@ -93,7 +93,7 @@ Rather than letting the CLI run as an isolated, uncoordinated process, Codale:
 | CLI Identifier | Agent Name | Command | Auto MCP Injection Method | Installation Command |
 | :--- | :--- | :--- | :--- | :--- |
 | `claude` | **Claude Code** | `claude` | Staged `--mcp-config <staged.json>` | `irm https://claude.ai/install.ps1 \| iex` |
-| `agy` | **Google Antigravity** | `agy` | Workspace `.agents/mcp_config.json` & `.agents/rules/codale.md` | `npm i -g @google/antigravity` |
+| `agy` | **Google Antigravity** | `agy` | Terminal only | `npm i -g @google/antigravity` |
 | `copilot` | **GitHub Copilot CLI** | `copilot` | `--additional-mcp-config @<staged.json>` | Installed via GitHub CLI / npm |
 | `codex` | **OpenAI Codex CLI** | `codex` | Command override `-c mcp_servers.*` | CLI package installer |
 | `gemini` | **Gemini Code Assist** | `gemini` | `GEMINI_CLI_SYSTEM_SETTINGS_PATH=<staged.json>` | Google Cloud / Gemini CLI installer |
@@ -202,7 +202,7 @@ docs/                           Documentation assets and screenshots
 src/
   Codale.App/                   WinUI 3 application shell (Mica, views, viewmodels, single-project MSIX)
   Codale.Core/                  Core domain models (AgentEvent union, models, Markdown, syntax tokenizers)
-  Codale.Agents/                Agent drivers (Claude stream-json session, CLI locator, Antigravity history, OpenAI bridge)
+  Codale.Agents/                Claude and Codex session drivers and CLI locator
   Codale.Terminal/              ConPTY P/Invoke interop, VT parsing, and TerminalSession
   Codale.Commands/              Saved project commands catalog (.codale, .vscode, package.json)
   Codale.Git/                   Git CLI wrapper (status, graph, diffs, commits)
@@ -261,8 +261,8 @@ flowchart TD
 
     subgraph Agents ["AI Coding CLIs"]
         ClaudeCli["Claude Code (claude)"]
-        AgyCli["Antigravity (agy)"]
-        OtherClis["Copilot / Codex / Gemini / Qwen / etc."]
+        CodexCli["Codex (codex)"]
+        OtherClis["Other terminal CLIs"]
     end
 
     ChatTab --> AgentEvent
@@ -342,7 +342,7 @@ Commands are also automatically detected from `.claude/launch.json`, `.vscode/ta
 - **Operating System**: Windows 11 (Build 22621 or newer).
 - **Runtime & SDK**: [.NET 10 SDK](https://dotnet.microsoft.com/).
 - **Build Tools**: Visual Studio 2026 / 2022 with the **Desktop development with C++** and **MSVC v143+** toolsets (required to compile the native `Codale.ShellExt` COM DLL).
-- **AI Agent CLI**: [Claude Code](https://claude.com/claude-code) installed and authenticated, or another supported CLI (e.g. Antigravity, Gemini, Copilot).
+- **AI Agent CLI**: [Claude Code](https://claude.com/claude-code) or OpenAI Codex installed and authenticated for full integration.
 
 ### Build, Package, and Launch
 

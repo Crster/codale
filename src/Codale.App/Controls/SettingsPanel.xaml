@@ -385,6 +385,28 @@
                             </StackPanel>
                         </Border>
 
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="Smart experience" />
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="24" Padding="16">
+                                    <TextBlock Style="{StaticResource RowDesc}" VerticalAlignment="Center" TextWrapping="Wrap" Text="Use local AI for summaries, context, routing, and commit messages." />
+                                    <ToggleSwitch x:Name="SmartExperienceToggle" Grid.Column="1" MinWidth="0" VerticalAlignment="Center" AutomationProperties.Name="Smart experience" Toggled="OnSmartExperienceToggled" />
+                                </Grid>
+                                <Border x:Name="SmartExperienceStatusPanel" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="16,12" Visibility="Collapsed">
+                                    <StackPanel Spacing="8">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                                            <TextBlock x:Name="SmartExperienceStatus" Style="{StaticResource RowDesc}" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                                <Button x:Name="SmartExperienceCancel" Content="Cancel" Click="OnSmartExperienceCancel" Visibility="Collapsed" />
+                                                <Button x:Name="SmartExperienceRetry" Content="Retry" Click="OnSmartExperienceRetry" Visibility="Collapsed" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <ProgressBar x:Name="SmartExperienceProgress" Maximum="100" Visibility="Collapsed" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+
                     </StackPanel>
 
                     <!-- ========================================== -->

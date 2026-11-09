@@ -495,3 +495,7 @@ tools/
 
 # ZCode local session data
 .zcode/
+
+# Downloaded native inference payload and smoke-test weights
+.cache/
+src/Codale.Smart/native/bin/

@@ -10,10 +10,19 @@ public static class PlanningShellPolicy
         "Get-Content", "Get-ChildItem", "Get-Item", "Get-Location", "Test-Path", "Resolve-Path",
         "Select-String", "Select-Object", "Measure-Object", "Get-FileHash",
         "Format-Table", "Format-List", "Out-String",
+        "rg", "grep", "cat", "head", "tail", "wc", "ls", "pwd",
+    };
+
+    /// <summary>Reads may proceed during planning; writes and plan review still need approval.</summary>
+    public static bool AllowsToolInspection(string toolName, string? command = null) => toolName switch
+    {
+        "Read" or "Glob" or "Grep" or "LS" or "WebSearch" or "WebFetch" => true,
+        "Bash" or "PowerShell" => AllowsInspection(command),
+        _ => false,
     };
 
     /// <summary>
-    /// Recognizes literal PowerShell inspection commands and pipelines. Unknown programs,
+    /// Recognizes literal inspection commands and pipelines. Unknown programs,
     /// script expressions, redirection and shell escapes fail closed, regardless of risk rating.
     /// </summary>
     public static bool AllowsInspection(string? command)
@@ -54,8 +63,19 @@ public static class PlanningShellPolicy
         var segments = ShellCommandAnalyzer.SplitSegments(command.ReplaceLineEndings("\n"));
         return segments.Count > 0 && segments.All(segment =>
         {
-            var name = Regex.Match(segment, @"^([A-Za-z]+-[A-Za-z]+)(?=\s|$)");
-            return name.Success && Commands.Contains(name.Value);
+            var name = Regex.Match(segment, @"^[A-Za-z]+(?:-[A-Za-z]+)*(?=\s|$)");
+            if (!name.Success) return false;
+
+            // Git's other subcommands and global options can execute programs or write files.
+            if (name.Value.Equals("git", StringComparison.OrdinalIgnoreCase))
+                return Regex.IsMatch(segment, @"^git\s+(?:status|ls-files)(?:\s|$)", RegexOptions.IgnoreCase);
+
+            // Ripgrep can launch a preprocessor or a hostname command even for a search.
+            if (name.Value.Equals("rg", StringComparison.OrdinalIgnoreCase) &&
+                Regex.IsMatch(segment, @"--(?:pre|hostname-bin)(?:[=\s]|$)", RegexOptions.IgnoreCase))
+                return false;
+
+            return Commands.Contains(name.Value);
         });
     }
 }
