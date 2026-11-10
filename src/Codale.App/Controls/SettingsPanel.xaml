@@ -410,7 +410,7 @@
                                         <TextBlock Style="{StaticResource RowTitle}" Text="Summarize files in the background" />
                                         <TextBlock Style="{StaticResource RowDesc}" Text="Run the local model over project files to pre-write summaries (up to 25 per pass). Uses CPU/GPU while it works." />
                                     </StackPanel>
-                                    <ToggleSwitch x:Name="SmartSummariesToggle" Grid.Column="1" MinWidth="0" VerticalAlignment="Center" AutomationProperties.Name="Summarize files in the background" Toggled="OnSmartSummariesToggled" />
+                                    <ToggleSwitch x:Name="SmartSummariesToggle" Grid.Column="1" MinWidth="0" VerticalAlignment="Center" IsEnabled="{Binding IsOn, ElementName=SmartExperienceToggle}" AutomationProperties.Name="Summarize files in the background" Toggled="OnSmartSummariesToggled" />
                                 </Grid>
                                 <Rectangle Style="{StaticResource Divider}" />
                                 <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
@@ -418,7 +418,7 @@
                                         <TextBlock Style="{StaticResource RowTitle}" Text="Enable thinking" />
                                         <TextBlock Style="{StaticResource RowDesc}" Text="Allow the local model to reason before using tools and answering." />
                                     </StackPanel>
-                                    <ToggleSwitch x:Name="SmartThinkingToggle" Grid.Column="1" MinWidth="0" VerticalAlignment="Center" AutomationProperties.Name="Enable thinking" Toggled="OnSmartThinkingToggled" />
+                                    <ToggleSwitch x:Name="SmartThinkingToggle" Grid.Column="1" MinWidth="0" VerticalAlignment="Center" IsEnabled="{Binding IsOn, ElementName=SmartExperienceToggle}" AutomationProperties.Name="Enable thinking" Toggled="OnSmartThinkingToggled" />
                                 </Grid>
                                 <Rectangle Style="{StaticResource Divider}" />
                                 <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
@@ -426,7 +426,7 @@
                                         <TextBlock Style="{StaticResource RowTitle}" Text="Inline code completions" />
                                         <TextBlock Style="{StaticResource RowDesc}" Text="Suggest the rest of the line in the editor when you pause typing. Tab accepts, Esc dismisses, Ctrl+Space asks again." />
                                     </StackPanel>
-                                    <ToggleSwitch x:Name="SmartCompletionsToggle" Grid.Column="1" MinWidth="0" VerticalAlignment="Center" AutomationProperties.Name="Inline code completions" Toggled="OnSmartCompletionsToggled" />
+                                    <ToggleSwitch x:Name="SmartCompletionsToggle" Grid.Column="1" MinWidth="0" VerticalAlignment="Center" IsEnabled="{Binding IsOn, ElementName=SmartExperienceToggle}" AutomationProperties.Name="Inline code completions" Toggled="OnSmartCompletionsToggled" />
                                 </Grid>
                             </StackPanel>
                         </Border>
