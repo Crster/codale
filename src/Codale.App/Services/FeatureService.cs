@@ -136,9 +136,9 @@ public sealed class FeatureService : IDisposable
 
     /// <param name="workingSessionId">The history whose recently written files get a ranking boost; null on a new topic.</param>
     public async Task<RetrievalResult> RetrieveAsync(string worktree, string prompt, string recent, IReadOnlySet<string> delivered, string? currentSessionId,
-        string? workingSessionId = null, CancellationToken preparationToken = default, DateTimeOffset? preparationDeadline = null, string? chatId = null, Codale.Smart.SmartIntent? intent = null)
+        string? workingSessionId = null, CancellationToken preparationToken = default, DateTimeOffset? preparationDeadline = null, string? chatId = null, Codale.Smart.SmartIntent? intent = null, bool allowSmartReview = true)
     {
-        if (AppSettings.SmartExperience)
+        if (AppSettings.SmartExperience && allowSmartReview)
         {
             return await _knowledge.RetrieveSmartAsync(worktree, prompt, recent, delivered, currentSessionId,
                 workingSessionId is null ? null : _store.FilesOf(workingSessionId, WorkingSetFiles), preparationToken, preparationDeadline, chatId, intent).ConfigureAwait(false);

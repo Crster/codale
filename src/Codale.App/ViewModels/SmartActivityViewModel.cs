@@ -22,6 +22,7 @@ public sealed partial class SmartActivityItem(string id) : ObservableObject
 /// <summary>Project-scoped Smart activity in the status bar, including background work.</summary>
 public sealed partial class SmartActivityViewModel : ObservableObject, IDisposable
 {
+    private const int MaxToolRows = 5;
     private readonly string _project;
     private readonly DispatcherQueue _ui = DispatcherQueue.GetForCurrentThread();
     private readonly SmartExperience _smart = SmartExperienceHost.Instance;
@@ -149,11 +150,12 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
                     {
                         var r = run;
                         rows.Add((r.Id, i => FillTask(i, r)));
-                        var n = 0;
-                        foreach (var tool in r.Tools ?? [])
+                        var tools = r.Tools ?? [];
+                        var skip = Math.Max(0, tools.Count - MaxToolRows);
+                        for (var n = skip; n < tools.Count; n++)
                         {
-                            var t = tool;
-                            rows.Add(($"{r.Id}:{n++}", i => FillTool(i, t)));
+                            var t = tools[n];
+                            rows.Add(($"{r.Id}:{n}", i => FillTool(i, t)));
                         }
                     }
                     Title = latest.Count > 0 ? $"Latest prompt · {latest[0].StartedAt.ToLocalTime():HH:mm:ss}" : "No Smart activity yet";

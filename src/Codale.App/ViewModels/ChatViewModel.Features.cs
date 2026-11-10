@@ -416,11 +416,13 @@ public sealed partial class ChatViewModel
             if (Features is not { } features || !AppSettings.ProjectKnowledge) return null;
             var recent = newTopic ? "" : string.Join("\n", earlier.TakeLast(2).Append(text));
             // A new topic leaves the files the session has been editing behind.
+            // The slow model review runs only for a new topic or when the agent shifts to plan.
+            var smartReview = newTopic || earlier.Count == 0 || _routedIntent == Codale.Smart.SmartIntent.Plan;
             var retrieval = features.RetrieveAsync(_projectPath, text, recent, new HashSet<string>(_deliveredContext),
-                _needsResumeContext ? null : FeatureId, newTopic ? null : FeatureId, smartDeadline.Token, preparationDeadline, _chatId, _routedIntent);
+                _needsResumeContext ? null : FeatureId, newTopic ? null : FeatureId, smartDeadline.Token, preparationDeadline, _chatId, _routedIntent, smartReview);
             // Smart retrieval bounds inference itself and returns verified basic context on timeout.
             // An outer timeout would discard that fallback just as it becomes available.
-            var result = AppSettings.SmartExperience
+            var result = smartReview && AppSettings.SmartExperience
                 ? await retrieval.WaitAsync(cts.Token)
                 : await retrieval.WaitAsync(TimeSpan.FromSeconds(2), cts.Token);
             if (newTopic) result = result with { NewTopic = true };
