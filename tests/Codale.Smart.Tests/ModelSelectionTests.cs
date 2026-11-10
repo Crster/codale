@@ -6,14 +6,14 @@ namespace Codale.Smart.Tests;
 public sealed class ModelSelectionTests
 {
     [Fact]
-    public void Settings_resolution_defaults_and_never_enables_an_unreleased_model()
+    public void Settings_resolution_defaults_and_preserves_experimental_model_selection()
     {
         Assert.Same(SmartModels.Default, SmartModels.Resolve(null));
         Assert.Same(SmartModels.Default, SmartModels.Resolve(""));
         Assert.Same(SmartModels.Default, SmartModels.Resolve("unknown"));
         Assert.Same(SmartModels.Default, SmartModels.Resolve(SmartModels.Default.Id));
         Assert.False(SmartModels.Gemma4.Released);
-        Assert.Same(SmartModels.Default, SmartModels.Resolve(SmartModels.Gemma4.Id));
+        Assert.Same(SmartModels.Gemma4, SmartModels.Resolve(SmartModels.Gemma4.Id));
         Assert.Equal(2, SmartModels.All.Select(m => m.Id).Distinct().Count());
     }
 

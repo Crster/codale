@@ -1064,6 +1064,11 @@
                                 </TextBox>
 
                             </Grid>
+                            <StackPanel Orientation="Horizontal" Spacing="6"
+                                        Visibility="{x:Bind ViewModel.Git.IsGeneratingCommitMessage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                <ProgressRing Width="14" Height="14" IsActive="{x:Bind ViewModel.Git.IsGeneratingCommitMessage, Mode=OneWay}" />
+                                <TextBlock FontSize="12" Text="Generating commit message…" />
+                            </StackPanel>
                             <Button
                                 HorizontalAlignment="Stretch"
                                 Command="{x:Bind ViewModel.Git.CommitCommand}"

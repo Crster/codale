@@ -14,17 +14,32 @@ public sealed class SmartRetrievalTests : IDisposable
         _index = new ProjectKnowledgeIndex(_store);
     }
     [Fact]
-    public async Task A_model_that_ignores_cancellation_cannot_hold_up_basic_retrieval()
+    public async Task Cancellation_stops_even_if_model_ignores_it()
     {
         File.WriteAllText(Path.Combine(_root, "Widget.cs"), "public class Widget { public void RenderWidget() {} }");
         await _index.RefreshAsync(_root);
         _index.Smart = new FakeSmart { Rank = (_, _) => new TaskCompletionSource<IReadOnlyList<string>?>().Task };
         using var budget = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
-        var result = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, budget.Token)
-            .WaitAsync(TimeSpan.FromSeconds(2));
-        Assert.Contains("Widget.cs", result.Files);
-        Assert.Contains("RenderWidget", result.Text);
-        Assert.True(System.Text.Encoding.UTF8.GetByteCount(result.Text) <= ProjectKnowledgeIndex.MaxContextBytes);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, budget.Token)
+            .WaitAsync(TimeSpan.FromSeconds(2)));
+    }
+    [Fact]
+    public async Task Compound_identifier_finds_view_and_supplies_source_to_reranker()
+    {
+        File.WriteAllText(Path.Combine(_root, "Workspace.xaml"), "<TextBox Text=\"{Binding CommitMessage}\" />");
+        File.WriteAllText(Path.Combine(_root, "GitViewModel.cs"), "class GitViewModel { string CommitMessage; void GenerateCommitMessage() {} }");
+        for (var i = 0; i < 12; i++)
+            File.WriteAllText(Path.Combine(_root, $"Noise{i}.cs"), $"class Noise{i} {{ void SmartExperience() {{ }} string message; }}");
+        await _index.RefreshAsync(_root);
+        IReadOnlyList<SmartCandidate> seen = [];
+        _index.Smart = new FakeSmart { Rank = (c, _) =>
+        {
+            seen = c;
+            return Task.FromResult<IReadOnlyList<string>?>(c.Select(x => x.Id).ToArray());
+        } };
+        var result = await _index.RetrieveSmartAsync(_root, "there is no loading when pressing ctrl space in the commit message git when smart experience is working or busy", "", new HashSet<string>(), null, null, default);
+        Assert.Contains(result.Files, p => p.EndsWith("Workspace.xaml"));
+        Assert.Contains(seen, c => c.Path.EndsWith("Workspace.xaml") && c.Evidence.Contains("CommitMessage"));
     }
     [Fact]
     public async Task Model_order_is_applied_to_fresh_context()
@@ -41,11 +56,73 @@ public sealed class SmartRetrievalTests : IDisposable
         var result = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default);
         Assert.Equal(expected, result.Files[0]);
     }
+    [Fact]
+    public async Task Model_can_discover_an_additional_indexed_view()
+    {
+        File.WriteAllText(Path.Combine(_root, "GitViewModel.cs"), "class GitViewModel { void GenerateCommitMessage() {} }");
+        File.WriteAllText(Path.Combine(_root, "Workspace.xaml"), "<TextBox Text=\"{Binding CommitMessage}\" />");
+        await _index.RefreshAsync(_root);
+        _index.Smart = new FakeSmart { Explore = async (initial, search, ct) =>
+        {
+            var found = await search("CommitMessage", ct);
+            var view = Assert.Single(found, c => c.Path.EndsWith("Workspace.xaml"));
+            Assert.Contains("CommitMessage", view.Evidence);
+            return new[] { view.Id }.Concat(initial.Select(c => c.Id).Where(id => id != view.Id)).ToArray();
+        } };
+        var result = await _index.RetrieveSmartAsync(_root, "GenerateCommitMessage", "", new HashSet<string>(), null, null, default);
+        Assert.Equal("Workspace.xaml", result.Files[0]);
+        Assert.Equal("Smart review", result.Method);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Invalid_or_duplicate_model_ids_fall_back_to_index(bool duplicate)
+    {
+        File.WriteAllText(Path.Combine(_root, "Widget.cs"), "class Widget { void RenderWidget() {} }");
+        await _index.RefreshAsync(_root);
+        _index.Smart = new FakeSmart { Explore = (initial, _, _) => Task.FromResult<IReadOnlyList<string>?>(duplicate ? new[] { initial[0].Id, initial[0].Id } : new[] { "invented" }) };
+        var result = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default);
+        Assert.Null(result.SmartActivityId);
+        Assert.Contains("Widget.cs", result.Files);
+    }
+
+    [Fact]
+    public async Task Changed_candidate_is_not_delivered_as_model_verified()
+    {
+        var path = Path.Combine(_root, "Widget.cs");
+        File.WriteAllText(path, "class Widget { void RenderWidget() {} }");
+        await _index.RefreshAsync(_root);
+        _index.Smart = new FakeSmart { Explore = (initial, _, _) =>
+        {
+            File.WriteAllText(path, "class Changed {} ");
+            return Task.FromResult<IReadOnlyList<string>?>([initial[0].Id]);
+        } };
+        var result = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default);
+        Assert.Null(result.SmartActivityId);
+    }
+
+    [Fact]
+    public async Task Empty_initial_results_can_be_extended_by_index_query()
+    {
+        File.WriteAllText(Path.Combine(_root, "Workspace.xaml"), "<TextBox Text=\"{Binding CommitMessage}\" />");
+        await _index.RefreshAsync(_root);
+        _index.Smart = new FakeSmart { Explore = async (_, search, ct) => (await search("CommitMessage", ct)).Select(c => c.Id).ToArray() };
+        var result = await _index.RetrieveSmartAsync(_root, "zzzzunrelatedtopic", "", new HashSet<string>(), null, null, default);
+        Assert.Contains("Workspace.xaml", result.Files);
+    }
+
     private sealed class FakeSmart : ISmartExperience
     {
         public Func<SmartRequestContext, string, CancellationToken, Task<SmartResult<string>?>> Summary = (_, _, _) => Task.FromResult<SmartResult<string>?>(null);
         public IReadOnlyList<SmartEvidence> Evidence = [], Historical = [];
         public Func<IReadOnlyList<SmartCandidate>, CancellationToken, Task<IReadOnlyList<string>?>> Rank = (_, _) => Task.FromResult<IReadOnlyList<string>?>(null);
+        public Func<IReadOnlyList<SmartCandidate>, Func<string, CancellationToken, Task<IReadOnlyList<SmartCandidate>>>, CancellationToken, Task<IReadOnlyList<string>?>>? Explore;
+        public async Task<SmartResult<IReadOnlyList<string>>?> ExploreContextAsync(SmartRequestContext context, string query, string recent, IReadOnlyList<SmartCandidate> candidates, Func<string, CancellationToken, Task<IReadOnlyList<SmartCandidate>>> search, CancellationToken ct = default)
+        {
+            var value = Explore is null ? await Rank(candidates, ct) : await Explore(candidates, search, ct);
+            return value is null ? null : new(value, Evidence, "test");
+        }
         public Func<string, string?> Brief = _ => null;
         public int Briefs;
         public Task<SmartResult<string>?> BriefAsync(SmartRequestContext context, string request, SmartIntent intent, string material, CancellationToken ct = default)
@@ -94,7 +171,7 @@ public sealed class SmartRetrievalTests : IDisposable
         Assert.Equal(0, smart.Briefs);
         smart.Rank = (c, _) => Task.FromResult<IReadOnlyList<string>?>(c.Select(x => x.Id).ToArray());
         var ranked = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default, intent: SmartIntent.Act);
-        Assert.Equal("Smart rerank", ranked.Method);
+        Assert.Equal("Smart review", ranked.Method);
         Assert.Equal(0, smart.Briefs);
     }
     [Fact]

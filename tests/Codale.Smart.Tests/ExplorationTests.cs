@@ -29,6 +29,27 @@ public sealed class ExplorationTests : IDisposable
     }
 
     [Fact]
+    public async Task Context_exploration_queries_index_and_exposes_only_read_only_index_tools()
+    {
+        var calls = 0;
+        var runtime = new Runtime((prompt, _) => ++calls switch
+        {
+            1 => Call("query_index", ("query", "CommitMessage binding")),
+            2 => Call("read_index", ("id", "view")),
+            _ => "[\"view\",\"model\"]"
+        });
+        await using var smart = await Ready(runtime);
+        var result = await smart.ExploreContextAsync(Context("context", deadline: DateTimeOffset.UtcNow.AddSeconds(-1)), "loading", "recent",
+            [new("model", "GitViewModel.cs", "GenerateCommitMessage")],
+            (query, _) => Task.FromResult<IReadOnlyList<SmartCandidate>>([new("view", "Workspace.xaml", "Binding CommitMessage", 12, 12)]));
+        Assert.Equal(new[] { "view", "model" }, result!.Value);
+        Assert.Contains("query_index", runtime.Prompts[0].Prompt);
+        Assert.DoesNotContain("run_shell", runtime.Prompts[0].Prompt);
+        Assert.Contains("Binding CommitMessage", runtime.Prompts[^1].Prompt);
+        Assert.Equal(new[] { "query_index", "read_index" }, smart.Activities(_root)[0].Tools!.Select(t => t.Tool));
+    }
+
+    [Fact]
     public void Parser_handles_multiple_calls_and_rejects_malformed_arguments()
     {
         var calls = SmartConversation.Parse(Call("read_file", ("path", "a.cs")) + Call("run_shell", ("command", "echo hello")));

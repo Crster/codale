@@ -3662,14 +3662,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         if (decision.SwitchToMode is { Length: > 0 } chosen)
         {
-            // Accepting a plan into a work mode is the user overriding the plan
-            // restore: the session stays in the chosen mode after the turn, so the
-            // saved "back to manual" would clobber their pick. The switch goes out
-            // after the approval answer - the CLI is blocked on that answer first.
+            // An Auto-routed plan uses the chosen work mode for this turn, then
+            // returns to Auto. Other starting modes keep the user's chosen mode.
             // "chosen" is a host mode id; the CLI half goes through CliMode, so Auto
             // ("automatic") lands on the CLI's "auto" and Full on "bypassPermissions".
-            _planSession = null;
-            _planRestoreMode = null;
+            if (_planRestoreMode != AutomaticMode)
+            {
+                _planSession = null;
+                _planRestoreMode = null;
+            }
             PermissionMode = chosen;
             RestorePlanEffort();
 
@@ -3991,7 +3992,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (IsAutomaticMode && !IsBusy && !planOnly && !text.StartsWith('/'))
         {
             var preparationDeadline = DateTimeOffset.UtcNow.AddSeconds(120);
-            using var preparation = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+            using var preparation = new CancellationTokenSource();
             using var stopped = new CancellationTokenSource();
             using var routing = CancellationTokenSource.CreateLinkedTokenSource(preparation.Token, stopped.Token);
             _briefing = stopped;

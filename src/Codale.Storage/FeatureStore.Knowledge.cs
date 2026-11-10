@@ -193,6 +193,11 @@ public sealed partial class FeatureStore
     public IReadOnlyList<SourceChunk> SearchSourceTerms(string query, string worktree, int limit = 40) =>
         SearchSourceMatch(SearchText.ToRetrievalQuery(query), worktree, limit);
 
+    /// <summary>Find identifier prefixes such as CommitMessage in addition to their individual words.</summary>
+    public IReadOnlyList<SourceChunk> SearchSourceIdentifierPrefix(string identifier, string worktree, int limit = 20) =>
+        identifier.Length == 0 || !identifier.All(char.IsLetterOrDigit) ? [] :
+            SearchSourceMatch($"\"{identifier}\"*", worktree, limit);
+
     private IReadOnlyList<SourceChunk> SearchSourceMatch(string? match, string worktree, int limit)
     {
         if (match is null) return [];

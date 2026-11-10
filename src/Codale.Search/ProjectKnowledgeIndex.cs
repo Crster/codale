@@ -196,6 +196,19 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
         Fuse(lexical, 1.0);
         var terms = SearchText.RetrievalTerms(prompt);
 
+        // Natural language often separates the words joined in a binding or identifier
+        // ("commit message" -> CommitMessageBox). Retrieve those compound names explicitly;
+        // ordinary OR queries can bury a view under many generic single-word matches.
+        var words = System.Text.RegularExpressions.Regex.Matches(SearchText.WithoutAttachments(prompt), @"[A-Za-z][A-Za-z0-9]*")
+            .Select(m => m.Value.ToLowerInvariant()).ToArray();
+        var compounds = Enumerable.Range(0, Math.Max(0, words.Length - 1))
+            .Where(i => words[i].Length >= 3 && words[i + 1].Length >= 3 &&
+                terms.Contains(SearchText.Stem(words[i])) && terms.Contains(SearchText.Stem(words[i + 1])))
+            .Select(i => words[i] + words[i + 1]).Distinct().Take(8);
+        foreach (var compound in compounds)
+            foreach (var chunk in store.SearchSourceIdentifierPrefix(compound, worktree))
+                scores[chunk.Id] = scores.GetValueOrDefault(chunk.Id) + (IsViewPath(chunk.Path) ? 0.08 : 0.015);
+
         if (terms.Count > 0)
         {
             // Embed the topic, not the phrasing: "where does ... located" must not pull in prose that says "located".
@@ -307,7 +320,8 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
     /// </summary>
     /// <param name="workingSet">Files the current session wrote, newest first; empty on a new topic.</param>
     public RetrievalResult Retrieve(string worktree, string prompt, string recent, IReadOnlySet<string> delivered, string? currentSessionId = null,
-        IReadOnlyList<string>? workingSet = null, IReadOnlyList<string>? preferredChunkIds = null, bool pointersOnly = false)
+        IReadOnlyList<string>? workingSet = null, IReadOnlyList<string>? preferredChunkIds = null, bool pointersOnly = false,
+        IReadOnlyList<SourceChunk>? discoveredChunks = null)
     {
         const int MaxPointers = 6;
         var timer = Stopwatch.StartNew();
@@ -335,6 +349,9 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
         // index catches up, and stale files are dropped, so wait briefly for that rather than lose them.
         if ((stale || ranked.Count == 0) && CaughtUp(worktree))
             ranked = Search(worktree, prompt, recent, MaxFiles + 2, 3, workingSet, out _);
+        if (discoveredChunks is not null)
+            ranked = discoveredChunks.Where(c => c.Worktree == worktree && ReadSource(worktree, c.Path) is { } source && Hash(source) == c.Hash)
+                .Concat(ranked).DistinctBy(c => c.Id).ToList();
         if (preferredChunkIds is not null)
         {
             var order = preferredChunkIds.Select((id, i) => (id, i)).ToDictionary(x => x.id, x => x.i);
@@ -382,9 +399,10 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
         foreach (var file in topFiles)
         {
             var first = file.First();
+            if (Fresh(first.Path, first.Hash) is not { } source) continue;
             var key = $"map:{first.Path}:{first.Hash}";
             var path = first.Path.Replace('\\', '/');
-            var symbols = Definitions(Fresh(first.Path, first.Hash)!, terms);
+            var symbols = Definitions(source, terms);
             // Definitions depend on the prompt: another topic in an unchanged file needs its
             // own locator, even though previously delivered source excerpts stay deduplicated.
             key += ":" + Hash(string.Join(", ", symbols));
@@ -451,6 +469,7 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
         // A window keeps the key of the ranked chunk it overlaps, so what the conversation already holds is still recognised.
         foreach (var w in windows)
         {
+            if (Fresh(w.Path, w.Hash) is null) continue;
             var overlapped = topFiles.SelectMany(f => f).Where(c => c.Path == w.Path)
                 .FirstOrDefault(c => c.StartLine <= w.End && w.Start <= c.StartLine + c.Text.Count(ch => ch == '\n'));
             Excerpt(w.Path, w.Hash, w.Start, w.End, w.Text, overlapped?.StartLine);
@@ -460,6 +479,7 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
         foreach (var chunk in topFiles.SelectMany((f, rank) => f.Take(rank == 0 ? 3 : 2).Select((c, i) => (c, order: rank == 0 ? i : i == 0 ? 1 + rank : 1 + MaxFiles + rank)))
                      .OrderBy(x => x.order).Select(x => x.c))
         {
+            if (Fresh(chunk.Path, chunk.Hash) is null) continue;
             var endLine = chunk.StartLine + chunk.Text.Count(c => c == '\n');
             if (windows.Any(w => w.Path == chunk.Path && w.Start <= endLine && chunk.StartLine <= w.End)) continue;
             Excerpt(chunk.Path, chunk.Hash, chunk.StartLine, endLine, chunk.Text);
@@ -573,6 +593,8 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { }
         return "unknown";
     }
+
+    private static bool IsViewPath(string path) => new[] { ".xaml", ".axaml", ".html", ".razor", ".tsx", ".jsx", ".vue", ".svelte" }.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
 
     public static bool Eligible(string path) => !SensitivePaths.IsSensitive(path) && !CodeDiscovery.IsNoisePath(path) &&
         !CodeDiscovery.IsNoisePath(Path.DirectorySeparatorChar + path) &&

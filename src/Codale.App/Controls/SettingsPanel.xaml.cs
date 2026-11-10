@@ -41,11 +41,11 @@ public sealed partial class SettingsPanel : UserControl
         foreach (var model in Codale.Smart.SmartModels.All)
             SmartModelSelector.Items.Add(new ComboBoxItem
             {
-                Content = model.DisplayName + (model.Released ? "" : " · pending validation"),
-                Tag = model.Id, IsEnabled = model.Released
+                Content = model.DisplayName + (model.Released ? "" : " · experimental"),
+                Tag = model.Id
             });
         SmartModelValidationNote.Text = Codale.Smart.SmartModels.Gemma4.Released ? ""
-            : "Gemma 4 E2B is awaiting runtime and 8 GB CPU validation before selection is enabled.";
+            : "Gemma 4 E2B is experimental; runtime compatibility and 8 GB CPU performance have not been validated.";
 
         // Only listen while in the visual tree: the settings event is static and windows come and go.
         Loaded += (_, _) => { AppSettings.Changed += OnAppSettingsChanged; SmartExperienceHost.Instance.Changed += OnSmartStatusChanged; RefreshSmartStatus(); };

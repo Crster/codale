@@ -140,11 +140,8 @@ public sealed class FeatureService : IDisposable
     {
         if (AppSettings.SmartExperience)
         {
-            using var budget = CancellationTokenSource.CreateLinkedTokenSource(preparationToken);
-            var remaining = (preparationDeadline ?? DateTimeOffset.UtcNow.AddSeconds(120)) - DateTimeOffset.UtcNow;
-            budget.CancelAfter(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero);
             return await _knowledge.RetrieveSmartAsync(worktree, prompt, recent, delivered, currentSessionId,
-                workingSessionId is null ? null : _store.FilesOf(workingSessionId, WorkingSetFiles), budget.Token, preparationDeadline, chatId, intent).ConfigureAwait(false);
+                workingSessionId is null ? null : _store.FilesOf(workingSessionId, WorkingSetFiles), preparationToken, preparationDeadline, chatId, intent).ConfigureAwait(false);
         }
         return await Task.Run(() => _knowledge.Retrieve(worktree, prompt, recent, delivered, currentSessionId,
             workingSessionId is null ? null : _store.FilesOf(workingSessionId, WorkingSetFiles))).ConfigureAwait(false);

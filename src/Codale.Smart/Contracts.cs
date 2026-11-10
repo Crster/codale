@@ -3,7 +3,7 @@ namespace Codale.Smart;
 public enum SmartIntent { Ask, Plan, Act }
 public enum SmartState { Disabled, Downloading, Loading, Ready, Error }
 public sealed record SmartStatus(SmartState State, string Message, double Progress = 0, string? Backend = null);
-public sealed record SmartCandidate(string Id, string Path);
+public sealed record SmartCandidate(string Id, string Path, string Evidence = "", int StartLine = 1, int EndLine = 1);
 public sealed record SmartCommandAssessment(string Description, string Risk, string Reason);
 
 public sealed record SmartRequestContext(string Project, string Worktree, string Task, string? ChatId = null,
@@ -37,6 +37,9 @@ public interface ISmartExperience
     Task SetEnabledAsync(bool enabled, CancellationToken ct = default);
     Task<SmartResult<string>?> SummarizeAsync(SmartRequestContext context, string path, CancellationToken ct = default);
     Task<SmartResult<IReadOnlyList<string>>?> RankAsync(SmartRequestContext context, string query, IReadOnlyList<SmartCandidate> candidates, CancellationToken ct = default);
+    Task<SmartResult<IReadOnlyList<string>>?> ExploreContextAsync(SmartRequestContext context, string query, string recent,
+        IReadOnlyList<SmartCandidate> candidates, Func<string, CancellationToken, Task<IReadOnlyList<SmartCandidate>>> search, CancellationToken ct = default) =>
+        RankAsync(context, query, candidates, ct);
     Task<SmartResult<SmartIntent?>?> ClassifyAsync(SmartRequestContext context, string message, string? previousReply, CancellationToken ct = default);
     Task<SmartResult<string>?> CommitMessageAsync(SmartRequestContext context, CancellationToken ct = default);
     Task<SmartResult<string>?> ShellCommandAsync(SmartRequestContext context, string request, string shell, CancellationToken ct = default) =>

@@ -26,6 +26,13 @@ internal sealed class SmartTools(TimeSpan? commandTimeout = null)
             new { command = new { type = "string" }, cwd = new { type = "string" } }, ["command"])
     };
     public static readonly string Schemas = "<tools>\n" + string.Join("\n", Definitions.Select(s => JsonSerializer.Serialize(s))) + "\n</tools>";
+    internal static readonly object[] ContextDefinitions =
+    [
+        Schema("query_index", "Search the project index for relevant indexed source using alternative terms.",
+            new { query = new { type = "string" } }, ["query"]),
+        Schema("read_index", "Inspect the indexed source excerpt for a candidate ID returned by the index.",
+            new { id = new { type = "string" } }, ["id"])
+    ];
 
     public static string Resolve(SmartRequestContext context, string? path) =>
         Path.GetFullPath(string.IsNullOrWhiteSpace(path) ? "." : path, context.WorkingDirectory);

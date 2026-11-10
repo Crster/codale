@@ -22,5 +22,5 @@ public static class SmartModels
         "fa401b55b07ee70a54c6dae3903c783a6e65064312529ea57175cb5f8dec6634", SmartProtocol.Gemma4, false);
 
     public static IReadOnlyList<SmartModel> All { get; } = Array.AsReadOnly(new[] { Default, Gemma4 });
-    public static SmartModel Resolve(string? id) => All.FirstOrDefault(m => m.Released && m.Id == id) ?? Default;
+    public static SmartModel Resolve(string? id) => All.FirstOrDefault(m => m.Id == id) ?? Default;
 }

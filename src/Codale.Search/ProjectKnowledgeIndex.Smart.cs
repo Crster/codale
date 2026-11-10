@@ -5,8 +5,6 @@ namespace Codale.Search;
 
 public sealed partial class ProjectKnowledgeIndex
 {
-    /// <summary>Longest the model may spend reordering the index's candidates; past it the index order goes out as it is.</summary>
-    private static readonly TimeSpan RankBudget = TimeSpan.FromSeconds(3);
     public ISmartExperience? Smart { get; set; }
     public SummaryCache? Summaries { get; set; }
     public string? SmartProjectRoot { get; set; }
@@ -91,25 +89,39 @@ public sealed partial class ProjectKnowledgeIndex
         CancellationToken ct, DateTimeOffset? deadline = null, string? chatId = null, SmartIntent? intent = null)
     {
         var timer = System.Diagnostics.Stopwatch.StartNew();
-        // The index answers on its own, as pointers (ranges to open, never the code). The model only reorders them,
-        // within a short budget; if it is slow or fails, the index order goes out as it is.
-        var basicTask = Task.Run(() => Retrieve(worktree, prompt, recent, delivered, currentSessionId, workingSet, pointersOnly: true));
-        if (Smart?.Status.State != SmartState.Ready || ct.IsCancellationRequested) return await basicTask.ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+        Task<RetrievalResult> Basic() => Task.Run(() => Retrieve(worktree, prompt, recent, delivered, currentSessionId, workingSet, pointersOnly: true), ct);
+        if (Smart?.Status.State != SmartState.Ready) return await Basic().ConfigureAwait(false);
         try
         {
-            var chunksTask = Task.Run(() => Search(worktree, prompt, recent, 8, 2), ct);
-            var chunks = await chunksTask.ConfigureAwait(false);
-            if (chunks.Count < 2) return await basicTask.ConfigureAwait(false); // nothing to reorder
-            var candidates = chunks.Select(c => new SmartCandidate(c.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), c.Path)).ToList();
-            var budget = DateTimeOffset.UtcNow.Add(RankBudget);
-            var context = new SmartRequestContext(SmartProjectRoot ?? worktree, worktree, "context", chatId ?? currentSessionId,
-                deadline is { } d && d < budget ? d : budget);
-            var ranked = await Smart.RankAsync(context, prompt, candidates, ct).WaitAsync(ct).ConfigureAwait(false);
-            if (ranked?.Value is null || ct.IsCancellationRequested || Smart.Status.State != SmartState.Ready) return await basicTask.ConfigureAwait(false);
+            var known = new Dictionary<string, Codale.Core.Features.SourceChunk>(StringComparer.Ordinal);
+            SmartCandidate Candidate(Codale.Core.Features.SourceChunk c)
+            {
+                var id = c.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                known[id] = c;
+                return new(id, c.Path, c.Text.Length > 300 ? c.Text[..300] : c.Text,
+                    c.StartLine, c.StartLine + c.Text.Count(ch => ch == '\n'));
+            }
+            async Task<IReadOnlyList<SmartCandidate>> Query(string query, CancellationToken token)
+            {
+                var found = await SearchAsync(worktree, query, "", 8, 2, token).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+                return found.Select(Candidate).ToArray();
+            }
+            var chunks = await SearchAsync(worktree, prompt, recent, 8, 2, ct).ConfigureAwait(false);
+            var candidates = chunks.Take(8).Select(Candidate).ToArray();
+            var context = new SmartRequestContext(SmartProjectRoot ?? worktree, worktree, "context", chatId ?? currentSessionId);
+            var ranked = await Smart.ExploreContextAsync(context, prompt, recent, candidates, Query, ct).WaitAsync(ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            if (ranked?.Value is not { Count: > 0 } ids || ids.Distinct(StringComparer.Ordinal).Count() != ids.Count || ids.Any(id => !known.ContainsKey(id)) || Smart.Status.State != SmartState.Ready)
+                return await Basic().ConfigureAwait(false);
+            var selected = ids.Select(id => known[id]).Where(c => ReadSource(worktree, c.Path) is { } source && Hash(source) == c.Hash).ToArray();
+            if (selected.Length == 0) return await Basic().ConfigureAwait(false);
             var fresh = await Task.Run(() => Retrieve(worktree, prompt, recent, delivered, currentSessionId, workingSet,
-                preferredChunkIds: ranked.Value, pointersOnly: true)).ConfigureAwait(false);
-            return fresh with { Method = "Smart rerank", SmartActivityId = ranked.ActivityId, ElapsedMilliseconds = timer.ElapsedMilliseconds };
+                preferredChunkIds: ids, pointersOnly: true, discoveredChunks: selected), ct).ConfigureAwait(false);
+            return fresh with { Method = "Smart review", SmartActivityId = ranked.ActivityId, ElapsedMilliseconds = timer.ElapsedMilliseconds };
         }
-        catch (Exception) { return await basicTask.ConfigureAwait(false); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception) { return await Basic().ConfigureAwait(false); }
     }
 }
