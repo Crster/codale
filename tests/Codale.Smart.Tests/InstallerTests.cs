@@ -15,7 +15,7 @@ public sealed class InstallerTests : IDisposable
         var handler = new Handler(() => new(HttpStatusCode.OK) { Content = new ByteArrayContent(data) });
         using var http = new HttpClient(handler);
         var first = SmartModels.Default with { Size = data.Length, Sha256 = hash };
-        var second = SmartModels.Gemma4 with { Size = data.Length, Sha256 = hash };
+        var second = first with { Id = "test-model", Revision = "test-revision", FileName = "test.gguf" };
         var a = new ModelInstaller(_root, first, http);
         var b = new ModelInstaller(_root, second, http);
         Assert.Equal(Path.Combine(_root, ModelInstaller.Revision, ModelInstaller.FileName), a.ModelPath);

@@ -19,7 +19,7 @@ internal interface ISmartConversation
 internal sealed class SmartConversation(string system, string input, bool thinking, object[]? definitions = null) : ISmartConversation
 {
     public static ISmartConversation Create(SmartModel model, string system, string input, bool thinking, object[]? definitions = null) =>
-        model.Protocol == SmartProtocol.Gemma4 ? new GemmaConversation(system, input, thinking, definitions) : new SmartConversation(system, input, thinking, definitions);
+        new SmartConversation(system, input, thinking, definitions);
     public string FinalVisible(string response) => WithoutReasoning("<think></think>" + response);
     public IReadOnlyList<SmartToolCall> ParseCalls(string visible) => Parse(visible);
     private readonly List<(string Assistant, string Results)> _exchanges = [];

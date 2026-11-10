@@ -392,15 +392,6 @@
                                     <TextBlock Style="{StaticResource RowDesc}" VerticalAlignment="Center" TextWrapping="Wrap" Text="Use local AI for summaries, context, routing, and commit messages." />
                                     <ToggleSwitch x:Name="SmartExperienceToggle" Grid.Column="1" MinWidth="0" VerticalAlignment="Center" AutomationProperties.Name="Smart experience" Toggled="OnSmartExperienceToggled" />
                                 </Grid>
-                                <Rectangle Style="{StaticResource Divider}" />
-                                <StackPanel Padding="16" Spacing="8">
-                                    <TextBlock Style="{StaticResource RowTitle}" Text="Smart model" />
-                                    <ComboBox x:Name="SmartModelSelector" HorizontalAlignment="Stretch" SelectedValuePath="Tag"
-                                              AutomationProperties.Name="Smart model" SelectionChanged="OnSmartModelChanged" />
-                                    <TextBlock Style="{StaticResource RowDesc}" TextWrapping="Wrap"
-                                               Text="Applies to all Smart features. Switching cancels active Smart work. Downloads are kept for reuse." />
-                                    <TextBlock x:Name="SmartModelValidationNote" Style="{StaticResource RowDesc}" TextWrapping="Wrap" />
-                                </StackPanel>
                                 <Border x:Name="SmartExperienceStatusPanel" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="16,12" Visibility="Collapsed">
                                     <StackPanel Spacing="8">
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">

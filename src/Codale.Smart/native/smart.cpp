@@ -111,10 +111,7 @@ extern "C" __declspec(dllexport) int __cdecl smart_generate_v2(runtime* r, const
         if (cancel(state)) { failure = "Cancelled."; break; }
         auto token = p_llama_sampler_sample(sampler, r->context, -1);
         if (p_llama_vocab_is_eog(vocab, token)) break;
-        char piece[512]; int bytes = p_llama_token_to_piece(vocab, token, piece, sizeof(piece), 0, protocol == 1);
-        // Gemma hands control to the caller at this token, before any tool response.
-        // Preserve its call/string/channel markers; LFM3 keeps its existing decoding.
-        if (protocol == 1 && bytes == 16 && same(piece, "<|tool_response>", 16)) break;
+        char piece[512]; int bytes = p_llama_token_to_piece(vocab, token, piece, sizeof(piece), 0, false);
         if (bytes < 0 || length+bytes >= capacity) { failure = "Output buffer exceeded."; break; }
         memcpy(output+length, piece, bytes); length += bytes;
         if (p_llama_decode(r->context, p_llama_batch_get_one(&token, 1))) failure = "Generation failed.";

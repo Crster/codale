@@ -1,7 +1,7 @@
 using Codale.Smart;
 try
 {
-if (args.Length < 2) throw new ArgumentException("Usage: smoke <native-directory> <model-path> [cpu|gpu] [budget-seconds=120] [protocol-only|features-only] [model=lfm3-1.7b-q4|gemma4-e2b-q4]");
+if (args.Length < 2) throw new ArgumentException("Usage: smoke <native-directory> <model-path> [cpu|gpu] [budget-seconds=120] [protocol-only|features-only] [model=lfm3-1.7b-q4]");
 if (args.Contains("protocol-only") && args.Contains("features-only")) throw new ArgumentException("Choose one smoke stage.");
 var taskBudget = args.FirstOrDefault(a => a.StartsWith("budget-seconds=", StringComparison.Ordinal)) is { } budget
     ? int.Parse(budget.Split('=')[1], System.Globalization.CultureInfo.InvariantCulture) : 120;

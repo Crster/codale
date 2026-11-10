@@ -15,8 +15,7 @@ public interface ISmartRuntime : IDisposable
 public sealed class NativeRuntime(string nativeDirectory) : ISmartRuntime
 {
     private IntPtr _handle;
-    private SmartProtocol _protocol;
-    public void Configure(SmartModel model) => _protocol = model.Protocol;
+    public void Configure(SmartModel model) { }
     private static bool _resolved;
     public string Backend { get; private set; } = "CPU";
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int CancelCallback(IntPtr state);
@@ -56,7 +55,7 @@ public sealed class NativeRuntime(string nativeDirectory) : ISmartRuntime
         if (_handle == IntPtr.Zero) throw new InvalidOperationException("Model is not loaded.");
         var output = new byte[65536]; var error = new byte[1024];
         CancelCallback cancel = _ => ct.IsCancellationRequested ? 1 : 0;
-        int length = smart_generate(_handle, prompt, maxTokens, (int)_protocol, grammar, cancel, IntPtr.Zero, output, output.Length, error, error.Length);
+        int length = smart_generate(_handle, prompt, maxTokens, 0, grammar, cancel, IntPtr.Zero, output, output.Length, error, error.Length);
         ct.ThrowIfCancellationRequested();
         if (length < 0) throw new InvalidOperationException(Text(error));
         return Encoding.UTF8.GetString(output, 0, length);

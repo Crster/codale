@@ -38,15 +38,6 @@ public sealed partial class SettingsPanel : UserControl
     public SettingsPanel()
     {
         InitializeComponent();
-        foreach (var model in Codale.Smart.SmartModels.All)
-            SmartModelSelector.Items.Add(new ComboBoxItem
-            {
-                Content = model.DisplayName + (model.Released ? "" : " · experimental"),
-                Tag = model.Id
-            });
-        SmartModelValidationNote.Text = Codale.Smart.SmartModels.Gemma4.Released ? ""
-            : "Gemma 4 E2B is experimental; runtime compatibility and 8 GB CPU performance have not been validated.";
-
         // Only listen while in the visual tree: the settings event is static and windows come and go.
         Loaded += (_, _) => { AppSettings.Changed += OnAppSettingsChanged; SmartExperienceHost.Instance.Changed += OnSmartStatusChanged; RefreshSmartStatus(); };
         Unloaded += (_, _) => { AppSettings.Changed -= OnAppSettingsChanged; SmartExperienceHost.Instance.Changed -= OnSmartStatusChanged; };
@@ -102,7 +93,6 @@ public sealed partial class SettingsPanel : UserControl
         SmartExperienceToggle.IsOn = AppSettings.SmartExperience;
         SmartThinkingToggle.IsOn = AppSettings.SmartThinking;
         SmartSummariesToggle.IsOn = AppSettings.SmartSummaries;
-        SmartModelSelector.SelectedValue = AppSettings.SmartModel;
         _loading = loading;
         SmartExperienceStatus.Text = status.Message;
         SmartExperienceStatusPanel.Visibility = status.State != Codale.Smart.SmartState.Disabled ? Visibility.Visible : Visibility.Collapsed;
@@ -114,8 +104,6 @@ public sealed partial class SettingsPanel : UserControl
     }
     private void OnSmartExperienceToggled(object sender, RoutedEventArgs e)
     { if (!_loading) AppSettings.SmartExperience = SmartExperienceToggle.IsOn; }
-    private void OnSmartModelChanged(object sender, SelectionChangedEventArgs e)
-    { if (!_loading && SmartModelSelector.SelectedValue is string id) AppSettings.SmartModel = id; }
     private void OnSmartSummariesToggled(object sender, RoutedEventArgs e)
     { if (!_loading) AppSettings.SmartSummaries = SmartSummariesToggle.IsOn; }
     private void OnSmartThinkingToggled(object sender, RoutedEventArgs e)
