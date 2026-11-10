@@ -18,6 +18,61 @@ public sealed class ProjectSessionTests : IDisposable
         Assert.Equal(2, store.List().Count);
         Assert.Equal("same topic", store.Get(first.Id)!.Description);
     }
+    [Fact]
+    public void An_index_from_before_chunks_had_symbols_is_upgraded_in_place()
+    {
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Database}"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE source_chunks (id INTEGER PRIMARY KEY, worktree TEXT NOT NULL, path TEXT NOT NULL, hash TEXT NOT NULL, start_line INTEGER NOT NULL, text TEXT NOT NULL)";
+            command.ExecuteNonQuery();
+        }
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+        using var store = new FeatureStore(Database);
+        store.ReplaceSource("checkout", "Auth.cs", "hash", [(1, "class Authentication {}", "Authentication")]);
+        var chunk = Assert.Single(store.SourceChunksForPath("checkout", "Auth.cs"));
+        Assert.Equal("Authentication", chunk.Symbols);
+        Assert.Single(store.SearchSourceTerms("authentication", "checkout"));
+    }
+
+    [Fact]
+    public void A_stronger_association_replaces_a_weaker_one_and_never_the_other_way_round()
+    {
+        using var store = new FeatureStore(Database);
+        store.RecordLearned("s", "w", "a.cs", "fix the owner picker", LearnedKind.Read);
+        store.RecordLearned("s", "w", "a.cs", "fix the owner picker", LearnedKind.Edit);
+        store.RecordLearned("s", "w", "a.cs", "fix the owner picker", LearnedKind.Read);
+        store.RecordLearned("s", "w", "b.cs", "fix the owner picker", LearnedKind.Read);
+        store.RecordLearned("s", "w", "b.cs", "fix the owner picker", LearnedKind.Open);
+
+        var kinds = store.LearnedAssociations("w").ToDictionary(x => x.Path, x => x.Kind);
+        Assert.Equal(2, kinds.Count);
+        Assert.Equal(LearnedKind.Edit, kinds["a.cs"]);
+        Assert.Equal(LearnedKind.Open, kinds["b.cs"]);
+        Assert.Empty(store.LearnedAssociations("other"));
+        store.RecordLearned("s", "w", "c.cs", "the", LearnedKind.Edit);   // no topic words: nothing to learn from
+        Assert.Equal(2, store.LearnedAssociations("w").Count);
+    }
+
+    [Fact]
+    public void Learned_associations_from_before_kinds_existed_are_edits()
+    {
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Database}"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE learned_edits (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, worktree TEXT NOT NULL, path TEXT NOT NULL, prompt TEXT NOT NULL, UNIQUE(session_id, path, prompt)); " +
+                                  "INSERT INTO learned_edits(session_id,worktree,path,prompt) VALUES ('s','w','Old.cs','old request')";
+            command.ExecuteNonQuery();
+        }
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+        using var store = new FeatureStore(Database);
+        Assert.Equal(("Old.cs", "old request", LearnedKind.Edit), Assert.Single(store.LearnedAssociations("w")));
+    }
+
     [Theory]
     [InlineData("codex")]
     [InlineData("claude")]
@@ -48,7 +103,7 @@ public sealed class ProjectSessionTests : IDisposable
         store.SetProviderSession(new ProviderSession(session.Id, "codex", "native", "checkout", ""));
         store.MarkContextDelivered("native", ["key"]);
         store.PutKnowledge(new KnowledgeHit("finding", session.Id, "codex", "checkout", "rev", "authentication finding", []));
-        store.ReplaceSource("checkout", "Auth.cs", "hash", [(1, "class Authentication {}")]);
+        store.ReplaceSource("checkout", "Auth.cs", "hash", [(1, "class Authentication {}", "")]);
         store.Delete(session.Id);
         Assert.Null(store.GetProviderSession(session.Id));
         Assert.Empty(store.SearchKnowledge("authentication"));
@@ -69,7 +124,7 @@ public sealed class ProjectSessionTests : IDisposable
         {
             for (var i = 0; i < 10; i++)
             {
-                store.ReplaceSource(root, $"File{i}.cs", $"hash{i}", [(1, "class Authentication {}")]);
+                store.ReplaceSource(root, $"File{i}.cs", $"hash{i}", [(1, "class Authentication {}", "")]);
                 store.PutKnowledge(new KnowledgeHit(root + i, root, "codex", root, "rev", "finding Authentication", []));
             }
         }

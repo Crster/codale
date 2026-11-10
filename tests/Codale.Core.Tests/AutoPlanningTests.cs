@@ -39,9 +39,7 @@ public sealed class AutoPlanningTests
     [InlineData("the header is ugly")]
     [InlineData("redesign the dashboard")]
     [InlineData("add CSV export for invoices")]
-    [InlineData("implement notifications")]
     [InlineData("add recurring task schedules")]
-    [InlineData("build a timetable editor")]
     [InlineData("ok now add a dark theme to the settings page and wire it to the toggle")]
     public void Specific_features_and_ui_complaints_are_not_forced_into_plan(string text)
     {
@@ -49,6 +47,24 @@ public sealed class AutoPlanningTests
         Assert.Equal(RouteIntent.Act, MessageRouting.RouteWithoutModel(text).Intent);
         var call = new ToolCall("route", JsonSerializer.SerializeToElement(new { intent = "act" }));
         Assert.Equal(RouteIntent.Act, MessageRouting.Interpret(call, text).Intent);
+    }
+
+    // A one-line request for a whole new feature cannot say what it needs: the answer is a plan, not a guess.
+    [Theory]
+    [InlineData("implement login form")]
+    [InlineData("implement notifications")]
+    [InlineData("build a timetable editor")]
+    [InlineData("add user authentication")]
+    [InlineData("create a signup flow with email verification")]
+    [InlineData("make the app better")]
+    [InlineData("clean up the codebase")]
+    [InlineData("migrate all functionality to the new project")]
+    public void New_features_big_changes_and_unclear_requests_are_planned_first(string text)
+    {
+        Assert.Equal(RouteIntent.Plan, MessageRouting.TryRouteLocally(text)?.Intent);
+        Assert.Equal(RouteIntent.Plan, MessageRouting.RouteWithoutModel(text).Intent);
+        var call = new ToolCall("route", JsonSerializer.SerializeToElement(new { intent = "act" }));
+        Assert.Equal(RouteIntent.Plan, MessageRouting.Interpret(call, text).Intent);
     }
 
     [Theory]
@@ -60,6 +76,44 @@ public sealed class AutoPlanningTests
         var call = new ToolCall("route", JsonSerializer.SerializeToElement(new { intent = "plan" }));
         Assert.Equal(RouteIntent.Act, MessageRouting.Interpret(call, text).Intent);
     }
+
+    [Fact]
+    public void A_confident_local_decision_stands_and_the_model_only_settles_the_rest()
+    {
+        var confident = MessageRouting.Assess("implement login form");
+        Assert.True(confident.Confident);
+        Assert.Equal(RouteIntent.Plan, MessageRouting.Reconcile(confident, RouteIntent.Act).Intent);
+
+        // The header complaint is unsure, so the model's reading is used, within limits.
+        var unsure = MessageRouting.Assess("the header is ugly");
+        Assert.False(unsure.Confident);
+        Assert.Equal(RouteIntent.Act, MessageRouting.Reconcile(unsure, RouteIntent.Ask).Intent);   // an ask has to read as a question
+        Assert.Equal(RouteIntent.Act, MessageRouting.Reconcile(unsure, RouteIntent.Plan).Intent);  // a plan needs more than a complaint's few words
+    }
+
+    [Fact]
+    public void A_long_list_of_changes_is_only_a_weak_plan_that_a_model_may_confirm()
+    {
+        var text = "lets remove all logging code. then in chat history remove the session not visible anymore and only keep the latest four prompts to reduce ram usage. " +
+                   "restart terminal should also clear the view and restart so it wont grow very big. reduce all ram usage and remove the performance counter and unused library.";
+        var weak = MessageRouting.Assess(text);
+        Assert.Equal(RouteIntent.Plan, weak.Intent);
+        Assert.False(weak.Confident);
+        Assert.Equal(RouteIntent.Act, MessageRouting.RouteWithoutModel(text).Intent);   // nobody confirmed it: do not interrupt
+        Assert.Equal(RouteIntent.Plan, MessageRouting.Reconcile(weak, RouteIntent.Plan).Intent);
+        Assert.Equal(RouteIntent.Act, MessageRouting.Reconcile(weak, RouteIntent.Act).Intent);
+    }
+
+    [Theory]
+    [InlineData("ok lets implement this feature")]
+    [InlineData("implement that")]
+    [InlineData("build the project")]
+    [InlineData("add a login button to the header")]
+    [InlineData("make the login form fields required")]
+    [InlineData("add a column to the database")]
+    [InlineData("add a search box next to the filters")]
+    public void Approvals_commands_and_changes_to_existing_things_are_not_new_features(string text) =>
+        Assert.Equal(RouteIntent.Act, MessageRouting.RouteWithoutModel(text).Intent);
 
     [Theory]
     [InlineData("rename Save to Apply")]

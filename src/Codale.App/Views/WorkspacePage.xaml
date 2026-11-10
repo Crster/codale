@@ -1744,93 +1744,126 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <!--  Left: the repository and the file language  -->
-                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="16">
+                <Grid.Resources>
+                    <!--  Flat status entries: transparent at rest, a soft fill on hover/press  -->
+                    <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
+                    <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
+                    <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="SubtleFillColorSecondaryBrush" />
+                    <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="SubtleFillColorTertiaryBrush" />
+                    <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
+                    <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
 
-                    <!--  Icons center on their label: 10px keeps the glyph inside the text band,
-                          and each Margin (computed from the icon font's glyph boxes) lines the
-                          glyph's visual center up with the label's. Both sides center again in
-                          whatever height the row ends up with.  -->
+                    <Style x:Key="StatusChip" TargetType="Border">
+                        <Setter Property="Padding" Value="8,3" />
+                        <Setter Property="MinHeight" Value="26" />
+                        <Setter Property="CornerRadius" Value="5" />
+                        <Setter Property="VerticalAlignment" Value="Center" />
+                    </Style>
+                    <Style x:Key="StatusButton" TargetType="Button">
+                        <Setter Property="Padding" Value="8,3" />
+                        <Setter Property="MinHeight" Value="26" />
+                        <Setter Property="MinWidth" Value="0" />
+                        <Setter Property="CornerRadius" Value="5" />
+                        <Setter Property="BorderThickness" Value="0" />
+                        <Setter Property="VerticalAlignment" Value="Center" />
+                    </Style>
+                    <Style x:Key="StatusDivider" TargetType="Rectangle">
+                        <Setter Property="Width" Value="1" />
+                        <Setter Property="Height" Value="14" />
+                        <Setter Property="Margin" Value="6,0" />
+                        <Setter Property="VerticalAlignment" Value="Center" />
+                        <Setter Property="Fill" Value="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                    </Style>
+                </Grid.Resources>
+
+                <!--  Left: the repository and the file language. Each entry is a quiet chip; the
+                      interactive ones light up on hover, and thin dividers separate the groups.  -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+
                     <!--  Git: branch, then modified / created / deleted counts  -->
                     <StackPanel
                         Orientation="Horizontal"
-                        Spacing="12"
+                        Spacing="2"
+                        VerticalAlignment="Center"
                         Visibility="{x:Bind ViewModel.Git.IsRepository, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                        <StackPanel
-                            Orientation="Horizontal"
-                            Spacing="6"
-                            ToolTipService.ToolTip="{x:Bind ViewModel.Git.TrackingSummary, Mode=OneWay}">
-                            <FontIcon VerticalAlignment="Center" Margin="0,1.3,0,0" FontSize="10" Glyph="&#xE81E;" Opacity="0.6" />
-                            <TextBlock
-                                VerticalAlignment="Center"
-                                FontSize="12"
-                                Opacity="0.8"
-                                Text="{x:Bind ViewModel.Git.BranchName, Mode=OneWay}" />
-                            <TextBlock
-                                VerticalAlignment="Center"
-                                FontSize="12"
-                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                Text="{x:Bind ViewModel.Git.TrackingSummary, Mode=OneWay}"
-                                Visibility="{x:Bind ViewModel.Git.TrackingSummary, Mode=OneWay, Converter={StaticResource NullToVisibility}}" />
-                        </StackPanel>
+                        <Border Style="{StaticResource StatusChip}" ToolTipService.ToolTip="{x:Bind ViewModel.Git.TrackingSummary, Mode=OneWay}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon VerticalAlignment="Center" Margin="0,1.3,0,0" FontSize="11" Glyph="&#xE81E;" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    FontWeight="SemiBold"
+                                    Text="{x:Bind ViewModel.Git.BranchName, Mode=OneWay}" />
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    FontSize="11"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    Text="{x:Bind ViewModel.Git.TrackingSummary, Mode=OneWay}"
+                                    Visibility="{x:Bind ViewModel.Git.TrackingSummary, Mode=OneWay, Converter={StaticResource NullToVisibility}}" />
+                            </StackPanel>
+                        </Border>
 
-                        <StackPanel
-                            Orientation="Horizontal"
-                            Spacing="8"
-                            ToolTipService.ToolTip="{x:Bind ViewModel.Git.StatusDetail, Mode=OneWay}">
-                            <TextBlock
-                                VerticalAlignment="Center"
-                                FontSize="12"
-                                Foreground="{ThemeResource SystemFillColorCautionBrush}"
-                                ToolTipService.ToolTip="Modified">
-                                <Run Text="~" /><Run Text="{x:Bind ViewModel.Git.ModifiedCount, Mode=OneWay}" />
-                            </TextBlock>
-                            <TextBlock
-                                VerticalAlignment="Center"
-                                FontSize="12"
-                                Foreground="{ThemeResource SystemFillColorSuccessBrush}"
-                                ToolTipService.ToolTip="Created (added or untracked)">
-                                <Run Text="+" /><Run Text="{x:Bind ViewModel.Git.CreatedCount, Mode=OneWay}" />
-                            </TextBlock>
-                            <TextBlock
-                                VerticalAlignment="Center"
-                                FontSize="12"
-                                Foreground="{ThemeResource SystemFillColorCriticalBrush}"
-                                ToolTipService.ToolTip="Deleted">
-                                <Run Text="−" /><Run Text="{x:Bind ViewModel.Git.DeletedCount, Mode=OneWay}" />
-                            </TextBlock>
-                        </StackPanel>
+                        <Border Style="{StaticResource StatusChip}" ToolTipService.ToolTip="{x:Bind ViewModel.Git.StatusDetail, Mode=OneWay}">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    FontFamily="Cascadia Code, Consolas"
+                                    FontSize="11"
+                                    Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                    ToolTipService.ToolTip="Modified">
+                                    <Run Text="~" /><Run Text="{x:Bind ViewModel.Git.ModifiedCount, Mode=OneWay}" />
+                                </TextBlock>
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    FontFamily="Cascadia Code, Consolas"
+                                    FontSize="11"
+                                    Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                                    ToolTipService.ToolTip="Created (added or untracked)">
+                                    <Run Text="+" /><Run Text="{x:Bind ViewModel.Git.CreatedCount, Mode=OneWay}" />
+                                </TextBlock>
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    FontFamily="Cascadia Code, Consolas"
+                                    FontSize="11"
+                                    Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                    ToolTipService.ToolTip="Deleted">
+                                    <Run Text="−" /><Run Text="{x:Bind ViewModel.Git.DeletedCount, Mode=OneWay}" />
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
 
                     <!--  No repository: say so, and offer to create one  -->
                     <StackPanel
                         Orientation="Horizontal"
-                        Spacing="6"
+                        Spacing="2"
+                        VerticalAlignment="Center"
                         Visibility="{x:Bind ViewModel.Git.IsRepository, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
-                        <FontIcon VerticalAlignment="Center" Margin="0,1.3,0,0" FontSize="10" Glyph="&#xE81E;" Opacity="0.4" />
-                        <TextBlock
-                            VerticalAlignment="Center"
-                            FontSize="12"
-                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="No repository"
-                            ToolTipService.ToolTip="This folder is not a Git repository" />
-                        <HyperlinkButton
-                            Padding="4,0"
-                            VerticalAlignment="Center"
+                        <Border Style="{StaticResource StatusChip}" ToolTipService.ToolTip="This folder is not a Git repository">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon VerticalAlignment="Center" Margin="0,1.3,0,0" FontSize="11" Glyph="&#xE81E;" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    Text="No repository" />
+                            </StackPanel>
+                        </Border>
+                        <Button
+                            Style="{StaticResource StatusButton}"
                             Command="{x:Bind ViewModel.Git.InitRepositoryCommand}"
-                            Content="Initialize"
-                            FontSize="12"
-                            ToolTipService.ToolTip="Run git init in this folder to start a repository" />
+                            ToolTipService.ToolTip="Run git init in this folder to start a repository">
+                            <TextBlock FontSize="12" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Text="Initialize" />
+                        </Button>
                     </StackPanel>
 
+                    <Rectangle Style="{StaticResource StatusDivider}" />
 
                     <!--  Language of the file in front: shows what colours it, and lets the user override that  -->
-                    <StackPanel x:Name="LanguageHost" Orientation="Horizontal" Spacing="16">
+                    <StackPanel x:Name="LanguageHost" Orientation="Horizontal" VerticalAlignment="Center">
                         <Button
                             x:Name="LanguageButton"
-                            Padding="8,2"
-                            Background="Transparent"
-                            BorderThickness="0"
+                            Style="{StaticResource StatusButton}"
                             IsEnabled="False"
                             ToolTipService.ToolTip="Language mode: change how this file is coloured">
                             <Button.Resources>
@@ -1847,13 +1880,12 @@
                                 </Flyout>
                             </Button.Flyout>
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="10" Glyph="&#xE943;" Opacity="0.6" />
+                                <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="11" Glyph="&#xE943;" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <TextBlock
                                     x:Name="LanguageText"
                                     VerticalAlignment="Center"
                                     Text="No File"
-                                    FontSize="12"
-                                    Opacity="0.8" />
+                                    FontSize="12" />
                             </StackPanel>
                         </Button>
                     </StackPanel>
@@ -1865,9 +1897,9 @@
                     Grid.Column="1"
                     Margin="12,0,12,0"
                     VerticalAlignment="Stretch"
-                    Background="Transparent"
+                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                     BorderThickness="0"
-                    CornerRadius="4">
+                    CornerRadius="6">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
@@ -1987,20 +2019,19 @@
                 </Border>
 
                 <!--  Right: the indexer  -->
-                <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="16">
+                <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="2">
                 <!--  Indexer: what the project index holds for this workspace, or that it is scanning  -->
-                <StackPanel
-                    VerticalAlignment="Center"
-                    Orientation="Horizontal"
-                    Spacing="6"
-                    ToolTipService.ToolTip="{x:Bind ViewModel.Health.IndexTooltip, Mode=OneWay}">
-                    <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="10" Glyph="&#xE721;" Opacity="0.6" />
-                    <TextBlock
-                        VerticalAlignment="Center"
-                        FontSize="12"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="{x:Bind ViewModel.Health.IndexText, Mode=OneWay}" />
-                </StackPanel>
+                <Border Style="{StaticResource StatusChip}" ToolTipService.ToolTip="{x:Bind ViewModel.Health.IndexTooltip, Mode=OneWay}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon VerticalAlignment="Center" Margin="0,0.7,0,0" FontSize="11" Glyph="&#xE721;" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind ViewModel.Health.IndexText, Mode=OneWay}" />
+                    </StackPanel>
+                </Border>
+                <Rectangle Style="{StaticResource StatusDivider}" />
 
                     <!--  Built-in MCP servers: a browser to verify work in, and desktop control  -->
                     <!--  Opened from the title bar's Browser button; this host only owns the flyout  -->
@@ -2214,10 +2245,9 @@
                             </Flyout>
                         </FlyoutBase.AttachedFlyout>
                     </Border>
-                    <!--  Far right: Smart process log, latest prompt only. Hover/click/keyboard open a small flyout  -->
-                    <Button x:Name="SmartActivityButton" Background="Transparent" BorderThickness="0" Padding="4,1" MinHeight="0"
-                            PointerEntered="OnSmartActivityPointerEntered" PointerExited="OnSmartActivityPointerExited"
-                            Click="OnSmartActivityClick" AutomationProperties.Name="Smart process log">
+                    <!--  Far right: Smart process log, latest prompt only. Opens its flyout on click only  -->
+                    <Button x:Name="SmartActivityButton" Style="{StaticResource StatusButton}"
+                            AutomationProperties.Name="Smart process log">
                         <StackPanel Orientation="Horizontal" Spacing="5">
                             <Path Width="11" Height="11" Stretch="Uniform" VerticalAlignment="Center" Fill="{ThemeResource TextFillColorSecondaryBrush}"
                                   Data="M8,0 C8.6,4.6 11.4,7.4 16,8 C11.4,8.6 8.6,11.4 8,16 C7.4,11.4 4.6,8.6 0,8 C4.6,7.4 7.4,4.6 8,0 Z" />
@@ -2232,8 +2262,7 @@
                                         <Setter Property="CornerRadius" Value="6" />
                                     </Style>
                                 </Flyout.FlyoutPresenterStyle>
-                                <Grid Width="360" MaxHeight="260" RowDefinitions="Auto,*"
-                                      PointerEntered="OnSmartLogPointerEntered" PointerExited="OnSmartLogPointerExited">
+                                <Grid Width="360" MaxHeight="260" RowDefinitions="Auto,*">
                                     <TextBlock Margin="8,2,8,6" FontSize="12" FontWeight="SemiBold"
                                                Text="{x:Bind ViewModel.SmartActivity.Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
                                     <ListView Grid.Row="1" ItemsSource="{x:Bind ViewModel.SmartActivity.Runs}" SelectionMode="None"

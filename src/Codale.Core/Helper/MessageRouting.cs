@@ -2,7 +2,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-using Codale.Core.Background;
 using Codale.Core.Text;
 
 namespace Codale.Core.Helper;
@@ -20,8 +19,11 @@ public enum RouteIntent
     Act,
 }
 
-/// <summary>The router's verdict on one message: the message as typed, its intent, and whether it starts a new topic.</summary>
-public sealed record RouteDecision(string Text, RouteIntent Intent, bool NewTopic);
+/// <summary>
+/// The router's verdict on one message: the message as typed, its intent, and whether it starts a new topic.
+/// <see cref="Confident"/> means the local rules are sure, so no model needs to be asked.
+/// </summary>
+public sealed record RouteDecision(string Text, RouteIntent Intent, bool NewTopic, bool Confident = false);
 
 /// <summary>
 /// Automatic mode's local shortcuts and bounded helper call. Topic detection uses
@@ -31,86 +33,6 @@ public static partial class MessageRouting
 {
     private const int MaxMessageChars = 4000;
     private const int MaxAssistantChars = 800;
-
-    /// <summary>How long a native decision model may take: it scores rather than writes, so this is generous.</summary>
-    public static readonly TimeSpan DecisionModelTimeout = TimeSpan.FromSeconds(5);
-
-    /// <summary>
-    /// Fast local decisions first; then the native decision model, when there is one; then a bounded call
-    /// to the chat model when there is none or it failed. Whatever answers, <see cref="Interpret"/> has the
-    /// last word, so a decision model is held to the same rules as the chat model.
-    /// </summary>
-    /// <param name="timeout">How long the chat model may take, when it is asked.</param>
-    public static async Task<RouteDecision> RouteAsync(IDecisionModel? decision, IHelperModel fallback, string message,
-        string? lastAssistantText = null, CancellationToken ct = default, TimeSpan? timeout = null)
-    {
-        ct.ThrowIfCancellationRequested();
-        if (TryRouteLocally(message) is { } local) return local;
-        if (decision is not null)
-        {
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            deadline.CancelAfter(DecisionModelTimeout);
-            try
-            {
-                var answers = await decision.DecideAsync(BuildState(message, lastAssistantText), [IntentQuestion], deadline.Token)
-                    .WaitAsync(deadline.Token).ConfigureAwait(false);
-                ct.ThrowIfCancellationRequested();
-                if (answers.TryGetValue(IntentQuestion.Id, out var answer))
-                {
-                    return Interpret(IntentCall(answer.Choice), message);
-                }
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-            catch (Exception)
-            {
-                // Not running, not a decision model, too slow: the chat model decides instead.
-            }
-        }
-
-        return await RouteAsync(fallback, message, lastAssistantText, ct, timeout).ConfigureAwait(false);
-    }
-
-    /// <summary>What a decision model reads: the agent's last reply, when there is one, then the new message.</summary>
-    public static IReadOnlyDictionary<string, string> BuildState(string message, string? lastAssistantText)
-    {
-        var state = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (lastAssistantText is { Length: > 0 })
-        {
-            state["last_agent_message"] = Clip(lastAssistantText, MaxAssistantChars);
-        }
-
-        state["new_message"] = Clip(message, MaxMessageChars);
-        return state;
-    }
-
-    /// <summary>A decision model's pick, in the shape <see cref="Interpret"/> reads.</summary>
-    internal static ToolCall IntentCall(string choice)
-    {
-        using var document = JsonDocument.Parse(JsonSerializer.Serialize(new Dictionary<string, string> { ["intent"] = choice }));
-        return new ToolCall(RouteTool.Name, document.RootElement.Clone());
-    }
-
-    /// <summary>The routing question as a decision model gets it: the same rules as <see cref="SystemPrompt"/>, one option each.</summary>
-    public static readonly DecisionQuestion IntentQuestion = new(
-        "intent",
-        "Classify new_message by the mode the agent's turn should run in. Do not answer it. " +
-        "Use last_agent_message only to resolve replies such as approvals or answers to questions. " +
-        "Never change sessions. When uncertain choose act.",
-        [
-            new("act",
-                "The default. Requests to change, fix, add, adjust, test or run something; bug reports; complaints about " +
-                "something specific (spacing, layout, a broken flow); approvals; answers to the agent's questions; continuation. " +
-                "A feature request that says what to add and where is act, even when it adds new UI, a column, a toolbar or a field. " +
-                "Polite questions like 'can you fix X?' are act, and so is 'Why is X slow? Fix it'."),
-            new("plan",
-                "Only when the user asks for a plan, proposal or design before implementation; or the work is large and " +
-                "cross-cutting: a new subsystem such as authentication or billing, a migration, or a rewrite spanning many files; " +
-                "or the target or desired result cannot be identified at all ('make it better'). Size, the word new, or a " +
-                "missing detail the agent can reasonably choose never means plan."),
-            new("ask",
-                "Explanation, investigation, review or comparison with no requested changes. 'How do I fix X?' is ask. " +
-                "An acknowledgment followed by a question ('yes, why is it broken?') is ask, not approval to edit."),
-        ]);
 
     /// <summary>Fast local decisions first; a bounded helper call only for ambiguous messages.</summary>
     public static async Task<RouteDecision> RouteAsync(IHelperModel client, string message,
@@ -189,48 +111,66 @@ public static partial class MessageRouting
     }
 
     /// <summary>
-    /// Clear short approvals, requests, questions and explicit plans need no model.
-    /// Null means the model should read the message.
+    /// The decision when the local rules are sure, null when a model should read the message. Sure means a go-ahead, an
+    /// explicit plan, work that is big, new or unclear (see <see cref="ScopeOfWork"/>), a plain question, or a short
+    /// single-purpose change request.
     /// </summary>
     public static RouteDecision? TryRouteLocally(string message)
     {
-        var text = message.Trim();
-        if (IsGoAhead(text))
-        {
-            return new RouteDecision(message, RouteIntent.Act, NewTopic: false);
-        }
-
-        if (RequiresPlanning(text)) return new(message, RouteIntent.Plan, false);
-
-        // Only short, single-purpose messages qualify. Mixed/quoted/code prompts need the model.
-        if (text.Length == 0 || text.Length > 160 || CountWords(text) > 24 ||
-            text.IndexOfAny(['\r', '\n', '`', '"', '<', '>']) >= 0 ||
-            AmbiguousClause().IsMatch(text)) return null;
-
-        if (ExplicitPlan().IsMatch(Codale.Core.Agents.SessionTitles.StripFillers(text)))
-            return new(message, RouteIntent.Plan, false);
-        if (IsChangeRequest(text)) return new(message, RouteIntent.Act, false);
-        if (PureQuestion().IsMatch(Codale.Core.Agents.SessionTitles.StripFillers(text)))
-            return new(message, RouteIntent.Ask, false);
-
-        return null;
+        var decision = Decide(message);
+        return decision.Confident ? decision : null;
     }
 
     /// <summary>
-    /// The decision when the model could not give one: the words as typed, a pure
-    /// question as ask, and everything else as act. A slow or failed helper must not
-    /// turn ordinary requests into plans; only the local planning rules can.
+    /// The decision when the model could not give one: the local rules' best reading. Plans come only from the
+    /// local rules, questions are asks, and everything else is act: a slow or failed helper must not turn
+    /// ordinary requests into plans.
     /// </summary>
     public static RouteDecision RouteWithoutModel(string message) =>
-        TryRouteLocally(message) ?? new(message,
-            IsPlanOnly(message) ? RouteIntent.Plan :
-            IsQuestion(message) && !IsChangeRequest(message) ? RouteIntent.Ask : RouteIntent.Act, NewTopic: false);
+        Assess(message) is { Confident: false, Intent: RouteIntent.Plan } weak ? weak with { Intent = RouteIntent.Act } : Assess(message);
 
     /// <summary>
-    /// Plans that hold whatever the model says: an explicit plan request, large
-    /// cross-cutting work (rewrites, migrations, architecture, new subsystems such as
-    /// authentication or billing), or a request with no identifiable target. Ordinary
-    /// feature requests, UI complaints and redesigns of one screen are left to the model.
+    /// The local rules' reading of the message, including what they are unsure of: a weak plan (many changes in one long
+    /// message) is kept as a plan with <see cref="RouteDecision.Confident"/> false, for a model to confirm or overrule
+    /// through <see cref="Reconcile"/>.
+    /// </summary>
+    public static RouteDecision Assess(string message) => Decide(message);
+
+    private static RouteDecision Decide(string message)
+    {
+        var text = Normalize(message);
+        if (IsGoAhead(text)) return new(message, RouteIntent.Act, NewTopic: false, Confident: true);
+        if (IsPlanOnly(text)) return new(message, RouteIntent.Plan, NewTopic: false, Confident: true);
+
+        // A question that asks for nothing to change. Long text may hide a request inside pasted detail: the model reads it.
+        if (IsQuestion(text) && !IsChangeRequest(text) && !BugConfirmation().IsMatch(text))
+            return new(message, RouteIntent.Ask, NewTopic: false, Confident: text.Length <= MaxPureQuestionChars);
+
+        // Large subsystems, rewrites and migrations, and requests with no identifiable target always plan, unless the
+        // message is plainly a small fix that happens to mention one ("fix the typo in the migration script").
+        var stripped = Codale.Core.Agents.SessionTitles.StripFillers(text);
+        if ((LargeSubsystem().IsMatch(stripped) || SubstantialWork().IsMatch(stripped) || VagueRequest().IsMatch(stripped)) &&
+            !(CountWords(stripped) >= 3 && BoundedChange().IsMatch(stripped)) &&
+            !(ApprovedImplementation().IsMatch(stripped) && !AdditionalScope().IsMatch(stripped)))
+            return new(message, RouteIntent.Plan, NewTopic: false, Confident: true);
+
+        if (ScopeOfWork(message) is { } scope)
+            return new(message, RouteIntent.Plan, NewTopic: false, Confident: scope.Strong);
+
+        // Act when it is short, single-purpose and starts like a change. Otherwise act is only a default.
+        var bounded = text.Length <= 200 && CountWords(text) <= 24 && IsChangeRequest(text) && !AmbiguousClause().IsMatch(text);
+        return new(message, RouteIntent.Act, NewTopic: false, Confident: bounded || RoutineWork().IsMatch(text));
+    }
+
+    private const int MaxPureQuestionChars = 600;
+
+    /// <summary>"is this correct? the totals are over 100%": the user reports a problem and wants it fixed, so it is not an ask.</summary>
+    [GeneratedRegex(@"^(?:is|are)\s+(?:this|that|these|those|it)\s+(?:correct|right|expected|normal|intended|a\s+bug|wrong|broken|supposed\s+to)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex BugConfirmation();
+
+    /// <summary>
+    /// Plans that hold whatever the model says: an explicit plan request, work that is big, a new feature or too
+    /// unclear to act on.
     /// </summary>
     private static bool RequiresPlanning(string message)
     {
@@ -238,7 +178,8 @@ public static partial class MessageRouting
         if (IsQuestion(message) && !IsChangeRequest(message)) return false;
         var text = Codale.Core.Agents.SessionTitles.StripFillers(message.Trim());
         if (ApprovedImplementation().IsMatch(text) && !AdditionalScope().IsMatch(text)) return false;
-        return LargeSubsystem().IsMatch(text) || SubstantialWork().IsMatch(text) || VagueRequest().IsMatch(text);
+        return LargeSubsystem().IsMatch(text) || SubstantialWork().IsMatch(text) || VagueRequest().IsMatch(text) ||
+               ScopeOfWork(message) is { Strong: true };
     }
 
     private static bool IsBoundedChange(string message)
@@ -252,7 +193,32 @@ public static partial class MessageRouting
     private static bool IsPlanOnly(string message) =>
         (ExplicitPlan().IsMatch(Codale.Core.Agents.SessionTitles.StripFillers(message.Trim())) &&
             !ImplementationRequest().IsMatch(message)) ||
-        (NoEdits().IsMatch(message) && PlanWord().IsMatch(message));
+        (NoEdits().IsMatch(message) && (PlanWord().IsMatch(message) || DesignWord().IsMatch(message))) ||
+        AskForPlan().IsMatch(message);
+
+    /// <summary>"give me a plan first", "plan before you implement": a plan requested anywhere in the message, not only at its start.</summary>
+    [GeneratedRegex(@"\b(?:give|write|draft|propose|prepare|make|create|show)\s+(?:me\s+)?(?:a|an|the)?\s*(?:implementation\s+)?(?:plan|proposal)\b|\bplan\s+(?:first|before)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex AskForPlan();
+
+    /// <summary>With "don't edit yet", a proposal for a design or approach is a plan.</summary>
+    [GeneratedRegex(@"\b(?:design|approach|outline|strategy)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex DesignWord();
+
+    /// <summary>
+    /// A model's classification checked against the local rules. A confident local decision stands. Otherwise the
+    /// model's plan is kept unless the message is a bounded change, and its ask has to be earned: the message must
+    /// read as a question and ask for no change.
+    /// </summary>
+    public static RouteDecision Reconcile(RouteDecision local, RouteIntent model)
+    {
+        if (local.Confident) return local;
+        var intent = model;
+        // A plan needs substance: a few words, or one short bounded change, is not worth interrupting for.
+        var words = CountWords(Normalize(local.Text));
+        if (intent == RouteIntent.Plan && (words < 5 || (words <= 24 && IsBoundedChange(local.Text)))) intent = RouteIntent.Act;
+        if (intent == RouteIntent.Ask && (IsChangeRequest(local.Text) || !IsQuestion(local.Text))) intent = RouteIntent.Act;
+        return local with { Intent = intent, Confident = true };
+    }
 
     /// <summary>
     /// Turns the model's call into a decision for the message as typed, distrusting it
@@ -327,9 +293,20 @@ public static partial class MessageRouting
         // Any sentence or line can carry the request: "why is it slow? speed it up".
         foreach (var part in SentenceBreak().Split(message))
         {
-            if (part.Length > 0 && ChangeVerbPattern().IsMatch(Codale.Core.Agents.SessionTitles.StripFillers(part.Trim())))
+            if (part.Length > 0 && ChangeVerbPattern().IsMatch(Codale.Core.Agents.SessionTitles.StripFillers(LeadIn().Replace(part.Trim(), ""))))
             {
                 return true;
+            }
+
+            // "investigate the crash and fix it": the request can follow an "and" in the same sentence. A question
+            // keeps its own conjunctions ("how do I add and remove items?").
+            if (part.Length > 0 && !message.TrimEnd().EndsWith('?') && !QuestionOpener().IsMatch(Codale.Core.Agents.SessionTitles.StripFillers(part.Trim())))
+            {
+                var clauses = ClauseBreak().Split(part);
+                for (var i = 1; i < clauses.Length; i++)
+                {
+                    if (ChangeVerbPattern().IsMatch(Codale.Core.Agents.SessionTitles.StripFillers(clauses[i].Trim()))) return true;
+                }
             }
         }
 
@@ -372,10 +349,15 @@ public static partial class MessageRouting
         RegexOptions.IgnoreCase)]
     private static partial Regex BackReference();
 
+    /// <summary>
+    /// How a question opens: an interrogative, an auxiliary with its subject ("is the build broken", "do we have", but not
+    /// "do the same"), or an explain-style verb. "investigate", "check" and "look into" are not here: they usually lead to a fix.
+    /// </summary>
     [GeneratedRegex(
-        @"^(what|whats|why|how|where|when|which|who|whom|whose|is|are|was|were|does|do|did|can|could|should|would|will|" +
-        @"explain|describe|tell me|show me|walk me|summari[sz]e|review|compare|investigate|analy[sz]e|inspect|audit|list|find out|look into|check whether|" +
-        @"i wonder|any idea)\b",
+        @"^(?:what|whats|what's|why|how|where|when|which|who|whom|whose|" +
+        @"(?:is|are|was|were|does|did|can|could|should|would|will|has|have|am)\s+(?:you|we|i|they|he|she|it|this|that|these|those|there|the|a|an|my|our|your|any|some|all|each|every)\b|" +
+        @"do\s+(?!(?:the\s+same|that|this|it|so|these|those)\b)(?:you|we|i|they|he|she|there|the|a|an|my|our|your|any|some|all|each|every|this)\b|" +
+        @"explain|describe|tell\s+me|walk\s+me|summari[sz]e|review|compare|list|find\s+out|check\s+whether|check\s+if|i\s+wonder|any\s+(?:idea|way|suggestion)s?|is\s+there|are\s+there|how\s+come)\b",
         RegexOptions.IgnoreCase)]
     private static partial Regex QuestionOpener();
 
@@ -388,7 +370,7 @@ public static partial class MessageRouting
     [GeneratedRegex(
         @"^(make|add|fix|change|update|create|remove|delete|rename|refactor|implement|move|replace|improve|" +
         @"redesign|rework|redo|rewrite|build|write|set|use|convert|clean|tweak|adjust|restyle|style|polish|" +
-        @"optimi[sz]e|speed it up|speed up|simplify|extract|split|merge|install|upgrade|bump|commit|push|run|test|debug|deploy|" +
+        @"do\s+(?:the\s+same|that|this|it)|apply|have\s+(?:a|an|the|some|another|different|more)|group|sort|filter|display|combine|reorder|highlight|colou?rize|expand|collapse|show(?!\s+me)|optimi[sz]e|speed it up|speed up|simplify|extract|split|merge|install|upgrade|bump|commit|push|run|test|debug|deploy|" +
         @"enable|disable|turn|hide|put|drop|revert|undo|reset|generate|migrate|port|wire|hook|support|" +
         @"allow|prevent|stop|handle|translate|format|resize|center|align|color|colour)\b",
         RegexOptions.IgnoreCase)]

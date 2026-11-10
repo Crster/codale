@@ -33,18 +33,15 @@ public sealed class ProjectKnowledgeTests : IDisposable
         Assert.Contains("Auth.cs", Retrieve("RefreshToken").Files);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Unknown_topic_does_not_send_unrelated_neighbours(bool semantic)
+    [Fact]
+    public async Task Unknown_topic_does_not_send_unrelated_neighbours()
     {
-        ITextEmbedder? model = semantic ? new ConceptEmbedder() : null;
-        using var retrieval = new ProjectKnowledgeIndex(_store, () => model);
+        using var retrieval = new ProjectKnowledgeIndex(_store);
         Write("src/Authentication.cs", "class Authentication { bool RefreshCredential() => true; }");
         Write("src/RevenueChart.cs", "class RevenueChart { void DrawMonthlyGraph() {} }");
         await retrieval.RefreshAsync(Root);
         const string query = "zygomorphic quasar submarine teleportation";
-        Assert.Empty(retrieval.Retrieve(Root, query, "", new HashSet<string>(), query: await retrieval.EmbedQueryAsync(query)).Text);
+        Assert.Empty(retrieval.Retrieve(Root, query, "", new HashSet<string>()).Text);
     }
 
     [Fact]
@@ -52,41 +49,12 @@ public sealed class ProjectKnowledgeTests : IDisposable
     {
         const string text = "\n\n    public void RefreshToken() {}\n";
         Write("Auth.cs", text);
-        _store.ReplaceSource(Root, "Auth.cs", ProjectKnowledgeIndex.Hash(text), [(1, "public void RefreshToken() {}")]);
+        _store.ReplaceSource(Root, "Auth.cs", ProjectKnowledgeIndex.Hash(text), [(1, "public void RefreshToken() {}", "")]);
         await _index.RefreshAsync(Root);
         var chunk = Assert.Single(_store.SourceChunksForPath(Root, "Auth.cs"));
         Assert.Equal(3, chunk.StartLine);
         Assert.StartsWith("    public", chunk.Text);
         Assert.Equal(FileChunker.Version, _store.SourceChunkVersion(Root));
-    }
-
-    [Fact]
-    public async Task Confident_semantic_paraphrases_still_work_without_lexical_matches()
-    {
-        var model = new ConceptEmbedder();
-        using var retrieval = new ProjectKnowledgeIndex(_store, () => model);
-        Write("vault.cs", "// Protect saved credentials with encryption.\nclass Vault { void Seal() {} }");
-        Write("chart.cs", "// Draw monthly revenue totals in a bar graph.\nclass Chart { void Paint() {} }");
-        await retrieval.RefreshAsync(Root);
-        const string query = "secure stored passwords";
-        Assert.Empty(_store.SearchSourceTerms(query, Root));
-        var vector = await retrieval.EmbedQueryAsync(query);
-        Assert.NotNull(vector);
-        Assert.Contains("vault.cs", retrieval.Retrieve(Root, query, "", new HashSet<string>(), query: vector).Files);
-        Assert.Contains(EmbedRole.Query, model.Roles);
-        Assert.Contains(EmbedRole.Document, model.Roles);
-    }
-
-    [Fact]
-    public async Task A_semantic_model_that_fails_leaves_retrieval_to_bm25_and_ngrams()
-    {
-        var model = new ConceptEmbedder { Fail = true };
-        using var retrieval = new ProjectKnowledgeIndex(_store, () => model);
-        Write("Auth.cs", "class Authentication { void RefreshToken() {} }");
-        await retrieval.RefreshAsync(Root);
-        Assert.Null(await retrieval.EmbedQueryAsync("RefreshToken"));
-        Assert.Contains("Auth.cs", retrieval.Retrieve(Root, "RefreshToken", "", new HashSet<string>()).Files);
-        Assert.Contains("Auth.cs", (await retrieval.SearchAsync(Root, "RefreshToken")).Select(c => c.Path));
     }
 
     [Fact]
@@ -171,12 +139,10 @@ public sealed class ProjectKnowledgeTests : IDisposable
     public void Same_branch_ignores_commits_but_not_switches(string previous, string current, bool same) =>
         Assert.Equal(same, ProjectKnowledgeIndex.SameBranch(previous, current));
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Discovery_and_enrichment_share_fresh_hybrid_candidates(bool semantic)
+    [Fact]
+    public async Task Discovery_and_enrichment_share_fresh_hybrid_candidates()
     {
-        using var retrieval = new ProjectKnowledgeIndex(_store, semantic ? () => new ConceptEmbedder() : null);
+        using var retrieval = new ProjectKnowledgeIndex(_store);
         Write("Auth.cs", "class Authentication { void RefreshToken() {} }");
         Write("Charts.cs", "class RevenueChart { void RenderGraph() {} }");
         await retrieval.RefreshAsync(Root);
@@ -263,7 +229,7 @@ public sealed class ProjectKnowledgeTests : IDisposable
             [new SourceReference("Auth.cs", ProjectKnowledgeIndex.Hash(File.ReadAllText(Path.Combine(Root, "Auth.cs"))))]));
         Assert.DoesNotContain("CheckoutOneAuthentication", Retrieve("CheckoutOneAuthentication", root: second).Text);
         File.Copy(Path.Combine(Root, "Auth.cs"), Path.Combine(second, "Auth.cs"), true);
-        Assert.Contains("finding", Retrieve("CheckoutOneAuthentication", root: second).Text);
+        Assert.Contains("earlier work", Retrieve("CheckoutOneAuthentication", root: second).Text);
     }
 
     [Fact]
@@ -404,6 +370,50 @@ public sealed class ProjectKnowledgeTests : IDisposable
         Assert.Empty(Retrieve("RevenueChart", first.Keys.Concat(next.Keys).ToHashSet()).Text);
     }
 
+    [Theory]
+    [InlineData(LearnedKind.Edit)]
+    [InlineData(LearnedKind.Open)]
+    [InlineData(LearnedKind.Read)]
+    public async Task Every_kind_of_learned_association_lifts_its_file_for_a_similar_prompt(string kind)
+    {
+        Write("src/component-a.tsx", "export const Panel = () => null;");
+        Write("src/unrelated.tsx", "export const Other = () => null;");
+        await _index.RefreshAsync(Root);
+        Assert.Empty(_index.Search(Root, "projects owner picker"));
+
+        _store.RecordLearned("s", Root, "src/component-a.tsx", "show the projects owner picker", kind);
+        Assert.Equal("src/component-a.tsx", _index.Search(Root, "projects owner picker")[0].Path.Replace('\\', '/'));
+    }
+
+    [Fact]
+    public async Task An_opened_search_result_outranks_a_file_that_was_only_read_and_an_edit_outranks_both()
+    {
+        Write("a.tsx", "export const A = 1;");
+        Write("b.tsx", "export const B = 1;");
+        Write("c.tsx", "export const C = 1;");
+        await _index.RefreshAsync(Root);
+        _store.RecordLearned("s", Root, "a.tsx", "rotate the owner picker", LearnedKind.Read);
+        _store.RecordLearned("s", Root, "b.tsx", "rotate the owner picker", LearnedKind.Open);
+        _store.RecordLearned("s", Root, "c.tsx", "rotate the owner picker", LearnedKind.Edit);
+        Assert.Equal(["c.tsx", "b.tsx", "a.tsx"], _index.Search(Root, "rotate owner picker").Select(c => c.Path).ToArray());
+    }
+
+    [Fact]
+    public async Task A_named_identifier_hands_over_its_line_and_the_code_around_it()
+    {
+        var filler = string.Join("\n", Enumerable.Range(0, 60).Select(i => $"// filler {i} about files and defaults"));
+        Write("Index.cs", "class Index\n{\n    private const int MaxFiles = 6;\n}\n" + filler + "\nvoid Search() { var files = 1; }");
+        await _index.RefreshAsync(Root);
+        var result = Retrieve("Change the default MaxFiles from 6 to 5");
+        Assert.Contains("Matches (path:line):", result.Text);
+        Assert.Contains("- Index.cs:3  private const int MaxFiles = 6;", result.Text);
+        Assert.Contains("Index.cs:1-", result.Text);
+        Assert.Contains("private const int MaxFiles = 6;", result.Text);
+        Assert.DoesNotContain("const (", result.Text);
+        Assert.Equal(new[] { "MaxFiles", "rank_ids", "RankAsync" }, ProjectKnowledgeIndex.Identifiers("Change MaxFiles and rank_ids in RankAsync, not the plain words"));
+        Assert.Empty(ProjectKnowledgeIndex.Identifiers("Change the default value of files"));
+    }
+
     [Fact]
     public async Task An_oversized_file_map_keeps_entries_that_fit()
     {
@@ -475,49 +485,3 @@ public sealed class ProjectKnowledgeTests : IDisposable
         try { Directory.Delete(_directory, true); } catch (IOException) { }
     }
 }
-
-/// <summary>
-/// A semantic model in miniature: words of one concept land on one dimension, so a paraphrase with no
-/// shared word still scores high, and a text of unknown words scores nothing.
-/// </summary>
-internal sealed class ConceptEmbedder : ITextEmbedder
-{
-    private static readonly string[][] Concepts =
-    [
-        ["secure", "protect", "password", "passwords", "credential", "credentials", "encryption", "vault", "seal", "stored", "saved", "authentication", "token", "refreshtoken"],
-        ["chart", "graph", "revenue", "draw", "paint", "render", "rendered", "monthly", "bar", "revenuechart", "rendergraph"],
-    ];
-
-    public bool Fail { get; init; }
-
-    public List<EmbedRole> Roles { get; } = [];
-
-    public string Model => "concept-test";
-
-    public float RelatedSimilarity => 0.5f;
-
-    public float MatchSimilarity => 0.5f;
-
-    public Task<IReadOnlyList<float[]>> EmbedAsync(IReadOnlyList<string> texts, EmbedRole role, CancellationToken ct = default)
-    {
-        lock (Roles) Roles.Add(role);
-        if (Fail) throw new Codale.Core.Helper.HelperModelException("Ollama is not reachable.");
-        return Task.FromResult<IReadOnlyList<float[]>>(texts.Select(Embed).ToArray());
-    }
-
-    private static float[] Embed(string text)
-    {
-        var vector = new float[Concepts.Length];
-        foreach (var word in System.Text.RegularExpressions.Regex.Split(text.ToLowerInvariant(), "[^a-z]+"))
-        {
-            for (var i = 0; i < Concepts.Length; i++)
-            {
-                if (Concepts[i].Contains(word)) vector[i] += 1;
-            }
-        }
-
-        var norm = MathF.Sqrt(vector.Sum(v => v * v));
-        return norm == 0 ? vector : vector.Select(v => v / norm).ToArray();
-    }
-}
-

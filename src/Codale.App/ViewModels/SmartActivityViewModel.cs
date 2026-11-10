@@ -27,6 +27,18 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
     private readonly SmartExperience _smart = SmartExperienceHost.Instance;
     private int _refreshing, _dirty;
     private bool _disposed;
+    private (int Done, int Total) _summary;
+    private Codale.Search.ProjectKnowledgeIndex? _knowledge;
+    public void ObserveIndex(Codale.Search.ProjectKnowledgeIndex knowledge)
+    {
+        _knowledge = knowledge;
+        knowledge.IndexingChanged += OnIndexingChanged;
+        knowledge.SummaryProgressChanged += SetSummaryProgress;
+        Refresh();
+    }
+    private void OnIndexingChanged() => Refresh();
+    /// <summary>Progress of the background file summaries; called from any thread.</summary>
+    public void SetSummaryProgress(int done, int total) { _summary = (done, total); Refresh(); }
     public SmartActivityViewModel(string project)
     {
         _project = project;
@@ -89,12 +101,16 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
                 _ui.TryEnqueue(() =>
                 {
                     if (_disposed) return;
-                    var running = activities.FirstOrDefault(a => a.State is "queued" or "exploring" or "finalizing");
+                    var running = _smart.CurrentActivity;
+                    var (sumDone, sumTotal) = _summary;
                     Text = _smart.Status.State switch
                     {
                         SmartState.Disabled => "Smart off",
                         SmartState.Error => "Smart error",
+                        SmartState.Ready when running is { Context.Task: "summary" } => sumTotal > 0 ? $"Smart · summarizing {Math.Min(sumDone + 1, sumTotal)}/{sumTotal}" : "Smart · summarizing",
                         SmartState.Ready when running is not null => $"Smart · {running.Context.Task}",
+                        SmartState.Ready when sumTotal > 0 => $"Smart · summarizing {Math.Min(sumDone + 1, sumTotal)}/{sumTotal}",
+                        SmartState.Ready when _knowledge?.IsIndexing == true => "Smart · indexing",
                         SmartState.Ready when activities.FirstOrDefault()?.State == "error" => "Smart · last task failed",
                         SmartState.Ready => "Smart ready",
                         _ => _smart.Status.Message
@@ -134,5 +150,10 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
         _disposed = true;
         _smart.Changed -= OnChanged;
         _smart.ActivityChanged -= OnChanged;
+        if (_knowledge is { } knowledge)
+        {
+            knowledge.IndexingChanged -= OnIndexingChanged;
+            knowledge.SummaryProgressChanged -= SetSummaryProgress;
+        }
     }
 }

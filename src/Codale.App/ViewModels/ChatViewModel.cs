@@ -3986,18 +3986,21 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             using var stopped = new CancellationTokenSource();
             using var routing = CancellationTokenSource.CreateLinkedTokenSource(preparation.Token, stopped.Token);
             _briefing = stopped;
+            // The local rules settle most messages (go-aheads, plain questions, small changes, new features, big or unclear
+            // work), so the model is only asked about the ones they are unsure of, and its answer is checked against them.
+            var local = MessageRouting.Assess(text);
             var decision = MessageRouting.RouteWithoutModel(text);
             try
             {
-                if (AppSettings.SmartExperience && SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready)
+                if (!local.Confident && AppSettings.SmartExperience && SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready)
                 {
                     var intent = await SmartExperienceHost.Instance.ClassifyAsync(new(_projectPath, _projectPath, "routing", _chatId, preparationDeadline), text, LastRoutingReply, routing.Token).WaitAsync(routing.Token);
-                    if (intent?.Value is { } selected) decision = decision with { Intent = selected switch
+                    if (intent?.Value is { } selected) decision = MessageRouting.Reconcile(local, selected switch
                     {
                         Codale.Smart.SmartIntent.Ask => RouteIntent.Ask,
                         Codale.Smart.SmartIntent.Plan => RouteIntent.Plan,
                         _ => RouteIntent.Act,
-                    } };
+                    });
                 }
             }
             catch (OperationCanceledException) { if (stopped.IsCancellationRequested) return; }
@@ -4027,6 +4030,21 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        _routedIntent = intent switch
+        {
+            RouteIntent.Plan => Codale.Smart.SmartIntent.Plan,
+            RouteIntent.Ask => Codale.Smart.SmartIntent.Ask,
+            _ => Codale.Smart.SmartIntent.Act,
+        };
+        try
+        {
+            await SendRoutedCoreAsync(text, attachments, intent, preparationToken, preparationDeadline);
+        }
+        finally { _routedIntent = null; }
+    }
+
+    private async Task SendRoutedCoreAsync(string text, IReadOnlyList<TurnAttachment> attachments, RouteIntent intent, CancellationToken preparationToken, DateTimeOffset? preparationDeadline)
+    {
         switch (intent)
         {
             case RouteIntent.Plan:
@@ -4168,7 +4186,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            var context = retrieved is { Text.Length: > 0 } ? SessionBriefing.ContextBlock(retrieved.Text) : null;
+            var context = retrieved is { Text.Length: > 0 } ? SessionBriefing.ContextBlock(retrieved.Text, _deliveredContext.Count == 0) : null;
             if (!compact && _handoffContext is not null)
             {
                 context = context is null ? TakeHandoffContext() : TakeHandoffContext() + "\n\n" + context;
@@ -4241,7 +4259,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         try
         {
             await session.SendAsync(new UserTurn(text) { Attachments = attachments,
-                ContextPrefix = retrieved is { Text.Length: > 0 } ? SessionBriefing.ContextBlock(retrieved.Text) : null });
+                ContextPrefix = retrieved is { Text.Length: > 0 } ? SessionBriefing.ContextBlock(retrieved.Text, _deliveredContext.Count == 0) : null });
             if (ReferenceEquals(session, _session)) ContextDelivered(retrieved);
         }
         catch (Exception ex)
@@ -4720,6 +4738,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public void ResetForNewSession()
     {
+        _earlierLoaded = false;
         EndTurn(TurnOutcome.Stopped);
         Items.Clear();
         _toolCalls.Clear();
@@ -4842,22 +4861,29 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>
-    /// Prompts the transcript keeps in memory. Older turns have long scrolled out of view;
-    /// they are dropped with their rows, tool calls and rendered markdown so a long session
-    /// does not grow without bound. The session history still has every message.
+    /// Prompts the transcript keeps in full. Older turns have long scrolled out of view; their rows,
+    /// tool calls and rendered markdown are dropped so a long session does not grow without bound.
+    /// A count row stands in for them and holds no reference to what it replaced; Load reads the
+    /// turns back from the history log, which still has every message.
     /// </summary>
-    private const int KeptPrompts = 4;
+    private const int KeptPrompts = 2;
 
-    /// <summary>The notice standing in for turns no longer in the transcript.</summary>
-    internal const string TrimmedNoticeText = "Showing recent messages. Earlier messages are available in session history.";
+    /// <summary>The reader loaded the earlier turns back: they stay, so the next prompt does not fold them away again.</summary>
+    private bool _earlierLoaded;
 
     /// <summary>
-    /// Drops everything before the <see cref="KeptPrompts"/>th-latest prompt (steers join their
-    /// turn and do not count). Anything still waiting on the user - a running call, an approval
-    /// or plan not yet decided - stays, with everything after it.
+    /// Folds everything before the <see cref="KeptPrompts"/>th-latest prompt (steers join their
+    /// turn and do not count) into the <see cref="EarlierTurnsItem"/> at the top. Anything still
+    /// waiting on the user - a running call, an approval or plan not yet decided - stays, with
+    /// everything after it.
     /// </summary>
     private void TrimTranscript()
     {
+        if (_earlierLoaded)
+        {
+            return;
+        }
+
         var cut = -1;
         var prompts = 0;
         for (var i = Items.Count - 1; i >= 0; i--)
@@ -4869,7 +4895,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             }
         }
 
-        var first = Items.Count > 0 && Items[0] is NoticeItem { Text: TrimmedNoticeText } ? 1 : 0;
+        var earlier = Items.Count > 0 ? Items[0] as EarlierTurnsItem : null;
+        var first = earlier is null ? 0 : 1;
         for (var i = first; i < cut; i++)
         {
             if (ToolsOf(Items[i]).Any(IsStillLive))
@@ -4885,6 +4912,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         var cutoff = Items[cut].Timestamp;
+        var folded = EarlierTurnsItem.CountTurns(Items.Skip(first).Take(cut - first));
         for (var i = cut - 1; i >= first; i--)
         {
             Items.RemoveAt(i);
@@ -4900,9 +4928,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             }
         }
 
-        if (first == 0)
+        if (earlier is null && folded > 0)
         {
-            Items.Insert(0, new NoticeItem { Text = TrimmedNoticeText });
+            earlier = new EarlierTurnsItem();
+            Items.Insert(0, earlier);
+        }
+
+        if (earlier is not null)
+        {
+            earlier.CanLoad = _featureLog is not null;
+            earlier.Turns += folded;
         }
 
         Reflow();

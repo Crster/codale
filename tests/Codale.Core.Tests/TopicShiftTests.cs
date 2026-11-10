@@ -4,12 +4,11 @@ namespace Codale.Core.Tests;
 
 public sealed class TopicShiftTests
 {
-    private static readonly ITextEmbedder Embedder = HashedTextEmbedder.Instance;
 
     [Fact]
-    public async Task The_first_prompt_of_a_chat_is_never_new()
+    public void The_first_prompt_of_a_chat_is_never_new()
     {
-        Assert.False(await TopicShift.IsNewTopicAsync("fix the login redirect", [], Embedder));
+        Assert.False(TopicShift.IsNewTopic("fix the login redirect", []));
     }
 
     [Theory]
@@ -18,26 +17,26 @@ public sealed class TopicShiftTests
     [InlineData("it still fails")]
     [InlineData("yes do it")]
     [InlineData("the connectors drawer should show the status")]
-    public async Task Follow_ups_and_shared_subjects_stay_on_topic(string prompt)
+    public void Follow_ups_and_shared_subjects_stay_on_topic(string prompt)
     {
-        Assert.False(await TopicShift.IsNewTopicAsync(prompt, ["where does the new connector table located?"], Embedder));
+        Assert.False(TopicShift.IsNewTopic(prompt, ["where does the new connector table located?"]));
     }
 
     [Theory]
     [InlineData("the terminal flickers when resizing the window")]
     [InlineData("fix the login redirect after oauth")]
-    public async Task An_unrelated_subject_is_new(string prompt)
+    public void An_unrelated_subject_is_new(string prompt)
     {
-        Assert.True(await TopicShift.IsNewTopicAsync(prompt, ["where does the new connector table located?", "add a status column to connectors"], Embedder));
+        Assert.True(TopicShift.IsNewTopic(prompt, ["where does the new connector table located?", "add a status column to connectors"]));
     }
 
     [Theory]
     [InlineData("commit all changes")]
     [InlineData("continue in full permission mode")]
-    public async Task Workflow_commands_have_no_subject_and_are_never_new(string prompt)
+    public void Workflow_commands_have_no_subject_and_are_never_new(string prompt)
     {
         Assert.False(SearchText.HasTopic(prompt));
-        Assert.False(await TopicShift.IsNewTopicAsync(prompt, ["redesign the garrison minimap"], Embedder));
+        Assert.False(TopicShift.IsNewTopic(prompt, ["redesign the garrison minimap"]));
     }
 
     [Theory]
@@ -57,11 +56,11 @@ public sealed class TopicShiftTests
     }
 
     [Fact]
-    public async Task Agent_reply_supplies_the_subject_missing_from_the_user_prompt()
+    public void Agent_reply_supplies_the_subject_missing_from_the_user_prompt()
     {
-        Assert.False(await TopicShift.IsNewTopicAsync("fix the oauth callback", ["investigate the failure"], Embedder,
+        Assert.False(TopicShift.IsNewTopic("fix the oauth callback", ["investigate the failure"],
             "The login failure is in the oauth callback: it discards the redirect URI."));
-        Assert.True(await TopicShift.IsNewTopicAsync("the terminal flickers when resizing", ["investigate the failure"], Embedder,
+        Assert.True(TopicShift.IsNewTopic("the terminal flickers when resizing", ["investigate the failure"],
             "The login failure is in the oauth callback: it discards the redirect URI."));
     }
 
@@ -69,15 +68,15 @@ public sealed class TopicShiftTests
     [InlineData("fix login")]
     [InlineData("next fix the login redirect after oauth")]
     [InlineData("now fix the login redirect after oauth")]
-    public async Task Short_or_sequenced_requests_can_start_a_topic(string prompt)
+    public void Short_or_sequenced_requests_can_start_a_topic(string prompt)
     {
-        Assert.True(await TopicShift.IsNewTopicAsync(prompt, ["where is the connector table"], Embedder));
+        Assert.True(TopicShift.IsNewTopic(prompt, ["where is the connector table"]));
     }
 
     [Fact]
-    public async Task Only_recent_user_topics_are_compared()
+    public void Only_recent_user_topics_are_compared()
     {
-        Assert.True(await TopicShift.IsNewTopicAsync("fix login", ["fix login", "connector table", "connector secret", "connector status"], Embedder));
-        Assert.False(await TopicShift.IsNewTopicAsync("fix login", [], Embedder, "working on terminal"));
+        Assert.True(TopicShift.IsNewTopic("fix login", ["fix login", "connector table", "connector secret", "connector status"]));
+        Assert.False(TopicShift.IsNewTopic("fix login", [], "working on terminal"));
     }
 }

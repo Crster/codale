@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8" ?>
 <UserControl
     x:Class="Codale.App.Views.ChatTab"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -1485,6 +1485,28 @@
                 IsTabStop="False" />
         </DataTemplate>
 
+        <!--  Every turn older than the latest two, folded out of memory: a count and the way to read them back.  -->
+        <DataTemplate x:Key="EarlierTurnsTemplate" x:DataType="vm:EarlierTurnsItem">
+            <StackPanel
+                Margin="{x:Bind RowMargin, Mode=OneWay}"
+                Orientation="Horizontal"
+                Spacing="8">
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="{x:Bind S12, Mode=OneWay}"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    Text="{x:Bind Title, Mode=OneWay}" />
+                <HyperlinkButton
+                    Padding="0"
+                    VerticalAlignment="Center"
+                    Click="OnLoadEarlierClick"
+                    Content="Load"
+                    FontSize="{x:Bind S12, Mode=OneWay}"
+                    ToolTipService.ToolTip="Restore the earlier turns from this chat's history"
+                    Visibility="{x:Bind CanLoad, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+            </StackPanel>
+        </DataTemplate>
+
         <DataTemplate x:Key="NoticeTemplate" x:DataType="vm:NoticeItem">
             <Border
                 Margin="{x:Bind RowMargin, Mode=OneWay}"
@@ -1978,6 +2000,7 @@
             AssistantTemplate="{StaticResource AssistantTemplate}"
             BriefingTemplate="{StaticResource BriefingTemplate}"
             ContextTemplate="{StaticResource ContextTemplate}"
+            EarlierTurnsTemplate="{StaticResource EarlierTurnsTemplate}"
             CompactTemplate="{StaticResource CompactTemplate}"
             FeatureJumpTemplate="{StaticResource FeatureJumpTemplate}"
             HandoffBriefTemplate="{StaticResource HandoffBriefTemplate}"

@@ -352,6 +352,8 @@ public sealed partial class ChatTab : UserControl
         }
     }
 
+    private void OnLoadEarlierClick(object sender, RoutedEventArgs e) => ViewModel.LoadEarlierTurns();
+
     /// <summary>The feature's whole log, newest page first, read only when asked for: a chat never loads it by itself.</summary>
     private async void OnViewFeatureHistoryClick(object sender, RoutedEventArgs e)
     {

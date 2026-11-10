@@ -6,7 +6,21 @@ namespace Codale.Storage;
 
 public sealed partial class FeatureStore
 {
-    private void InitializeProjectKnowledge() => Execute("""
+    private void InitializeProjectKnowledge()
+    {
+        InitializeProjectKnowledgeTables();
+        // Chunks gained the symbols they belong to; an index from before has none until it is re-chunked.
+        lock (_gate)
+        {
+            if (!Query("PRAGMA table_info(source_chunks)", r => r.GetString(1)).Contains("symbols"))
+                Execute("ALTER TABLE source_chunks ADD COLUMN symbols TEXT NOT NULL DEFAULT ''");
+            // Learned associations gained a kind: what showed the file answered the prompt (an edit, a read, a search click).
+            if (!Query("PRAGMA table_info(learned_edits)", r => r.GetString(1)).Contains("kind"))
+                Execute("ALTER TABLE learned_edits ADD COLUMN kind TEXT NOT NULL DEFAULT 'edit'");
+        }
+    }
+
+    private void InitializeProjectKnowledgeTables() => Execute("""
         CREATE TABLE IF NOT EXISTS provider_sessions (
             session_id TEXT PRIMARY KEY, provider TEXT NOT NULL, provider_session_id TEXT NOT NULL,
             worktree TEXT NOT NULL, endpoint TEXT NOT NULL
@@ -21,7 +35,7 @@ public sealed partial class FeatureStore
         );
         CREATE TABLE IF NOT EXISTS source_chunks (
             id INTEGER PRIMARY KEY, worktree TEXT NOT NULL, path TEXT NOT NULL, hash TEXT NOT NULL,
-            start_line INTEGER NOT NULL, text TEXT NOT NULL
+            start_line INTEGER NOT NULL, text TEXT NOT NULL, symbols TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS ix_source_chunks ON source_chunks(worktree, path);
         CREATE TABLE IF NOT EXISTS source_index_versions (
@@ -41,7 +55,7 @@ public sealed partial class FeatureStore
         );
         CREATE TABLE IF NOT EXISTS learned_edits (
             id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, worktree TEXT NOT NULL,
-            path TEXT NOT NULL, prompt TEXT NOT NULL,
+            path TEXT NOT NULL, prompt TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'edit',
             UNIQUE(session_id, path, prompt)
         );
         CREATE VIRTUAL TABLE IF NOT EXISTS learned_edits_fts USING fts5(edit_id UNINDEXED, tokens);
@@ -147,7 +161,7 @@ public sealed partial class FeatureStore
                 ("$w", worktree), ("$v", version));
     }
 
-    public void ReplaceSource(string worktree, string path, string? hash, IReadOnlyList<(int StartLine, string Text)> chunks)
+    public void ReplaceSource(string worktree, string path, string? hash, IReadOnlyList<(int StartLine, string Text, string Symbols)> chunks)
     {
         lock (_gate)
         {
@@ -161,11 +175,11 @@ public sealed partial class FeatureStore
             if (hash is not null)
             {
                 Execute("INSERT INTO source_files VALUES ($w,$p,$h)", ("$w", worktree), ("$p", path), ("$h", hash));
-                foreach (var (line, text) in chunks)
+                foreach (var (line, text, symbols) in chunks)
                 {
-                    var id = Insert("INSERT INTO source_chunks(worktree,path,hash,start_line,text) VALUES ($w,$p,$h,$l,$t) RETURNING id",
-                        ("$w", worktree), ("$p", path), ("$h", hash), ("$l", line), ("$t", text));
-                    Execute("INSERT INTO source_fts VALUES ($id,$t)", ("$id", id), ("$t", SearchText.ForIndex(path + " " + text)));
+                    var id = Insert("INSERT INTO source_chunks(worktree,path,hash,start_line,text,symbols) VALUES ($w,$p,$h,$l,$t,$s) RETURNING id",
+                        ("$w", worktree), ("$p", path), ("$h", hash), ("$l", line), ("$t", text), ("$s", symbols));
+                    Execute("INSERT INTO source_fts VALUES ($id,$t)", ("$id", id), ("$t", SearchText.ForIndex(path + " " + symbols + " " + text)));
                 }
             }
             tx.Commit();
@@ -185,33 +199,33 @@ public sealed partial class FeatureStore
         lock (_gate)
         {
             return Query("""
-                SELECT c.worktree,c.path,c.hash,c.start_line,c.text,c.id FROM source_fts f JOIN source_chunks c ON c.id=f.chunk_id
+                SELECT c.worktree,c.path,c.hash,c.start_line,c.text,c.id,c.symbols FROM source_fts f JOIN source_chunks c ON c.id=f.chunk_id
                 WHERE source_fts MATCH $q AND c.worktree=$w ORDER BY bm25(source_fts) LIMIT $n
                 """, ReadChunk, ("$q", match), ("$w", worktree), ("$n", limit));
         }
     }
 
     private static SourceChunk ReadChunk(SqliteDataReader r) =>
-        new(r.GetString(0), r.GetString(1), r.GetString(2), r.GetInt32(3), r.GetString(4), r.GetInt64(5));
+        new(r.GetString(0), r.GetString(1), r.GetString(2), r.GetInt32(3), r.GetString(4), r.GetInt64(5), r.GetString(6));
 
     public IReadOnlyList<SourceChunk> SourceChunks(IReadOnlyCollection<long> ids)
     {
         if (ids.Count == 0) return [];
         lock (_gate)
         {
-            return Query($"SELECT worktree,path,hash,start_line,text,id FROM source_chunks WHERE id IN ({string.Join(',', ids)})", ReadChunk);
+            return Query($"SELECT worktree,path,hash,start_line,text,id,symbols FROM source_chunks WHERE id IN ({string.Join(',', ids)})", ReadChunk);
         }
     }
 
     /// <summary>Chunks of a worktree with no vector from <paramref name="model"/> yet, for background embedding.</summary>
-    public IReadOnlyList<(long Id, string Path, string Text)> ChunksMissingVectors(string worktree, string model, int limit)
+    public IReadOnlyList<(long Id, string Path, string Symbols, string Text)> ChunksMissingVectors(string worktree, string model, int limit)
     {
         lock (_gate)
         {
             return Query("""
-                SELECT c.id,c.path,c.text FROM source_chunks c LEFT JOIN chunk_vectors v ON v.chunk_id=c.id AND v.model=$m
+                SELECT c.id,c.path,c.symbols,c.text FROM source_chunks c LEFT JOIN chunk_vectors v ON v.chunk_id=c.id AND v.model=$m
                 WHERE c.worktree=$w AND v.chunk_id IS NULL LIMIT $n
-                """, r => (r.GetInt64(0), r.GetString(1), r.GetString(2)), ("$w", worktree), ("$m", model), ("$n", limit));
+                """, r => (r.GetInt64(0), r.GetString(1), r.GetString(2), r.GetString(3)), ("$w", worktree), ("$m", model), ("$n", limit));
         }
     }
 
@@ -285,32 +299,61 @@ public sealed partial class FeatureStore
     }
 
     /// <summary>Associate an actual agent edit with the user request active during that turn.</summary>
-    public void RecordLearnedEdit(string sessionId, string worktree, string path, string prompt)
+    public void RecordLearnedEdit(string sessionId, string worktree, string path, string prompt) =>
+        RecordLearned(sessionId, worktree, path, prompt, LearnedKind.Edit);
+
+    /// <summary>
+    /// Remembers that <paramref name="path"/> answered <paramref name="prompt"/>: the agent edited it, read it
+    /// while working on it, or the user opened it from a search for it. A stronger kind replaces a weaker one
+    /// recorded for the same file and prompt.
+    /// </summary>
+    public void RecordLearned(string sessionId, string worktree, string path, string prompt, string kind)
     {
         if (SearchText.RetrievalTerms(prompt).Count == 0) return;
         path = path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+        var clipped = prompt.Length > 500 ? prompt[..500] : prompt;
         lock (_gate)
         {
             using var tx = _connection.BeginTransaction();
-            var id = Insert("INSERT OR IGNORE INTO learned_edits(session_id,worktree,path,prompt) VALUES ($s,$w,$p,$q) RETURNING id",
-                ("$s", sessionId), ("$w", worktree), ("$p", path), ("$q", prompt.Length > 500 ? prompt[..500] : prompt));
-            if (id > 0) Execute("INSERT INTO learned_edits_fts VALUES ($id,$t)", ("$id", id), ("$t", SearchText.ForIndex(prompt)));
+            var id = Insert("INSERT OR IGNORE INTO learned_edits(session_id,worktree,path,prompt,kind) VALUES ($s,$w,$p,$q,$k) RETURNING id",
+                ("$s", sessionId), ("$w", worktree), ("$p", path), ("$q", clipped), ("$k", kind));
+            if (id > 0)
+            {
+                Execute("INSERT INTO learned_edits_fts VALUES ($id,$t)", ("$id", id), ("$t", SearchText.ForIndex(prompt)));
+                // Bounded memory: the oldest associations of a project go first.
+                Execute("DELETE FROM learned_edits_fts WHERE edit_id IN (SELECT id FROM learned_edits WHERE worktree=$w AND id <= $cut); " +
+                        "DELETE FROM learned_edits WHERE worktree=$w AND id <= $cut", ("$w", worktree), ("$cut", id - MaxLearnedPerProject));
+            }
+            else if (LearnedKind.Strength(kind) > 0)
+            {
+                Execute("UPDATE learned_edits SET kind=$k WHERE session_id=$s AND path=$p AND prompt=$q AND kind IN (" + LearnedKind.WeakerThan(kind) + ")",
+                    ("$s", sessionId), ("$p", path), ("$q", clipped), ("$k", kind));
+            }
             tx.Commit();
         }
     }
 
-    public IReadOnlyList<(string Path, string Prompt)> SearchLearnedEdits(string worktree, string prompt)
+    private const int MaxLearnedPerProject = 20_000;
+
+    public IReadOnlyList<(string Path, string Prompt, string Kind)> SearchLearnedEdits(string worktree, string prompt)
     {
         if (SearchText.ToRetrievalQuery(prompt) is not { } match) return [];
         lock (_gate) return Query("""
-            SELECT e.path,e.prompt FROM learned_edits_fts f JOIN learned_edits e ON e.id=f.edit_id
+            SELECT e.path,e.prompt,e.kind FROM learned_edits_fts f JOIN learned_edits e ON e.id=f.edit_id
             WHERE learned_edits_fts MATCH $q AND e.worktree=$w ORDER BY bm25(learned_edits_fts) LIMIT 80
-            """, r => (r.GetString(0), r.GetString(1)), ("$q", match), ("$w", worktree));
+            """, r => (r.GetString(0), r.GetString(1), r.GetString(2)), ("$q", match), ("$w", worktree));
+    }
+
+    /// <summary>Every remembered association of a project, newest first: real usage, as labelled retrieval examples.</summary>
+    public IReadOnlyList<(string Path, string Prompt, string Kind)> LearnedAssociations(string worktree, int limit = 2000)
+    {
+        lock (_gate) return Query("SELECT path,prompt,kind FROM learned_edits WHERE worktree=$w ORDER BY id DESC LIMIT $n",
+            r => (r.GetString(0), r.GetString(1), r.GetString(2)), ("$w", worktree), ("$n", limit));
     }
 
     public IReadOnlyList<SourceChunk> SourceChunksForPath(string worktree, string path, int limit = 2)
     {
-        lock (_gate) return Query("SELECT worktree,path,hash,start_line,text,id FROM source_chunks WHERE worktree=$w AND path=$p ORDER BY start_line LIMIT $n",
+        lock (_gate) return Query("SELECT worktree,path,hash,start_line,text,id,symbols FROM source_chunks WHERE worktree=$w AND path=$p ORDER BY start_line LIMIT $n",
             ReadChunk, ("$w", worktree), ("$p", path), ("$n", limit));
     }
 }

@@ -407,6 +407,14 @@
                                 <Rectangle Style="{StaticResource Divider}" />
                                 <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
                                     <StackPanel VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock Style="{StaticResource RowTitle}" Text="Summarize files in the background" />
+                                        <TextBlock Style="{StaticResource RowDesc}" Text="Run the local model over project files to pre-write summaries (up to 25 per pass). Uses CPU/GPU while it works." />
+                                    </StackPanel>
+                                    <ToggleSwitch x:Name="SmartSummariesToggle" Grid.Column="1" MinWidth="0" VerticalAlignment="Center" AutomationProperties.Name="Summarize files in the background" Toggled="OnSmartSummariesToggled" />
+                                </Grid>
+                                <Rectangle Style="{StaticResource Divider}" />
+                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                    <StackPanel VerticalAlignment="Center" Spacing="2">
                                         <TextBlock Style="{StaticResource RowTitle}" Text="Enable thinking" />
                                         <TextBlock Style="{StaticResource RowDesc}" Text="Allow the local model to reason before using tools and answering." />
                                     </StackPanel>

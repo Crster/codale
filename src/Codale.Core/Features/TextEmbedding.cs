@@ -3,32 +3,6 @@ using System.Text;
 
 namespace Codale.Core.Features;
 
-/// <summary>What a text is embedded as: models trained with task prefixes embed a search query apart from the text it should find.</summary>
-public enum EmbedRole
-{
-    Document,
-    Query,
-}
-
-/// <summary>
-/// Turns text into a dense, L2-normalised vector for similarity search. <see cref="Model"/> is stored
-/// beside every vector, so swapping the implementation re-embeds the index.
-/// </summary>
-public interface ITextEmbedder
-{
-    string Model { get; }
-
-    /// <summary>The cosine above which two short texts are on one subject, for this model.</summary>
-    float RelatedSimilarity { get; }
-
-    /// <summary>The cosine a neighbour needs to count as a match on its own, without lexical evidence beside it.</summary>
-    float MatchSimilarity { get; }
-
-    /// <summary>One unit vector per text, in order.</summary>
-    /// <exception cref="Helper.HelperModelException">A model behind a server could not be reached or answered badly.</exception>
-    Task<IReadOnlyList<float[]>> EmbedAsync(IReadOnlyList<string> texts, EmbedRole role, CancellationToken ct = default);
-}
-
 /// <summary>
 /// Local, dependency-free embedding: identifier words, their light stems and their character
 /// trigrams are hashed into a fixed number of signed buckets (the "hashing trick", as in fastText
@@ -36,17 +10,17 @@ public interface ITextEmbedder
 /// ("connectors"/"connector", "located"/"location"), identifier fragments ("connTable"), typos —
 /// while staying instant and private. It does not know synonyms; that needs a trained model.
 /// </summary>
-public sealed class HashedTextEmbedder : ITextEmbedder
+public sealed class HashedTextEmbedder
 {
     public static readonly HashedTextEmbedder Instance = new();
 
+    /// <summary>Stored beside every vector, so changing the embedding re-embeds the index.</summary>
     public string Model => "hashed-ngram-v1-384";
     public int Dimension => 384;
+    /// <summary>The cosine above which two short texts are on one subject.</summary>
     public float RelatedSimilarity => 0.25f;
+    /// <summary>The cosine a neighbour needs to count as a match on its own, without lexical evidence beside it.</summary>
     public float MatchSimilarity => 0.25f;
-
-    public Task<IReadOnlyList<float[]>> EmbedAsync(IReadOnlyList<string> texts, EmbedRole role, CancellationToken ct = default) =>
-        Task.FromResult<IReadOnlyList<float[]>>(texts.Select(Embed).ToArray());
 
     public float[] Embed(string text)
     {

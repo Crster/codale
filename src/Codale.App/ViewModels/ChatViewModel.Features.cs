@@ -33,16 +33,18 @@ public sealed partial class ChatViewModel
     private readonly HashSet<string> _deliveredContext = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SourceReference> _turnReferences = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _turnEditedPaths = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Files the agent opened with a read tool this turn, first few only: what it needed beyond the enrichment.</summary>
+    private readonly HashSet<string> _turnReadPaths = new(StringComparer.OrdinalIgnoreCase);
+    private const int MaxLearnedReads = 6;
     /// <summary>When the current turn's request went out; files changed on disk since then are the turn's work.</summary>
     private DateTime? _turnStartedUtc;
     private readonly StringBuilder _turnFindings = new();
     private string? _retrievalId;
+
+    /// <summary>The intent Auto routed the prompt being sent to; null outside Auto, where the context stays the plain verified kind.</summary>
+    private Codale.Smart.SmartIntent? _routedIntent;
     private bool _needsResumeContext;
     private string? _handoffContext;
-    /// <summary>Events of a history shown when it opens. The transcript is not virtualized (that made the
-    /// scroll jump), so the window is what bounds its memory; the rest stays in the session log.</summary>
-    private const int HistoryWindowEvents = 120;
-
 
     /// <summary>Only opening a history row resumes it. Prompts never select a different session.</summary>
     public async Task<bool> AttachFeatureAsync(FeatureInfo feature, string? cliId = null)
@@ -72,25 +74,79 @@ public sealed partial class ChatViewModel
         SetFeature(feature);
         if (handoff) CaptureHandoff();
         Title = feature.Name;
-        var events = _featureLog!.ReadTail(HistoryWindowEvents, out var more);
-        if (more) Add(new NoticeItem { Text = TrimmedNoticeText });
-        foreach (var e in events)
+        // The latest turns replay in full; older ones stay on disk behind a "Load" row.
+        _earlierLoaded = false;
+        var events = _featureLog!.ReadTail(int.MaxValue, out _);
+        var firstKept = FirstKeptEvent(events, KeptPrompts);
+        var older = events.Take(firstKept).Count(e => e is UserMessageRecorded);
+        if (older > 0)
         {
-            if (e is UserMessageRecorded user)
-                Add(new UserMessageItem { Text = user.Text });
-            else if (e is ContextEnrichmentRecorded context)
-                Add(new ContextEnrichedItem { Summary = context.Summary, Details = context.Details });
-            else if (e is AssistantMessageCompleted reply)
-            {
-                var item = new AssistantMessageItem();
-                item.Complete(reply.Text);
-                Add(item);
-            }
+            Add(new EarlierTurnsItem { Turns = older, CanLoad = true });
+        }
+        foreach (var e in events.Skip(firstKept))
+        {
+            if (ReplayedRow(e) is { } row) Add(row);
         }
         TrimTranscript();
         RestorePendingPlan();
         await ConnectAsync();
         return IsConnected;
+    }
+
+    /// <summary>Where the latest <paramref name="keep"/> prompts begin in a replayed log; 0 when there are no more than that.</summary>
+    private static int FirstKeptEvent(IReadOnlyList<AgentEvent> events, int keep)
+    {
+        var starts = new List<int>();
+        for (var i = 0; i < events.Count; i++)
+        {
+            if (events[i] is UserMessageRecorded) starts.Add(i);
+        }
+
+        return keep <= 0 ? events.Count : starts.Count > keep ? starts[^keep] : 0;
+    }
+
+    /// <summary>The transcript row a logged event replays as, or null for events that are not conversation.</summary>
+    private static ChatItem? ReplayedRow(AgentEvent e)
+    {
+        switch (e)
+        {
+            case UserMessageRecorded user:
+                return new UserMessageItem { Text = user.Text };
+            case ContextEnrichmentRecorded context:
+                return new ContextEnrichedItem { Summary = context.Summary, Details = context.Details };
+            case AssistantMessageCompleted reply:
+                var item = new AssistantMessageItem();
+                item.Complete(reply.Text);
+                return item;
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads the folded turns back from the history log as ordinary rows in front of the latest ones.
+    /// They stay for the rest of the chat: the next prompt does not fold them away again.
+    /// </summary>
+    public void LoadEarlierTurns()
+    {
+        if (Items.Count == 0 || Items[0] is not EarlierTurnsItem || _featureLog is null)
+        {
+            return;
+        }
+
+        var events = _featureLog.ReadTail(int.MaxValue, out _);
+        var shown = Items.Count(i => i is UserMessageItem { IsSteer: false });
+        var firstKept = FirstKeptEvent(events, shown);
+
+        _earlierLoaded = true;
+        Items.RemoveAt(0);
+        var at = 0;
+        foreach (var e in events.Take(firstKept))
+        {
+            if (ReplayedRow(e) is { } row) Items.Insert(at++, row);
+        }
+
+        Reflow();
     }
 
     /// <summary>The feature's summary, or what it was started for while it has none.</summary>
@@ -193,6 +249,7 @@ public sealed partial class ChatViewModel
         _turnFindings.Clear();
         _turnReferences.Clear();
         _turnEditedPaths.Clear();
+        _turnReadPaths.Clear();
         _turnStartedUtc = null;
         _deliveredContext.Clear();
         _retrievalId = null;
@@ -259,7 +316,11 @@ public sealed partial class ChatViewModel
             if (tool.Input.ValueKind == System.Text.Json.JsonValueKind.Object)
                 foreach (var property in tool.Input.EnumerateObject())
                     if (property.Name is "file_path" or "path" or "file" && property.Value.ValueKind == System.Text.Json.JsonValueKind.String &&
-                        property.Value.GetString() is { Length: > 0 } path) CaptureReference(path);
+                        property.Value.GetString() is { Length: > 0 } path)
+                    {
+                        CaptureReference(path);
+                        if (IsFileReadTool(tool.ToolName) && _turnReadPaths.Count < MaxLearnedReads) _turnReadPaths.Add(path);
+                    }
         }
         if (e is ToolCallCompleted done)
         {
@@ -281,6 +342,9 @@ public sealed partial class ChatViewModel
             {
                 foreach (var path in _turnEditedPaths)
                     features.RecordLearnedEdit(id, _projectPath, path, _featureRequest ?? "");
+                // A file the agent had to open to do the work is evidence for the next similar request, weaker than an edit.
+                foreach (var path in _turnReadPaths.Where(p => !_turnEditedPaths.Contains(p)))
+                    features.RecordLearned(id, _projectPath, path, _featureRequest ?? "", LearnedKind.Read);
                 // Shell edits (sed, scripts) only show on disk: credit them to this history's working set.
                 if (_turnStartedUtc is { } started)
                     _ = features.RecordTurnChangesAsync(id, _projectPath, started);
@@ -292,11 +356,16 @@ public sealed partial class ChatViewModel
             _turnFindings.Clear();
             _turnReferences.Clear();
             _turnEditedPaths.Clear();
+        _turnReadPaths.Clear();
             _turnStartedUtc = null;
             return;
         }
         _featureLog?.Append(e);
     }
+
+    private static bool IsFileReadTool(string name) =>
+        name.Equals("Read", StringComparison.OrdinalIgnoreCase) || name.Contains("read_file", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("readfile", StringComparison.OrdinalIgnoreCase) || name.Equals("view", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsExplorationTool(string name) =>
         name.Contains("read", StringComparison.OrdinalIgnoreCase) || name.Contains("search", StringComparison.OrdinalIgnoreCase) ||
@@ -316,10 +385,8 @@ public sealed partial class ChatViewModel
     /// <summary>
     /// Topic detection on local hashed vectors.
     /// </summary>
-    private static async Task<bool> IsNewTopicAsync(string text, IReadOnlyList<string> earlier, string? lastReply, CancellationToken ct)
-    {
-        return await TopicShift.IsNewTopicAsync(text, earlier, HashedTextEmbedder.Instance, lastReply, ct);
-    }
+    private static bool IsNewTopic(string text, IReadOnlyList<string> earlier, string? lastReply) =>
+        TopicShift.IsNewTopic(text, earlier, lastReply);
 
     private async Task<RetrievalResult?> RetrieveProjectContextAsync(string text, UserMessageItem? sent = null, CancellationToken preparationToken = default, DateTimeOffset? preparationDeadline = null)
     {
@@ -339,7 +406,7 @@ public sealed partial class ChatViewModel
                 .TakeLast(3).Select(i => i.Text).ToList();
             var lastReply = priorItems.AsEnumerable().Reverse().TakeWhile(i => i is not UserMessageItem)
                 .OfType<AssistantMessageItem>().FirstOrDefault(i => !i.IsStreaming)?.Text;
-            var newTopic = sent is not null && await IsNewTopicAsync(text, earlier, lastReply, cts.Token);
+            var newTopic = sent is not null && IsNewTopic(text, earlier, lastReply);
             cts.Token.ThrowIfCancellationRequested();
             if (!ReferenceEquals(session, _session)) throw new OperationCanceledException();
             if (newTopic) sent!.IsNewTopic = true;
@@ -347,7 +414,7 @@ public sealed partial class ChatViewModel
             var recent = newTopic ? "" : string.Join("\n", earlier.TakeLast(2).Append(text));
             // A new topic leaves the files the session has been editing behind.
             var retrieval = features.RetrieveAsync(_projectPath, text, recent, new HashSet<string>(_deliveredContext),
-                _needsResumeContext ? null : FeatureId, newTopic ? null : FeatureId, smartDeadline.Token, preparationDeadline, _chatId);
+                _needsResumeContext ? null : FeatureId, newTopic ? null : FeatureId, smartDeadline.Token, preparationDeadline, _chatId, _routedIntent);
             // Smart retrieval bounds inference itself and returns verified basic context on timeout.
             // An outer timeout would discard that fallback just as it becomes available.
             var result = AppSettings.SmartExperience

@@ -192,6 +192,13 @@ public static class AppSettings
         set => Set("ai.smartExperience", value, FormatFlag);
     }
 
+    /// <summary>Whether Smart summarises project files in the background (a model run per file); off by default.</summary>
+    public static bool SmartSummaries
+    {
+        get => Get("ai.smartSummaries", () => ReadFlag("ai.smartSummaries", false));
+        set => Set("ai.smartSummaries", value, FormatFlag);
+    }
+
     public static bool SmartThinking
     {
         get => Get("ai.smartThinking", () => ReadFlag("ai.smartThinking", false));

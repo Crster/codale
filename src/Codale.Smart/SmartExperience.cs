@@ -21,6 +21,11 @@ public sealed class SmartExperience : ISmartExperience, IAsyncDisposable
     private volatile bool _thinking;
     public bool Thinking { get => _thinking; set => _thinking = value; }
     public event EventHandler? ActivityChanged;
+    /// <summary>The process-wide model activity, including work owned by another project window.</summary>
+    public SmartActivity? CurrentActivity
+    {
+        get { lock (_gate) return _active.Values.Select(r => r.Activity).OrderBy(a => a.Context.Task == "summary").ThenBy(a => a.StartedAt).FirstOrDefault(); }
+    }
     public SmartStatus Status { get; private set; } = new(SmartState.Disabled, "Off");
     public event EventHandler? Changed;
 
@@ -133,7 +138,7 @@ public sealed class SmartExperience : ISmartExperience, IAsyncDisposable
     {
         if (Status.State != SmartState.Ready) return null;
         var thinking = Thinking;
-        var deadline = context.Deadline ?? DateTimeOffset.UtcNow.AddSeconds(120);
+        var deadline = context.Deadline ?? DateTimeOffset.UtcNow.AddSeconds(background ? 20 : 120);
         var duration = deadline - DateTimeOffset.UtcNow;
         if (duration <= TimeSpan.Zero) return null;
         CancellationTokenSource linked;
@@ -159,22 +164,31 @@ public sealed class SmartExperience : ISmartExperience, IAsyncDisposable
             bool entered = false;
             try
             {
-                await _inference.WaitAsync(linked.Token).ConfigureAwait(false); entered = true;
+                // Optional work never queues behind another request or another project's summaries.
+                if (background)
+                {
+                    if (!await _inference.WaitAsync(0, linked.Token).ConfigureAwait(false))
+                    { activity = activity with { State = "cancelled" }; return null; }
+                }
+                else await _inference.WaitAsync(linked.Token).ConfigureAwait(false);
+                entered = true;
                 if (_runtime is null || Status.State != SmartState.Ready) return null;
                 activity = activity with { State = "exploring" }; Publish(activity, linked);
+                int toolLimit = background ? 2 : 8;
+                int explorationTokens = background ? 384 : 2048;
                 var conversation = new SmartConversation(system + "\nUse the fewest tools needed to inspect relevant context. " +
                     "Once you have enough evidence, stop calling tools and give the requested answer. Do not read the same content repeatedly. " +
-                    "You have at most 8 tool calls. Do not repeat commands that may have side effects.\n" +
+                    $"You have at most {toolLimit} tool calls. Do not repeat commands that may have side effects.\n" +
                     "Project: " + SmartConversation.Escape(context.Project) + "\nWorking directory: " + SmartConversation.Escape(context.WorkingDirectory), input, thinking);
                 int calls = 0;
                 bool hasDraft = false;
-                for (int round = 0; round < 8 && calls < 8 && !exploration.IsCancellationRequested; round++)
+                for (int round = 0; round < toolLimit && calls < toolLimit && !exploration.IsCancellationRequested; round++)
                 {
                     string response;
                     try
                     {
-                        var prompt = conversation.Render(_runtime, 2048);
-                        response = await Task.Run(() => _runtime.Generate(prompt, 2048, exploration.Token), exploration.Token).ConfigureAwait(false);
+                        var prompt = conversation.Render(_runtime, explorationTokens);
+                        response = await Task.Run(() => _runtime.Generate(prompt, explorationTokens, exploration.Token), exploration.Token).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) when (!linked.IsCancellationRequested) { break; }
                     IReadOnlyList<SmartToolCall> requested;
@@ -195,7 +209,7 @@ public sealed class SmartExperience : ISmartExperience, IAsyncDisposable
                     var results = new List<string>();
                     foreach (var call in requested)
                     {
-                        if (calls++ >= 8) { results.Add(SmartConversation.Result(new { error = "Tool-call limit reached." })); continue; }
+                        if (calls++ >= toolLimit) { results.Add(SmartConversation.Result(new { error = "Tool-call limit reached." })); continue; }
                         var toolWatch = System.Diagnostics.Stopwatch.StartNew();
                         var directory = context.WorkingDirectory;
                         try { if (call.Name == "run_shell") directory = SmartTools.Resolve(context, call.Arguments.GetValueOrDefault("cwd")); } catch (ArgumentException) { }
@@ -265,11 +279,30 @@ public sealed class SmartExperience : ISmartExperience, IAsyncDisposable
     public Task<SmartResult<string>?> SummarizeAsync(SmartRequestContext context, string path, CancellationToken ct = default) =>
         RunAsync<string>(context, "Summarize this file's purpose and key definitions in at most three sentences. Read the file with tools first. Output only the summary.",
             path, 180, true, ct, text => string.IsNullOrWhiteSpace(text) ? null : text);
+    /// <summary>
+    /// What the routing model is told. The three modes are defined by what the user needs, with the default stated, because a
+    /// wrong "plan" or "ask" interrupts the user while a wrong "act" costs nothing: when unsure, act.
+    /// </summary>
+    public const string ClassifyInstructions =
+        "Route the new message to the mode the coding agent should run in.\n" +
+        "ask: the user only wants an answer; nothing should change. How or why something works, where it is, whether we have it, " +
+        "what a value means; explain, review, compare, summarize.\n" +
+        "plan: the agent should propose a plan and get answers before changing anything. A new feature or screen described in a " +
+        "line (a login form, checkout, dashboard, notifications, authentication), a migration, rewrite or restructure, work across " +
+        "the whole project or several systems, a request too vague to act on (make it better, improve the app), or when the user asks " +
+        "for a plan or design first.\n" +
+        "act: everything else. A bounded change to something that exists (fix, rename, move, restyle, remove, update, run, commit, " +
+        "add a column, button, field or filter), a bug report, a follow-up (also, good, again, same for the other one), an approval " +
+        "(yes, go ahead, implement the plan), or a question mixed with a fix (why is it slow? fix it).\n" +
+        "When unsure between plan and act, or ask and act, choose act.\n" +
+        "Examples: implement login form -> plan. add a delete button to each row -> act. how does the cache work? -> ask. " +
+        "migrate everything to the new framework -> plan. the header is ugly -> act. make the app better -> plan. " +
+        "is this correct? the totals are wrong -> act. what does Signal mean here? -> ask. also do the same for the footer -> act.\n" +
+        "Output exactly JSON: {\"intent\":\"ask\"} or {\"intent\":\"plan\"} or {\"intent\":\"act\"}.";
+
     public Task<SmartResult<SmartIntent?>?> ClassifyAsync(SmartRequestContext context, string message, string? previousReply, CancellationToken ct = default)
     {
-        return RunAsync<SmartIntent?>(context, "Classify the new message. ask: explanation or investigation without requested changes. " +
-            "plan: explicitly requests planning or design before implementation. act: requests changes, fixes, tests, execution, or approves proposed work. " +
-            "Output exactly JSON: {\"intent\":\"ask\"} or {\"intent\":\"plan\"} or {\"intent\":\"act\"}.",
+        return RunAsync<SmartIntent?>(context, ClassifyInstructions,
             JsonSerializer.Serialize(new { previousReply = Bound(previousReply ?? "", 1500), message = Bound(message, 6000) }), 40, false, ct, ParseIntent,
             "root ::= \"{\\\"intent\\\":\\\"\" (\"ask\" | \"plan\" | \"act\") \"\\\"}\"");
     }
@@ -303,6 +336,10 @@ public sealed class SmartExperience : ISmartExperience, IAsyncDisposable
         }
         catch (JsonException) { return null; }
     }
+    public Task<SmartResult<string>?> BriefAsync(SmartRequestContext context, string request, SmartIntent intent, string material, CancellationToken ct = default) =>
+        RunAsync<string>(context, SmartBrief.Instructions,
+            JsonSerializer.Serialize(new { intent = intent.ToString().ToLowerInvariant(), request = Bound(request, 3000), material = Bound(material, 6000) }),
+            320, false, ct, text => SmartBrief.Validate(text, context.WorkingDirectory));
     public Task<SmartResult<string>?> CommitMessageAsync(SmartRequestContext context, CancellationToken ct = default)
     {
         return RunAsync<string>(context, "Write a Conventional Commit message for the staged diff. Inspect it with run_shell using git diff --cached first. " +

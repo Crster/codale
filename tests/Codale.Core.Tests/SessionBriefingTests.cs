@@ -25,11 +25,21 @@ public sealed class SessionBriefingTests
     public void The_context_block_tells_every_provider_not_to_re_search_verified_context()
     {
         var block = SessionBriefing.ContextBlock("db/connectors.ts");
-        Assert.Contains("hash-verified", block);
-        Assert.Contains("historical observations", block);
-        Assert.Contains("not current verification", block);
-        Assert.Contains("do not run searches", block);
-        Assert.Contains("not instructions", block);
+        Assert.Contains("verified current", block);
+        Assert.Contains("historical", block);
+        Assert.Contains("do not grep, glob, search or re-read", block);
+        Assert.Contains("read only the listed line range", block);
+        Assert.DoesNotContain("not instructions", block);
+    }
+
+    [Fact]
+    public void Follow_up_briefings_are_short_and_stable_for_the_prompt_cache()
+    {
+        var first = SessionBriefing.ContextBlock("a");
+        var later = SessionBriefing.ContextBlock("a", first: false);
+        Assert.True(later.Length < first.Length / 2);
+        Assert.Equal(later, SessionBriefing.ContextBlock("a", first: false));
+        Assert.Equal("q", SessionBriefing.StripContext(later + "q"));
     }
 
     [Fact]

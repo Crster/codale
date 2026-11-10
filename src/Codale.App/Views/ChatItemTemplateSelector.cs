@@ -22,9 +22,11 @@ public sealed partial class ChatItemTemplateSelector : DataTemplateSelector
     public DataTemplate? FeatureJumpTemplate { get; set; }
     public DataTemplate? CompactTemplate { get; set; }
     public DataTemplate? ContextTemplate { get; set; }
+    public DataTemplate? EarlierTurnsTemplate { get; set; }
 
     protected override DataTemplate? SelectTemplateCore(object item) => item switch
     {
+        EarlierTurnsItem => EarlierTurnsTemplate,
         ContextEnrichedItem => ContextTemplate,
         FeatureJumpItem => FeatureJumpTemplate,
         CompactItem => CompactTemplate,

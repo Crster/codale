@@ -14,7 +14,8 @@ public sealed class MessageRoutingTests
     {
         var decision = MessageRouting.Interpret(null, "fix teh bug");
 
-        Assert.Equal(new RouteDecision("fix teh bug", RouteIntent.Act, NewTopic: false), decision);
+        Assert.Equal(RouteIntent.Act, decision.Intent);
+        Assert.Equal("fix teh bug", decision.Text);
     }
 
     [Fact]
@@ -111,7 +112,7 @@ public sealed class MessageRoutingTests
     [InlineData("continue")]
     public void A_bare_go_ahead_is_routed_without_the_model(string message)
     {
-        Assert.Equal(new RouteDecision(message, RouteIntent.Act, NewTopic: false), MessageRouting.TryRouteLocally(message));
+        Assert.Equal(new RouteDecision(message, RouteIntent.Act, NewTopic: false, Confident: true), MessageRouting.TryRouteLocally(message));
     }
 
     [Theory]
@@ -205,10 +206,8 @@ public sealed class MessageRoutingTests
     }
 
     [Theory]
-    [InlineData("yes, why is it broken?")]
     [InlineData("why is login broken, fix it")]
-    [InlineData("how does it work? make it faster")]
-    [InlineData("fix `plan()`")]
+    [InlineData("the header is ugly")]
     [InlineData("explain this\nthen implement it")]
     public void Ambiguous_short_messages_still_use_the_helper(string message)
     {

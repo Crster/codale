@@ -37,4 +37,7 @@ public interface ISmartExperience
     Task<SmartResult<SmartIntent?>?> ClassifyAsync(SmartRequestContext context, string message, string? previousReply, CancellationToken ct = default);
     Task<SmartResult<string>?> CommitMessageAsync(SmartRequestContext context, CancellationToken ct = default);
     Task<IReadOnlyList<SmartEvidence>> DiscoveriesAsync(SmartRequestContext context, string query, CancellationToken ct = default);
+    /// <summary>The task brief for the agent CLI (see <see cref="SmartBrief"/>), written from verified <paramref name="material"/>; null when unavailable.</summary>
+    Task<SmartResult<string>?> BriefAsync(SmartRequestContext context, string request, SmartIntent intent, string material, CancellationToken ct = default) =>
+        Task.FromResult<SmartResult<string>?>(null);
 }

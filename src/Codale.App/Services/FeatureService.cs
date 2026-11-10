@@ -29,13 +29,13 @@ public sealed class FeatureService : IDisposable
     {
         _projectPath = projectPath;
         _store = OpenStore(projectPath);
-        _knowledge = new ProjectKnowledgeIndex(_store, () => null);
+        _knowledge = new ProjectKnowledgeIndex(_store);
         _knowledge.Smart = SmartExperienceHost.Instance;
         _knowledge.SmartProjectRoot = projectPath;
         _knowledge.Summaries = new Codale.Smart.SummaryCache(Path.Combine(ProjectPaths.KnowledgeDirectory(projectPath), "smart-summaries"));
+        _knowledge.SummariesEnabled = () => AppSettings.SmartSummaries;
         SmartExperienceHost.Instance.Changed += OnSmartChanged;
         _knowledge.Warm(projectPath);
-        _embeddingModel = null;
         AppSettings.Changed += OnAppSettingsChanged;
         _activity = FeatureActivity.For(projectPath);
         _activity.HistoryDeleted += OnHistoryDeleted;
@@ -136,7 +136,7 @@ public sealed class FeatureService : IDisposable
 
     /// <param name="workingSessionId">The history whose recently written files get a ranking boost; null on a new topic.</param>
     public async Task<RetrievalResult> RetrieveAsync(string worktree, string prompt, string recent, IReadOnlySet<string> delivered, string? currentSessionId,
-        string? workingSessionId = null, CancellationToken preparationToken = default, DateTimeOffset? preparationDeadline = null, string? chatId = null)
+        string? workingSessionId = null, CancellationToken preparationToken = default, DateTimeOffset? preparationDeadline = null, string? chatId = null, Codale.Smart.SmartIntent? intent = null)
     {
         if (AppSettings.SmartExperience)
         {
@@ -144,31 +144,27 @@ public sealed class FeatureService : IDisposable
             var remaining = (preparationDeadline ?? DateTimeOffset.UtcNow.AddSeconds(120)) - DateTimeOffset.UtcNow;
             budget.CancelAfter(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero);
             return await _knowledge.RetrieveSmartAsync(worktree, prompt, recent, delivered, currentSessionId,
-                workingSessionId is null ? null : _store.FilesOf(workingSessionId, WorkingSetFiles), budget.Token, preparationDeadline, chatId).ConfigureAwait(false);
+                workingSessionId is null ? null : _store.FilesOf(workingSessionId, WorkingSetFiles), budget.Token, preparationDeadline, chatId, intent).ConfigureAwait(false);
         }
-        var query = await _knowledge.EmbedQueryAsync(prompt).ConfigureAwait(false);
         return await Task.Run(() => _knowledge.Retrieve(worktree, prompt, recent, delivered, currentSessionId,
-            workingSessionId is null ? null : _store.FilesOf(workingSessionId, WorkingSetFiles), query)).ConfigureAwait(false);
+            workingSessionId is null ? null : _store.FilesOf(workingSessionId, WorkingSetFiles))).ConfigureAwait(false);
     }
 
-    private string? _embeddingModel;
     private bool _smartThinking = AppSettings.SmartThinking;
+    private bool _smartSummaries = AppSettings.SmartSummaries;
 
     private void OnSmartChanged(object? sender, EventArgs e)
     { if (SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready) _knowledge.Warm(_projectPath); }
 
-    /// <summary>A newly picked embedding model (or provider) embeds the project now, not on the next prompt.</summary>
+    /// <summary>Switching Smart thinking re-summarises the project now, not on the next prompt.</summary>
     private void OnAppSettingsChanged(object? sender, EventArgs e)
     {
-        if (_smartThinking != AppSettings.SmartThinking)
+        if (_smartThinking != AppSettings.SmartThinking || _smartSummaries != AppSettings.SmartSummaries)
         {
             _smartThinking = AppSettings.SmartThinking;
+            _smartSummaries = AppSettings.SmartSummaries;
             _knowledge.Warm(_projectPath);
         }
-        string? model = null;
-        if (model == _embeddingModel) return;
-        _embeddingModel = model;
-        _knowledge.Warm(_projectPath);
     }
 
     private const int WorkingSetFiles = 8;
@@ -195,15 +191,23 @@ public sealed class FeatureService : IDisposable
 
     public void RecordRetrieval(string retrievalId, string sessionId, RetrievalResult result) => _store.RecordRetrieval(retrievalId, sessionId, result);
     public void RecordExploration(string retrievalId) => _store.RecordExploration(retrievalId);
-    public void RecordLearnedEdit(string sessionId, string worktree, string path, string prompt)
+    public void RecordLearnedEdit(string sessionId, string worktree, string path, string prompt) =>
+        RecordLearned(sessionId, worktree, path, prompt, LearnedKind.Edit);
+
+    public void RecordLearned(string sessionId, string worktree, string path, string prompt, string kind)
     {
         if (string.IsNullOrWhiteSpace(prompt)) return;
         var root = ProjectPaths.Normalize(worktree);
         var full = Path.GetFullPath(path, root);
         if (!ProjectPaths.IsInside(root, full)) return;
         var relative = Path.GetRelativePath(root, full);
-        if (ProjectKnowledgeIndex.Eligible(relative)) _store.RecordLearnedEdit(sessionId, root, relative, prompt);
+        if (ProjectKnowledgeIndex.Eligible(relative)) _store.RecordLearned(sessionId, root, relative, prompt, kind);
     }
+
+    /// <summary>The user opened a global-search result: choosing it from that query is the clearest sign it was the answer.</summary>
+    public void RecordSearchOpen(string query, string filePath) =>
+        RecordLearned("global-search", _projectPath, filePath, query, LearnedKind.Open);
+
     public void RecordUsage(string retrievalId, int inputTokens, int outputTokens) => _store.RecordUsage(retrievalId, inputTokens, outputTokens);
 
     public void RecordFinding(string sessionId, string provider, string worktree, string text, IReadOnlyList<SourceReference> references)

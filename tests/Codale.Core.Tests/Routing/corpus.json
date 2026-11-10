@@ -1,0 +1,678 @@
+[
+ {
+  "text": "implement login form",
+  "label": "plan"
+ },
+ {
+  "text": "add a login page",
+  "label": "plan"
+ },
+ {
+  "text": "add user authentication",
+  "label": "plan"
+ },
+ {
+  "text": "create a signup flow with email verification",
+  "label": "plan"
+ },
+ {
+  "text": "build a dashboard for sales",
+  "label": "plan"
+ },
+ {
+  "text": "build an admin panel",
+  "label": "plan"
+ },
+ {
+  "text": "add dark mode support",
+  "label": "plan"
+ },
+ {
+  "text": "add search to the app",
+  "label": "plan"
+ },
+ {
+  "text": "create a settings page",
+  "label": "plan"
+ },
+ {
+  "text": "implement a checkout flow",
+  "label": "plan"
+ },
+ {
+  "text": "add payment integration with stripe",
+  "label": "plan"
+ },
+ {
+  "text": "add real-time notifications",
+  "label": "plan"
+ },
+ {
+  "text": "support multiple languages",
+  "label": "plan"
+ },
+ {
+  "text": "add an export to pdf feature",
+  "label": "plan"
+ },
+ {
+  "text": "make a todo app",
+  "label": "plan"
+ },
+ {
+  "text": "create a snake game",
+  "label": "plan"
+ },
+ {
+  "text": "add a shopping cart",
+  "label": "plan"
+ },
+ {
+  "text": "add role based access control",
+  "label": "plan"
+ },
+ {
+  "text": "create an api for orders",
+  "label": "plan"
+ },
+ {
+  "text": "add oauth login with google",
+  "label": "plan"
+ },
+ {
+  "text": "implement a drag and drop kanban board",
+  "label": "plan"
+ },
+ {
+  "text": "add undo and redo",
+  "label": "plan"
+ },
+ {
+  "text": "add a chat feature",
+  "label": "plan"
+ },
+ {
+  "text": "implement file uploads with progress and resumable chunks",
+  "label": "plan"
+ },
+ {
+  "text": "lets add a comments system to the posts",
+  "label": "plan"
+ },
+ {
+  "text": "I want to create a blog with an admin area",
+  "label": "plan"
+ },
+ {
+  "text": "make the app better",
+  "label": "plan"
+ },
+ {
+  "text": "improve the performance of the app",
+  "label": "plan"
+ },
+ {
+  "text": "clean up the codebase",
+  "label": "plan"
+ },
+ {
+  "text": "work on the current code and check if it still needs improvement",
+  "label": "plan"
+ },
+ {
+  "text": "refactor the whole project to use hooks",
+  "label": "plan"
+ },
+ {
+  "text": "migrate from rest to graphql",
+  "label": "plan"
+ },
+ {
+  "text": "rewrite the backend in go",
+  "label": "plan"
+ },
+ {
+  "text": "convert the entire app to typescript",
+  "label": "plan"
+ },
+ {
+  "text": "migrate all functionality to the new project",
+  "label": "plan"
+ },
+ {
+  "text": "port the old module into the new service",
+  "label": "plan"
+ },
+ {
+  "text": "write a plan for adding caching",
+  "label": "plan"
+ },
+ {
+  "text": "how should we structure multi tenant data? give me a plan first",
+  "label": "plan"
+ },
+ {
+  "text": "do not edit anything yet, propose a design for the billing module",
+  "label": "plan"
+ },
+ {
+  "text": "plan the migration to postgres",
+  "label": "plan"
+ },
+ {
+  "text": "create a nextjs project with the same functionality as the old server and client so it is one project",
+  "label": "plan"
+ },
+ {
+  "text": "implement an add directory feature for both providers with a toolbar button, permissions and temporary attachment",
+  "label": "plan"
+ },
+ {
+  "text": "I want a dashboard report for the admin showing one row per product and how its landing pages perform",
+  "label": "plan"
+ },
+ {
+  "text": "redesign the whole onboarding experience to be more useful",
+  "label": "plan"
+ },
+ {
+  "text": "remove the old indexer and implement a workspace index of keywords and function bodies so search is exact",
+  "label": "plan"
+ },
+ {
+  "text": "lets add a notification center",
+  "label": "plan"
+ },
+ {
+  "text": "add two factor authentication",
+  "label": "plan"
+ },
+ {
+  "text": "build an invoice generator",
+  "label": "plan"
+ },
+ {
+  "text": "create an onboarding wizard",
+  "label": "plan"
+ },
+ {
+  "text": "add offline support",
+  "label": "plan"
+ },
+ {
+  "text": "add a leaderboard with weekly resets",
+  "label": "plan"
+ },
+ {
+  "text": "set up continuous deployment for the project",
+  "label": "plan"
+ },
+ {
+  "text": "add subscription billing with plans and trials",
+  "label": "plan"
+ },
+ {
+  "text": "make it work on mobile",
+  "label": "plan"
+ },
+ {
+  "text": "improve the whole ui",
+  "label": "plan"
+ },
+ {
+  "text": "add multi user collaboration",
+  "label": "plan"
+ },
+ {
+  "text": "build a plugin system",
+  "label": "plan"
+ },
+ {
+  "text": "create a recommendation engine for products",
+  "label": "plan"
+ },
+ {
+  "text": "lets build the reporting module",
+  "label": "plan"
+ },
+ {
+  "text": "add an activity feed with filtering and pagination",
+  "label": "plan"
+ },
+ {
+  "text": "how does the auth middleware work?",
+  "label": "ask"
+ },
+ {
+  "text": "where is the order total calculated?",
+  "label": "ask"
+ },
+ {
+  "text": "what does the retry policy do?",
+  "label": "ask"
+ },
+ {
+  "text": "why is the build so slow?",
+  "label": "ask"
+ },
+ {
+  "text": "explain the caching strategy",
+  "label": "ask"
+ },
+ {
+  "text": "what is the difference between these two services?",
+  "label": "ask"
+ },
+ {
+  "text": "can you explain this error?",
+  "label": "ask"
+ },
+ {
+  "text": "review this function for bugs",
+  "label": "ask"
+ },
+ {
+  "text": "what libraries do we use for dates?",
+  "label": "ask"
+ },
+ {
+  "text": "is this thread safe?",
+  "label": "ask"
+ },
+ {
+  "text": "which file handles routing?",
+  "label": "ask"
+ },
+ {
+  "text": "how do I run the tests?",
+  "label": "ask"
+ },
+ {
+  "text": "summarize the changes in the last commit",
+  "label": "ask"
+ },
+ {
+  "text": "compare redux and zustand for this project",
+  "label": "ask"
+ },
+ {
+  "text": "what would break if I remove the cache?",
+  "label": "ask"
+ },
+ {
+  "text": "do we have a feature for exporting?",
+  "label": "ask"
+ },
+ {
+  "text": "what is this project for?",
+  "label": "ask"
+ },
+ {
+  "text": "walk me through the startup sequence",
+  "label": "ask"
+ },
+ {
+  "text": "why is the login failing with a 401?",
+  "label": "ask"
+ },
+ {
+  "text": "is there a limit on the upload size?",
+  "label": "ask"
+ },
+ {
+  "text": "what does this regex match?",
+  "label": "ask"
+ },
+ {
+  "text": "how are permissions checked on the api?",
+  "label": "ask"
+ },
+ {
+  "text": "can you tell me what the sync job does?",
+  "label": "ask"
+ },
+ {
+  "text": "what is happening now?",
+  "label": "ask"
+ },
+ {
+  "text": "where do we store the session token?",
+  "label": "ask"
+ },
+ {
+  "text": "are there tests for the parser?",
+  "label": "ask"
+ },
+ {
+  "text": "what product does order 1234 contain?",
+  "label": "ask"
+ },
+ {
+  "text": "which environment variables does the server read?",
+  "label": "ask"
+ },
+ {
+  "text": "explain how the retry logic decides when to give up",
+  "label": "ask"
+ },
+ {
+  "text": "what is the meaning of this column?",
+  "label": "ask"
+ },
+ {
+  "text": "why does the chart show negative values? how is it computed?",
+  "label": "ask"
+ },
+ {
+  "text": "do you have access to the browser?",
+  "label": "ask"
+ },
+ {
+  "text": "how many endpoints does the orders service expose?",
+  "label": "ask"
+ },
+ {
+  "text": "what else can we do to improve the search accuracy? do we need embeddings?",
+  "label": "ask"
+ },
+ {
+  "text": "any idea why memory keeps growing on long sessions?",
+  "label": "ask"
+ },
+ {
+  "text": "how would you add caching here? just explain, do not change anything",
+  "label": "ask"
+ },
+ {
+  "text": "what is the best way to structure the folders in this repo?",
+  "label": "ask"
+ },
+ {
+  "text": "describe the data flow from the form to the database",
+  "label": "ask"
+ },
+ {
+  "text": "tell me which modules depend on the payment service",
+  "label": "ask"
+ },
+ {
+  "text": "could this query cause a deadlock?",
+  "label": "ask"
+ },
+ {
+  "text": "rename the Save button to Apply",
+  "label": "act"
+ },
+ {
+  "text": "fix the typo in the header",
+  "label": "act"
+ },
+ {
+  "text": "make the sidebar 20px wider",
+  "label": "act"
+ },
+ {
+  "text": "add a tooltip to the delete icon",
+  "label": "act"
+ },
+ {
+  "text": "add a column showing the created date to the orders table",
+  "label": "act"
+ },
+ {
+  "text": "change the primary color to blue",
+  "label": "act"
+ },
+ {
+  "text": "remove the console.log in auth.ts",
+  "label": "act"
+ },
+ {
+  "text": "fix the null reference in UserService.GetById",
+  "label": "act"
+ },
+ {
+  "text": "run the tests",
+  "label": "act"
+ },
+ {
+  "text": "commit all changes",
+  "label": "act"
+ },
+ {
+  "text": "yes go ahead",
+  "label": "act"
+ },
+ {
+  "text": "move the Launched table above the chart",
+  "label": "act"
+ },
+ {
+  "text": "add a status filter to the list",
+  "label": "act"
+ },
+ {
+  "text": "increase the timeout to 30 seconds",
+  "label": "act"
+ },
+ {
+  "text": "update the README install steps",
+  "label": "act"
+ },
+ {
+  "text": "bump lodash to 4.17.21",
+  "label": "act"
+ },
+ {
+  "text": "use async await instead of then in api.ts",
+  "label": "act"
+ },
+ {
+  "text": "add a unit test for parseDate",
+  "label": "act"
+ },
+ {
+  "text": "center the login button",
+  "label": "act"
+ },
+ {
+  "text": "this spacing is annoying can we redesign it",
+  "label": "act"
+ },
+ {
+  "text": "also apply it to the settings page",
+  "label": "act"
+ },
+ {
+  "text": "fix the failing test in checkout.spec.ts",
+  "label": "act"
+ },
+ {
+  "text": "add logging to the sync job",
+  "label": "act"
+ },
+ {
+  "text": "make the font bigger on mobile",
+  "label": "act"
+ },
+ {
+  "text": "hide the sidebar on small screens",
+  "label": "act"
+ },
+ {
+  "text": "add a loading spinner to the submit button",
+  "label": "act"
+ },
+ {
+  "text": "add a required validation to the email field",
+  "label": "act"
+ },
+ {
+  "text": "add a delete button to each row",
+  "label": "act"
+ },
+ {
+  "text": "the header is ugly, make it flat",
+  "label": "act"
+ },
+ {
+  "text": "good, commit all changes",
+  "label": "act"
+ },
+ {
+  "text": "still not working, try again",
+  "label": "act"
+ },
+ {
+  "text": "ok now do the same for the footer",
+  "label": "act"
+ },
+ {
+  "text": "put an icon beside the Smart label in the status bar",
+  "label": "act"
+ },
+ {
+  "text": "move the search box to the right of the toolbar",
+  "label": "act"
+ },
+ {
+  "text": "make the table rows clickable",
+  "label": "act"
+ },
+ {
+  "text": "remove the loading bar from the upload dialog",
+  "label": "act"
+ },
+ {
+  "text": "fix the scrolling jitter in the chat list",
+  "label": "act"
+ },
+ {
+  "text": "the export button does nothing, fix it",
+  "label": "act"
+ },
+ {
+  "text": "add a badge showing the unread count on the inbox tab",
+  "label": "act"
+ },
+ {
+  "text": "swap the order of the first and second columns",
+  "label": "act"
+ },
+ {
+  "text": "set the default page size to 50",
+  "label": "act"
+ },
+ {
+  "text": "fix all lint errors",
+  "label": "act"
+ },
+ {
+  "text": "format the code with prettier",
+  "label": "act"
+ },
+ {
+  "text": "update the dependencies to the latest patch versions",
+  "label": "act"
+ },
+ {
+  "text": "rename UserService to AccountService everywhere",
+  "label": "act"
+ },
+ {
+  "text": "extract the validation into its own function",
+  "label": "act"
+ },
+ {
+  "text": "add a comment explaining the retry loop",
+  "label": "act"
+ },
+ {
+  "text": "delete the unused helper functions in utils.ts",
+  "label": "act"
+ },
+ {
+  "text": "the dialog grows when I resize the window, fix it",
+  "label": "act"
+ },
+ {
+  "text": "make the login form fields required",
+  "label": "act"
+ },
+ {
+  "text": "add an optional phone number field to the profile form",
+  "label": "act"
+ },
+ {
+  "text": "translate the error messages to spanish",
+  "label": "act"
+ },
+ {
+  "text": "add a confirm dialog before deleting a project",
+  "label": "act"
+ },
+ {
+  "text": "sort the list by date descending",
+  "label": "act"
+ },
+ {
+  "text": "why is it slow? speed it up",
+  "label": "act"
+ },
+ {
+  "text": "implement the approved plan",
+  "label": "act"
+ },
+ {
+  "text": "yes, implement 1",
+  "label": "act"
+ },
+ {
+  "text": "the chart legend overlaps the axis, move it",
+  "label": "act"
+ },
+ {
+  "text": "make the avatar round",
+  "label": "act"
+ },
+ {
+  "text": "add a copy button next to the api key",
+  "label": "act"
+ },
+ {
+  "text": "fix the failing build",
+  "label": "act"
+ },
+ {
+  "text": "do the same in the other tab",
+  "label": "act"
+ },
+ {
+  "text": "only show the sync button when there are changes",
+  "label": "act"
+ },
+ {
+  "text": "use the same font as the header in the sidebar",
+  "label": "act"
+ },
+ {
+  "text": "check why the terminal does not receive ctrl keys and fix it",
+  "label": "act"
+ },
+ {
+  "text": "investigate the crash on startup and fix it",
+  "label": "act"
+ },
+ {
+  "text": "add a retry button to the error banner",
+  "label": "act"
+ },
+ {
+  "text": "log the response status in the client",
+  "label": "act"
+ },
+ {
+  "text": "align the labels with the inputs",
+  "label": "act"
+ }
+]

@@ -118,10 +118,14 @@ public sealed class SmartTests
         await smart.SetEnabledAsync(true);
         var background = smart.SummarizeAsync(Context("summary"), "file.cs");
         await runtime.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("summary", smart.CurrentActivity?.Context.Task);
+        // A second project's optional work is dropped instead of piling up behind the busy runtime.
+        Assert.Null(await smart.SummarizeAsync(Context("summary"), "other.cs").WaitAsync(TimeSpan.FromSeconds(2)));
         var intent = await smart.ClassifyAsync(Context(), "plan this", null).WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Equal(SmartIntent.Plan, intent?.Value);
         Assert.Null(await background);
         Assert.Equal(1, runtime.MaxActive);
+        Assert.Null(smart.CurrentActivity);
     }
 
     private sealed class BlockingRuntime : ISmartRuntime

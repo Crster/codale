@@ -61,35 +61,6 @@ public sealed partial class WorkspacePage : Page
     private EditorTabEntry? _previewTab;
 
     private readonly PointerEventHandler _outsidePointerPressedHandler;
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _smartHoverTimer;
-    private bool _smartLogPinned;
-
-    private void OnSmartActivityPointerEntered(object sender, PointerRoutedEventArgs e)
-    {
-        _smartHoverTimer?.Stop();
-        if (!SmartActivityFlyout.IsOpen)
-        {
-            _smartLogPinned = false;
-            SmartActivityFlyout.ShowAt(SmartActivityButton);
-        }
-    }
-    private void OnSmartActivityClick(object sender, RoutedEventArgs e)
-    { _smartHoverTimer?.Stop(); _smartLogPinned = true; }
-    private void OnSmartLogPointerEntered(object sender, PointerRoutedEventArgs e) => _smartHoverTimer?.Stop();
-    private void OnSmartActivityPointerExited(object sender, PointerRoutedEventArgs e) => ScheduleSmartLogClose();
-    private void OnSmartLogPointerExited(object sender, PointerRoutedEventArgs e) => ScheduleSmartLogClose();
-    private void ScheduleSmartLogClose()
-    {
-        if (_smartLogPinned) return;
-        if (_smartHoverTimer is null)
-        {
-            _smartHoverTimer = DispatcherQueue.CreateTimer();
-            _smartHoverTimer.Interval = TimeSpan.FromMilliseconds(500);
-            _smartHoverTimer.IsRepeating = false;
-            _smartHoverTimer.Tick += (_, _) => { if (!_smartLogPinned) SmartActivityFlyout.Hide(); };
-        }
-        _smartHoverTimer.Stop(); _smartHoverTimer.Start();
-    }
 
     public WorkspacePage()
     {
@@ -159,7 +130,6 @@ public sealed partial class WorkspacePage : Page
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
         base.OnNavigatedFrom(e);
-        _smartHoverTimer?.Stop();
         SmartActivityFlyout.Hide();
 
         AppSettings.Changed -= OnAppSettingsChanged;
@@ -1804,6 +1774,8 @@ public sealed partial class WorkspacePage : Page
     private async Task ShowSearchResultAsync(SearchOpenRequest request, SearchViewModel? source = null)
     {
         var query = (source ?? ViewModel.Search).Query;
+        // Only the project's own search teaches ranking: the references list is not an answer to a question.
+        if (source is null) ViewModel.Features?.RecordSearchOpen(query, request.FilePath);
         var entry = await ShowFileTabAsync(request.FilePath);
         var count = request.Spans.Count;
 
