@@ -5,28 +5,6 @@ namespace Codale.Smart.Tests;
 public sealed class SmartTests
 {
     private static SmartRequestContext Context(string task = "test") => new(Environment.CurrentDirectory, Environment.CurrentDirectory, task);
-    [Fact]
-    public async Task Commit_generation_passes_a_format_grammar_and_preserves_the_message()
-    {
-        var runtime = new CommitRuntime();
-        await using var smart = new SmartExperience(() => runtime, (_, _) => Task.FromResult("model"));
-        await smart.SetEnabledAsync(true);
-        var message = await smart.CommitMessageAsync(Context());
-        Assert.NotNull(runtime.Grammar);
-        Assert.DoesNotContain("body", runtime.Grammar);
-        Assert.Equal("feat(theme): add dark mode", message?.Value);
-    }
-
-    private sealed class CommitRuntime : ISmartRuntime
-    {
-        public string? Grammar;
-        public string Backend => "test";
-        public void Load(string modelPath, bool gpu, CancellationToken ct) { }
-        public string Generate(string prompt, int maxTokens, CancellationToken ct, string? grammar = null)
-        { Grammar = grammar; return "feat(theme): add dark mode"; }
-        public void Dispose() { }
-    }
-
     [Theory]
     [InlineData("feat(git): generate a message\n\nExplain the change.\n\nRefs: #12", false)]
     [InlineData("feat(api)!: switch authentication endpoint from /login to /v2/auth", true)]

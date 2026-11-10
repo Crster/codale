@@ -3957,11 +3957,7 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
-    /// <summary>
-    /// Asks the fill-in-the-middle model to finish the command, steering clear of earlier answers. A newer
-    /// request cancels an older one. Empty when there is nothing to add, the box no longer holds
-    /// <paramref name="typed"/>, or the finished command would be dangerous when what is typed is not.
-    /// </summary>
+    /// <summary>Replaces the status-bar command box's text, keeping the caret at the end.</summary>
     private void SetStatusBarCommandText(string text)
     {
         StatusBarCommandBox.Text = text;
@@ -4081,7 +4077,7 @@ public sealed partial class WorkspacePage : Page
             StatusBarCommandBox.IsEnabled = false;
             StatusBarRunButton.IsEnabled = false;
             StatusBarRunProgress.Visibility = Visibility.Visible;
-            StatusBarCommandBox.PlaceholderText = "Translating with LFM3…";
+            StatusBarCommandBox.PlaceholderText = $"Translating with {SmartExperienceHost.Instance.Model.Name}…";
             try
             {
                 var result = await SmartExperienceHost.Instance.ShellCommandAsync(
@@ -4096,7 +4092,7 @@ public sealed partial class WorkspacePage : Page
                     TerminalDrawerSpinner.Visibility = Visibility.Collapsed;
                     TerminalDrawerStatusIcon.Visibility = Visibility.Collapsed;
                     TerminalDrawerStatusText.Text = "Translation failed";
-                    TerminalDrawerOutputBox.Text = "LFM3 could not translate this request. Rephrase it and try again.";
+                    TerminalDrawerOutputBox.Text = $"{SmartExperienceHost.Instance.Model.Name} could not translate this request. Rephrase it and try again.";
                     return;
                 }
                 command = translated;

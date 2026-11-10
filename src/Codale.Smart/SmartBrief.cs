@@ -39,7 +39,7 @@ public static partial class SmartBrief
         {
             var line = raw.Trim();
             if (line.Length == 0) continue;
-            if (line.StartsWith("Task:", StringComparison.OrdinalIgnoreCase)) { task = Clip(line[5..].Trim(), MaxTaskChars); section = ""; continue; }
+            if (line.StartsWith("Task:", StringComparison.OrdinalIgnoreCase)) { task = Clip(Unwrap(line[5..].Trim()), MaxTaskChars); section = ""; continue; }
             if (line.Equals("Where:", StringComparison.OrdinalIgnoreCase)) { section = "where"; continue; }
             if (line.Equals("Facts:", StringComparison.OrdinalIgnoreCase)) { section = "facts"; continue; }
             if (section.Length == 0 || !line.StartsWith("- ", StringComparison.Ordinal)) continue;
@@ -77,6 +77,10 @@ public static partial class SmartBrief
         }
         return any;
     }
+
+    /// <summary>The text without the layout's placeholder brackets, which a model sometimes copies around its answer.</summary>
+    private static string Unwrap(string value) =>
+        value.Length > 2 && value[0] == '<' && value[^1] == '>' && value.IndexOf('>') == value.Length - 1 ? value[1..^1].Trim() : value;
 
     private static string Clip(string value, int max) => value.Length <= max ? value : value[..max].TrimEnd() + "…";
 }

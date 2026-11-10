@@ -389,7 +389,7 @@
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="24" Padding="16">
-                                    <TextBlock Style="{StaticResource RowDesc}" VerticalAlignment="Center" TextWrapping="Wrap" Text="Use local AI for summaries, context, routing, and commit messages." />
+                                    <TextBlock Style="{StaticResource RowDesc}" VerticalAlignment="Center" TextWrapping="Wrap" Text="Use local AI for summaries, context, routing, shell commands, commit messages, and code completions." />
                                     <ToggleSwitch x:Name="SmartExperienceToggle" Grid.Column="1" MinWidth="0" VerticalAlignment="Center" AutomationProperties.Name="Smart experience" Toggled="OnSmartExperienceToggled" />
                                 </Grid>
                                 <Border x:Name="SmartExperienceStatusPanel" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="16,12" Visibility="Collapsed">
@@ -419,6 +419,14 @@
                                         <TextBlock Style="{StaticResource RowDesc}" Text="Allow the local model to reason before using tools and answering." />
                                     </StackPanel>
                                     <ToggleSwitch x:Name="SmartThinkingToggle" Grid.Column="1" MinWidth="0" VerticalAlignment="Center" AutomationProperties.Name="Enable thinking" Toggled="OnSmartThinkingToggled" />
+                                </Grid>
+                                <Rectangle Style="{StaticResource Divider}" />
+                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock Style="{StaticResource RowTitle}" Text="Inline code completions" />
+                                        <TextBlock Style="{StaticResource RowDesc}" Text="Suggest the rest of the line in the editor when you pause typing. Tab accepts, Esc dismisses, Ctrl+Space asks again." />
+                                    </StackPanel>
+                                    <ToggleSwitch x:Name="SmartCompletionsToggle" Grid.Column="1" MinWidth="0" VerticalAlignment="Center" AutomationProperties.Name="Inline code completions" Toggled="OnSmartCompletionsToggled" />
                                 </Grid>
                             </StackPanel>
                         </Border>

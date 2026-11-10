@@ -93,6 +93,7 @@ public sealed partial class SettingsPanel : UserControl
         SmartExperienceToggle.IsOn = AppSettings.SmartExperience;
         SmartThinkingToggle.IsOn = AppSettings.SmartThinking;
         SmartSummariesToggle.IsOn = AppSettings.SmartSummaries;
+        SmartCompletionsToggle.IsOn = AppSettings.SmartCompletions;
         _loading = loading;
         SmartExperienceStatus.Text = status.Message;
         SmartExperienceStatusPanel.Visibility = status.State != Codale.Smart.SmartState.Disabled ? Visibility.Visible : Visibility.Collapsed;
@@ -108,6 +109,8 @@ public sealed partial class SettingsPanel : UserControl
     { if (!_loading) AppSettings.SmartSummaries = SmartSummariesToggle.IsOn; }
     private void OnSmartThinkingToggled(object sender, RoutedEventArgs e)
     { if (!_loading) AppSettings.SmartThinking = SmartThinkingToggle.IsOn; }
+    private void OnSmartCompletionsToggled(object sender, RoutedEventArgs e)
+    { if (!_loading) AppSettings.SmartCompletions = SmartCompletionsToggle.IsOn; }
     private void OnSmartExperienceCancel(object sender, RoutedEventArgs e) => SmartExperienceHost.Cancel();
     private void OnSmartExperienceRetry(object sender, RoutedEventArgs e) => SmartExperienceHost.Retry();
 

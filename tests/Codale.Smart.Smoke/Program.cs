@@ -10,17 +10,80 @@ var model = SmartModels.All.Single(m => m.Id == modelId);
 Console.WriteLine($"Model: {model.Name}; CPU count: {Environment.ProcessorCount}; available memory: {GC.GetGCMemoryInfo().TotalAvailableMemoryBytes}");
 if (!await ModelInstaller.VerifyAsync(args[1], model, default)) throw new InvalidDataException("Invalid smoke-test model.");
 using var runtime = new NativeRuntime(Path.GetFullPath(args[0]));
+Console.Write("Devices:\n" + runtime.Devices());
 var watch = System.Diagnostics.Stopwatch.StartNew();
 runtime.Configure(model);
 runtime.Load(Path.GetFullPath(args[1]), args.ElementAtOrDefault(2) != "cpu", default);
 Console.WriteLine($"Loaded {runtime.Backend} in {watch.Elapsed}.");
-var readiness = SmartConversation.Create(model, "Output only the word READY.", "Confirm readiness.", false);
+var readiness = SmartConversation.Create(model, "Output only the word READY.", "Confirm readiness.", SmartReasoning.Off);
 var prompt = readiness.Render(runtime, 40, final: true);
 var text = runtime.Generate(prompt, 40, default);
 Console.WriteLine($"Generated: {text}");
 if (!text.Contains("READY", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Unexpected model output.");
+if (args.Contains("eval"))
+{
+    runtime.Dispose();
+    var reportPath = args.FirstOrDefault(a => a.StartsWith("report=", StringComparison.Ordinal))?["report=".Length..]
+        ?? Path.Combine(Path.GetTempPath(), "codale-smart-eval.md");
+    var ok = await Eval.RunAsync(Path.GetFullPath(args[0]), Path.GetFullPath(args[1]), model, reportPath, args.ElementAtOrDefault(2) != "cpu");
+    Console.WriteLine($"Report: {reportPath}");
+    if (!ok) Environment.ExitCode = 2;
+    return;
+}
+if (args.Contains("bench"))
+{
+    // Prompt evaluation, prefix reuse and generation speed, measured separately.
+    var body = string.Join("\n", Enumerable.Range(0, 300).Select(i => $"public int Value{i}(int x) => x * {i};"));
+    var benchPrompt = "<|im_start|>system\nSummarize code.<|im_end|>\n<|im_start|>user\n" + body + "<|im_end|>\n<|im_start|>assistant\n<think></think>";
+    Console.WriteLine($"Bench prompt tokens: {runtime.CountTokens(benchPrompt)}");
+    foreach (var label in new[] { "cold prompt", "same prompt (prefix reuse)" })
+    {
+        var benchWatch = System.Diagnostics.Stopwatch.StartNew();
+        runtime.Generate(benchPrompt, 1, default, null, new(Temperature: 0));
+        Console.WriteLine($"{label}: {benchWatch.ElapsedMilliseconds} ms");
+    }
+    var changed = benchPrompt.Replace("Summarize code.", "Summarize this code.");
+    var w = System.Diagnostics.Stopwatch.StartNew(); runtime.Generate(changed, 1, default, null, new(Temperature: 0));
+    Console.WriteLine($"changed system prompt (full re-eval): {w.ElapsedMilliseconds} ms");
+    w.Restart(); var generated = runtime.Generate(benchPrompt, 128, default, null, new(Temperature: 0));
+    Console.WriteLine($"generate 128 tokens (cached prompt): {w.ElapsedMilliseconds} ms; {runtime.CountTokens(generated)} tokens");
+    return;
+}
+if (args.Contains("fim-spike"))
+{
+    // Which fill-in-the-middle prompt does the instruct model complete best? Each variant runs every case with
+    // three fixed seeds at the recommended sampling settings, plus greedy decoding for reference.
+    var variants = new (string Name, Func<FimCases.Case, string> Prompt)[]
+    {
+        ("PSM", c => $"<|fim_prefix|>{c.Prefix}<|fim_suffix|>{c.Suffix}<|fim_middle|>"),
+        ("filename+PSM", c => $"<|filename|>{c.File}\n<|fim_prefix|>{c.Prefix}<|fim_suffix|>{c.Suffix}<|fim_middle|>"),
+        ("reponame+filename+PSM", c => $"<|reponame|>codale\n<|filename|>{c.File}\n<|fim_prefix|>{c.Prefix}<|fim_suffix|>{c.Suffix}<|fim_middle|>"),
+        ("SPM", c => $"<|fim_suffix|>{c.Suffix}<|fim_prefix|>{c.Prefix}<|fim_middle|>"),
+        ("chat", c => SmartConversation.Create(model, "Complete the code at <CURSOR>. Output only the code that replaces <CURSOR> on that line, nothing else.",
+            $"File: {c.File}\n```\n{c.Prefix}<CURSOR>{c.Suffix}```", SmartReasoning.Off).Render(runtime, 48, final: true)),
+    };
+    foreach (var (name, build) in variants)
+    {
+        foreach (var sampling in new[] { "sampled", "greedy" })
+        {
+            int passed = 0, total = 0; var latencies = new List<long>(); var failures = new List<string>();
+            foreach (var c in FimCases.All)
+                foreach (var seed in sampling == "greedy" ? new uint[] { 0 } : [1u, 2u, 3u])
+                {
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    var raw = runtime.Generate(build(c), 48, default, null, new(Temperature: sampling == "greedy" ? 0 : 1.0f, Seed: seed, Stop: ["\n"]));
+                    latencies.Add(sw.ElapsedMilliseconds); total++;
+                    if (FimCases.Passes(c, raw)) passed++; else if (failures.Count < 6) failures.Add($"{c.File}: {FimCases.Shown(c, raw)} [raw: {raw.Replace("\n", "\\n")}]");
+                }
+            latencies.Sort();
+            Console.WriteLine($"{name,-24} {sampling,-8} {passed}/{total} ({100.0 * passed / total:0}%)  p50 {latencies[latencies.Count / 2]} ms  p95 {latencies[(int)(latencies.Count * 0.95)]} ms");
+            foreach (var failure in failures) Console.WriteLine("    miss: " + failure);
+        }
+    }
+    return;
+}
 // Verify the pinned GGUF's actual tool protocol before integrating application callers.
-if (!args.Contains("features-only")) foreach (var thinking in new[] { false, true })
+if (!args.Contains("features-only")) foreach (var thinking in new[] { SmartReasoning.Off, SmartReasoning.Low, SmartReasoning.Full })
 {
     using var toolDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(120));
     var folder = Directory.CreateTempSubdirectory("codale-smart-protocol-");
@@ -30,26 +93,31 @@ if (!args.Contains("features-only")) foreach (var thinking in new[] { false, tru
         File.WriteAllText(file, "CODALE_TOOL_ROUNDTRIP_743");
         var conversation = SmartConversation.Create(model,
             "Use read_file to read the requested file. You must call the tool before answering.\nWorking directory: " + folder.FullName,
-            "Read answer.txt in the working directory and reply with its contents.", thinking);
-        var roundWatch = System.Diagnostics.Stopwatch.StartNew();
-        var call = runtime.Generate(conversation.Render(runtime, 2048), 2048, toolDeadline.Token);
-        Console.WriteLine($"Tool call latency (thinking={thinking}): {roundWatch.Elapsed}");
-        var visible = conversation.Visible(call);
-        Console.WriteLine($"Tool protocol (thinking={thinking}): {visible}");
-        var calls = conversation.ParseCalls(visible);
-        if (calls.Count != 1 || calls[0].Name != "read_file")
-            throw new InvalidDataException("Model did not produce the required tool call.");
+            "Read answer.txt in the working directory and reply with its contents.", thinking, SmartTools.Definitions);
+        // A real tool loop: the model may look around first (list_directory) but must read the file, every call must
+        // use the template's XML format, and the answer must carry the file's token.
         var context = new SmartRequestContext(folder.FullName, folder.FullName, "protocol");
-        if (!string.Equals(SmartTools.Resolve(context, calls[0].Arguments["path"]), file, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("Tool call requested the wrong file.");
-        var outcome = await new SmartTools().ExecuteAsync(context, calls[0], toolDeadline.Token);
-        if (outcome.State != "completed" || outcome.Evidence.Count != 1) throw new InvalidDataException("Tool execution failed.");
-        conversation.Add(call, [outcome.Output]);
-        roundWatch.Restart();
-        var answer = conversation.Visible(runtime.Generate(conversation.Render(runtime, 2048), 2048, toolDeadline.Token));
-        Console.WriteLine($"Tool follow-up latency (thinking={thinking}): {roundWatch.Elapsed}");
-        Console.WriteLine($"Tool follow-up: {answer}");
-        if (!answer.Contains("CODALE_TOOL_ROUNDTRIP_743")) throw new InvalidDataException("Tool result was not used.");
+        string? answer = null; bool readIt = false;
+        for (int round = 0; round < 4 && answer is null; round++)
+        {
+            var roundWatch = System.Diagnostics.Stopwatch.StartNew();
+            var response = runtime.Generate(conversation.Render(runtime, 2048), 2048, toolDeadline.Token);
+            var visible = conversation.Visible(response);
+            Console.WriteLine($"Round {round} ({thinking}, {roundWatch.ElapsedMilliseconds} ms): {visible.Replace("\n", " ")}");
+            var calls = conversation.ParseCalls(visible);
+            if (calls.Count == 0) { answer = visible; break; }
+            if (!visible.Contains("<tool_call>\n<function=", StringComparison.Ordinal)) throw new InvalidDataException("Tool call was not in the template's XML format.");
+            var results = new List<string>();
+            foreach (var call in calls)
+            {
+                if (call.Name == "read_file" && string.Equals(SmartTools.Resolve(context, call.Arguments.GetValueOrDefault("path")), file, StringComparison.OrdinalIgnoreCase)) readIt = true;
+                results.Add((await new SmartTools().ExecuteAsync(context, call, toolDeadline.Token)).Output);
+            }
+            conversation.Add(response, results);
+        }
+        if (!readIt) throw new InvalidDataException("Model never read the requested file.");
+        if (answer is null || !answer.Contains("CODALE_TOOL_ROUNDTRIP_743")) throw new InvalidDataException("Tool result was not used.");
+        Console.WriteLine($"Tool protocol passed (thinking={thinking}).");
     }
     finally { folder.Delete(true); }
 }
@@ -148,6 +216,12 @@ sealed class LoggingRuntime(string directory, bool forceCpu) : ISmartRuntime
     {
         var watch = System.Diagnostics.Stopwatch.StartNew();
         try { var text = _runtime.Generate(prompt, cap, ct, grammar); Console.WriteLine($"Generated ({watch.Elapsed}, {text.Length} chars): {text[..Math.Min(text.Length, 600)]}"); return text; }
+        catch (Exception ex) { Console.WriteLine(ex); throw; }
+    }
+    public string Generate(string prompt, int cap, CancellationToken ct, string? grammar, SmartGenerateOptions options)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        try { var text = _runtime.Generate(prompt, cap, ct, grammar, options); Console.WriteLine($"Generated ({watch.Elapsed}, {text.Length} chars): {text[..Math.Min(text.Length, 600)]}"); return text; }
         catch (Exception ex) { Console.WriteLine(ex); throw; }
     }
     public void Dispose() => _runtime.Dispose();

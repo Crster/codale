@@ -32,5 +32,13 @@ public sealed class SmartBriefTests : IDisposable
         Assert.Equal("Task: t\nWhere:\n- Auth.cs:1-3 — ok", brief);
     }
 
+    [Fact]
+    public void Copied_placeholder_brackets_are_removed_from_the_task()
+    {
+        Assert.Equal("Task: explain the addition helper\nWhere:\n- Auth.cs:1-3 — ok",
+            SmartBrief.Validate("Task: <explain the addition helper>\nWhere:\n- Auth.cs:1-3 — ok", _root));
+        Assert.StartsWith("Task: <T> is generic, keep it", SmartBrief.Validate("Task: <T> is generic, keep it\nWhere:\n- Auth.cs:1-3 — ok", _root));
+    }
+
     public void Dispose() => Directory.Delete(_root, true);
 }

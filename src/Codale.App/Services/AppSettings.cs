@@ -192,7 +192,7 @@ public static class AppSettings
         set => Set("ai.smartExperience", value, FormatFlag);
     }
 
-    /// <summary>The released model shared by all Smart features. Unknown or gated IDs use LFM3.</summary>
+    /// <summary>The released model shared by all Smart features. Unknown or gated IDs use the default (Granite 4.2 8B).</summary>
     public static string SmartModel
     {
         get => Codale.Smart.SmartModels.Resolve(Get("ai.smartModel", () => Read("ai.smartModel", ""))).Id;
@@ -210,6 +210,13 @@ public static class AppSettings
     {
         get => Get("ai.smartThinking", () => ReadFlag("ai.smartThinking", false));
         set => Set("ai.smartThinking", value, FormatFlag);
+    }
+
+    /// <summary>Whether the editor shows Smart's fill-in-the-middle ghost text as you type (Ctrl+Space asks on demand); on by default.</summary>
+    public static bool SmartCompletions
+    {
+        get => Get("ai.smartCompletions", () => ReadFlag("ai.smartCompletions", true));
+        set => Set("ai.smartCompletions", value, FormatFlag);
     }
 
     /// <summary>Whether the editor draws the gutter with line numbers.</summary>

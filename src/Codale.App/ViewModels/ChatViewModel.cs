@@ -362,6 +362,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         OnPropertyChanged(nameof(IsWaitingForYou));
         OnPropertyChanged(nameof(IsWorkingOnItsOwn));
+        OnPropertyChanged(nameof(ShowStatusLine));
         OnPropertyChanged(nameof(WorkingStatusMessage));
         OnPropertyChanged(nameof(WaitingStatusMessage));
         OnPropertyChanged(nameof(IsBusyWorking));
@@ -1356,7 +1357,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private string? _activityToolId;
 
     /// <summary>The status line's detail: the step in flight, else the task the agent says it is on.</summary>
-    public string? StatusDetail => CurrentActivity is { Length: > 0 } activity ? activity : ActiveTask;
+    public string? StatusDetail => _activeTurn is { LiveStage.Length: > 0 } turn ? turn.LiveStage
+        : CurrentActivity is { Length: > 0 } activity ? activity : ActiveTask;
 
     private void SetActivity(string? activity, string? toolUseId)
     {
@@ -1393,6 +1395,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsBusyWorking))]
+    [NotifyPropertyChangedFor(nameof(ShowStatusLine))]
     [NotifyPropertyChangedFor(nameof(ShowStop))]
     [NotifyPropertyChangedFor(nameof(CanChangeMode))]
     [NotifyPropertyChangedFor(nameof(HasConversation))]
@@ -1423,6 +1426,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>Running a turn without waiting on anyone: the tab's blue dot. Waiting shows amber instead.</summary>
     public bool IsBusyWorking => IsBusy && !IsWaitingForYou;
+
+    /// <summary>The status line above the composer: while a turn runs or waits on the reader.</summary>
+    public bool ShowStatusLine => IsBusy || IsWaitingForYou;
 
     [ObservableProperty]
     public partial bool IsConnected { get; set; }
@@ -4411,6 +4417,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _turnPlanFile = null;
 
         _activeTurn = new TurnActivityItem { HasClock = true };
+        _activeTurn.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(TurnActivityItem.LiveStage))
+            {
+                OnPropertyChanged(nameof(StatusDetail));
+            }
+        };
 
         // A revision request that has not met its plan yet rides on this new turn; an
         // older one not bound to a turn (its plan's turn ended long ago) does not.

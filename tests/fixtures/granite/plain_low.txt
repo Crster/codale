@@ -1,0 +1,8 @@
+<|im_start|>system
+S<|im_end|>
+<|im_start|>user
+Hello
+
+{reasoning effort: low}<|im_end|>
+<|im_start|>assistant
+<think>

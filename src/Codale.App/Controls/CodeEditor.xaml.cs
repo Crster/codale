@@ -389,6 +389,7 @@ public sealed partial class CodeEditor : UserControl
             _caretTimer.Stop();
             _autoScrollTimer?.Stop();
             _occurrenceTimer?.Stop();
+            _ghostTimer?.Stop();
         };
 
         // Tunnelling: the focus system takes Tab before a bubbling KeyDown fires.
@@ -421,6 +422,8 @@ public sealed partial class CodeEditor : UserControl
         _caretTimer.Stop();
         _autoScrollTimer?.Stop();
         _occurrenceTimer?.Stop();
+        _ghostTimer?.Stop();
+        _ghostCts?.Cancel();
         CloseCompletion();
         ClearLayouts();
         _textFormat?.Dispose();
@@ -1188,6 +1191,7 @@ public sealed partial class CodeEditor : UserControl
             args.DrawingSession.FillRectangle((float)x, (float)y, CaretWidth, (float)_lineHeight, _caretBrush!);
         }
 
+        DrawGhost(args.DrawingSession, x, y - LineHighlightOffset);
     }
 
     private void OnCanvasDraw(CanvasControl sender, CanvasDrawEventArgs args)
@@ -1777,6 +1781,33 @@ public sealed partial class CodeEditor : UserControl
 
     private void OnEditorKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (e.Key == VirtualKey.Tab && !CompletionOpen && !IsShiftDown() && AcceptGhost())
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == VirtualKey.Space && IsCtrlDown() && InlineCompleter is not null)
+        {
+            CloseCompletion();
+            RequestGhost();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == VirtualKey.Escape && GhostVisible && !CompletionOpen)
+        {
+            ClearGhost();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key is not (VirtualKey.Shift or VirtualKey.Control or VirtualKey.Menu or VirtualKey.LeftShift or VirtualKey.RightShift
+            or VirtualKey.LeftControl or VirtualKey.RightControl))
+        {
+            ClearGhost();
+        }
+
         if (HandleCompletionKey(e))
         {
             e.Handled = true;
@@ -1829,6 +1860,7 @@ public sealed partial class CodeEditor : UserControl
         args.Handled = true;
         InsertText(ch.ToString());
         OnCharacterTyped(ch);
+        ScheduleGhost();
     }
 
     private int VisibleLineCount() => Math.Max(1, (int)(Canvas.ActualHeight / _lineHeight) - 1);

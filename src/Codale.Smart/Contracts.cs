@@ -44,6 +44,9 @@ public interface ISmartExperience
     Task<SmartResult<string>?> CommitMessageAsync(SmartRequestContext context, CancellationToken ct = default);
     Task<SmartResult<string>?> ShellCommandAsync(SmartRequestContext context, string request, string shell, CancellationToken ct = default) =>
         Task.FromResult<SmartResult<string>?>(null);
+    /// <summary>Fill-in-the-middle at a caret (see <see cref="SmartExperience.FillInMiddleAsync"/>); null when unavailable.</summary>
+    Task<string?> FillInMiddleAsync(SmartRequestContext context, string prefix, string suffix, string? fileName,
+        IReadOnlyList<string>? rejected = null, CancellationToken ct = default) => Task.FromResult<string?>(null);
     Task<IReadOnlyList<SmartEvidence>> DiscoveriesAsync(SmartRequestContext context, string query, CancellationToken ct = default);
     /// <summary>The task brief for the agent CLI (see <see cref="SmartBrief"/>), written from verified <paramref name="material"/>; null when unavailable.</summary>
     Task<SmartResult<string>?> BriefAsync(SmartRequestContext context, string request, SmartIntent intent, string material, CancellationToken ct = default) =>

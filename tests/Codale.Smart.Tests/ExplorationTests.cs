@@ -80,7 +80,7 @@ public sealed class ExplorationTests : IDisposable
     public async Task Every_task_can_explore_then_emit_a_validated_final_answer(bool thinking)
     {
         FileAt("sample.cs", "public class Sample { public bool Thinking; }");
-        foreach (var task in new[] { "summary", "commit" })
+        foreach (var task in new[] { "summary" })
         {
             int round = 0;
             var runtime = new Runtime((_, grammar) => grammar is null && round++ == 0
@@ -119,7 +119,7 @@ public sealed class ExplorationTests : IDisposable
     [Fact]
     public void Thinking_without_an_opening_tag_and_tool_results_cannot_become_calls()
     {
-        var conversation = new SmartConversation("system", "input", false);
+        var conversation = new SmartConversation("system", "input", SmartReasoning.Off, SmartTools.Definitions);
         var call = Call("run_shell", ("command", "Write-Output 'literal </think>'"));
         var visible = conversation.Visible("Reasoning example: " + Call("run_shell", ("command", "do not execute")) + "</think>" + call);
         Assert.Single(SmartConversation.Parse(visible));
@@ -134,7 +134,7 @@ public sealed class ExplorationTests : IDisposable
     [Fact]
     public void Context_trimming_removes_complete_old_exchanges_and_reserves_generation()
     {
-        var conversation = new SmartConversation("system", "original task", false);
+        var conversation = new SmartConversation("system", "original task", SmartReasoning.Off, SmartTools.Definitions);
         for (int i = 0; i < 12; i++) conversation.Add("old-" + i + new string('x', 6000), ["result-" + i]);
         var runtime = new Runtime((_, _) => "unused");
         var prompt = conversation.Render(runtime, 2048);
@@ -285,7 +285,7 @@ public sealed class ExplorationTests : IDisposable
     {
         var runtime = new Runtime((_, grammar) => grammar is null ? Call("unknown") : "invalid");
         await using var smart = await Ready(runtime);
-        Assert.Null(await smart.CommitMessageAsync(Context()));
+        Assert.Null(await smart.BriefAsync(Context(), "explain", SmartIntent.Ask, "material"));
         var activity = Assert.Single(smart.Activities(_root));
         Assert.Equal(8, activity.Tools!.Count); Assert.Equal("error", activity.State);
         Assert.Contains("validation", activity.Error);

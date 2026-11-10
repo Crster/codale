@@ -126,6 +126,7 @@ public sealed partial class EditorTab : UserControl
     public void ApplyAppSettings()
     {
         FileEditor.ApplyAppSettings();
+        FileEditor.AutomaticInlineCompletions = AppSettings.SmartCompletions;
         RenderHighlights();
     }
 
@@ -345,7 +346,46 @@ public sealed partial class EditorTab : UserControl
         Bindings.Update();
         ViewModel.Saved += (_, _) => _ = RefreshDiffMarkersAsync(refetchHead: true);
         FileEditor.WorkspaceSuggest = ProjectSuggestions;
+        FileEditor.InlineCompleter = CompleteInlineAsync;
         return this;
+    }
+
+    /// <summary>
+    /// Ghost text from the local Smart model (Granite fill-in-the-middle): the project index's header for this file
+    /// (path, language, declarations used nearby) leads the code before the caret. Returns the one line to show.
+    /// </summary>
+    private async Task<string?> CompleteInlineAsync(string prefix, string suffix, IReadOnlyList<string> rejected, CancellationToken ct)
+    {
+        var smart = SmartExperienceHost.Instance;
+        if (!AppSettings.SmartExperience || !AppSettings.SmartCompletions || smart.Status.State != Codale.Smart.SmartState.Ready)
+        {
+            return null;
+        }
+
+        var root = !string.IsNullOrEmpty(ProjectRoot) && Directory.Exists(ProjectRoot) ? ProjectRoot : null;
+        var path = ViewModel?.FilePath;
+        var nearby = prefix.Length > 1500 ? prefix[^1500..] : prefix;
+        string header;
+        try
+        {
+            var snapshot = root is null ? null : SourceIndex.For(root).Current;
+            header = CompletionContext.Build(snapshot, root ?? "", path, FileEditor.LanguageId, nearby);
+        }
+        catch (Exception)
+        {
+            header = "";
+        }
+
+        var name = path is null ? null : root is null ? Path.GetFileName(path) : Path.GetRelativePath(root, path);
+        var directory = root ?? (path is null ? Environment.CurrentDirectory : Path.GetDirectoryName(path)!);
+        var raw = await smart.FillInMiddleAsync(new(directory, directory, "completion"), header + prefix, suffix, name, rejected, ct);
+        if (raw is null)
+        {
+            return null;
+        }
+
+        var line = Codale.Core.Text.FimText.FirstLine(raw, suffix, prefix);
+        return Codale.Core.Text.FimText.LooksLikeProse(line) ? null : line;
     }
 
     /// <summary>

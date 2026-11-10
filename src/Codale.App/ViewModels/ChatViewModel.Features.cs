@@ -442,7 +442,18 @@ public sealed partial class ChatViewModel
     {
         if (result is not { Text.Length: > 0 }) return;
         var item = ContextEnrichedItem.From(result);
-        Add(item);
+        // Under the prompt, ahead of the running turn's timeline.
+        var at = _activeTurn is { } turn ? Items.IndexOf(turn) : -1;
+        if (at >= 0)
+        {
+            Items.Insert(at, item);
+            Reflow();
+        }
+        else
+        {
+            Add(item);
+        }
+
         if (_recording)
         {
             try { _featureLog?.AppendContext(item.Summary, item.Details); }

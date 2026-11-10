@@ -46,7 +46,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     {
         if (IsGeneratingCommitMessage || IsBusy) return;
         if (SmartExperienceHost.Instance.Status.State != Codale.Smart.SmartState.Ready || !AppSettings.SmartExperience)
-        { ActionError = "Enable Smart experience in Settings and wait for LFM3 to be ready."; return; }
+        { ActionError = $"Enable Smart experience in Settings and wait for {SmartExperienceHost.Instance.Model.Name} to be ready."; return; }
         using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         _smartCommit = cancel;
         IsGeneratingCommitMessage = true;
