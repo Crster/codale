@@ -269,8 +269,55 @@ public static partial class MessageRouting
         return CountWords(text) < 2 ||
             IsGoAhead(text) ||
             FollowUpOpener().IsMatch(text) ||
-            BackReference().IsMatch(text);
+            BackReference().IsMatch(text) ||
+            ContinuationPhrase().IsMatch(text) ||
+            (CountWords(text) <= 6 && PronounObject().IsMatch(text)) ||
+            ReactionOpener().IsMatch(text) ||
+            AnswerToAgent().IsMatch(text) ||
+            ReferencesPriorWork().IsMatch(text) ||
+            (CountWords(text) <= 8 && ShortFeedback().IsMatch(text));
     }
+
+    /// <summary>Opens as a reaction or approval of what the agent just said: "looks good, commit it", "great, now ...", "go for it".</summary>
+    [GeneratedRegex(
+        @"^(?:(?:great|good|nice|perfect|awesome|excellent|cool|exactly|agreed|thanks?|thank\s+you|thx|go\s+for\s+it|i\s+approve|i\s+agree|that\s+works|works\s+for\s+me|do\s+that|ship\s+it|lgtm|yes|yep|yeah|yup|ok|okay|sure|alright|approved?|proceed|go\s+ahead|continue|carry\s+on|keep\s+going)\b)",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex ReactionOpener();
+
+    /// <summary>Picks an option or answers a question the agent asked: "option 2", "the first one", "use the second approach", "what about X", "how about Y".</summary>
+    [GeneratedRegex(
+        @"^(?:(?:go\s+with|use|pick|choose|take|do|try|take)\s+)?(?:option|choice|approach|plan|variant|#)\s*[a-z0-9]\b|" +
+        @"^(?:(?:go\s+with|use|pick|choose|take|do|try)\s+)?(?:the\s+)?(?:first|second|third|fourth|last|former|latter|other|1st|2nd|3rd)\s+(?:one|option|approach|choice|plan)\b|" +
+        @"^(?:what|how)\s+about\b|^(?:and\s+)?(?:why|how)\s+(?:did|does|is|was|come)\s+(?:it|that|this|you)\b",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex AnswerToAgent();
+
+    /// <summary>Names the earlier work instead of a subject: "the above", "as discussed", "like you said", "per the plan", "the previous error", "your suggestion".</summary>
+    [GeneratedRegex(
+        @"\b(?:the\s+above|as\s+(?:discussed|planned|suggested|agreed|mentioned|said|before)|like\s+(?:you|we)\s+(?:said|discussed|suggested|planned)|per\s+the\s+plan|" +
+        @"the\s+plan\s+(?:above|you|we)|your\s+(?:plan|suggestion|proposal|recommendation|answer|reply|response|fix|change|changes|code|implementation)|" +
+        @"(?:that|the)\s+(?:error|bug|issue|problem|crash|fix|change|changes|plan|approach|result|output|log|logs)\s+(?:above|you|we|from\s+before|earlier)|" +
+        @"you\s+(?:said|suggested|proposed|mentioned|recommended|wrote|ran|found)|we\s+(?:discussed|talked|planned|just)|just\s+now|a\s+moment\s+ago|so\s+far|" +
+        @"what\s+you\s+(?:did|made|changed|wrote)|(?:last|previous|prior|above)\s+(?:message|reply|response|answer|plan|step|result))\b",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex ReferencesPriorWork();
+
+    /// <summary>A short complaint or correction about the last result: "doesn't work", "still broken", "wrong", "that's not what I meant", "same error".</summary>
+    [GeneratedRegex(
+        @"\b(?:doesn'?t|does\s+not|didn'?t|did\s+not|isn'?t|is\s+not|won'?t|not)\s+(?:work|working|fixed|right|correct|showing|appear|change|apply|applied|updated?)\b|" +
+        @"\b(?:broken|wrong|incorrect|not\s+what\s+i|still\s+(?:fails?|broken|wrong|happens)|same\s+(?:error|result|thing)|nothing\s+(?:happened|changed)|no\s+change|failed|fails)\b",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex ShortFeedback();
+
+    /// <summary>"continue where it left off", "pick up where we stopped", "carry on with the rest".</summary>
+    [GeneratedRegex(
+        @"\b(?:(?:continue|carry\s+on|resume|pick\s+up|keep\s+going|go\s+on)\b.*\b(?:where|from|with\s+the\s+rest|left\s+off|stopped|before)|where\s+(?:it|you|we|they)\s+(?:left|stopped)|left\s+off|the\s+rest)\b",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex ContinuationPhrase();
+
+    /// <summary>A short command whose object is a pronoun: "implement it", "fix that", "apply this", "do them".</summary>
+    [GeneratedRegex(@"^\w+(?:\s+\w+)?\s+(?:it|this|that|them|those|these)(?:\s+(?:now|too|please|again))?[\s.!]*$", RegexOptions.IgnoreCase)]
+    private static partial Regex PronounObject();
 
     private static int CountWords(string text) => WordPattern().Count(text);
 

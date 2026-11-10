@@ -61,16 +61,43 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
         return all.Where(a => a.Context.Task is "routing" or "context" && a.StartedAt >= from).OrderBy(a => a.StartedAt).ToList();
     }
     private static string Short(string text, int max) { text = text.ReplaceLineEndings(" "); return text.Length <= max ? text : text[..max] + "…"; }
-    private static string Seconds(long ms) => ms >= 1000 ? $"{ms / 1000.0:0.0}s" : $"{ms}ms";
+    private static string Seconds(long ms) =>
+        ms < 100 ? "" : ms < 1000 ? $"{ms}ms" : ms < 60_000 ? $"{ms / 1000.0:0.#}s" : $"{ms / 60_000}m {ms / 1000 % 60}s";
+    private static string TaskLabel(string task) => task switch
+    {
+        "routing" => "Choosing the best agent",
+        "context" => "Finding relevant code",
+        "summary" => "Summarizing files",
+        "" => "Task",
+        _ => char.ToUpperInvariant(task[0]) + task[1..]
+    };
+    private static string ToolLabel(string tool) => tool switch
+    {
+        "read_index" => "Looked at a code match",
+        "read_file" => "Read",
+        "list_directory" => "Browsed",
+        "search_files" => "Searched for",
+        "run_shell" => "Ran",
+        "parse" => "Couldn't read model reply",
+        _ => tool.Replace('_', ' ')
+    };
     private static void FillTask(SmartActivityItem i, SmartActivity run)
     {
-        i.Verb = run.Context.Task; i.Target = run.State is "completed" ? "" : run.State is "error" && run.Error is { Length: > 0 } why ? "error: " + Short(why, 70) : run.State;
+        i.Verb = TaskLabel(run.Context.Task);
+        i.Target = run.State switch
+        {
+            "completed" => "",
+            "cancelled" => "Stopped",
+            "running" => "In progress…",
+            "error" => run.Error is { Length: > 0 } why ? "Failed – " + Short(why, 70) : "Failed",
+            _ => run.State
+        };
         i.Meta = Seconds(run.ElapsedMilliseconds); i.KindBrush = SmartActivityItem.Palette("KindAgentBrush");
     }
     private static void FillTool(SmartActivityItem i, SmartToolActivity tool)
     {
         string? Arg(string name) { try { using var d = System.Text.Json.JsonDocument.Parse(tool.Arguments); return d.RootElement.TryGetProperty(name, out var v) ? v.ToString() : null; } catch { return null; } }
-        i.Verb = tool.Tool.Replace('_', ' ');
+        i.Verb = ToolLabel(tool.Tool);
         i.KindBrush = SmartActivityItem.Palette(tool.Tool switch { "read_file" => "KindReadBrush", "list_directory" or "search_files" => "KindSearchBrush", "run_shell" => "KindShellBrush", _ => "KindOtherBrush" });
         i.Target = tool.Tool switch
         {
@@ -78,6 +105,7 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
             "list_directory" => ShortPath(Arg("path") ?? tool.WorkingDirectory),
             "search_files" => Arg("pattern") ?? "",
             "run_shell" => Short(Arg("command") ?? "", 60),
+            "read_index" or "parse" => "",
             _ => Short(tool.Arguments, 60)
         };
         i.Meta = (tool.State is "running" ? "running" : tool.ExitCode is { } code and not 0 ? $"exit {code}" : "") is { Length: > 0 } w ? $"{w} · {Seconds(tool.ElapsedMilliseconds)}" : Seconds(tool.ElapsedMilliseconds);

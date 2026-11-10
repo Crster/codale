@@ -1497,9 +1497,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     public bool IsAutomaticMode => PermissionMode == AutomaticMode;
 
-    /// <summary>The permission mode the CLI last reported at init; "default" under Auto means it has no classifier.</summary>
-    private string? _cliReportedMode;
-
     /// <summary>Modes only the host knows; the CLI is handed <see cref="CliMode"/> instead.</summary>
     public static bool IsHostMode(string mode) => mode is AskMode or AutomaticMode;
 
@@ -2316,7 +2313,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 {
                     _status.ContextWindow = contextWindow;
                 }
-                _cliReportedMode = init.PermissionMode;
 
                 // Ask and automatic are the host's, riding on the CLI's manual and auto:
                 // the CLI confirming its half is not a reason to drop them.
