@@ -3981,7 +3981,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         if (IsAutomaticMode && !IsBusy && !planOnly && !text.StartsWith('/'))
         {
-            using var preparation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var preparationDeadline = DateTimeOffset.UtcNow.AddSeconds(120);
+            using var preparation = new CancellationTokenSource(TimeSpan.FromSeconds(120));
             using var stopped = new CancellationTokenSource();
             using var routing = CancellationTokenSource.CreateLinkedTokenSource(preparation.Token, stopped.Token);
             _briefing = stopped;
@@ -3990,8 +3991,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             {
                 if (AppSettings.SmartExperience && SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready)
                 {
-                    var intent = await SmartExperienceHost.Instance.ClassifyAsync(text, LastRoutingReply, routing.Token).WaitAsync(routing.Token);
-                    if (intent is { } selected) decision = decision with { Intent = selected switch
+                    var intent = await SmartExperienceHost.Instance.ClassifyAsync(new(_projectPath, _projectPath, "routing", _chatId, preparationDeadline), text, LastRoutingReply, routing.Token).WaitAsync(routing.Token);
+                    if (intent?.Value is { } selected) decision = decision with { Intent = selected switch
                     {
                         Codale.Smart.SmartIntent.Ask => RouteIntent.Ask,
                         Codale.Smart.SmartIntent.Plan => RouteIntent.Plan,
@@ -4004,10 +4005,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             if (stopped.IsCancellationRequested) return;
             if (!IsAutomaticMode)
             {
-                await SendTurnAsync(text, attachments, planOnly: PermissionMode == "plan", askOnly: IsAskMode, preparation.Token);
+                await SendTurnAsync(text, attachments, planOnly: PermissionMode == "plan", askOnly: IsAskMode, preparation.Token, preparationDeadline);
                 return;
             }
-            await SendRoutedAsync(text, attachments, decision.Intent, preparation.Token);
+            await SendRoutedAsync(text, attachments, decision.Intent, preparation.Token, preparationDeadline);
             return;
         }
         await SendTurnAsync(text, attachments, planOnly, askOnly: IsAskMode && !planOnly);
@@ -4017,7 +4018,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// Sends a message the router already read: a plan turn, an explain-only turn, or
     /// a plain one - each in its own mode for the turn, back to Automatic after.
     /// </summary>
-    public async Task SendRoutedAsync(string text, IReadOnlyList<TurnAttachment> attachments, RouteIntent intent, CancellationToken preparationToken = default)
+    public async Task SendRoutedAsync(string text, IReadOnlyList<TurnAttachment> attachments, RouteIntent intent, CancellationToken preparationToken = default, DateTimeOffset? preparationDeadline = null)
     {
         if (_session is null || !IsConnected)
         {
@@ -4029,7 +4030,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         switch (intent)
         {
             case RouteIntent.Plan:
-                await SendTurnAsync(text, attachments, planOnly: true, askOnly: false, preparationToken);
+                await SendTurnAsync(text, attachments, planOnly: true, askOnly: false, preparationToken, preparationDeadline);
                 break;
 
             case RouteIntent.Ask:
@@ -4038,11 +4039,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     return;
                 }
 
-                await SendTurnAsync(text, attachments, planOnly: false, askOnly: true, preparationToken);
+                await SendTurnAsync(text, attachments, planOnly: false, askOnly: true, preparationToken, preparationDeadline);
                 break;
 
             default:
-                await SendTurnAsync(text, attachments, planOnly: false, askOnly: false, preparationToken);
+                await SendTurnAsync(text, attachments, planOnly: false, askOnly: false, preparationToken, preparationDeadline);
                 break;
         }
     }
@@ -4065,7 +4066,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private async Task SendTurnAsync(string text, IReadOnlyList<TurnAttachment> attachments, bool planOnly, bool askOnly, CancellationToken preparationToken = default)
+    private async Task SendTurnAsync(string text, IReadOnlyList<TurnAttachment> attachments, bool planOnly, bool askOnly, CancellationToken preparationToken = default, DateTimeOffset? preparationDeadline = null)
     {
         _idleCompactTimer.Stop();
         var compact = IsCompactCommand(text);
@@ -4134,7 +4135,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         RetrievalResult? retrieved;
         try
         {
-            retrieved = await RetrieveProjectContextAsync(text, compact ? null : sent, preparationToken);
+            retrieved = await RetrieveProjectContextAsync(text, compact ? null : sent, preparationToken, preparationDeadline);
         }
         catch (OperationCanceledException)
         {
@@ -5020,6 +5021,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeSessionAsync()
     {
+        _briefing?.Cancel();
+        SmartExperienceHost.Instance.CancelOwner(_projectPath, _chatId);
         // A tab closed mid-turn would otherwise leave the 500ms timer ticking forever,
         // keeping this view model and its whole transcript rooted.
         _turnTimer.Stop();

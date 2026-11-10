@@ -31,6 +31,7 @@ public sealed class FeatureService : IDisposable
         _store = OpenStore(projectPath);
         _knowledge = new ProjectKnowledgeIndex(_store, () => null);
         _knowledge.Smart = SmartExperienceHost.Instance;
+        _knowledge.SmartProjectRoot = projectPath;
         _knowledge.Summaries = new Codale.Smart.SummaryCache(Path.Combine(ProjectPaths.KnowledgeDirectory(projectPath), "smart-summaries"));
         SmartExperienceHost.Instance.Changed += OnSmartChanged;
         _knowledge.Warm(projectPath);
@@ -135,14 +136,15 @@ public sealed class FeatureService : IDisposable
 
     /// <param name="workingSessionId">The history whose recently written files get a ranking boost; null on a new topic.</param>
     public async Task<RetrievalResult> RetrieveAsync(string worktree, string prompt, string recent, IReadOnlySet<string> delivered, string? currentSessionId,
-        string? workingSessionId = null, CancellationToken preparationToken = default)
+        string? workingSessionId = null, CancellationToken preparationToken = default, DateTimeOffset? preparationDeadline = null, string? chatId = null)
     {
         if (AppSettings.SmartExperience)
         {
             using var budget = CancellationTokenSource.CreateLinkedTokenSource(preparationToken);
-            budget.CancelAfter(TimeSpan.FromSeconds(5));
+            var remaining = (preparationDeadline ?? DateTimeOffset.UtcNow.AddSeconds(120)) - DateTimeOffset.UtcNow;
+            budget.CancelAfter(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero);
             return await _knowledge.RetrieveSmartAsync(worktree, prompt, recent, delivered, currentSessionId,
-                workingSessionId is null ? null : _store.FilesOf(workingSessionId, WorkingSetFiles), budget.Token).ConfigureAwait(false);
+                workingSessionId is null ? null : _store.FilesOf(workingSessionId, WorkingSetFiles), budget.Token, preparationDeadline, chatId).ConfigureAwait(false);
         }
         var query = await _knowledge.EmbedQueryAsync(prompt).ConfigureAwait(false);
         return await Task.Run(() => _knowledge.Retrieve(worktree, prompt, recent, delivered, currentSessionId,
@@ -150,6 +152,7 @@ public sealed class FeatureService : IDisposable
     }
 
     private string? _embeddingModel;
+    private bool _smartThinking = AppSettings.SmartThinking;
 
     private void OnSmartChanged(object? sender, EventArgs e)
     { if (SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready) _knowledge.Warm(_projectPath); }
@@ -157,6 +160,11 @@ public sealed class FeatureService : IDisposable
     /// <summary>A newly picked embedding model (or provider) embeds the project now, not on the next prompt.</summary>
     private void OnAppSettingsChanged(object? sender, EventArgs e)
     {
+        if (_smartThinking != AppSettings.SmartThinking)
+        {
+            _smartThinking = AppSettings.SmartThinking;
+            _knowledge.Warm(_projectPath);
+        }
         string? model = null;
         if (model == _embeddingModel) return;
         _embeddingModel = model;

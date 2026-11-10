@@ -192,6 +192,12 @@ public static class AppSettings
         set => Set("ai.smartExperience", value, FormatFlag);
     }
 
+    public static bool SmartThinking
+    {
+        get => Get("ai.smartThinking", () => ReadFlag("ai.smartThinking", false));
+        set => Set("ai.smartThinking", value, FormatFlag);
+    }
+
     /// <summary>Whether the editor draws the gutter with line numbers.</summary>
     public static bool EditorLineNumbers
     {
@@ -525,7 +531,7 @@ public static class AppSettings
     [
         "editor.lineNumbers", "editor.highlighting", "editor.wordWrap", "chat.suggestNextPrompt",
         "tokens.compressShell", "tokens.digest", "tokens.explore", "tokens.readGuard", "tokens.handoffNudge", "tokens.terse",
-        "tokens.idleCompact",
+        "tokens.idleCompact", "ai.smartThinking",
     ];
 
     private static readonly HashSet<string> NumberKeys =
@@ -620,7 +626,7 @@ public static class AppSettings
             ("terminal.fontFamily", "Cascadia Mono"), ("terminal.fontSize", "13"), ("terminal.scrollback", "10000"),
             ("chat.fontSize", "12.5"), ("chat.fontFamily", "Segoe UI"),
             ("chat.defaultMode", " "), ("chat.defaultModel", " "), ("chat.defaultEffort", " "),
-            ("git.pollSeconds", "5"),
+            ("git.pollSeconds", "5"), ("ai.smartThinking", "0"),
         })
         {
             result.TryAdd(key, value);

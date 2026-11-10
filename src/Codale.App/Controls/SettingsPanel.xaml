@@ -404,6 +404,14 @@
                                         <ProgressBar x:Name="SmartExperienceProgress" Maximum="100" Visibility="Collapsed" />
                                     </StackPanel>
                                 </Border>
+                                <Rectangle Style="{StaticResource Divider}" />
+                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock Style="{StaticResource RowTitle}" Text="Enable thinking" />
+                                        <TextBlock Style="{StaticResource RowDesc}" Text="Allow the local model to reason before using tools and answering." />
+                                    </StackPanel>
+                                    <ToggleSwitch x:Name="SmartThinkingToggle" Grid.Column="1" MinWidth="0" VerticalAlignment="Center" AutomationProperties.Name="Enable thinking" Toggled="OnSmartThinkingToggled" />
+                                </Grid>
                             </StackPanel>
                         </Border>
 

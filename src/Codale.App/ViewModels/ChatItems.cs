@@ -1679,7 +1679,7 @@ public sealed partial class ContextEnrichedItem : ChatItem
         return new ContextEnrichedItem
         {
             Summary = string.Join(" · ", parts),
-            Details = $"{files}*{result.Method}*\n\n~~~text\n{result.Text}\n~~~",
+            Details = $"{files}*{result.Method}*" + (result.SmartActivityId is { } activity ? $" · Smart process log: `{activity}`" : "") + $"\n\n~~~text\n{result.Text}\n~~~",
         };
     }
 

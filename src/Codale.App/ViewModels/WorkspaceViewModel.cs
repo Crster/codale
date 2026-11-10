@@ -48,6 +48,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         _endpoints = new CliEndpointSettings();
         _mcp = new McpServerSettings(_store, ProjectPath);
         Health = new WorkspaceHealthViewModel(ProjectPath);
+        SmartActivity = new SmartActivityViewModel(ProjectPath);
         McpTools = new McpToolsViewModel(_mcp, FolderServers, ProjectPath);
         CliEndpoint = new CliEndpointViewModel();
         CliEndpoint.PropertyChanged += (_, e) =>
@@ -77,6 +78,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
     /// <summary>The status bar's indexer for this workspace.</summary>
     public WorkspaceHealthViewModel Health { get; }
+    public SmartActivityViewModel SmartActivity { get; }
 
     public FileTreeViewModel Files { get; }
 
@@ -920,7 +922,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
     public async ValueTask DisposeAsync()
     {
+        SmartExperienceHost.Instance.CancelOwner(ProjectPath);
         Health.Dispose();
+        SmartActivity.Dispose();
         CliEndpoint.Dispose();
         McpTools.Dispose();
         FolderServers.Dispose();

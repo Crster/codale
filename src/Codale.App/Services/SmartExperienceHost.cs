@@ -7,7 +7,8 @@ public static class SmartExperienceHost
 {
     public static SmartExperience Instance { get; } = new(
         Path.Combine(McpServerSettings.CodaleDataRoot(), "smart", "models"),
-        Path.Combine(AppContext.BaseDirectory, "SmartNative"));
+        Path.Combine(AppContext.BaseDirectory, "SmartNative"),
+        Path.Combine(McpServerSettings.CodaleDataRoot(), "smart", "history"));
     private static bool _started, _enabled;
     public static void Start()
     {
@@ -18,6 +19,7 @@ public static class SmartExperienceHost
     }
     private static void Apply()
     {
+        Instance.Thinking = AppSettings.SmartThinking;
         var enabled = AppSettings.SmartExperience;
         if (enabled == _enabled) return;
         _enabled = enabled;

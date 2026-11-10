@@ -2214,6 +2214,50 @@
                             </Flyout>
                         </FlyoutBase.AttachedFlyout>
                     </Border>
+                    <!--  Far right: Smart process log, latest prompt only. Hover/click/keyboard open a small flyout  -->
+                    <Button x:Name="SmartActivityButton" Background="Transparent" BorderThickness="0" Padding="4,1" MinHeight="0"
+                            PointerEntered="OnSmartActivityPointerEntered" PointerExited="OnSmartActivityPointerExited"
+                            Click="OnSmartActivityClick" AutomationProperties.Name="Smart process log">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <FontIcon FontSize="10" Glyph="&#xE945;" VerticalAlignment="Center" Opacity="0.6" />
+                            <TextBlock FontSize="12" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind ViewModel.SmartActivity.Text, Mode=OneWay}" />
+                        </StackPanel>
+                        <Button.Flyout>
+                            <Flyout x:Name="SmartActivityFlyout" Placement="TopEdgeAlignedRight" ShouldConstrainToRootBounds="True">
+                                <Flyout.FlyoutPresenterStyle>
+                                    <Style TargetType="FlyoutPresenter">
+                                        <Setter Property="Padding" Value="4" />
+                                        <Setter Property="MinWidth" Value="0" />
+                                        <Setter Property="CornerRadius" Value="6" />
+                                    </Style>
+                                </Flyout.FlyoutPresenterStyle>
+                                <Grid Width="340" MaxHeight="240" RowDefinitions="Auto,*"
+                                      PointerEntered="OnSmartLogPointerEntered" PointerExited="OnSmartLogPointerExited">
+                                    <TextBlock Margin="6,2,6,4" FontSize="11" Opacity="0.6"
+                                               Text="{x:Bind ViewModel.SmartActivity.Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                                    <ListView Grid.Row="1" ItemsSource="{x:Bind ViewModel.SmartActivity.Runs}" SelectionMode="None"
+                                              IsItemClickEnabled="True" ItemClick="OnSmartLogItemClick"
+                                              HorizontalContentAlignment="Stretch" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                        <ListView.ItemContainerStyle>
+                                            <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                                                <Setter Property="MinHeight" Value="0" />
+                                                <Setter Property="Padding" Value="6,2" />
+                                            </Style>
+                                        </ListView.ItemContainerStyle>
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:SmartActivityItem">
+                                                <StackPanel Spacing="2">
+                                                    <TextBlock Text="{x:Bind Heading, Mode=OneWay}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{x:Bind Details, Mode=OneWay}" Visibility="{x:Bind DetailsVisibility, Mode=OneWay}"
+                                                               TextWrapping="Wrap" IsTextSelectionEnabled="True" FontFamily="Consolas" FontSize="10.5" Opacity="0.7" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                </Grid>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>

@@ -18,6 +18,7 @@ public sealed record RetrievalResult(string Text, IReadOnlyList<string> Keys, in
     public int Snippets { get; init; }
     public int Findings { get; init; }
     public string Method { get; init; } = "";
+    public string? SmartActivityId { get; init; }
 
     /// <summary>The prompt changed the subject, so this was retrieved for it alone.</summary>
     public bool NewTopic { get; init; }

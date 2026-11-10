@@ -321,7 +321,7 @@ public sealed partial class ChatViewModel
         return await TopicShift.IsNewTopicAsync(text, earlier, HashedTextEmbedder.Instance, lastReply, ct);
     }
 
-    private async Task<RetrievalResult?> RetrieveProjectContextAsync(string text, UserMessageItem? sent = null, CancellationToken preparationToken = default)
+    private async Task<RetrievalResult?> RetrieveProjectContextAsync(string text, UserMessageItem? sent = null, CancellationToken preparationToken = default, DateTimeOffset? preparationDeadline = null)
     {
         _retrievalId = null;
         if (text.StartsWith('/')) return null;
@@ -347,7 +347,7 @@ public sealed partial class ChatViewModel
             var recent = newTopic ? "" : string.Join("\n", earlier.TakeLast(2).Append(text));
             // A new topic leaves the files the session has been editing behind.
             var retrieval = features.RetrieveAsync(_projectPath, text, recent, new HashSet<string>(_deliveredContext),
-                _needsResumeContext ? null : FeatureId, newTopic ? null : FeatureId, smartDeadline.Token);
+                _needsResumeContext ? null : FeatureId, newTopic ? null : FeatureId, smartDeadline.Token, preparationDeadline, _chatId);
             // Smart retrieval bounds inference itself and returns verified basic context on timeout.
             // An outer timeout would discard that fallback just as it becomes available.
             var result = AppSettings.SmartExperience

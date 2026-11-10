@@ -59,14 +59,52 @@ public sealed class SmartRetrievalTests : IDisposable
     }
     private sealed class FakeSmart : ISmartExperience
     {
+        public IReadOnlyList<SmartEvidence> Evidence = [], Historical = [];
         public Func<IReadOnlyList<SmartCandidate>, CancellationToken, Task<IReadOnlyList<string>?>> Rank = (_, _) => Task.FromResult<IReadOnlyList<string>?>(null);
         public SmartStatus Status => new(SmartState.Ready, "Ready");
+        public bool Thinking { get; set; }
         public event EventHandler? Changed { add { } remove { } }
         public Task SetEnabledAsync(bool enabled, CancellationToken ct = default) => Task.CompletedTask;
-        public Task<string?> SummarizeAsync(string path, string source, CancellationToken ct = default) => Task.FromResult<string?>(null);
-        public Task<IReadOnlyList<string>?> RankAsync(string query, IReadOnlyList<SmartCandidate> candidates, CancellationToken ct = default) => Rank(candidates, ct);
-        public Task<SmartIntent?> ClassifyAsync(string message, string? previousReply, CancellationToken ct = default) => Task.FromResult<SmartIntent?>(null);
-        public Task<string?> CommitMessageAsync(string stagedDiff, CancellationToken ct = default) => Task.FromResult<string?>(null);
+        public Task<SmartResult<string>?> SummarizeAsync(SmartRequestContext context, string path, CancellationToken ct = default) => Task.FromResult<SmartResult<string>?>(null);
+        public async Task<SmartResult<IReadOnlyList<string>>?> RankAsync(SmartRequestContext context, string query, IReadOnlyList<SmartCandidate> candidates, CancellationToken ct = default)
+        {
+            var value = await Rank(candidates, ct);
+            return value is null ? null : new(value, Evidence, "test");
+        }
+        public Task<SmartResult<SmartIntent?>?> ClassifyAsync(SmartRequestContext context, string message, string? previousReply, CancellationToken ct = default) => Task.FromResult<SmartResult<SmartIntent?>?>(null);
+        public Task<SmartResult<string>?> CommitMessageAsync(SmartRequestContext context, CancellationToken ct = default) => Task.FromResult<SmartResult<string>?>(null);
+        public Task<IReadOnlyList<SmartEvidence>> DiscoveriesAsync(SmartRequestContext context, string query, CancellationToken ct = default) => Task.FromResult(Historical);
+    }
+    [Fact]
+    public async Task Current_and_background_evidence_reach_the_briefing_and_are_deduplicated()
+    {
+        var observation = new SmartEvidence("command", _root, "RenderWidget tests passed", DateTimeOffset.UtcNow.AddMinutes(-5), Command: "dotnet test", ExitCode: 0);
+        _index.Smart = new FakeSmart { Rank = (c, _) => Task.FromResult<IReadOnlyList<string>?>(c.Select(x => x.Id).ToArray()), Evidence = [observation], Historical = [observation] };
+        var result = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default);
+        Assert.Contains("RenderWidget tests passed", result.Text); Assert.Contains("Historical command observation", result.Text);
+        Assert.Equal("test", result.SmartActivityId); Assert.Single(result.Keys);
+        var next = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", result.Keys.ToHashSet(), null, null, default);
+        Assert.DoesNotContain("RenderWidget tests passed", next.Text);
+    }
+
+    [Fact]
+    public async Task Large_discoveries_fit_the_smart_budget_and_failures_keep_the_basic_budget()
+    {
+        File.WriteAllText(Path.Combine(_root, "Widget.cs"), "public class Widget { public void RenderWidget() {} }");
+        await _index.RefreshAsync(_root);
+        var smart = new FakeSmart
+        {
+            Rank = (c, _) => Task.FromResult<IReadOnlyList<string>?>(c.Select(x => x.Id).ToArray()),
+            Evidence = Enumerable.Range(0, 8).Select(i => new SmartEvidence("command", _root, new string('水', 2000), DateTimeOffset.UtcNow.AddMinutes(-i), Command: "test" + i, ExitCode: 0)).ToArray()
+        };
+        _index.Smart = smart;
+        var result = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default);
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(result.Text) <= SmartContext.MaxBytes);
+        Assert.Equal("Smart exploration", result.Method);
+        smart.Rank = (_, _) => Task.FromResult<IReadOnlyList<string>?>(null);
+        var fallback = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default);
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(fallback.Text) <= ProjectKnowledgeIndex.MaxContextBytes);
+        Assert.Contains("RenderWidget", fallback.Text); Assert.Null(fallback.SmartActivityId);
     }
     public void Dispose()
     {

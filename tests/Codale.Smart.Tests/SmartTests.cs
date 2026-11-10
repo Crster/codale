@@ -4,16 +4,17 @@ namespace Codale.Smart.Tests;
 
 public sealed class SmartTests
 {
+    private static SmartRequestContext Context(string task = "test") => new(Environment.CurrentDirectory, Environment.CurrentDirectory, task);
     [Fact]
     public async Task Commit_generation_passes_a_format_grammar_and_preserves_the_message()
     {
         var runtime = new CommitRuntime();
         await using var smart = new SmartExperience(() => runtime, (_, _) => Task.FromResult("model"));
         await smart.SetEnabledAsync(true);
-        var message = await smart.CommitMessageAsync("diff --git a/theme.cs b/theme.cs\n+DarkMode");
+        var message = await smart.CommitMessageAsync(Context());
         Assert.NotNull(runtime.Grammar);
         Assert.DoesNotContain("body", runtime.Grammar);
-        Assert.Equal("feat(theme): add dark mode", message);
+        Assert.Equal("feat(theme): add dark mode", message?.Value);
     }
 
     private sealed class CommitRuntime : ISmartRuntime
@@ -50,7 +51,7 @@ public sealed class SmartTests
     [Fact]
     public void Rankings_reject_unknown_duplicate_or_missing_ids()
     {
-        SmartCandidate[] candidates = [new("a", "a.cs", "a"), new("b", "b.cs", "b")];
+        SmartCandidate[] candidates = [new("a", "a.cs"), new("b", "b.cs")];
         Assert.Equal(new[] { "b", "a" }, SmartExperience.ParseRanking("[\"b\",\"a\"]", candidates));
         Assert.Null(SmartExperience.ParseRanking("[\"a\",\"a\"]", candidates));
         Assert.Null(SmartExperience.ParseRanking("[\"a\",\"c\"]", candidates));
@@ -65,10 +66,10 @@ public sealed class SmartTests
         await smart.SetEnabledAsync(true);
         Assert.Equal(new[] { true, false }, attempts);
         Assert.Equal("CPU", smart.Status.Backend);
-        Assert.Equal(SmartIntent.Plan, await smart.ClassifyAsync("plan", null));
+        Assert.Equal(SmartIntent.Plan, (await smart.ClassifyAsync(Context(), "plan", null))?.Value);
         await smart.SetEnabledAsync(false);
         Assert.All(runtimes, r => Assert.True(r.Disposed));
-        Assert.Null(await smart.ClassifyAsync("plan", null));
+        Assert.Null(await smart.ClassifyAsync(Context(), "plan", null));
     }
 
     [Fact]
@@ -115,10 +116,10 @@ public sealed class SmartTests
         var runtime = new BlockingRuntime();
         await using var smart = new SmartExperience(() => runtime, (_, _) => Task.FromResult("model"));
         await smart.SetEnabledAsync(true);
-        var background = smart.SummarizeAsync("file.cs", "source");
+        var background = smart.SummarizeAsync(Context("summary"), "file.cs");
         await runtime.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        var intent = await smart.ClassifyAsync("plan this", null).WaitAsync(TimeSpan.FromSeconds(2));
-        Assert.Equal(SmartIntent.Plan, intent);
+        var intent = await smart.ClassifyAsync(Context(), "plan this", null).WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(SmartIntent.Plan, intent?.Value);
         Assert.Null(await background);
         Assert.Equal(1, runtime.MaxActive);
     }

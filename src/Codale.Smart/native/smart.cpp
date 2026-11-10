@@ -81,6 +81,9 @@ extern "C" __declspec(dllexport) runtime* __cdecl smart_open(const char* folder,
     if (!r->context) { error(err, err_size, "Cannot allocate inference context."); smart_close(r); return nullptr; }
     return r;
 }
+extern "C" __declspec(dllexport) int __cdecl smart_token_count(runtime* r, const char* prompt) {
+    return -p_llama_tokenize(p_llama_model_get_vocab(r->model), prompt, lstrlenA(prompt), nullptr, 0, true, true);
+}
 extern "C" __declspec(dllexport) int __cdecl smart_generate(runtime* r, const char* prompt, int max_tokens,
     const char* grammar, cancel_fn cancel, void* state, char* output, int capacity, char* err, int err_size) {
     const char* failure = nullptr; int length = 0;

@@ -7,6 +7,7 @@ public interface ISmartRuntime : IDisposable
 {
     string Backend { get; }
     void Load(string modelPath, bool gpu, CancellationToken ct);
+    int CountTokens(string prompt) => Encoding.UTF8.GetByteCount(prompt);
     string Generate(string prompt, int maxTokens, CancellationToken ct, string? grammar = null);
 }
 
@@ -23,6 +24,14 @@ public sealed class NativeRuntime(string nativeDirectory) : ISmartRuntime
         IntPtr runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string prompt, int maxTokens,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string? grammar, CancelCallback cancel, IntPtr state, byte[] output, int capacity, byte[] error, int errorSize);
     [DllImport("codale-smart", CallingConvention = CallingConvention.Cdecl)] private static extern void smart_close(IntPtr runtime);
+    [DllImport("codale-smart", CallingConvention = CallingConvention.Cdecl)] private static extern int smart_token_count(
+        IntPtr runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string prompt);
+
+    public int CountTokens(string prompt)
+    {
+        if (_handle == IntPtr.Zero) throw new InvalidOperationException("Model is not loaded.");
+        return smart_token_count(_handle, prompt);
+    }
 
     public void Load(string modelPath, bool gpu, CancellationToken ct)
     {

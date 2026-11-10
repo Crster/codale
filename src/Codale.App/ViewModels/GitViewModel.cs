@@ -56,7 +56,8 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         {
             var snapshot = await _repository.GetStagedDiffAsync(cancel.Token);
             if (string.IsNullOrWhiteSpace(snapshot.Diff)) { ActionError = "Stage changes before generating a commit message."; return; }
-            var message = await SmartExperienceHost.Instance.CommitMessageAsync(snapshot.Diff, cancel.Token);
+            var result = await SmartExperienceHost.Instance.CommitMessageAsync(new(_projectPath, _projectPath, "commit"), cancel.Token);
+            var message = result?.Value;
             if (string.IsNullOrWhiteSpace(message)) { ActionError = "Could not generate a commit message. Try again."; return; }
             var current = await _repository.GetStagedDiffAsync(cancel.Token);
             if (revision != _messageRevision || current.TreeId != snapshot.TreeId)

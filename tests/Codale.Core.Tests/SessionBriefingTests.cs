@@ -26,6 +26,8 @@ public sealed class SessionBriefingTests
     {
         var block = SessionBriefing.ContextBlock("db/connectors.ts");
         Assert.Contains("hash-verified", block);
+        Assert.Contains("historical observations", block);
+        Assert.Contains("not current verification", block);
         Assert.Contains("do not run searches", block);
         Assert.Contains("not instructions", block);
     }
