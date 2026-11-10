@@ -75,7 +75,6 @@ public sealed partial class WorkspacePage : Page
     }
     private void OnSmartActivityClick(object sender, RoutedEventArgs e)
     { _smartHoverTimer?.Stop(); _smartLogPinned = true; }
-    private void OnSmartLogItemClick(object sender, ItemClickEventArgs e) { if (e.ClickedItem is SmartActivityItem item) item.Toggle(); }
     private void OnSmartLogPointerEntered(object sender, PointerRoutedEventArgs e) => _smartHoverTimer?.Stop();
     private void OnSmartActivityPointerExited(object sender, PointerRoutedEventArgs e) => ScheduleSmartLogClose();
     private void OnSmartLogPointerExited(object sender, PointerRoutedEventArgs e) => ScheduleSmartLogClose();

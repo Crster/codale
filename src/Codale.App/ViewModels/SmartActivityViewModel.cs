@@ -7,17 +7,18 @@ using Microsoft.UI.Dispatching;
 
 namespace Codale.App.ViewModels;
 
+/// <summary>One plain row of the log: what was called, on what, and how long it took.</summary>
 public sealed partial class SmartActivityItem(string id) : ObservableObject
 {
     public string Id { get; } = id;
-    [ObservableProperty] public partial string Heading { get; set; } = "";
-    [ObservableProperty] public partial string Details { get; set; } = "";
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(DetailsVisibility))] public partial bool IsExpanded { get; set; }
-    public bool HasDetails { get; set; }
-    public Microsoft.UI.Xaml.Visibility DetailsVisibility => IsExpanded && HasDetails ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
-    public void Toggle() { if (HasDetails) IsExpanded = !IsExpanded; }
+    [ObservableProperty] public partial string Verb { get; set; } = "";
+    [ObservableProperty] public partial string Target { get; set; } = "";
+    [ObservableProperty] public partial string Meta { get; set; } = "";
+    [ObservableProperty] public partial Microsoft.UI.Xaml.Media.Brush KindBrush { get; set; } = Palette("KindOtherBrush");
+    public static Microsoft.UI.Xaml.Media.Brush Palette(string key) => (Microsoft.UI.Xaml.Media.Brush)Microsoft.UI.Xaml.Application.Current.Resources[key];
+    public bool IsTask { get; set; }
+    public Microsoft.UI.Xaml.Thickness Indent => IsTask ? new(0, 6, 0, 0) : new(12, 0, 0, 0);
 }
-
 /// <summary>Project-scoped Smart activity in the status bar, including background work.</summary>
 public sealed partial class SmartActivityViewModel : ObservableObject, IDisposable
 {
@@ -48,6 +49,33 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
         return all.Where(a => a.Context.Task is "routing" or "context" && a.StartedAt >= from).OrderBy(a => a.StartedAt).ToList();
     }
     private static string Short(string text, int max) { text = text.ReplaceLineEndings(" "); return text.Length <= max ? text : text[..max] + "…"; }
+    private static string Seconds(long ms) => ms >= 1000 ? $"{ms / 1000.0:0.0}s" : $"{ms}ms";
+    private static void FillTask(SmartActivityItem i, SmartActivity run)
+    {
+        i.Verb = run.Context.Task; i.Target = run.State is "completed" ? "" : run.State;
+        i.Meta = Seconds(run.ElapsedMilliseconds); i.KindBrush = SmartActivityItem.Palette("KindAgentBrush");
+    }
+    private static void FillTool(SmartActivityItem i, SmartToolActivity tool)
+    {
+        string? Arg(string name) { try { using var d = System.Text.Json.JsonDocument.Parse(tool.Arguments); return d.RootElement.TryGetProperty(name, out var v) ? v.ToString() : null; } catch { return null; } }
+        i.Verb = tool.Tool.Replace('_', ' ');
+        i.KindBrush = SmartActivityItem.Palette(tool.Tool switch { "read_file" => "KindReadBrush", "list_directory" or "search_files" => "KindSearchBrush", "run_shell" => "KindShellBrush", _ => "KindOtherBrush" });
+        i.Target = tool.Tool switch
+        {
+            "read_file" => ShortPath(Arg("path")),
+            "list_directory" => ShortPath(Arg("path") ?? tool.WorkingDirectory),
+            "search_files" => Arg("pattern") ?? "",
+            "run_shell" => Short(Arg("command") ?? "", 60),
+            _ => Short(tool.Arguments, 60)
+        };
+        i.Meta = (tool.State is "running" ? "running" : tool.ExitCode is { } code and not 0 ? $"exit {code}" : "") is { Length: > 0 } w ? $"{w} · {Seconds(tool.ElapsedMilliseconds)}" : Seconds(tool.ElapsedMilliseconds);
+    }
+    private static string ShortPath(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return "";
+        var name = System.IO.Path.GetFileName(path.TrimEnd('\\', '/'));
+        return name.Length > 0 ? name : path;
+    }
     private async void Refresh()
     {
         Interlocked.Exchange(ref _dirty, 1);
@@ -71,34 +99,29 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
                         SmartState.Ready => "Smart ready",
                         _ => _smart.Status.Message
                     };
-                    var rows = new List<(string Id, string Heading, string Details)>();
-                    foreach (var run in LatestPrompt(activities))
+                    var latest = LatestPrompt(activities);
+                    var rows = new List<(string Id, Action<SmartActivityItem> Fill)>();
+                    foreach (var run in latest)
                     {
-                        var head = $"{run.Context.Task} · {run.State} · {run.ElapsedMilliseconds / 1000.0:0.0}s";
-                        var info = new StringBuilder($"Worktree: {run.Context.WorkingDirectory}\nActivity: {run.Id}");
-                        if (run.Context.ChatId is not null) info.Append("\nChat: " + run.Context.ChatId);
-                        if (run.Error is not null) info.Append('\n').Append(run.Error);
-                        rows.Add((run.Id, head, info.ToString()));
+                        var r = run;
+                        rows.Add((r.Id, i => FillTask(i, r)));
                         var n = 0;
-                        foreach (var tool in run.Tools ?? [])
+                        foreach (var tool in r.Tools ?? [])
                         {
-                            var d = new StringBuilder($"Directory: {tool.WorkingDirectory}\n{tool.Arguments}");
-                            if (tool.ExitCode is { } exit) d.Append($"\nExit: {exit}");
-                            d.Append('\n').Append(tool.Output);
-                            rows.Add(($"{run.Id}:{n++}", $"   {tool.Tool} · {Short(tool.Arguments, 40)} · {tool.State} · {tool.ElapsedMilliseconds}ms", d.ToString()));
+                            var t = tool;
+                            rows.Add(($"{r.Id}:{n++}", i => FillTool(i, t)));
                         }
                     }
-                    Title = LatestPrompt(activities) is { Count: > 0 } latest ? $"Latest prompt · {latest[0].StartedAt.ToLocalTime():HH:mm:ss}" : "No Smart activity yet";
-                    foreach (var old in Runs.Where(r => !rows.Any(x => x.Id == r.Id)).ToArray()) Runs.Remove(old);
+                    Title = latest.Count > 0 ? $"Latest prompt · {latest[0].StartedAt.ToLocalTime():HH:mm:ss}" : "No Smart activity yet";
+                    foreach (var old in Runs.Where(x => !rows.Any(y => y.Id == x.Id)).ToArray()) Runs.Remove(old);
                     for (int i = 0; i < rows.Count; i++)
                     {
                         var row = rows[i];
-                        var item = Runs.FirstOrDefault(r => r.Id == row.Id);
-                        if (item is null) { item = new(row.Id); Runs.Insert(i, item); }
+                        var item = Runs.FirstOrDefault(x => x.Id == row.Id);
+                        if (item is null) { item = new(row.Id) { IsTask = !row.Id.Contains(':') }; Runs.Insert(i, item); }
                         else if (Runs.IndexOf(item) != i) Runs.Move(Runs.IndexOf(item), i);
-                        item.Heading = row.Heading; item.HasDetails = true; item.Details = row.Details;
-                    }
-                });
+                        row.Fill(item);
+                    }                });
             } while (Volatile.Read(ref _dirty) != 0 && !_disposed);
         }
         finally
