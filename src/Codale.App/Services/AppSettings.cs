@@ -309,8 +309,32 @@ public static class AppSettings
     /// <summary>The permission mode a fresh chat starts in: "automatic" (Auto), "ask", "plan", "manual", "acceptEdits" or "auto" (Full). Unset is Auto: a CLI left in its own default asks about every edit.</summary>
     public static string DefaultChatMode
     {
-        get => Get("chat.defaultMode", () => Read("chat.defaultMode", "") is var raw && IsChatMode(raw) ? raw : "automatic");
-        set => Set("chat.defaultMode", IsChatMode(value) ? value : "automatic", FormatText);
+        get
+        {
+            EnsureFullModeMigration();
+            return Get("chat.defaultMode", () => Read("chat.defaultMode", "") is var raw && IsChatMode(raw) ? raw : "auto");
+        }
+        set => Set("chat.defaultMode", IsChatMode(value) ? value : "auto", FormatText);
+    }
+
+    /// <summary>One-time reset of saved default modes so every CLI starts in Full (YOLO).</summary>
+    private static void EnsureFullModeMigration()
+    {
+        lock (FileLock)
+        {
+            if (Read("chat.fullModeMigrated", "") == "1")
+            {
+                return;
+            }
+
+            foreach (var key in new[] { "chat.defaultMode", DefaultsKey("claude", "mode"), DefaultsKey("codex", "mode") })
+            {
+                Write(key, "");
+                Cache.Remove(key);
+            }
+
+            Write("chat.fullModeMigrated", "1");
+        }
     }
 
     /// <summary>The last model/effort/mode the user picked for a CLI ("claude" or "codex"), saved as
@@ -361,8 +385,11 @@ public static class AppSettings
     public static void SetCliProvider(string cli, string? name) => WriteDefault(cli, "provider", name?.Trim());
 
     /// <summary>The saved mode for a CLI, falling back to the global <see cref="DefaultChatMode"/> when unset.</summary>
-    public static string DefaultModeFor(string cli) =>
-        ReadDefault(cli, "mode") is { } saved && IsChatMode(saved) ? saved : DefaultChatMode;
+    public static string DefaultModeFor(string cli)
+    {
+        EnsureFullModeMigration();
+        return ReadDefault(cli, "mode") is { } saved && IsChatMode(saved) ? saved : DefaultChatMode;
+    }
 
     public static void SetDefaultMode(string cli, string? value) => WriteDefault(cli, "mode", IsChatMode(value) ? value : "");
 

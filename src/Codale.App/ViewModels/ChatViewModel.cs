@@ -1471,7 +1471,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public partial string PermissionMode { get; set; } = AppSettings.DefaultChatMode;
 
     /// <summary>The mode a fresh chat starts in when Settings does not say otherwise: Auto.</summary>
-    public const string DefaultMode = AutomaticMode;
+    public const string DefaultMode = "auto";
 
     /// <summary>
     /// The host's own mode: the agent explains and changes nothing. No CLI has it, so
@@ -1511,7 +1511,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public static string CliMode(string mode) => ClaudeSessionOptions.ClampPermissionMode(mode switch
     {
         AskMode => "manual",
-        AutomaticMode => "auto",
+        // The host's analyzer judges shell, so the CLI's opaque classifier is not used.
+        AutomaticMode => "acceptEdits",
         "auto" or "dontAsk" => "bypassPermissions",
         _ => mode,
     });
@@ -1521,7 +1522,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         AskMode => reported is "manual" or "default",
         // A CLI that does not offer its "auto" classifier starts in "default" instead; Auto is the host's routing either way.
-        AutomaticMode => reported is "auto" or "default",
+        AutomaticMode => reported is "acceptEdits" or "auto" or "default",
         "auto" or "dontAsk" => reported is "bypassPermissions" or "dontAsk",
         _ => false,
     };
@@ -3479,9 +3480,22 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        // In acceptEdits mode, or Auto mode when a CLI runs in "default", file edits go
-        // through without asking.
-        if ((PermissionMode == "acceptEdits" || (IsAutomaticMode && _cliReportedMode == "default")) &&
+        // Interactive and Auto never stop for MCP tools or read-only tools; only edits (Interactive)
+        // and shell (both) can ask.
+        if ((IsAutomaticMode || PermissionMode is "manual" or "default") &&
+            (approval.ToolName.StartsWith("mcp__", StringComparison.Ordinal) ||
+             approval.ToolName is "Read" or "Glob" or "Grep" or "LS" or "WebSearch" or "WebFetch"))
+        {
+            if (_session is { } reads)
+            {
+                await reads.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
+            }
+
+            return;
+        }
+
+        // In acceptEdits and Auto mode, file edits go through without asking.
+        if ((PermissionMode == "acceptEdits" || IsAutomaticMode) &&
             approval.ToolName is "Edit" or "Write" or "MultiEdit" or "NotebookEdit")
         {
 
@@ -3526,7 +3540,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        if (!requiresPlanApproval && shellAssessment.Risk == ShellRisk.Safe && AppSettings.AutoApproveSafeShell)
+        if (!requiresPlanApproval && PermissionMode is not ("manual" or "default") &&
+            shellAssessment.Risk == ShellRisk.Safe && AppSettings.AutoApproveSafeShell)
         {
 
             if (_session is { } running)

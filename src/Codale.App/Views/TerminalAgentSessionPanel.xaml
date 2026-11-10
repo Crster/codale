@@ -412,6 +412,23 @@
                             </StackPanel>
                         </Border>
 
+                        <!--  Artifacts  -->
+                        <Border Padding="4,4,4,2" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10" Visibility="{x:Bind Session.Artifacts.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                            <StackPanel Spacing="2">
+                                <ToggleButton x:Name="PlansSection" IsChecked="True" Style="{StaticResource SectionHeader}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <TextBlock Text="Artifacts" />
+                                        <Border
+                                            Padding="7,1"
+                                            VerticalAlignment="Center"
+                                            Background="{StaticResource KindPlanTintBrush}"
+                                            CornerRadius="8">
+                                            <TextBlock
+                                                FontSize="10"
+                                                Foreground="{StaticResource KindPlanBrush}"
+                                                Text="{x:Bind Session.Artifacts.Count, Mode=OneWay}" />
+                                        </Border>
+
                         <!--  Session changes  -->
                         <Border Padding="4,4,4,2" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10" Visibility="{x:Bind Session.Status.ChangeCount, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
                             <StackPanel Spacing="2">
@@ -497,23 +514,6 @@
                                 </StackPanel>
                             </StackPanel>
                         </Border>
-
-                        <!--  Artifacts  -->
-                        <Border Padding="4,4,4,2" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10" Visibility="{x:Bind Session.Artifacts.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
-                            <StackPanel Spacing="2">
-                                <ToggleButton x:Name="PlansSection" IsChecked="True" Style="{StaticResource SectionHeader}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <TextBlock Text="Artifacts" />
-                                        <Border
-                                            Padding="7,1"
-                                            VerticalAlignment="Center"
-                                            Background="{StaticResource KindPlanTintBrush}"
-                                            CornerRadius="8">
-                                            <TextBlock
-                                                FontSize="10"
-                                                Foreground="{StaticResource KindPlanBrush}"
-                                                Text="{x:Bind Session.Artifacts.Count, Mode=OneWay}" />
-                                        </Border>
                                     </StackPanel>
                                 </ToggleButton>
 
