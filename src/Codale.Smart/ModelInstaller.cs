@@ -4,10 +4,10 @@ namespace Codale.Smart;
 
 public sealed class ModelInstaller
 {
-    public const string Revision = "cd0c74c575b5c416f3011b5b4c298077f26ca8c2";
-    public const string FileName = "LFM3-1.7B-Q4_K_M.gguf";
-    public const string Sha256 = "3793e1e6e2266919d6e015287221b41100175a98eddaba92e111aed3b05c93c4";
-    public const long Size = 1099627808;
+    public const string Revision = "93f3f6a8938ee922b784cf4e5b4203cd3428df8f";
+    public const string FileName = "granite-4.2-8b-Q4_K_M.gguf";
+    public const string Sha256 = "16a9369d0805f80b7377d25d87f937a90c05dc04ad79173a52001e42c9aab311";
+    public const long Size = 5347917952;
     private static readonly HttpClient Http = new() { Timeout = Timeout.InfiniteTimeSpan };
     private readonly string _directory;
     private readonly HttpClient? _client;
@@ -19,7 +19,6 @@ public sealed class ModelInstaller
     { _directory = directory; _model = model; _client = client; _size = model.Size; _hash = model.Sha256; }
     internal ModelInstaller(string directory, HttpClient client, long size, string hash) : this(directory, client)
     { _size = size; _hash = hash; }
-    // Preserve the existing LFM3 revision/file location for offline upgrades.
     public string ModelPath => Path.Combine(_directory, _model.Revision, _model.FileName);
 
     public async Task<string> EnsureAsync(IProgress<double>? progress, CancellationToken ct)

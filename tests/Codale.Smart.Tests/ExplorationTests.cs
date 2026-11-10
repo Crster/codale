@@ -95,7 +95,7 @@ public sealed class ExplorationTests : IDisposable
             else { var result = await smart.CommitMessageAsync(Context(task)); Assert.Equal("feat: add thinking", result?.Value); evidence = result?.Evidence; }
             Assert.Single(evidence!);
             Assert.Contains("public class Sample", evidence![0].Text);
-            Assert.EndsWith(thinking ? "<think>" : "<think></think>", runtime.Prompts[0].Prompt);
+            Assert.EndsWith(thinking ? "<think>\n" : "<think></think>", runtime.Prompts[0].Prompt);
             Assert.Contains("<tool_response>", runtime.Prompts[^1].Prompt);
             Assert.DoesNotContain("public class Sample", runtime.Prompts[0].Prompt);
             Assert.Equal("completed", smart.Activities(_root)[0].State);
@@ -135,10 +135,10 @@ public sealed class ExplorationTests : IDisposable
     public void Context_trimming_removes_complete_old_exchanges_and_reserves_generation()
     {
         var conversation = new SmartConversation("system", "original task", false);
-        for (int i = 0; i < 12; i++) conversation.Add("old-" + i + new string('x', 3000), ["result-" + i]);
+        for (int i = 0; i < 12; i++) conversation.Add("old-" + i + new string('x', 6000), ["result-" + i]);
         var runtime = new Runtime((_, _) => "unused");
         var prompt = conversation.Render(runtime, 2048);
-        Assert.True(runtime.CountTokens(prompt) + 2048 <= 8192);
+        Assert.True(runtime.CountTokens(prompt) + 2048 <= 16384);
         Assert.DoesNotContain("old-0", prompt); Assert.DoesNotContain("result-0", prompt);
         Assert.Contains("old-11", prompt); Assert.Contains("result-11", prompt); Assert.Contains("original task", prompt);
     }

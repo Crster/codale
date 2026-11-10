@@ -9,8 +9,8 @@ public sealed record SmartModel(string Id, string Name, string Repository, strin
 
 public static class SmartModels
 {
-    public static SmartModel Default { get; } = new("lfm3-1.7b-q4", "LFM3 1.7B Q4_K_M",
-        "LiquidAI/LFM3-1.7B-GGUF", ModelInstaller.Revision, ModelInstaller.FileName,
+    public static SmartModel Default { get; } = new("granite-4.2-8b-q4", "Granite 4.2 8B Q4_K_M",
+        "ibm-granite/granite-4.2-8b-GGUF", ModelInstaller.Revision, ModelInstaller.FileName,
         ModelInstaller.Size, ModelInstaller.Sha256);
 
     public static IReadOnlyList<SmartModel> All { get; } = Array.AsReadOnly(new[] { Default });

@@ -74,7 +74,7 @@ extern "C" __declspec(dllexport) runtime* __cdecl smart_open(const char* folder,
     r->model = p_llama_model_load_from_file(path, mp);
     if (!r->model) { error(err, err_size, "Model loading failed (memory, model, or driver)."); smart_close(r); return nullptr; }
     if (cancel(state)) { smart_close(r); return nullptr; }
-    auto cp = p_llama_context_default_params(); cp.n_ctx = 8192; cp.n_batch = 256; cp.n_ubatch = 128;
+    auto cp = p_llama_context_default_params(); cp.n_ctx = 16384; cp.n_batch = 256; cp.n_ubatch = 128;
     auto threads = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS) / 2;
     cp.n_threads = cp.n_threads_batch = threads > 0 ? (int)threads : 1;
     cp.offload_kqv = cp.op_offload = gpu != 0;
@@ -90,7 +90,7 @@ extern "C" __declspec(dllexport) int __cdecl smart_generate_v2(runtime* r, const
     const char* failure = nullptr; int length = 0;
     auto vocab = p_llama_model_get_vocab(r->model);
     int count = -p_llama_tokenize(vocab, prompt, lstrlenA(prompt), nullptr, 0, true, true);
-    if (count <= 0 || count + max_tokens > 8192) { error(err, err_size, "Input exceeds the model context budget."); return -1; }
+    if (count <= 0 || count + max_tokens > 16384) { error(err, err_size, "Input exceeds the model context budget."); return -1; }
     auto tokens = (llama_token*)alloc(count * sizeof(llama_token));
     if (!tokens) { error(err, err_size, "Out of memory."); return -1; }
     p_llama_tokenize(vocab, prompt, lstrlenA(prompt), tokens, count, true, true);
