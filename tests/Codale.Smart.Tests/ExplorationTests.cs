@@ -46,7 +46,22 @@ public sealed class ExplorationTests : IDisposable
         Assert.Contains("query_index", runtime.Prompts[0].Prompt);
         Assert.DoesNotContain("run_shell", runtime.Prompts[0].Prompt);
         Assert.Contains("Binding CommitMessage", runtime.Prompts[^1].Prompt);
+        Assert.Contains("view", runtime.Prompts[^1].Grammar);
+        Assert.Contains("model", runtime.Prompts[^1].Grammar);
         Assert.Equal(new[] { "query_index", "read_index" }, smart.Activities(_root)[0].Tools!.Select(t => t.Tool));
+    }
+
+    [Fact]
+    public async Task Context_exploration_accepts_an_empty_selection()
+    {
+        var runtime = new Runtime((_, _) => "[]");
+        await using var smart = await Ready(runtime);
+        var result = await smart.ExploreContextAsync(Context("context"), "unrelated", "",
+            [new("model", "GitViewModel.cs", "commit")],
+            (_, _) => Task.FromResult<IReadOnlyList<SmartCandidate>>([]));
+        Assert.NotNull(result?.Value);
+        Assert.Empty(result.Value);
+        Assert.Equal("completed", smart.Activities(_root)[0].State);
     }
 
     [Fact]

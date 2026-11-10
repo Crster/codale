@@ -257,7 +257,7 @@ public sealed class SourceIndexTests : IDisposable
     [InlineData("        return Execute(action);")]
     [InlineData("            new Dictionary<string, int>(),")]
     public void Calls_and_statements_are_not_declarations(string line) =>
-        Assert.Empty(SourceSymbols.Extract(line).Where(s => s.Kind != SourceSymbolKind.Variable));
+        Assert.DoesNotContain(SourceSymbols.Extract(line), s => s.Kind != SourceSymbolKind.Variable);
 
     [Fact]
     public void Declarations_carry_their_line_numbers()

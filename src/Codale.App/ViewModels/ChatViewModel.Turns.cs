@@ -13,6 +13,7 @@ public sealed partial class ChatViewModel
     {
         RestoreBrowserViewport();
         _turnTimer.Stop();
+        _preparingTask = null;
         SetActivity(null, toolUseId: null);
 
         if (_streaming is { } streaming)

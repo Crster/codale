@@ -1040,6 +1040,15 @@
                             </Grid>
                         </Border>
 
+                        <Border Grid.Row="1" Margin="2,0,2,6" Padding="10,6"
+                                CornerRadius="{StaticResource ControlCornerRadius}"
+                                Visibility="{x:Bind ViewModel.Git.IsGeneratingCommitMessage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <ProgressRing Width="14" Height="14" IsActive="{x:Bind ViewModel.Git.IsGeneratingCommitMessage, Mode=OneWay}" />
+                                <TextBlock FontSize="12" Text="Generating commit message…" />
+                            </StackPanel>
+                        </Border>
+
                         <!--  Commit: a roomy multi-line message (first line is the subject);
                               Enter breaks lines, Ctrl+Enter commits  -->
                         <StackPanel Grid.Row="2" Margin="2,0,2,10" Spacing="6">
@@ -1049,6 +1058,7 @@
                                     AcceptsReturn="True"
                                     MaxHeight="130"
                                     MinHeight="60"
+                                    IsEnabled="{x:Bind ViewModel.Git.IsGeneratingCommitMessage, Mode=OneWay, Converter={StaticResource NotBool}}"
                                     Padding="10,6,34,6"
                                     PlaceholderText="Commit message (Ctrl+Space to generate)"
                                     ToolTipService.ToolTip="Generate from staged changes (Ctrl+Space)"
@@ -1064,15 +1074,10 @@
                                 </TextBox>
 
                             </Grid>
-                            <StackPanel Orientation="Horizontal" Spacing="6"
-                                        Visibility="{x:Bind ViewModel.Git.IsGeneratingCommitMessage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                <ProgressRing Width="14" Height="14" IsActive="{x:Bind ViewModel.Git.IsGeneratingCommitMessage, Mode=OneWay}" />
-                                <TextBlock FontSize="12" Text="Generating commit message…" />
-                            </StackPanel>
                             <Button
                                 HorizontalAlignment="Stretch"
                                 Command="{x:Bind ViewModel.Git.CommitCommand}"
-                                IsEnabled="{x:Bind ViewModel.Git.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
+                                IsEnabled="{x:Bind CanCommit(ViewModel.Git.IsBusy, ViewModel.Git.IsGeneratingCommitMessage), Mode=OneWay}"
                                 Style="{StaticResource AccentButtonStyle}"
                                 ToolTipService.ToolTip="Commit (Ctrl+Enter)">
                                 <StackPanel Orientation="Horizontal" Spacing="6">

@@ -1608,6 +1608,9 @@ public sealed partial class WorkspacePage : Page
         await ViewModel.DiffViewer.LoadFileAsync(relative, File.Exists(node.FullPath));
     }
 
+    private bool CanCommit(bool isBusy, bool isGeneratingCommitMessage) =>
+        !isBusy && !isGeneratingCommitMessage;
+
     /// <summary>Click on a commit in the history graph: show everything it changed.</summary>
     private async void OnGitCommitClick(object sender, ItemClickEventArgs e)
     {

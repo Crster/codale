@@ -343,6 +343,14 @@ public sealed partial class TurnActivityItem : ChatItem
     [NotifyPropertyChangedFor(nameof(HeaderText))]
     public partial TimeSpan Elapsed { get; set; }
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HeaderText))]
+    public partial string LiveMessage { get; set; } = "Working";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HeaderText))]
+    public partial string LiveStage { get; set; } = "";
+
     /// <summary>
     /// False when no trustworthy clock exists (a replayed transcript without event
     /// timestamps): the header then omits the duration rather than lie with 0s.
@@ -388,7 +396,7 @@ public sealed partial class TurnActivityItem : ChatItem
 
             return Outcome switch
             {
-                TurnOutcome.Running => time is null ? "Working" : $"Working · {time}",
+                TurnOutcome.Running => string.Join(" · ", new[] { LiveMessage, time, LiveStage }.Where(s => !string.IsNullOrEmpty(s))),
                 TurnOutcome.NotSent => "Not sent",
                 TurnOutcome.Completed when !HasSteps => time is null ? "Replied" : $"Replied in {time}",
                 TurnOutcome.Completed => time is null ? "Worked" : $"Worked for {time}",

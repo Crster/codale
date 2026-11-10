@@ -382,9 +382,6 @@ public static partial class MessageRouting
     [GeneratedRegex(@"^(plan\b|(?:write|create|draft|propose)\s+(?:(?:a|an|the)\s+)?(?:implementation\s+)?(?:plan|proposal)\b)", RegexOptions.IgnoreCase)]
     private static partial Regex ExplicitPlan();
 
-    [GeneratedRegex(@"^(what|why|how|where|when|which|who|explain|describe|summari[sz]e|review|compare)\b", RegexOptions.IgnoreCase)]
-    private static partial Regex PureQuestion();
-
     [GeneratedRegex(@"^(?:yes|yep|yeah|sure)\s*[,!:]\s*", RegexOptions.IgnoreCase)]
     private static partial Regex AcknowledgementPrefix();
 

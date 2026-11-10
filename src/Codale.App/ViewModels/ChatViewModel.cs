@@ -74,6 +74,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private readonly DispatcherQueueTimer _turnTimer;
 
     private DateTimeOffset _turnStarted;
+    private string? _preparingTask;
 
     /// <summary>Effort the running session was actually started with; spawn-time, so a change means a restart.</summary>
     private string? _liveEffort;
@@ -205,6 +206,21 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             if (++_workingTicks % 10 == 0)
             {
                 WorkingMessage = WorkingPhrases.Next(WorkingMessage);
+            }
+            if (_activeTurn is { } live)
+            {
+                live.LiveMessage = WorkingMessage;
+                if (_preparingTask is { } preparingTask)
+                {
+                    var activity = SmartExperienceHost.Instance.Activities(_projectPath)
+                        .FirstOrDefault(a => a.Context.ChatId == _chatId && a.StartedAt >= _turnStarted.ToUniversalTime()
+                            && a.Context.Task == preparingTask && a.State is "queued" or "exploring" or "finalizing");
+                    if (activity is not null)
+                        live.LiveStage = activity.Tools?.LastOrDefault() is { Tool: "run_shell", State: "running" } ? "Running shell"
+                            : activity.Context.Task == "routing" ? "Routing"
+                            : activity.State == "exploring" ? "Exploring context"
+                            : activity.State == "finalizing" ? "Finalizing" : "Waiting for smart model";
+                }
             }
         };
 
@@ -4005,6 +4021,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             Add(shown);
             TrimTranscript();
             _preShown = (shown, composerAttachments);
+            BeginTurn();
+            _preparingTask = "routing";
+            _activeTurn!.LiveStage = "Routing";
             try
             {
                 await RouteAndSendAsync();
@@ -4015,6 +4034,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 if (_preShown is { } unsent)
                 {
                     _preShown = null;
+                    _preparingTask = null;
+                    var abandoned = _activeTurn;
+                    EndTurn(TurnOutcome.NotSent);
+                    if (abandoned is not null) Items.Remove(abandoned);
                     Items.Remove(unsent.Item);
                     Reflow();
                     Draft = text;
@@ -4168,6 +4191,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         // Plan setup can restart the session (for the effort change), so it runs before
         // the draft is cleared - a failed setup must leave the message in place.
+        _preparingTask = null;
+        if (planOnly && _activeTurn is { } planning) planning.LiveStage = "Entering plan mode";
         if (planOnly && !await EnterPlanModeAsync())
         {
             return;
@@ -4186,6 +4211,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         NextPromptSuggestion = null;
         Attachments.Clear();
         ComposerNotice = null;
+        // Retrieval can take many seconds before BeginTurn runs; without a message the
+        // status capsule would show only its dot. BeginTurn replaces this with a phrase.
         IsBusy = true;
         _lastUserPrompt = text;
         var sent = pre?.Item ?? new UserMessageItem { Text = text, Attachments = attachments };
@@ -4196,6 +4223,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             Add(sent);
             TrimTranscript();
         }
+
+        if (_activeTurn is null) BeginTurn();
+        _preparingTask = "context";
+        _activeTurn!.LiveStage = compact ? "Compacting" : "Gathering context";
 
         if (!compact) RecordUserTurn(text);
         if (compact) ForgetDeliveredContext();
@@ -4212,6 +4243,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             if (!ReferenceEquals(session, _session)) return;
             // Stopped before anything went out: the message goes back to the composer.
             EndFeatureTurn("not sent");
+            _preparingTask = null;
+            var abandoned = _activeTurn;
+            EndTurn(TurnOutcome.NotSent);
+            if (abandoned is not null) Items.Remove(abandoned);
             Items.Remove(sent);
             Reflow();
             IsBusy = false;
@@ -4228,7 +4263,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (!silent) ShowContextEnrichment(retrieved);
 
         // "/compact" is housekeeping, not part of the conversation a resumed history replays.
-        BeginTurn();
+        _preparingTask = null;
+        if (_activeTurn is { } ready) ready.LiveStage = "";
         if (silent && _activeTurn is { } hidden)
         {
             // The compaction has its own entry; the turn behind it needs no timeline of its own.
@@ -4388,6 +4424,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _workingTicks = 0;
         WorkingElapsed = "";
         WorkingMessage = WorkingPhrases.Next(WorkingMessage);
+        _activeTurn.LiveMessage = WorkingMessage;
         _turnTimer.Start();
     }
 

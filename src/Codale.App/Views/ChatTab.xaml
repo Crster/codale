@@ -1275,6 +1275,11 @@
         <!--  A turn: the header capsule and, while open, the step timeline beneath it.  -->
         <DataTemplate x:Key="ActivityTemplate" x:DataType="vm:TurnActivityItem">
             <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="4">
+                <StackPanel Orientation="Horizontal" Spacing="8" Visibility="{x:Bind IsRunning, Mode=OneWay}">
+                    <ProgressRing Width="16" Height="16" IsActive="{x:Bind IsRunning, Mode=OneWay}" />
+                    <TextBlock VerticalAlignment="Center" Foreground="{StaticResource StatusRunningBrush}"
+                               Text="{x:Bind HeaderText, Mode=OneWay}" />
+                </StackPanel>
                 <Button
                     Padding="0"
                     Click="OnTurnToggleClick"
@@ -2298,12 +2303,12 @@
             </StackPanel>
         </ScrollViewer>
 
-        <!--  The live status capsule, always at the bottom while a turn runs  -->
+        <!-- Keep the action-required notice beside the composer. Working progress is in the turn. -->
         <Border
             Grid.Row="1"
             Margin="0,6,0,0"
             Padding="1,0,16,0"
-            Visibility="{x:Bind ViewModel.IsBusy, Mode=OneWay}">
+            Visibility="{x:Bind ViewModel.IsWaitingForYou, Mode=OneWay}">
             <Grid ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="22" />
