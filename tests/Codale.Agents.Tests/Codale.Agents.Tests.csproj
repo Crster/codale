@@ -23,6 +23,7 @@
     <ProjectReference Include="..\..\src\Codale.Core\Codale.Core.csproj" />
     <ProjectReference Include="..\..\src\Codale.Git\Codale.Git.csproj" />
     <Compile Include="..\..\src\Codale.App\ViewModels\ToolDiffs.cs" Link="ToolDiffs.cs" />
+    <Compile Include="..\..\src\Codale.App\ViewModels\PlanningApproval.cs" Link="PlanningApproval.cs" />
   </ItemGroup>
 
 </Project>

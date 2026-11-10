@@ -64,7 +64,7 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
     private static string Seconds(long ms) => ms >= 1000 ? $"{ms / 1000.0:0.0}s" : $"{ms}ms";
     private static void FillTask(SmartActivityItem i, SmartActivity run)
     {
-        i.Verb = run.Context.Task; i.Target = run.State is "completed" ? "" : run.State;
+        i.Verb = run.Context.Task; i.Target = run.State is "completed" ? "" : run.State is "error" && run.Error is { Length: > 0 } why ? "error: " + Short(why, 70) : run.State;
         i.Meta = Seconds(run.ElapsedMilliseconds); i.KindBrush = SmartActivityItem.Palette("KindAgentBrush");
     }
     private static void FillTool(SmartActivityItem i, SmartToolActivity tool)

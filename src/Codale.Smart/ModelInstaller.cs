@@ -2,18 +2,25 @@ using System.Security.Cryptography;
 
 namespace Codale.Smart;
 
-public sealed class ModelInstaller(string directory, HttpClient? client = null)
+public sealed class ModelInstaller
 {
     public const string Revision = "cd0c74c575b5c416f3011b5b4c298077f26ca8c2";
     public const string FileName = "LFM3-1.7B-Q4_K_M.gguf";
     public const string Sha256 = "3793e1e6e2266919d6e015287221b41100175a98eddaba92e111aed3b05c93c4";
     public const long Size = 1099627808;
     private static readonly HttpClient Http = new() { Timeout = Timeout.InfiniteTimeSpan };
-    private readonly long _size = Size;
-    private readonly string _hash = Sha256;
+    private readonly string _directory;
+    private readonly HttpClient? _client;
+    private readonly SmartModel _model;
+    private readonly long _size;
+    private readonly string _hash;
+    public ModelInstaller(string directory, HttpClient? client = null) : this(directory, SmartModels.Default, client) { }
+    public ModelInstaller(string directory, SmartModel model, HttpClient? client = null)
+    { _directory = directory; _model = model; _client = client; _size = model.Size; _hash = model.Sha256; }
     internal ModelInstaller(string directory, HttpClient client, long size, string hash) : this(directory, client)
     { _size = size; _hash = hash; }
-    public string ModelPath => Path.Combine(directory, Revision, FileName);
+    // Preserve the existing LFM3 revision/file location for offline upgrades.
+    public string ModelPath => Path.Combine(_directory, _model.Revision, _model.FileName);
 
     public async Task<string> EnsureAsync(IProgress<double>? progress, CancellationToken ct)
     {
@@ -24,8 +31,8 @@ public sealed class ModelInstaller(string directory, HttpClient? client = null)
         var partial = ModelPath + ".partial";
         try
         {
-            using var response = await (client ?? Http).GetAsync(
-                $"https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/resolve/{Revision}/{FileName}", HttpCompletionOption.ResponseHeadersRead, ct);
+            using var response = await (_client ?? Http).GetAsync(
+                _model.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
             response.EnsureSuccessStatusCode();
             await using (var input = await response.Content.ReadAsStreamAsync(ct))
             await using (var output = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None, 131072, true))
@@ -56,6 +63,7 @@ public sealed class ModelInstaller(string directory, HttpClient? client = null)
         }
     }
     public static Task<bool> VerifyAsync(string path, CancellationToken ct) => VerifyFileAsync(path, Size, Sha256, ct);
+    public static Task<bool> VerifyAsync(string path, SmartModel model, CancellationToken ct) => VerifyFileAsync(path, model.Size, model.Sha256, ct);
     private static async Task<bool> VerifyFileAsync(string path, long size, string hash, CancellationToken ct)
     {
         if (new FileInfo(path).Length != size) return false;

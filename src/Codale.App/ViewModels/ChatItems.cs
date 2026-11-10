@@ -123,7 +123,7 @@ public sealed partial class UserMessageItem : ChatItem
     public IReadOnlyList<TurnAttachment> Attachments { get; init; } = [];
 
     /// <summary>Sent with Ctrl+Enter: planned rather than executed.</summary>
-    public bool SentAsPlan { get; init; }
+    public bool SentAsPlan { get; set; }
 
     /// <summary>Sent while a turn was running: it joins that turn mid-way rather than starting one.</summary>
     public bool IsSteer { get; init; }

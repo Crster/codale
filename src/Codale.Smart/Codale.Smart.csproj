@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><TargetFramework>net10.0</TargetFramework><AllowUnsafeBlocks>true</AllowUnsafeBlocks></PropertyGroup>
   <ItemGroup><InternalsVisibleTo Include="Codale.Smart.Tests" /></ItemGroup>
+  <ItemGroup><InternalsVisibleTo Include="Codale.Smart.Smoke" /></ItemGroup>
   <ItemGroup><Compile Include="../Codale.Core/Tasks/ProcessJob.cs" Link="ProcessJob.cs" /></ItemGroup>
 </Project>

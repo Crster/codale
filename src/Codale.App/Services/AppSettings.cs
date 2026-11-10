@@ -192,6 +192,13 @@ public static class AppSettings
         set => Set("ai.smartExperience", value, FormatFlag);
     }
 
+    /// <summary>The released model shared by all Smart features. Unknown or gated IDs use LFM3.</summary>
+    public static string SmartModel
+    {
+        get => Codale.Smart.SmartModels.Resolve(Get("ai.smartModel", () => Read("ai.smartModel", ""))).Id;
+        set => Set("ai.smartModel", Codale.Smart.SmartModels.Resolve(value).Id, FormatText);
+    }
+
     /// <summary>Whether Smart summarises project files in the background (a model run per file); off by default.</summary>
     public static bool SmartSummaries
     {

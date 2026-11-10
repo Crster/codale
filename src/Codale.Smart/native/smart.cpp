@@ -19,6 +19,7 @@ BOOL WINAPI DllMain(HINSTANCE, DWORD, LPVOID) { return TRUE; }
 static void* alloc(size_t size) { return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size); }
 static void release(void* ptr) { if (ptr) HeapFree(GetProcessHeap(), 0, ptr); }
 static int smaller(int a, int b) { return a < b ? a : b; }
+static bool same(const char* a, const char* b, int size) { for (int i = 0; i < size; ++i) if (a[i] != b[i]) return false; return true; }
 static void error(char* dest, int size, const char* text) { if (size > 0) lstrcpynA(dest, text, size); }
 static HMODULE llama, ggml;
 #define API(name) static decltype(&name) p_##name
@@ -84,7 +85,7 @@ extern "C" __declspec(dllexport) runtime* __cdecl smart_open(const char* folder,
 extern "C" __declspec(dllexport) int __cdecl smart_token_count(runtime* r, const char* prompt) {
     return -p_llama_tokenize(p_llama_model_get_vocab(r->model), prompt, lstrlenA(prompt), nullptr, 0, true, true);
 }
-extern "C" __declspec(dllexport) int __cdecl smart_generate(runtime* r, const char* prompt, int max_tokens,
+extern "C" __declspec(dllexport) int __cdecl smart_generate_v2(runtime* r, const char* prompt, int max_tokens, int protocol,
     const char* grammar, cancel_fn cancel, void* state, char* output, int capacity, char* err, int err_size) {
     const char* failure = nullptr; int length = 0;
     auto vocab = p_llama_model_get_vocab(r->model);
@@ -110,7 +111,10 @@ extern "C" __declspec(dllexport) int __cdecl smart_generate(runtime* r, const ch
         if (cancel(state)) { failure = "Cancelled."; break; }
         auto token = p_llama_sampler_sample(sampler, r->context, -1);
         if (p_llama_vocab_is_eog(vocab, token)) break;
-        char piece[512]; int bytes = p_llama_token_to_piece(vocab, token, piece, sizeof(piece), 0, false);
+        char piece[512]; int bytes = p_llama_token_to_piece(vocab, token, piece, sizeof(piece), 0, protocol == 1);
+        // Gemma hands control to the caller at this token, before any tool response.
+        // Preserve its call/string/channel markers; LFM3 keeps its existing decoding.
+        if (protocol == 1 && bytes == 16 && same(piece, "<|tool_response>", 16)) break;
         if (bytes < 0 || length+bytes >= capacity) { failure = "Output buffer exceeded."; break; }
         memcpy(output+length, piece, bytes); length += bytes;
         if (p_llama_decode(r->context, p_llama_batch_get_one(&token, 1))) failure = "Generation failed.";

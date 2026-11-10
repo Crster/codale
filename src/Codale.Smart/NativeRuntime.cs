@@ -6,6 +6,7 @@ namespace Codale.Smart;
 public interface ISmartRuntime : IDisposable
 {
     string Backend { get; }
+    void Configure(SmartModel model) { }
     void Load(string modelPath, bool gpu, CancellationToken ct);
     int CountTokens(string prompt) => Encoding.UTF8.GetByteCount(prompt);
     string Generate(string prompt, int maxTokens, CancellationToken ct, string? grammar = null);
@@ -14,14 +15,16 @@ public interface ISmartRuntime : IDisposable
 public sealed class NativeRuntime(string nativeDirectory) : ISmartRuntime
 {
     private IntPtr _handle;
+    private SmartProtocol _protocol;
+    public void Configure(SmartModel model) => _protocol = model.Protocol;
     private static bool _resolved;
     public string Backend { get; private set; } = "CPU";
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int CancelCallback(IntPtr state);
     [DllImport("codale-smart", CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr smart_open(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string folder, [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
         int gpu, CancelCallback cancel, IntPtr state, byte[] error, int errorSize);
-    [DllImport("codale-smart", CallingConvention = CallingConvention.Cdecl)] private static extern int smart_generate(
-        IntPtr runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string prompt, int maxTokens,
+    [DllImport("codale-smart", EntryPoint = "smart_generate_v2", CallingConvention = CallingConvention.Cdecl)] private static extern int smart_generate(
+        IntPtr runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string prompt, int maxTokens, int protocol,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string? grammar, CancelCallback cancel, IntPtr state, byte[] output, int capacity, byte[] error, int errorSize);
     [DllImport("codale-smart", CallingConvention = CallingConvention.Cdecl)] private static extern void smart_close(IntPtr runtime);
     [DllImport("codale-smart", CallingConvention = CallingConvention.Cdecl)] private static extern int smart_token_count(
@@ -53,7 +56,7 @@ public sealed class NativeRuntime(string nativeDirectory) : ISmartRuntime
         if (_handle == IntPtr.Zero) throw new InvalidOperationException("Model is not loaded.");
         var output = new byte[65536]; var error = new byte[1024];
         CancelCallback cancel = _ => ct.IsCancellationRequested ? 1 : 0;
-        int length = smart_generate(_handle, prompt, maxTokens, grammar, cancel, IntPtr.Zero, output, output.Length, error, error.Length);
+        int length = smart_generate(_handle, prompt, maxTokens, (int)_protocol, grammar, cancel, IntPtr.Zero, output, output.Length, error, error.Length);
         ct.ThrowIfCancellationRequested();
         if (length < 0) throw new InvalidOperationException(Text(error));
         return Encoding.UTF8.GetString(output, 0, length);

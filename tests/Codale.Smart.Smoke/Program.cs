@@ -1,18 +1,26 @@
 using Codale.Smart;
-if (args.Length < 2) throw new ArgumentException("Usage: smoke <native-directory> <model-path> [cpu|gpu] [budget-seconds=120] [protocol-only]");
+try
+{
+if (args.Length < 2) throw new ArgumentException("Usage: smoke <native-directory> <model-path> [cpu|gpu] [budget-seconds=120] [protocol-only|features-only] [model=lfm3-1.7b-q4|gemma4-e2b-q4]");
+if (args.Contains("protocol-only") && args.Contains("features-only")) throw new ArgumentException("Choose one smoke stage.");
 var taskBudget = args.FirstOrDefault(a => a.StartsWith("budget-seconds=", StringComparison.Ordinal)) is { } budget
     ? int.Parse(budget.Split('=')[1], System.Globalization.CultureInfo.InvariantCulture) : 120;
-if (!await ModelInstaller.VerifyAsync(args[1], default)) throw new InvalidDataException("Invalid smoke-test model.");
+var modelId = args.FirstOrDefault(a => a.StartsWith("model=", StringComparison.Ordinal))?["model=".Length..] ?? SmartModels.Default.Id;
+var model = SmartModels.All.Single(m => m.Id == modelId);
+Console.WriteLine($"Model: {model.Name}; CPU count: {Environment.ProcessorCount}; available memory: {GC.GetGCMemoryInfo().TotalAvailableMemoryBytes}");
+if (!await ModelInstaller.VerifyAsync(args[1], model, default)) throw new InvalidDataException("Invalid smoke-test model.");
 using var runtime = new NativeRuntime(Path.GetFullPath(args[0]));
 var watch = System.Diagnostics.Stopwatch.StartNew();
+runtime.Configure(model);
 runtime.Load(Path.GetFullPath(args[1]), args.ElementAtOrDefault(2) != "cpu", default);
 Console.WriteLine($"Loaded {runtime.Backend} in {watch.Elapsed}.");
-var prompt = "<|startoftext|><|im_start|>system\nOutput only the word READY.<|im_end|>\n<|im_start|>user\nConfirm readiness.<|im_end|>\n<|im_start|>assistant\n<think></think>";
+var readiness = SmartConversation.Create(model, "Output only the word READY.", "Confirm readiness.", false);
+var prompt = readiness.Render(runtime, 40, final: true);
 var text = runtime.Generate(prompt, 40, default);
 Console.WriteLine($"Generated: {text}");
 if (!text.Contains("READY", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Unexpected model output.");
 // Verify the pinned GGUF's actual tool protocol before integrating application callers.
-foreach (var thinking in new[] { false, true })
+if (!args.Contains("features-only")) foreach (var thinking in new[] { false, true })
 {
     using var toolDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(120));
     var folder = Directory.CreateTempSubdirectory("codale-smart-protocol-");
@@ -20,20 +28,26 @@ foreach (var thinking in new[] { false, true })
     {
         var file = Path.Combine(folder.FullName, "answer.txt");
         File.WriteAllText(file, "CODALE_TOOL_ROUNDTRIP_743");
-        var head = "<|startoftext|><|im_start|>system\nUse the read_file tool to read the requested file. " +
-            "You must call the tool before answering.\n<tools>\n" +
-            "{\"name\":\"read_file\",\"description\":\"Read a text file\",\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}}" +
-            "\n</tools><|im_end|>\n<|im_start|>user\nRead " + file.Replace('\\', '/') +
-            " and reply with its contents.<|im_end|>\n<|im_start|>assistant\n";
-        var prefix = thinking ? "<think>" : "<think></think>";
-        var call = runtime.Generate(head + prefix, 2048, toolDeadline.Token);
-        var visible = SmartExperience.Clean(prefix + call);
+        var conversation = SmartConversation.Create(model,
+            "Use read_file to read the requested file. You must call the tool before answering.\nWorking directory: " + folder.FullName,
+            "Read answer.txt in the working directory and reply with its contents.", thinking);
+        var roundWatch = System.Diagnostics.Stopwatch.StartNew();
+        var call = runtime.Generate(conversation.Render(runtime, 2048), 2048, toolDeadline.Token);
+        Console.WriteLine($"Tool call latency (thinking={thinking}): {roundWatch.Elapsed}");
+        var visible = conversation.Visible(call);
         Console.WriteLine($"Tool protocol (thinking={thinking}): {visible}");
-        if (!visible.Contains("<function=read_file>") || !visible.Contains("</tool_call>"))
-            throw new InvalidDataException("Pinned model did not produce the required tool call.");
-        var next = head + prefix + call + "<|im_end|>\n<|im_start|>tool\n<tool_response>\n" +
-            File.ReadAllText(file) + "\n</tool_response><|im_end|>\n<|im_start|>assistant\n" + prefix;
-        var answer = SmartExperience.Clean(prefix + runtime.Generate(next, 2048, toolDeadline.Token));
+        var calls = conversation.ParseCalls(visible);
+        if (calls.Count != 1 || calls[0].Name != "read_file")
+            throw new InvalidDataException("Model did not produce the required tool call.");
+        var context = new SmartRequestContext(folder.FullName, folder.FullName, "protocol");
+        if (!string.Equals(SmartTools.Resolve(context, calls[0].Arguments["path"]), file, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Tool call requested the wrong file.");
+        var outcome = await new SmartTools().ExecuteAsync(context, calls[0], toolDeadline.Token);
+        if (outcome.State != "completed" || outcome.Evidence.Count != 1) throw new InvalidDataException("Tool execution failed.");
+        conversation.Add(call, [outcome.Output]);
+        roundWatch.Restart();
+        var answer = conversation.Visible(runtime.Generate(conversation.Render(runtime, 2048), 2048, toolDeadline.Token));
+        Console.WriteLine($"Tool follow-up latency (thinking={thinking}): {roundWatch.Elapsed}");
         Console.WriteLine($"Tool follow-up: {answer}");
         if (!answer.Contains("CODALE_TOOL_ROUNDTRIP_743")) throw new InvalidDataException("Tool result was not used.");
     }
@@ -45,7 +59,8 @@ try { runtime.Generate(prompt + new string('x', 4000), 400, cancel.Token); throw
 catch (OperationCanceledException) { Console.WriteLine("Cancellation passed."); }
 runtime.Dispose();
 await using var smart = new SmartExperience(() => new LoggingRuntime(Path.GetFullPath(args[0]), args.ElementAtOrDefault(2) == "cpu"), (_, _) => Task.FromResult(Path.GetFullPath(args[1])));
-await smart.SetEnabledAsync(true);
+await smart.ConfigureAsync(true, model);
+if (smart.Status.State != SmartState.Ready) throw new InvalidDataException(smart.Status.Message);
 var loggedTools = new HashSet<string>();
 string? smokeProject = null;
 smart.ActivityChanged += (_, _) =>
@@ -73,7 +88,7 @@ try
     foreach (var thinking in new[] { false, true })
     {
         smart.Thinking = thinking;
-        SmartRequestContext Context(string task) => new(fixture.FullName, fixture.FullName, task, Deadline: DateTimeOffset.UtcNow.AddSeconds(taskBudget));
+        SmartRequestContext Context(string task) => new(fixture.FullName, fixture.FullName, task, Deadline: DateTimeOffset.UtcNow.AddSeconds(task == "summary" ? Math.Min(20, taskBudget) : taskBudget));
         var intent = await smart.ClassifyAsync(Context("routing"), "Please plan the migration before implementing anything.", null);
         Console.WriteLine($"Intent (thinking={thinking}): {intent?.Value}");
         if (intent?.Value != SmartIntent.Plan) throw new InvalidDataException("Intent classification failed.");
@@ -84,8 +99,17 @@ try
         var commit = await smart.CommitMessageAsync(Context("commit"));
         Console.WriteLine($"Commit: {commit?.Value}");
         if (string.IsNullOrWhiteSpace(commit?.Value)) throw new InvalidDataException("Commit generation failed.");
+        if (!commit.Evidence.Any(e => e.Kind == "command" && e.Command?.Contains("git diff --cached", StringComparison.Ordinal) == true))
+            throw new InvalidDataException("Commit generation did not inspect the staged diff.");
         var summary = await smart.SummarizeAsync(Context("summary"), "MathHelpers.cs");
         Console.WriteLine($"Summary: {summary?.Value}");
+        var shell = await smart.ShellCommandAsync(Context("shell"), "show git status", "powershell.exe");
+        Console.WriteLine($"Shell command: {shell?.Value}");
+        if (string.IsNullOrWhiteSpace(shell?.Value)) throw new InvalidDataException("Shell translation failed.");
+        var brief = await smart.BriefAsync(Context("brief"), "Explain the addition helper", SmartIntent.Ask,
+            "MathHelpers.cs:1-1\npublic class MathHelpers { public static int Add(int a, int b) => a + b; }");
+        Console.WriteLine($"Brief: {brief?.Value}");
+        if (string.IsNullOrWhiteSpace(brief?.Value)) throw new InvalidDataException("Brief generation failed.");
         if (string.IsNullOrWhiteSpace(summary?.Value) || !summary.Evidence.Any(e => e.Kind == "file"))
             throw new InvalidDataException("File summary tool round trip failed.");
     }
@@ -96,10 +120,24 @@ finally
     fixture.Delete(true);
 }
 
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine(ex);
+    Environment.ExitCode = 1;
+}
+finally
+{
+    using var process = System.Diagnostics.Process.GetCurrentProcess();
+    process.Refresh();
+    Console.WriteLine($"Peak working set: {process.PeakWorkingSet64}; peak private bytes: {process.PeakPagedMemorySize64}");
+}
+
 sealed class LoggingRuntime(string directory, bool forceCpu) : ISmartRuntime
 {
     private readonly NativeRuntime _runtime = new(directory);
     public string Backend => _runtime.Backend;
+    public void Configure(SmartModel model) => _runtime.Configure(model);
     public int CountTokens(string prompt) => _runtime.CountTokens(prompt);
     public void Load(string path, bool gpu, CancellationToken ct)
     {

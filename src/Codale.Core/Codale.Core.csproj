@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="TextMateSharp.Grammars" />
+    <PackageReference Include="System.Management.Automation" />
     <EmbeddedResource Include="Syntax\Bundled\*.tmLanguage.json" />
     <EmbeddedResource Include="Syntax\Bundled\catalog.json" />
     <EmbeddedResource Include="Shell\shell_risk_rules.json" LogicalName="shell_risk_rules.json" />

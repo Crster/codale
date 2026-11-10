@@ -4,6 +4,7 @@ public enum SmartIntent { Ask, Plan, Act }
 public enum SmartState { Disabled, Downloading, Loading, Ready, Error }
 public sealed record SmartStatus(SmartState State, string Message, double Progress = 0, string? Backend = null);
 public sealed record SmartCandidate(string Id, string Path);
+public sealed record SmartCommandAssessment(string Description, string Risk, string Reason);
 
 public sealed record SmartRequestContext(string Project, string Worktree, string Task, string? ChatId = null,
     DateTimeOffset? Deadline = null)
@@ -28,6 +29,8 @@ public sealed record SmartActivity(string Id, SmartRequestContext Context, DateT
 
 public interface ISmartExperience
 {
+    Task<SmartResult<SmartCommandAssessment>?> AssessCommandAsync(SmartRequestContext context, string command,
+        string baseline, CancellationToken ct = default) => Task.FromResult<SmartResult<SmartCommandAssessment>?>(null);
     SmartStatus Status { get; }
     event EventHandler? Changed;
     bool Thinking { get; set; }
@@ -36,6 +39,8 @@ public interface ISmartExperience
     Task<SmartResult<IReadOnlyList<string>>?> RankAsync(SmartRequestContext context, string query, IReadOnlyList<SmartCandidate> candidates, CancellationToken ct = default);
     Task<SmartResult<SmartIntent?>?> ClassifyAsync(SmartRequestContext context, string message, string? previousReply, CancellationToken ct = default);
     Task<SmartResult<string>?> CommitMessageAsync(SmartRequestContext context, CancellationToken ct = default);
+    Task<SmartResult<string>?> ShellCommandAsync(SmartRequestContext context, string request, string shell, CancellationToken ct = default) =>
+        Task.FromResult<SmartResult<string>?>(null);
     Task<IReadOnlyList<SmartEvidence>> DiscoveriesAsync(SmartRequestContext context, string query, CancellationToken ct = default);
     /// <summary>The task brief for the agent CLI (see <see cref="SmartBrief"/>), written from verified <paramref name="material"/>; null when unavailable.</summary>
     Task<SmartResult<string>?> BriefAsync(SmartRequestContext context, string request, SmartIntent intent, string material, CancellationToken ct = default) =>

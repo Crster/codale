@@ -1959,7 +1959,7 @@
                             VerticalContentAlignment="Center"
                             FontFamily="Cascadia Code, Consolas"
                             FontSize="12"
-                            PlaceholderText="Run shell command (e.g. ls)…"
+                            PlaceholderText="Run a command or describe a task (Smart)…"
                             UpdateTextOnSelect="False"
                             TextChanged="OnStatusBarCommandBoxTextChanged"
                             QuerySubmitted="OnStatusBarCommandBoxQuerySubmitted"

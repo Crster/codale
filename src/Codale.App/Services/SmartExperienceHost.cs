@@ -10,6 +10,7 @@ public static class SmartExperienceHost
         Path.Combine(AppContext.BaseDirectory, "SmartNative"),
         Path.Combine(McpServerSettings.CodaleDataRoot(), "smart", "history"));
     private static bool _started, _enabled;
+    private static string? _modelId;
     public static void Start()
     {
         if (_started) return;
@@ -21,10 +22,12 @@ public static class SmartExperienceHost
     {
         Instance.Thinking = AppSettings.SmartThinking;
         var enabled = AppSettings.SmartExperience;
-        if (enabled == _enabled) return;
+        var model = SmartModels.Resolve(AppSettings.SmartModel);
+        if (enabled == _enabled && model.Id == _modelId) return;
         _enabled = enabled;
-        _ = Instance.SetEnabledAsync(enabled);
+        _modelId = model.Id;
+        _ = Instance.ConfigureAsync(enabled, model);
     }
     public static void Cancel() { AppSettings.SmartExperience = false; }
-    public static void Retry() { if (AppSettings.SmartExperience) _ = Instance.SetEnabledAsync(true); }
+    public static void Retry() { if (AppSettings.SmartExperience) _ = Instance.ConfigureAsync(true, SmartModels.Resolve(AppSettings.SmartModel)); }
 }

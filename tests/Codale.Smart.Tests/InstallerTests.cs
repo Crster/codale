@@ -8,6 +8,27 @@ public sealed class InstallerTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("codale-model-tests-").FullName;
     [Fact]
+    public async Task Models_have_independent_verified_caches_and_pinned_download_sources()
+    {
+        byte[] data = [1, 2, 3, 4];
+        var hash = Convert.ToHexString(SHA256.HashData(data));
+        var handler = new Handler(() => new(HttpStatusCode.OK) { Content = new ByteArrayContent(data) });
+        using var http = new HttpClient(handler);
+        var first = SmartModels.Default with { Size = data.Length, Sha256 = hash };
+        var second = SmartModels.Gemma4 with { Size = data.Length, Sha256 = hash };
+        var a = new ModelInstaller(_root, first, http);
+        var b = new ModelInstaller(_root, second, http);
+        Assert.Equal(Path.Combine(_root, ModelInstaller.Revision, ModelInstaller.FileName), a.ModelPath);
+        Assert.NotEqual(a.ModelPath, b.ModelPath);
+        await Task.WhenAll(a.EnsureAsync(null, default), b.EnsureAsync(null, default));
+        Assert.Contains(first.DownloadUrl, handler.Urls);
+        Assert.Contains(second.DownloadUrl, handler.Urls);
+        handler.Reply = () => throw new HttpRequestException("offline");
+        Assert.True(await ModelInstaller.VerifyAsync(a.ModelPath, first, default));
+        Assert.Equal(b.ModelPath, await b.EnsureAsync(null, default));
+        Assert.Equal(2, handler.Calls);
+    }
+    [Fact]
     public async Task Verified_download_is_reused_offline()
     {
         byte[] data = [1, 2, 3, 4];
@@ -48,9 +69,10 @@ public sealed class InstallerTests : IDisposable
     private sealed class Handler(Func<HttpResponseMessage> reply) : HttpMessageHandler
     {
         public int Calls;
+        public readonly List<string> Urls = [];
         public Func<HttpResponseMessage> Reply = reply;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
-        { Calls++; return Task.FromResult(Reply()); }
+        { Calls++; Urls.Add(request.RequestUri!.AbsoluteUri); return Task.FromResult(Reply()); }
     }
     private sealed class CancelStream(CancellationTokenSource cancel) : MemoryStream
     {

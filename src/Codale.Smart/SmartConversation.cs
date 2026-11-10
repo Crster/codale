@@ -6,9 +6,22 @@ namespace Codale.Smart;
 
 internal sealed record SmartToolCall(string Name, IReadOnlyDictionary<string, string> Arguments);
 
-/// <summary>The text/tool subset of the chat template embedded in the pinned GGUF.</summary>
-internal sealed class SmartConversation(string system, string input, bool thinking)
+internal interface ISmartConversation
 {
+    string Render(ISmartRuntime runtime, int reserve, bool final = false);
+    string Visible(string response);
+    string FinalVisible(string response);
+    IReadOnlyList<SmartToolCall> ParseCalls(string visible);
+    void Add(string response, IReadOnlyList<string> results);
+}
+
+/// <summary>The text/tool subset of the chat template embedded in the pinned GGUF.</summary>
+internal sealed class SmartConversation(string system, string input, bool thinking) : ISmartConversation
+{
+    public static ISmartConversation Create(SmartModel model, string system, string input, bool thinking) =>
+        model.Protocol == SmartProtocol.Gemma4 ? new GemmaConversation(system, input, thinking) : new SmartConversation(system, input, thinking);
+    public string FinalVisible(string response) => WithoutReasoning("<think></think>" + response);
+    public IReadOnlyList<SmartToolCall> ParseCalls(string visible) => Parse(visible);
     private readonly List<(string Assistant, string Results)> _exchanges = [];
     public static string Escape(string value) => value.Replace("<|", "< |", StringComparison.Ordinal);
     public string AssistantPrefix => thinking ? "<think>" : "<think></think>";

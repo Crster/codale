@@ -27,22 +27,6 @@ public sealed class SmartRetrievalTests : IDisposable
         Assert.True(System.Text.Encoding.UTF8.GetByteCount(result.Text) <= ProjectKnowledgeIndex.MaxContextBytes);
     }
     [Fact]
-    public async Task Source_changed_during_ranking_is_not_sent_from_the_old_basic_result()
-    {
-        var path = Path.Combine(_root, "Widget.cs");
-        File.WriteAllText(path, "public class Widget { public void RenderWidget() { OldImplementation(); } }");
-        await _index.RefreshAsync(_root);
-        _index.Smart = new FakeSmart { Rank = async (_, _) =>
-        {
-            File.WriteAllText(path, "public class Widget { public void RenderWidget() { FreshImplementation(); } }");
-            await _index.RefreshAsync(_root);
-            return null;
-        } };
-        var result = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default);
-        Assert.DoesNotContain("OldImplementation", result.Text);
-        Assert.Contains("FreshImplementation", result.Text);
-    }
-    [Fact]
     public async Task Model_order_is_applied_to_fresh_context()
     {
         File.WriteAllText(Path.Combine(_root, "Alpha.cs"), "public class Alpha { public void RenderWidget() {} }");
@@ -85,69 +69,33 @@ public sealed class SmartRetrievalTests : IDisposable
         public Task<IReadOnlyList<SmartEvidence>> DiscoveriesAsync(SmartRequestContext context, string query, CancellationToken ct = default) => Task.FromResult(Historical);
     }
     [Fact]
-    public async Task Current_and_background_evidence_reach_the_briefing_and_are_deduplicated()
-    {
-        var observation = new SmartEvidence("command", _root, "RenderWidget tests passed", DateTimeOffset.UtcNow.AddMinutes(-5), Command: "dotnet test", ExitCode: 0);
-        _index.Smart = new FakeSmart { Rank = (c, _) => Task.FromResult<IReadOnlyList<string>?>(c.Select(x => x.Id).ToArray()), Evidence = [observation], Historical = [observation] };
-        var result = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default);
-        Assert.Contains("RenderWidget tests passed", result.Text); Assert.Contains("Historical command observation", result.Text);
-        Assert.Equal("test", result.SmartActivityId); Assert.Single(result.Keys);
-        var next = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", result.Keys.ToHashSet(), null, null, default);
-        Assert.DoesNotContain("RenderWidget tests passed", next.Text);
-    }
-
-    [Fact]
-    public async Task Large_discoveries_fit_the_smart_budget_and_failures_keep_the_basic_budget()
-    {
-        File.WriteAllText(Path.Combine(_root, "Widget.cs"), "public class Widget { public void RenderWidget() {} }");
-        await _index.RefreshAsync(_root);
-        var smart = new FakeSmart
-        {
-            Rank = (c, _) => Task.FromResult<IReadOnlyList<string>?>(c.Select(x => x.Id).ToArray()),
-            Evidence = Enumerable.Range(0, 8).Select(i => new SmartEvidence("command", _root, new string('水', 2000), DateTimeOffset.UtcNow.AddMinutes(-i), Command: "test" + i, ExitCode: 0)).ToArray()
-        };
-        _index.Smart = smart;
-        var result = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default);
-        Assert.True(System.Text.Encoding.UTF8.GetByteCount(result.Text) <= SmartContext.MaxBytes);
-        Assert.Equal("Smart exploration", result.Method);
-        smart.Rank = (_, _) => Task.FromResult<IReadOnlyList<string>?>(null);
-        var fallback = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default);
-        Assert.True(System.Text.Encoding.UTF8.GetByteCount(fallback.Text) <= ProjectKnowledgeIndex.MaxContextBytes);
-        Assert.Contains("RenderWidget", fallback.Text); Assert.Null(fallback.SmartActivityId);
-    }
-
-    [Fact]
-    public async Task Auto_intent_puts_the_brief_ahead_of_the_verified_context_and_other_modes_get_none()
-    {
-        File.WriteAllText(Path.Combine(_root, "Widget.cs"), "public class Widget { public void RenderWidget() {} }");
-        await _index.RefreshAsync(_root);
-        var smart = new FakeSmart
-        {
-            Rank = (c, _) => Task.FromResult<IReadOnlyList<string>?>(c.Select(x => x.Id).ToArray()),
-            Brief = _ => "Task: change RenderWidget\nWhere:\n- Widget.cs:1-1 — RenderWidget body",
-        };
-        _index.Smart = smart;
-        var plain = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default);
-        Assert.Equal(0, smart.Briefs);
-        Assert.DoesNotContain("Task:", plain.Text);
-        var auto = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default, intent: SmartIntent.Act);
-        Assert.StartsWith("Task: change RenderWidget", auto.Text);
-        Assert.Contains("public class Widget", auto.Text);
-        Assert.Equal(auto.Text, (await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default, intent: SmartIntent.Act)).Text);
-        // Everything is already in the conversation: nothing new to brief.
-        var again = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", auto.Keys.ToHashSet(), null, null, default, intent: SmartIntent.Act);
-        Assert.DoesNotContain("Task:", again.Text);
-    }
-
-    [Fact]
-    public async Task A_missing_or_failed_brief_leaves_the_verified_context_intact()
+    public async Task Smart_context_is_pointers_not_code_and_reflects_the_model_order()
     {
         File.WriteAllText(Path.Combine(_root, "Widget.cs"), "public class Widget { public void RenderWidget() {} }");
         await _index.RefreshAsync(_root);
         _index.Smart = new FakeSmart { Rank = (c, _) => Task.FromResult<IReadOnlyList<string>?>(c.Select(x => x.Id).ToArray()) };
+        var result = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default);
+        Assert.Contains("Widget.cs", result.Text);
+        Assert.DoesNotContain("```", result.Text);
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(result.Text) <= ProjectKnowledgeIndex.MaxContextBytes);
+    }
+
+    [Fact]
+    public async Task A_failed_or_slow_rank_falls_back_to_the_index_order_and_no_brief_is_requested()
+    {
+        File.WriteAllText(Path.Combine(_root, "Widget.cs"), "public class Widget { public void RenderWidget() {} }");
+        File.WriteAllText(Path.Combine(_root, "Gadget.cs"), "public class Gadget { public void RenderWidget() {} }");
+        await _index.RefreshAsync(_root);
+        var smart = new FakeSmart { Rank = (_, _) => Task.FromResult<IReadOnlyList<string>?>(null) };
+        _index.Smart = smart;
         var result = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default, intent: SmartIntent.Act);
-        Assert.DoesNotContain("Task:", result.Text);
+        Assert.Null(result.SmartActivityId);
         Assert.Contains("RenderWidget", result.Text);
+        Assert.Equal(0, smart.Briefs);
+        smart.Rank = (c, _) => Task.FromResult<IReadOnlyList<string>?>(c.Select(x => x.Id).ToArray());
+        var ranked = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default, intent: SmartIntent.Act);
+        Assert.Equal("Smart rerank", ranked.Method);
+        Assert.Equal(0, smart.Briefs);
     }
     [Fact]
     public async Task Indexing_reports_busy_then_idle_even_when_the_snapshot_is_reused()

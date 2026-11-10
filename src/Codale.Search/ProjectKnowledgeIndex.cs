@@ -307,8 +307,9 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
     /// </summary>
     /// <param name="workingSet">Files the current session wrote, newest first; empty on a new topic.</param>
     public RetrievalResult Retrieve(string worktree, string prompt, string recent, IReadOnlySet<string> delivered, string? currentSessionId = null,
-        IReadOnlyList<string>? workingSet = null, IReadOnlyList<string>? preferredChunkIds = null)
+        IReadOnlyList<string>? workingSet = null, IReadOnlyList<string>? preferredChunkIds = null, bool pointersOnly = false)
     {
+        const int MaxPointers = 6;
         var timer = Stopwatch.StartNew();
         worktree = ProjectPaths.Normalize(worktree);
         Warm(worktree);
@@ -426,9 +427,20 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
         //    per file so one file cannot crowd out the rest. Chunks overlapping a window add nothing.
         var snippets = 0;
         var header = false;
+        var pointers = new List<string>();
+        var pointerKeys = new List<string>();
         bool Excerpt(string rawPath, string hash, int start, int end, string code, int? keyStart = null)
         {
             var path = rawPath.Replace('\\', '/');
+            if (pointersOnly)
+            {
+                // A starting point, not the code: the agent reads the range with its own tools.
+                var pointerKey = $"source:{rawPath}:{hash}:{keyStart ?? start}";
+                if (pointers.Count >= MaxPointers || delivered.Contains(pointerKey) || pointerKeys.Contains(pointerKey)) return false;
+                pointers.Add($"- {path}:{start}-{end}");
+                pointerKeys.Add(pointerKey);
+                return true;
+            }
             // One label for all excerpts: they are already read, so the agent edits from them (read ranges only if its tools demand it).
             var label = header ? "" : "Already read (current):\n";
             if (!Add([$"source:{rawPath}:{hash}:{keyStart ?? start}"], $"{label}{path}:{start}-{end}\n```\n{code}\n```", MaxContextBytes)) return false;
@@ -452,6 +464,8 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
             if (windows.Any(w => w.Path == chunk.Path && w.Start <= endLine && chunk.StartLine <= w.End)) continue;
             Excerpt(chunk.Path, chunk.Hash, chunk.StartLine, endLine, chunk.Text);
         }
+        if (pointers.Count > 0 && Add(pointerKeys, "Start here (best match first; read these ranges):\n" + string.Join("\n", pointers), MaxContextBytes))
+            snippets = pointers.Count;
         return new RetrievalResult(text.ToString().TrimEnd(), keys, bytes, timer.ElapsedMilliseconds)
         {
             Files = files,

@@ -5,8 +5,8 @@ namespace Codale.Search;
 
 public sealed partial class ProjectKnowledgeIndex
 {
-    /// <summary>Longest the model may spend writing the brief; past it the verified context goes out as it is.</summary>
-    private static readonly TimeSpan BriefBudget = TimeSpan.FromSeconds(12);
+    /// <summary>Longest the model may spend reordering the index's candidates; past it the index order goes out as it is.</summary>
+    private static readonly TimeSpan RankBudget = TimeSpan.FromSeconds(3);
     public ISmartExperience? Smart { get; set; }
     public SummaryCache? Summaries { get; set; }
     public string? SmartProjectRoot { get; set; }
@@ -91,44 +91,25 @@ public sealed partial class ProjectKnowledgeIndex
         CancellationToken ct, DateTimeOffset? deadline = null, string? chatId = null, SmartIntent? intent = null)
     {
         var timer = System.Diagnostics.Stopwatch.StartNew();
-        // Always retain a complete basic result before attempting model inference.
-        Task<RetrievalResult> BasicAsync() => Task.Run(() => Retrieve(worktree, prompt, recent, delivered, currentSessionId, workingSet));
-        var basic = await BasicAsync().ConfigureAwait(false);
-        if (Smart?.Status.State != SmartState.Ready || ct.IsCancellationRequested) return basic;
+        // The index answers on its own, as pointers (ranges to open, never the code). The model only reorders them,
+        // within a short budget; if it is slow or fails, the index order goes out as it is.
+        var basicTask = Task.Run(() => Retrieve(worktree, prompt, recent, delivered, currentSessionId, workingSet, pointersOnly: true));
+        if (Smart?.Status.State != SmartState.Ready || ct.IsCancellationRequested) return await basicTask.ConfigureAwait(false);
         try
         {
-            var chunks = await Task.Run(() => Search(worktree, prompt, recent, 8, 2), ct).ConfigureAwait(false);
+            var chunksTask = Task.Run(() => Search(worktree, prompt, recent, 8, 2), ct);
+            var chunks = await chunksTask.ConfigureAwait(false);
+            if (chunks.Count < 2) return await basicTask.ConfigureAwait(false); // nothing to reorder
             var candidates = chunks.Select(c => new SmartCandidate(c.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), c.Path)).ToList();
-            var context = new SmartRequestContext(SmartProjectRoot ?? worktree, worktree, "context", chatId ?? currentSessionId, deadline);
+            var budget = DateTimeOffset.UtcNow.Add(RankBudget);
+            var context = new SmartRequestContext(SmartProjectRoot ?? worktree, worktree, "context", chatId ?? currentSessionId,
+                deadline is { } d && d < budget ? d : budget);
             var ranked = await Smart.RankAsync(context, prompt, candidates, ct).WaitAsync(ct).ConfigureAwait(false);
-            if (ranked?.Value is null || ct.IsCancellationRequested || Smart.Status.State != SmartState.Ready) return await BasicAsync().ConfigureAwait(false);
-            // Retrieve rebuilds the context with fresh, hash-verified source and the existing byte limits.
+            if (ranked?.Value is null || ct.IsCancellationRequested || Smart.Status.State != SmartState.Ready) return await basicTask.ConfigureAwait(false);
             var fresh = await Task.Run(() => Retrieve(worktree, prompt, recent, delivered, currentSessionId, workingSet,
-                preferredChunkIds: ranked.Value)).ConfigureAwait(false);
-            var historical = await Smart.DiscoveriesAsync(context, prompt, ct).ConfigureAwait(false);
-            var discovered = await SmartContext.BuildAsync(ranked.Evidence.Concat(historical), delivered, fresh.Text, fresh.Keys, ct).ConfigureAwait(false);
-            var includesBasic = fresh.Keys.Count > 0 && fresh.Keys.All(discovered.Keys.Contains);
-            // Auto mode already read the request's intent. The model turns the verified material into a brief of
-            // where to act and what to respect, so the agent has an answer to follow rather than a list to search.
-            // Nothing new to say (everything already delivered) means no brief, and a slow or unverifiable one is dropped.
-            var text = discovered.Text;
-            if (intent is { } routed && text.Length > 0)
-            {
-                var budget = DateTimeOffset.UtcNow.Add(BriefBudget);
-                var briefContext = context with { Deadline = deadline is { } d && d < budget ? d : budget };
-                try
-                {
-                    var brief = await Smart.BriefAsync(briefContext, prompt, routed, text, ct).WaitAsync(ct).ConfigureAwait(false);
-                    if (brief?.Value is { Length: > 0 } written) text = written + "\n\n" + text;
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException) { }
-            }
-            return fresh with { Text = text, Keys = discovered.Keys, Tokens = System.Text.Encoding.UTF8.GetByteCount(text),
-                Files = discovered.Files.Concat(includesBasic ? fresh.Files : []).Distinct().ToArray(), Snippets = discovered.Snippets + (includesBasic ? fresh.Snippets : 0),
-                Findings = discovered.Findings + (includesBasic ? fresh.Findings : 0), Method = "Smart exploration", SmartActivityId = ranked.ActivityId,
-                ElapsedMilliseconds = timer.ElapsedMilliseconds };
+                preferredChunkIds: ranked.Value, pointersOnly: true)).ConfigureAwait(false);
+            return fresh with { Method = "Smart rerank", SmartActivityId = ranked.ActivityId, ElapsedMilliseconds = timer.ElapsedMilliseconds };
         }
-        catch (OperationCanceledException) { return await BasicAsync().ConfigureAwait(false); }
-        catch (Exception) { return await BasicAsync().ConfigureAwait(false); }
+        catch (Exception) { return await basicTask.ConfigureAwait(false); }
     }
 }

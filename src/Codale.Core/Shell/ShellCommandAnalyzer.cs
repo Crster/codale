@@ -158,12 +158,13 @@ public static class ShellCommandAnalyzer
 
         var findings = Analyze(trimmed, cwd, extraRoots);
         var risk = Verdict(findings);
+        var verifiedInspection = risk == ShellRisk.Safe && PlanningShellPolicy.AllowsInspection(trimmed);
         var reason = findings.Count > 0
             ? string.Join("; ", findings.Select(f => f.Reason).Distinct())
-            : ShellCommandSummary.DescribeSafetyReason(trimmed);
+            : verifiedInspection ? "Reads files and prints selected lines" : ShellCommandSummary.DescribeSafetyReason(trimmed);
         var description = !string.IsNullOrWhiteSpace(hint) && IsMeaningfulHint(hint, trimmed)
             ? CleanSentence(hint, MaxDescriptionChars)
-            : ShellCommandSummary.DescribeIntent(trimmed);
+            : verifiedInspection ? "Inspect files and print selected lines" : ShellCommandSummary.DescribeIntent(trimmed);
 
         return new ShellAssessment(description, risk, reason);
     }
@@ -581,6 +582,7 @@ public static class ShellCommandSummary
     /// </summary>
     public static string DescribeIntent(string command)
     {
+        command = UnwrapShellCommand(command);
         var actions = new List<string>();
         foreach (var segment in ShellCommandAnalyzer.SplitSegments(command))
         {
@@ -611,7 +613,8 @@ public static class ShellCommandSummary
     /// <summary>A brief reason for a <see cref="ShellRisk.Safe"/> command before the helper model replies.</summary>
     public static string DescribeSafetyReason(string command)
     {
-        if (IsEveryday(command))
+        command = UnwrapShellCommand(command);
+        if (PlanningShellPolicy.AllowsInspection(command))
         {
             return "reads or inspects workspace files only";
         }
@@ -627,7 +630,7 @@ public static class ShellCommandSummary
             "dotnet" or "msbuild" or "cargo" or "go" or " tsc" => "builds or tests the project locally",
             "npm" or "pnpm" or "yarn" or "bun" => "runs a project script or test locally",
             "pytest" or "jest" or "vitest" or "xunit" => "runs tests locally",
-            _ => "runs within the workspace with no risky flags matched",
+            _ => "no risk rule matched; command effects have not been verified",
         };
     }
 

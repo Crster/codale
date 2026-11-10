@@ -44,7 +44,7 @@ public sealed class ExplorationTests : IDisposable
     public async Task Every_task_can_explore_then_emit_a_validated_final_answer(bool thinking)
     {
         FileAt("sample.cs", "public class Sample { public bool Thinking; }");
-        foreach (var task in new[] { "routing", "context", "summary", "commit" })
+        foreach (var task in new[] { "summary", "commit" })
         {
             int round = 0;
             var runtime = new Runtime((_, grammar) => grammar is null && round++ == 0
@@ -234,11 +234,22 @@ public sealed class ExplorationTests : IDisposable
     }
 
     [Fact]
+    public async Task Routing_and_context_ranking_never_call_tools()
+    {
+        FileAt("sample.cs", "public class Sample { }");
+        var runtime = new Runtime((_, grammar) => { Assert.NotNull(grammar); return grammar.Contains("intent") ? "{\"intent\":\"plan\"}" : "[\"a\"]"; });
+        await using var smart = await Ready(runtime);
+        Assert.Equal(SmartIntent.Plan, (await smart.ClassifyAsync(Context("routing"), "plan thinking", null))?.Value);
+        Assert.Equal("a", (await smart.RankAsync(Context("context"), "thinking", [new("a", "sample.cs")]))?.Value?[0]);
+        Assert.All(smart.Activities(_root), a => Assert.Empty(a.Tools ?? []));
+    }
+
+    [Fact]
     public async Task Tool_rounds_are_capped_and_final_validation_remains_strict()
     {
         var runtime = new Runtime((_, grammar) => grammar is null ? Call("unknown") : "invalid");
         await using var smart = await Ready(runtime);
-        Assert.Null(await smart.ClassifyAsync(Context(), "plan this", null));
+        Assert.Null(await smart.CommitMessageAsync(Context()));
         var activity = Assert.Single(smart.Activities(_root));
         Assert.Equal(8, activity.Tools!.Count); Assert.Equal("error", activity.State);
         Assert.Contains("validation", activity.Error);

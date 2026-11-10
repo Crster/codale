@@ -15,7 +15,7 @@ internal sealed class SmartTools(TimeSpan? commandTimeout = null)
     private const int MaxFileBytes = 16 * 1024 * 1024;
     private static object Schema(string name, string description, object properties, string[] required) =>
         new { name, description, parameters = new { type = "object", properties, required, additionalProperties = false } };
-    public static readonly string Schemas = "<tools>\n" + string.Join("\n", new[]
+    internal static readonly object[] Definitions =
     {
         Schema("list_directory", "List files and directories; path defaults to the working directory.", new { path = new { type = "string" } }, []),
         Schema("search_files", "Find file paths matching a name, substring or glob. Set content=true to search literal file contents. Bounded results; narrow the path if truncated.",
@@ -24,7 +24,8 @@ internal sealed class SmartTools(TimeSpan? commandTimeout = null)
         { path = new { type = "string" }, start_line = new { type = "integer" }, line_count = new { type = "integer" } }, ["path"]),
         Schema("run_shell", "Execute a noninteractive shell command. Default cwd is the active worktree. Commands may change files. Maximum 60 seconds and bounded output.",
             new { command = new { type = "string" }, cwd = new { type = "string" } }, ["command"])
-    }.Select(s => JsonSerializer.Serialize(s))) + "\n</tools>";
+    };
+    public static readonly string Schemas = "<tools>\n" + string.Join("\n", Definitions.Select(s => JsonSerializer.Serialize(s))) + "\n</tools>";
 
     public static string Resolve(SmartRequestContext context, string? path) =>
         Path.GetFullPath(string.IsNullOrWhiteSpace(path) ? "." : path, context.WorkingDirectory);

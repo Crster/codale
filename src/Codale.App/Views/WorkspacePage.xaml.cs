@@ -71,6 +71,7 @@ public sealed partial class WorkspacePage : Page
         Loaded += (_, _) => MarkdownView.FileLinkClicked += OnMarkdownFileLink;
         Unloaded += (_, _) =>
         {
+            _commandTranslationCts?.Cancel();
             MarkdownView.FileLinkClicked -= OnMarkdownFileLink;
             RemoveHandler(PointerPressedEvent, _outsidePointerPressedHandler);
         };
@@ -129,6 +130,7 @@ public sealed partial class WorkspacePage : Page
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
+        _commandTranslationCts?.Cancel();
         base.OnNavigatedFrom(e);
         SmartActivityFlyout.Hide();
 
@@ -4059,7 +4061,58 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
+    private CancellationTokenSource? _commandTranslationCts;
+
     private async Task ExecuteStatusBarCommandAsync(string rawCommand)
+    {
+        if (_commandTranslationCts is not null || string.IsNullOrWhiteSpace(rawCommand)) return;
+        var command = rawCommand.Trim();
+        var shell = Codale.Terminal.TerminalSession.ResolveShell(AppSettings.TerminalShell);
+        if (AppSettings.SmartExperience && SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready)
+        {
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            _commandTranslationCts = cancellation;
+            var cwd = _terminalCwd;
+            var workspace = ViewModel;
+            var placeholder = StatusBarCommandBox.PlaceholderText;
+            StatusBarCommandBox.IsEnabled = false;
+            StatusBarRunButton.IsEnabled = false;
+            StatusBarRunProgress.Visibility = Visibility.Visible;
+            StatusBarCommandBox.PlaceholderText = "Translating with LFM3…";
+            try
+            {
+                var result = await SmartExperienceHost.Instance.ShellCommandAsync(
+                    new(workspace.ProjectPath, cwd, "shell-command", Deadline: DateTimeOffset.UtcNow.AddSeconds(30)),
+                    command, shell, cancellation.Token);
+                if (cancellation.IsCancellationRequested || !IsLoaded || ViewModel != workspace || _terminalCwd != cwd) return;
+                if (result?.Value is not { Length: > 0 } translated)
+                {
+                    OpenTerminalDrawer();
+                    TerminalDrawerCommandText.Text = rawCommand;
+                    TerminalDrawerSpinner.IsActive = false;
+                    TerminalDrawerSpinner.Visibility = Visibility.Collapsed;
+                    TerminalDrawerStatusIcon.Visibility = Visibility.Collapsed;
+                    TerminalDrawerStatusText.Text = "Translation failed";
+                    TerminalDrawerOutputBox.Text = "LFM3 could not translate this request. Rephrase it and try again.";
+                    return;
+                }
+                command = translated;
+                SetStatusBarCommandText(command);
+            }
+            catch (OperationCanceledException) { return; }
+            finally
+            {
+                _commandTranslationCts = null;
+                StatusBarCommandBox.IsEnabled = true;
+                StatusBarRunButton.IsEnabled = true;
+                if (_activeCommandProcess is null) StatusBarRunProgress.Visibility = Visibility.Collapsed;
+                StatusBarCommandBox.PlaceholderText = placeholder;
+            }
+        }
+        await RunStatusBarCommandAsync(command, shell);
+    }
+
+    private async Task RunStatusBarCommandAsync(string rawCommand, string shell)
     {
         var command = rawCommand.Trim();
         if (string.IsNullOrWhiteSpace(command))
@@ -4131,8 +4184,6 @@ public sealed partial class WorkspacePage : Page
         try
         {
             var outputBuilder = new StringBuilder();
-            var shell = Codale.Terminal.TerminalSession.ResolveDefaultShell();
-
             var startInfo = new ProcessStartInfo
             {
                 FileName = shell,
@@ -4164,6 +4215,23 @@ public sealed partial class WorkspacePage : Page
             var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
             _activeCommandProcess = process;
 
+            // Large listings (a recursive directory walk) used to rebuild and re-render the whole
+            // output on every line, which froze and eventually crashed the app. Cap the buffer and
+            // coalesce UI refreshes so at most one is queued at a time.
+            const int MaxOutputChars = 200_000;
+            var truncated = false;
+            var refreshQueued = 0;
+
+            string SnapshotOutput()
+            {
+                lock (outputBuilder)
+                {
+                    return truncated
+                        ? outputBuilder + $"{Environment.NewLine}… output truncated at {MaxOutputChars:N0} characters"
+                        : outputBuilder.ToString();
+                }
+            }
+
             void AppendOutput(string? line)
             {
                 if (line is null)
@@ -4172,19 +4240,28 @@ public sealed partial class WorkspacePage : Page
                 }
 
                 var clean = Codale.Core.Agents.BackgroundTaskDetector.StripAnsi(line);
-                string text;
                 // stdout and stderr callbacks arrive on separate threads; StringBuilder isn't thread-safe.
                 lock (outputBuilder)
                 {
-                    outputBuilder.AppendLine(clean);
-                    text = outputBuilder.ToString();
+                    if (outputBuilder.Length >= MaxOutputChars)
+                    {
+                        truncated = true;
+                    }
+                    else
+                    {
+                        outputBuilder.AppendLine(clean);
+                    }
                 }
 
-                DispatcherQueue.TryEnqueue(() =>
+                if (Interlocked.Exchange(ref refreshQueued, 1) == 0)
                 {
-                    TerminalDrawerOutputBox.Text = text;
-                    TerminalDrawerScrollViewer.ChangeView(null, TerminalDrawerScrollViewer.ScrollableHeight, null);
-                });
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        Interlocked.Exchange(ref refreshQueued, 0);
+                        TerminalDrawerOutputBox.Text = SnapshotOutput();
+                        TerminalDrawerScrollViewer.ChangeView(null, TerminalDrawerScrollViewer.ScrollableHeight, null);
+                    });
+                }
             }
 
             process.OutputDataReceived += (_, args) => AppendOutput(args.Data);
@@ -4229,10 +4306,9 @@ public sealed partial class WorkspacePage : Page
                     TerminalDrawerStatusText.Text = $"Exit {exitCode} · {elapsed}";
                 }
 
-                if (outputBuilder.Length == 0)
-                {
-                    TerminalDrawerOutputBox.Text = "(Command executed with no output)";
-                }
+                TerminalDrawerOutputBox.Text = outputBuilder.Length == 0
+                    ? "(Command executed with no output)"
+                    : SnapshotOutput();
             });
         }
         catch (OperationCanceledException)
@@ -4503,6 +4579,7 @@ public sealed partial class WorkspacePage : Page
 
     private void OnTerminalDrawerStopClick(object sender, RoutedEventArgs e)
     {
+        _commandTranslationCts?.Cancel();
         _commandRunCts?.Cancel();
         try
         {

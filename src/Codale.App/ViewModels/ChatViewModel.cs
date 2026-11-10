@@ -3471,9 +3471,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        // Ask mode backs its instruction with enforcement: anything the CLI had to ask
-        // about is an action, and the answer is no - without bothering the reader,
-        // except shell commands (below).
+        // Ask mode allows verified reads through the shared inspection fast path below.
+        // Other actions remain subject to Ask enforcement, except shell commands (below).
         // Questions for the user are conversation, not action, so they still get through.
         // Looking things up on the web reads, it changes nothing, and it often makes the
         // answer: ask mode lets it through unasked.
@@ -3495,13 +3494,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // Risk "Safe" is insufficient here: it also includes builds and unknown programs.
         var requiresPlanApproval = PermissionMode == "plan" &&
             approval.ToolName is "Edit" or "Write" or "MultiEdit" or "NotebookEdit" or "Bash" or "PowerShell" or "Permissions";
-        if ((PermissionMode == "plan" || IsAutomaticMode) &&
-            PlanningShellPolicy.AllowsToolInspection(approval.ToolName, shellCommand))
-        {
-            if (_session is { } planning)
+        if (await PlanningApproval.TryApproveInspectionAsync(
+            PermissionMode, IsAutomaticMode, approval.ToolName, shellCommand, async () =>
             {
-                await planning.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
-            }
+                if (_session is { } planning)
+                    await planning.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
+            }))
+        {
             return;
         }
 
@@ -3604,6 +3603,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         };
         pending.Approval = approvalItem;
 
+        // Show the deterministic assessment immediately. Optional local inference only
+        // improves a visible confirmation; it never changes automatic approval decisions.
+        using var assessmentDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        if (mcpRisk is null && ToolCallItem.IsShellName(approval.ToolName) &&
+            shellCommand is { Length: > 0 and <= 12000 } && AppSettings.SmartExperience &&
+            SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready)
+            _ = EnhanceConfirmationAsync(pending, approvalItem, answered.Task, shellCommand, shellAssessment, assessmentDeadline.Token);
+
         // The turn is blocked on the reader from here: say so, in case they are elsewhere.
         AttentionNeeded?.Invoke(this, pending.Approval switch
         {
@@ -3616,7 +3623,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 $"{permission.QuestionHeader} {(permission.Description.Length > 0 ? permission.Description : pending.Target)}".Trim()),
         });
 
-        var decision = await answered.Task;
+        ApprovalDecision decision;
+        try { decision = await answered.Task; }
+        finally { assessmentDeadline.Cancel(); }
 
         _approvals.Remove(approval.RequestId);
         OnApprovalsChanged();
@@ -3986,6 +3995,35 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             using var stopped = new CancellationTokenSource();
             using var routing = CancellationTokenSource.CreateLinkedTokenSource(preparation.Token, stopped.Token);
             _briefing = stopped;
+
+            // Show the prompt at once; routing and context retrieval happen under it.
+            var composerAttachments = Attachments.ToList();
+            var shown = new UserMessageItem { Text = text, Attachments = attachments };
+            Draft = "";
+            Attachments.Clear();
+            Add(shown);
+            TrimTranscript();
+            _preShown = (shown, composerAttachments);
+            try
+            {
+                await RouteAndSendAsync();
+            }
+            finally
+            {
+                // Never reached the turn (stopped, or setup failed): put it back in the composer.
+                if (_preShown is { } unsent)
+                {
+                    _preShown = null;
+                    Items.Remove(unsent.Item);
+                    Reflow();
+                    Draft = text;
+                    foreach (var attachment in unsent.Composer) Attachments.Add(attachment);
+                }
+            }
+            return;
+
+            async Task RouteAndSendAsync()
+            {
             // The local rules settle most messages (go-aheads, plain questions, small changes, new features, big or unclear
             // work), so the model is only asked about the ones they are unsure of, and its answer is checked against them.
             var local = MessageRouting.Assess(text);
@@ -3994,7 +4032,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             {
                 if (!local.Confident && AppSettings.SmartExperience && SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready)
                 {
-                    var intent = await SmartExperienceHost.Instance.ClassifyAsync(new(_projectPath, _projectPath, "routing", _chatId, preparationDeadline), text, LastRoutingReply, routing.Token).WaitAsync(routing.Token);
+                    ComposerNotice = new NoticeItem { Text = "Understanding your request…", Severity = NoticeSeverity.Info };
+                    // Routing is a convenience: if the model is slow, the local rules decide instead of making the user wait.
+                    using var quick = CancellationTokenSource.CreateLinkedTokenSource(routing.Token);
+                    quick.CancelAfter(TimeSpan.FromSeconds(4));
+                    Codale.Smart.SmartResult<Codale.Smart.SmartIntent?>? intent = null;
+                    try { intent = await SmartExperienceHost.Instance.ClassifyAsync(new(_projectPath, _projectPath, "routing", _chatId, preparationDeadline), text, LastRoutingReply, quick.Token).WaitAsync(quick.Token); }
+                    catch (OperationCanceledException) when (!routing.IsCancellationRequested) { }
                     if (intent?.Value is { } selected) decision = MessageRouting.Reconcile(local, selected switch
                     {
                         Codale.Smart.SmartIntent.Ask => RouteIntent.Ask,
@@ -4004,7 +4048,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 }
             }
             catch (OperationCanceledException) { if (stopped.IsCancellationRequested) return; }
-            finally { _briefing = null; }
+            finally
+            {
+                _briefing = null;
+                if (ComposerNotice?.Text == "Understanding your request…") ComposerNotice = null;
+            }
             if (stopped.IsCancellationRequested) return;
             if (!IsAutomaticMode)
             {
@@ -4012,7 +4060,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 return;
             }
             await SendRoutedAsync(text, attachments, decision.Intent, preparation.Token, preparationDeadline);
-            return;
+            }
         }
         await SendTurnAsync(text, attachments, planOnly, askOnly: IsAskMode && !planOnly);
     }
@@ -4130,16 +4178,19 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        var composerAttachments = Attachments.ToList();
+        var pre = _preShown;
+        _preShown = null;
+        var composerAttachments = pre?.Composer ?? Attachments.ToList();
         Draft = "";
         NextPromptSuggestion = null;
         Attachments.Clear();
         ComposerNotice = null;
         IsBusy = true;
         _lastUserPrompt = text;
-        var sent = new UserMessageItem { Text = text, Attachments = attachments, SentAsPlan = planOnly };
+        var sent = pre?.Item ?? new UserMessageItem { Text = text, Attachments = attachments };
+        sent.SentAsPlan = planOnly;
         var silent = compact && _idleCompacting;
-        if (!silent)
+        if (!silent && pre is null)
         {
             Add(sent);
             TrimTranscript();

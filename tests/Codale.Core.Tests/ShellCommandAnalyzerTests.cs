@@ -5,6 +5,25 @@ namespace Codale.Core.Tests;
 
 public sealed class ShellCommandAnalyzerTests
 {
+    [Fact]
+    public void Confirmation_fallback_describes_the_wrapped_action()
+    {
+        var description = ShellCommandSummary.DescribeIntent("pwsh -Command 'dotnet build src/App.csproj'");
+        Assert.Contains("build", description, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Run pwsh", description, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("mkdir new-folder")]
+    [InlineData("tee output.txt")]
+    [InlineData("unknown-program")]
+    public void Unverified_commands_are_not_described_as_reads(string command)
+    {
+        var reason = ShellCommandSummary.DescribeSafetyReason(command);
+        Assert.DoesNotContain("reads or inspects", reason);
+        Assert.Contains("not been verified", reason);
+    }
+
     private const string Cwd = @"X:\CrsterSite\codale";
 
     // Mirrors codale-llm/tests/test_shell_risk.py: the model was trained on these labels.
