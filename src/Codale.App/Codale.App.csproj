@@ -14,6 +14,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <!--
+      CsWinRT1032 flags `[..]` collection expressions that target IReadOnlyList/IEnumerable as
+      unsafe for trimming/AOT. Neither is used here (PublishTrimmed stays off), so it is noise.
+    -->
+    <NoWarn>$(NoWarn);CsWinRT1032</NoWarn>
+    <!--
       Custom Program.Main: which instance owns this project has to be decided, and
       activation possibly redirected, before the XAML application starts.
     -->

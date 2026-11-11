@@ -4,7 +4,11 @@
       "commandName": "MsixPackage"
     },
     "Codale.App (Unpackaged)": {
-      "commandName": "Project"
+      "commandName": "Project",
+      "hotReloadEnabled": true,
+      "environmentVariables": {
+        "DOTNET_MODIFIABLE_ASSEMBLIES": "debug"
+      }
     }
   }
 }
