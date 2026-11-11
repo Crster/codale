@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-using Codale.Storage;
+using Codale.Db;
 
 namespace Codale.App.Services;
 
@@ -21,13 +21,13 @@ public static class RecentProjects
 
     public static IReadOnlyList<RecentProject> Load()
     {
-        using var store = new CodaleStore(CodaleStore.DefaultDatabasePath);
-        return Load(store);
+        using var db = AppDb.Open();
+        return Load(db);
     }
 
-    private static IReadOnlyList<RecentProject> Load(CodaleStore store)
+    private static IReadOnlyList<RecentProject> Load(CodaleDb db)
     {
-        var json = store.GetSetting(SettingName);
+        var json = db.Setting(SettingName).Read();
         if (string.IsNullOrEmpty(json))
         {
             return [];
@@ -47,8 +47,8 @@ public static class RecentProjects
     /// <summary>Removes every entry from the MRU, e.g. from the picker's Clear link.</summary>
     public static void Clear()
     {
-        using var store = new CodaleStore(CodaleStore.DefaultDatabasePath);
-        store.SetSetting(SettingName, string.Empty);
+        using var db = AppDb.Open();
+        db.Setting(SettingName).Write(string.Empty);
     }
 
     /// <summary>Moves the project to the top of the MRU, adding it if new, and trims the tail.</summary>
@@ -57,10 +57,10 @@ public static class RecentProjects
         var normalized = Codale.Core.Projects.ProjectPaths.Normalize(projectPath);
         var name = System.IO.Path.GetFileName(normalized) is { Length: > 0 } leaf ? leaf : normalized;
 
-        // One store for the read-modify-write.
-        using var store = new CodaleStore(CodaleStore.DefaultDatabasePath);
+        // One lease for the read-modify-write.
+        using var db = AppDb.Open();
 
-        var entries = Load(store)
+        var entries = Load(db)
             .Where(p => !string.Equals(p.Path, normalized, StringComparison.OrdinalIgnoreCase))
             .ToList();
         entries.Insert(0, new RecentProject(normalized, name, DateTimeOffset.Now));
@@ -70,6 +70,6 @@ public static class RecentProjects
             entries.RemoveRange(MaxEntries, entries.Count - MaxEntries);
         }
 
-        store.SetSetting(SettingName, JsonSerializer.Serialize(entries, SerializerOptions));
+        db.Setting(SettingName).Write(JsonSerializer.Serialize(entries, SerializerOptions));
     }
 }

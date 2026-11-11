@@ -1,6 +1,6 @@
 using System.Threading.Channels;
 
-namespace Codale.Storage;
+namespace Codale.Db;
 
 /// <summary>
 /// Fan-out to subscribers. Every subscriber owns a bounded queue and a pump task, so a slow or throwing

@@ -33,10 +33,6 @@ public static class LearnedKind
 
     public static int Strength(string kind) => kind switch { Edit => 3, Open => 2, Read => 1, _ => 0 };
 
-    /// <summary>The quoted kinds weaker than <paramref name="kind"/>, for an SQL IN list (constants only, never user text).</summary>
-    public static string WeakerThan(string kind) =>
-        string.Join(",", new[] { Read, Open }.Where(k => Strength(k) < Strength(kind)).Select(k => $"'{k}'"));
-
     /// <summary>How much a remembered association lifts the file's chunks in ranking.</summary>
     public static double Boost(string kind) => kind switch { Edit => 0.12, Open => 0.10, Read => 0.05, _ => 0 };
 }

@@ -86,9 +86,9 @@ public static class ProjectPaths
     public static string ClaudeHistoryDirectory(string projectPath) =>
         Path.Combine(Agents.CodaleAccount.ClaudeHome, "projects", ClaudeHistoryFolderName(projectPath));
 
-    /// <summary>The project's feature database: features, summaries and the index of the files written for them.</summary>
+    /// <summary>The project's database folder: features, summaries, findings and the source index.</summary>
     public static string FeatureDatabasePath(string projectPath) =>
-        Path.Combine(KnowledgeDirectory(projectPath), "project.db");
+        Path.Combine(KnowledgeDirectory(projectPath), "project-db");
 
     /// <summary>A feature's log folder: <c>log.jsonl</c> and its archives.</summary>
     public static string FeatureDirectory(string projectPath, string featureId) =>

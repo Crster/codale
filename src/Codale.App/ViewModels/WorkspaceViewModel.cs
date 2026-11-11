@@ -12,7 +12,6 @@ using Codale.Core.Projects;
 using Codale.Core.Serving;
 using Codale.Core.Tasks;
 using Codale.Git;
-using Codale.Storage;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -21,7 +20,6 @@ namespace Codale.App.ViewModels;
 /// <summary>One project, one window. Everything the three panels bind to hangs off this.</summary>
 public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposable
 {
-    private readonly CodaleStore _store;
     private readonly CliEndpointSettings _endpoints;
     private readonly McpServerSettings _mcp;
 
@@ -34,9 +32,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         ProjectPath = ProjectPaths.Normalize(projectPath);
         DisplayName = ProjectPaths.DisplayName(ProjectPath);
 
-        _store = new CodaleStore(CodaleStore.DefaultDatabasePath);
-
-        ExtraFolders = new WorkspaceFolders(_store, ProjectPath);
+        ExtraFolders = new WorkspaceFolders(ProjectPath);
         Files = new FileTreeViewModel(ProjectPath, ExtraFolders);
         Git = new GitViewModel(ProjectPath);
         Features = new FeatureService(ProjectPath);
@@ -46,7 +42,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         DiffViewer = new DiffViewerViewModel(ProjectPath);
         Sessions = new SessionsViewModel(ProjectPath, Features);
         _endpoints = new CliEndpointSettings();
-        _mcp = new McpServerSettings(_store, ProjectPath);
+        _mcp = new McpServerSettings(ProjectPath);
         Health = new WorkspaceHealthViewModel(ProjectPath);
         SmartActivity = new SmartActivityViewModel(ProjectPath);
         SmartActivity.ObserveIndex(Features.Knowledge);
@@ -867,7 +863,16 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     {
         if (sender is ChatViewModel { SessionId: { Length: > 0 } id })
         {
-            _store.SaveTodos(id, todos.Select(t => (t.Content, t.Status.ToString())).ToList());
+            using var db = AppDb.Open();
+            var list = db.Open("todos").Open(id);
+            db.Batch(() =>
+            {
+                list.Remove();
+                for (var i = 0; i < todos.Count; i++)
+                {
+                    list.Open(i.ToString("D4")).WriteJson(new { todos[i].Content, Status = todos[i].Status.ToString() });
+                }
+            });
         }
     }
 
@@ -976,6 +981,5 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         }
 
         Features.Dispose();
-        _store.Dispose();
     }
 }

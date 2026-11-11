@@ -1,25 +1,25 @@
-﻿using Codale.Agents.History;
+using Codale.Agents.History;
 using Codale.Core.Features;
 using Codale.Core.Helper;
 using Codale.Core.Projects;
 using Codale.Search;
-using Codale.Storage;
+using Codale.Db;
 
 namespace Codale.App.Services;
 
 /// <summary>
 /// One repository's session history and shared knowledge. Each entry keeps its own log and provider
 /// mapping; project context is retrieved independently of those session boundaries. Owns the project's
-/// <see cref="FeatureStore"/>; every call is safe from any thread, and indexing and summaries
+/// <see cref="CodaleDb"/>; every call is safe from any thread, and indexing and summaries
 /// run in the background so the chat never waits for them.
 /// </summary>
 public sealed class FeatureService : IDisposable
 {
     private readonly string _projectPath;
-    private readonly FeatureStore _store;
+    private readonly CodaleDb _db;
     private readonly ProjectKnowledgeIndex _knowledge;
     public ProjectKnowledgeIndex Knowledge => _knowledge;
-    private readonly FileSystemWatcher? _databaseWatcher;
+    private readonly IDisposable _databaseWatch;
     private readonly Timer _historyRefresh;
 
     /// <summary>Shared with every other window on the project: open chats, running summaries, the create gate.</summary>
@@ -28,8 +28,8 @@ public sealed class FeatureService : IDisposable
     public FeatureService(string projectPath)
     {
         _projectPath = projectPath;
-        _store = OpenStore(projectPath);
-        _knowledge = new ProjectKnowledgeIndex(_store);
+        _db = OpenDatabase(projectPath);
+        _knowledge = new ProjectKnowledgeIndex(_db);
         _knowledge.Smart = SmartExperienceHost.Instance;
         _knowledge.SmartProjectRoot = projectPath;
         _knowledge.Summaries = new Codale.Smart.SummaryCache(Path.Combine(ProjectPaths.KnowledgeDirectory(projectPath), "smart-summaries"));
@@ -40,16 +40,8 @@ public sealed class FeatureService : IDisposable
         _activity = FeatureActivity.For(projectPath);
         _activity.HistoryDeleted += OnHistoryDeleted;
         _historyRefresh = new Timer(_ => Changed?.Invoke(this, EventArgs.Empty));
-        try
-        {
-            _databaseWatcher = new FileSystemWatcher(ProjectPaths.KnowledgeDirectory(projectPath), "project.db*");
-            _databaseWatcher.Changed += (_, _) => ScheduleHistoryRefresh();
-            _databaseWatcher.Created += (_, _) => ScheduleHistoryRefresh();
-            _databaseWatcher.EnableRaisingEvents = true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-        }
+        // Any change to the feature list (a chat appended to a feature, a summary written) refreshes the history list.
+        _databaseWatch = _db.Open("feature").Watch(_ => ScheduleHistoryRefresh());
     }
 
     private void ScheduleHistoryRefresh()
@@ -58,16 +50,16 @@ public sealed class FeatureService : IDisposable
         catch (ObjectDisposedException) { }
     }
 
-    /// <summary>The project's feature database; a throwaway one when it cannot be opened (a path too long, a locked file), so history never keeps the window from opening.</summary>
-    private static FeatureStore OpenStore(string projectPath)
+    /// <summary>The project's database; a throwaway one when it cannot be opened (a path too long, a folder another process holds), so history never keeps the window from opening.</summary>
+    private static CodaleDb OpenDatabase(string projectPath)
     {
         try
         {
-            return new FeatureStore(ProjectPaths.FeatureDatabasePath(projectPath));
+            return new CodaleDb(ProjectPaths.FeatureDatabasePath(projectPath));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException or PathTooLongException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException)
         {
-            return new FeatureStore(Path.Combine(Path.GetTempPath(), "codale-features-" + Guid.NewGuid().ToString("N"), "features.db"));
+            return new CodaleDb(Path.Combine(Path.GetTempPath(), "codale-features-" + Guid.NewGuid().ToString("N")));
         }
     }
 
@@ -76,17 +68,17 @@ public sealed class FeatureService : IDisposable
 
     private void OnHistoryDeleted(object? sender, EventArgs e) => Changed?.Invoke(this, e);
 
-    public IReadOnlyList<FeatureInfo> List() => _store.List();
+    public IReadOnlyList<FeatureInfo> List() => _knowledge.ListFeatures();
 
-    public FeatureInfo? Get(string id) => _store.Get(id);
+    public FeatureInfo? Get(string id) => _knowledge.GetFeature(id);
 
-    public int FileCount(string id) => _store.FileCount(id);
+    public int FileCount(string id) => _knowledge.FileCount(id);
 
-    public IReadOnlyList<FeatureInfo> Search(string text, int limit) => _store.Search(text, limit);
+    public IReadOnlyList<FeatureInfo> Search(string text, int limit) => _knowledge.SearchFeatures(text, limit);
 
     public FeatureInfo Create(string name, string description)
     {
-        var session = _store.Create(name, description);
+        var session = _knowledge.CreateFeature(name, description);
         Changed?.Invoke(this, EventArgs.Empty);
         return session;
     }
@@ -102,13 +94,13 @@ public sealed class FeatureService : IDisposable
 
     public void Rename(string id, string name)
     {
-        _store.Rename(id, name);
+        _knowledge.RenameFeature(id, name);
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
     public void Delete(string id)
     {
-        _store.Delete(id);
+        _knowledge.DeleteFeature(id);
         LogOf(id).Delete();
         _activity.NotifyHistoryDeleted(id);
     }
@@ -119,19 +111,19 @@ public sealed class FeatureService : IDisposable
     /// <summary>A prompt was added to a feature's log: its size and what it asked are what the feature is found by.</summary>
     public void RecordProgress(string id, FeatureLog log, string? prompt)
     {
-        _store.RecordProgress(id, log.Length, prompt);
+        _knowledge.RecordProgress(id, log.Length, prompt);
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
-    public ProviderSession? ProviderSession(string id) => _store.GetProviderSession(id);
+    public ProviderSession? ProviderSession(string id) => _knowledge.GetProviderSession(id);
 
-    public IReadOnlyList<string> DeliveredContext(string nativeId) => _store.DeliveredContext(nativeId);
-    public void MarkContextDelivered(string nativeId, IReadOnlyList<string> keys) => _store.MarkContextDelivered(nativeId, keys);
-    public void ClearDeliveredContext(string nativeId) => _store.ClearDeliveredContext(nativeId);
+    public IReadOnlyList<string> DeliveredContext(string nativeId) => _knowledge.DeliveredContext(nativeId);
+    public void MarkContextDelivered(string nativeId, IReadOnlyList<string> keys) => _knowledge.MarkContextDelivered(nativeId, keys);
+    public void ClearDeliveredContext(string nativeId) => _knowledge.ClearDeliveredContext(nativeId);
 
     public void BindProviderSession(string id, string provider, string nativeId, string worktree, string endpoint)
     {
-        _store.SetProviderSession(new ProviderSession(id, provider, nativeId, ProjectPaths.Normalize(worktree), endpoint));
+        _knowledge.SetProviderSession(new ProviderSession(id, provider, nativeId, ProjectPaths.Normalize(worktree), endpoint));
     }
 
     /// <param name="workingSessionId">The history whose recently written files get a ranking boost; null on a new topic.</param>
@@ -141,10 +133,10 @@ public sealed class FeatureService : IDisposable
         if (AppSettings.SmartExperience && allowSmartReview)
         {
             return await _knowledge.RetrieveSmartAsync(worktree, prompt, recent, delivered, currentSessionId,
-                workingSessionId is null ? null : _store.FilesOf(workingSessionId, WorkingSetFiles), preparationToken, preparationDeadline, chatId, intent).ConfigureAwait(false);
+                workingSessionId is null ? null : _knowledge.FilesOf(workingSessionId, WorkingSetFiles), preparationToken, preparationDeadline, chatId, intent).ConfigureAwait(false);
         }
         return await Task.Run(() => _knowledge.Retrieve(worktree, prompt, recent, delivered, currentSessionId,
-            workingSessionId is null ? null : _store.FilesOf(workingSessionId, WorkingSetFiles))).ConfigureAwait(false);
+            workingSessionId is null ? null : _knowledge.FilesOf(workingSessionId, WorkingSetFiles))).ConfigureAwait(false);
     }
 
     private bool _smartThinking = AppSettings.SmartThinking;
@@ -178,7 +170,7 @@ public sealed class FeatureService : IDisposable
         {
             await _knowledge.RefreshAsync(root).ConfigureAwait(false);
             foreach (var relative in _knowledge.ChangedSince(root, startedUtc))
-                if (ProjectKnowledgeIndex.Eligible(relative)) _store.RecordSessionFile(sessionId, relative);
+                if (ProjectKnowledgeIndex.Eligible(relative)) _knowledge.RecordSessionFile(sessionId, relative);
         }
         catch (Exception)
         {
@@ -186,8 +178,8 @@ public sealed class FeatureService : IDisposable
         }
     });
 
-    public void RecordRetrieval(string retrievalId, string sessionId, RetrievalResult result) => _store.RecordRetrieval(retrievalId, sessionId, result);
-    public void RecordExploration(string retrievalId) => _store.RecordExploration(retrievalId);
+    public void RecordRetrieval(string retrievalId, string sessionId, RetrievalResult result) => _knowledge.RecordRetrieval(retrievalId, sessionId, result);
+    public void RecordExploration(string retrievalId) => _knowledge.RecordExploration(retrievalId);
     public void RecordLearnedEdit(string sessionId, string worktree, string path, string prompt) =>
         RecordLearned(sessionId, worktree, path, prompt, LearnedKind.Edit);
 
@@ -198,45 +190,45 @@ public sealed class FeatureService : IDisposable
         var full = Path.GetFullPath(path, root);
         if (!ProjectPaths.IsInside(root, full)) return;
         var relative = Path.GetRelativePath(root, full);
-        if (ProjectKnowledgeIndex.Eligible(relative)) _store.RecordLearned(sessionId, root, relative, prompt, kind);
+        if (ProjectKnowledgeIndex.Eligible(relative)) _knowledge.RecordLearned(sessionId, root, relative, prompt, kind);
     }
 
     /// <summary>The user opened a global-search result: choosing it from that query is the clearest sign it was the answer.</summary>
     public void RecordSearchOpen(string query, string filePath) =>
         RecordLearned("global-search", _projectPath, filePath, query, LearnedKind.Open);
 
-    public void RecordUsage(string retrievalId, int inputTokens, int outputTokens) => _store.RecordUsage(retrievalId, inputTokens, outputTokens);
+    public void RecordUsage(string retrievalId, int inputTokens, int outputTokens) => _knowledge.RecordUsage(retrievalId, inputTokens, outputTokens);
 
     public void RecordFinding(string sessionId, string provider, string worktree, string text, IReadOnlyList<SourceReference> references)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
         try
         {
-            _store.PutKnowledge(new KnowledgeHit(Guid.NewGuid().ToString("N"), sessionId, provider,
+            _knowledge.PutKnowledge(new KnowledgeHit(Guid.NewGuid().ToString("N"), sessionId, provider,
                 ProjectPaths.Normalize(worktree), ProjectKnowledgeIndex.Revision(worktree), text.Length > 2400 ? text[..2400] : text, references));
         }
-        catch (Exception ex) when (ex is IOException or Microsoft.Data.Sqlite.SqliteException)
+        catch (Exception ex) when (ex is IOException)
         {
         }
     }
 
     public void IndexFile(string sessionId, string path)
     {
-        var root = _store.GetProviderSession(sessionId)?.Worktree ?? _projectPath;
+        var root = _knowledge.GetProviderSession(sessionId)?.Worktree ?? _projectPath;
         var relative = Path.GetRelativePath(root, Path.GetFullPath(path));
-        if (ProjectPaths.IsInside(root, path) && ProjectKnowledgeIndex.Eligible(relative)) _store.RecordSessionFile(sessionId, relative);
+        if (ProjectPaths.IsInside(root, path) && ProjectKnowledgeIndex.Eligible(relative)) _knowledge.RecordSessionFile(sessionId, relative);
         _knowledge.Warm(root);
     }
 
     public void Dispose()
     {
-        _databaseWatcher?.Dispose();
+        _databaseWatch.Dispose();
         _historyRefresh.Dispose();
         _activity.HistoryDeleted -= OnHistoryDeleted;
         AppSettings.Changed -= OnAppSettingsChanged;
         SmartExperienceHost.Instance.Changed -= OnSmartChanged;
         _knowledge.Dispose();
-        _store.Dispose();
+        _db.Dispose();
     }
 }
 

@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 
 namespace Codale.Core.Features;
 
@@ -99,11 +99,15 @@ public static class SearchText
     /// A match expression for project retrieval: question filler dropped, and each stem of four or more
     /// characters matched as a prefix so "connectors" finds "connector" and "ConnectorTable".
     /// </summary>
-    public static string? ToRetrievalQuery(string text)
-    {
-        var terms = RetrievalTerms(text);
-        return terms.Count == 0 ? null : string.Join(" OR ", terms.Select(t => t.Length >= 4 ? $"\"{t}\"*" : $"\"{t}\""));
-    }
+    public static string? ToRetrievalQuery(string text) => ToMatchExpression(RetrievalQueryTerms(text));
+
+    /// <summary>The terms behind <see cref="ToRetrievalQuery"/>: each stem, flagged when it is matched as a prefix.</summary>
+    public static IReadOnlyList<(string Word, bool Prefix)> RetrievalQueryTerms(string text) =>
+        [.. RetrievalTerms(text).Select(t => (t, t.Length >= 4))];
+
+    private static string? ToMatchExpression(IReadOnlyList<(string Word, bool Prefix)> terms) => terms.Count == 0
+        ? null
+        : string.Join(" OR ", terms.Select(t => t.Prefix ? $"\"{t.Word}\"*" : $"\"{t.Word}\""));
 
     /// <summary>The tokens of <paramref name="text"/> in order: each word whole, then its camelCase / snake_case parts.</summary>
     public static IEnumerable<string> Tokens(string text)
@@ -136,7 +140,10 @@ public static class SearchText
     /// A match expression finding any of the text's meaningful tokens (the most frequent first
     /// when there are many); null when the text has none.
     /// </summary>
-    public static string? ToMatchQuery(string text)
+    public static string? ToMatchQuery(string text) => ToMatchExpression(MatchQueryTerms(text));
+
+    /// <summary>The terms behind <see cref="ToMatchQuery"/>: whole tokens, none a prefix.</summary>
+    public static IReadOnlyList<(string Word, bool Prefix)> MatchQueryTerms(string text)
     {
         var tokens = Tokens(text)
             .Where(t => t.Length >= MinTokenLength && !Stop.Contains(t))
@@ -146,7 +153,7 @@ public static class SearchText
             .Take(MaxQueryTokens)
             .ToList();
 
-        return tokens.Count == 0 ? null : string.Join(" OR ", tokens.Select(t => $"\"{t}\""));
+        return [.. tokens.Select(t => (t, false))];
     }
 
     private static IEnumerable<string> Flush(StringBuilder word)

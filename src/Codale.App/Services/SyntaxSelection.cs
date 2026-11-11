@@ -24,7 +24,7 @@ public static class SyntaxSelection
 
         _started = true;
         SyntaxService.Initialize(Path.Combine(
-            Path.GetDirectoryName(Codale.Storage.CodaleStore.DefaultDatabasePath)!,
+            AppDb.Folder,
             "syntax"));
     }
 

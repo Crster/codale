@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Codale.Storage;
+using Codale.Db;
 using Xunit.Abstractions;
 
 namespace Codale.Search.Tests;
@@ -52,7 +52,7 @@ public sealed partial class RetrievalEvalTests : IDisposable
     [Fact]
     public async Task Retrieval_finds_the_file_and_the_lines_a_labelled_question_is_about()
     {
-        using var store = new FeatureStore(Path.Combine(_directory, "eval.db"));
+        using var store = new CodaleDb(Path.Combine(_directory, "eval.db"));
         using var index = new ProjectKnowledgeIndex(store);
         await index.RefreshAsync(_corpus);
 
@@ -101,20 +101,20 @@ public sealed partial class RetrievalEvalTests : IDisposable
         if (string.IsNullOrWhiteSpace(project)) return;
 
         var source = Codale.Core.Projects.ProjectPaths.FeatureDatabasePath(project);
-        Assert.True(File.Exists(source), $"no Codale history for {project}");
-        var copy = Path.Combine(_directory, "history.db");
-        foreach (var suffix in new[] { "", "-wal", "-shm" })
-            if (File.Exists(source + suffix)) File.Copy(source + suffix, copy + suffix, overwrite: true);
-        using var history = new FeatureStore(copy);
+        Assert.True(Directory.Exists(source), $"no Codale history for {project}");
+        var copy = Path.Combine(_directory, "history");
+        CopyFolder(source, copy);
+        using var history = new CodaleDb(copy);
+        using var historyIndex = new ProjectKnowledgeIndex(history);
         var root = Codale.Core.Projects.ProjectPaths.Normalize(project);
 
         // Prompt -> the files that answered it, strongest evidence only (reads are noisy as labels).
-        var labelled = history.LearnedAssociations(root, 2000)
+        var labelled = historyIndex.LearnedAssociations(root, 2000)
             .Where(a => Codale.Core.Features.LearnedKind.Strength(a.Kind) >= Codale.Core.Features.LearnedKind.Strength(Codale.Core.Features.LearnedKind.Open))
             .GroupBy(a => a.Prompt).Select(g => (Prompt: g.Key, Files: g.Select(a => a.Path.Replace('\\', '/')).ToHashSet())).Take(100).ToList();
         if (labelled.Count == 0) { _output.WriteLine("no edit or search-open history yet"); return; }
 
-        using var store = new FeatureStore(Path.Combine(_directory, "real.db"));
+        using var store = new CodaleDb(Path.Combine(_directory, "real.db"));
         using var index = new ProjectKnowledgeIndex(store);
         await index.RefreshAsync(root);
 
@@ -133,6 +133,14 @@ public sealed partial class RetrievalEvalTests : IDisposable
         }
         if (scored == 0) { _output.WriteLine("every labelled file is gone"); return; }
         _output.WriteLine($"real usage: prompts={scored}  file@1={at1 / (double)scored:P0}  file@5={at5 / (double)scored:P0}  MRR={reciprocal / scored:F3}");
+    }
+
+    private static void CopyFolder(string from, string to)
+    {
+        Directory.CreateDirectory(to);
+        // The LOCK file is held by the running app and is recreated on open.
+        foreach (var file in Directory.GetFiles(from).Where(f => Path.GetFileName(f) != "LOCK"))
+            File.Copy(file, Path.Combine(to, Path.GetFileName(file)), overwrite: true);
     }
 
     private static double Floor(string name, double fallback) =>
@@ -166,7 +174,6 @@ public sealed partial class RetrievalEvalTests : IDisposable
 
     public void Dispose()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         try { Directory.Delete(_directory, true); } catch (IOException) { }
     }
 }

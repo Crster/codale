@@ -1,9 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
 
-using Codale.Storage;
+using Codale.Db;
 
-namespace Codale.Storage.Tests.Db;
+namespace Codale.Db.Tests;
 
 public sealed class CodaleDbTests : IDisposable
 {

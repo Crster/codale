@@ -212,7 +212,7 @@ src/
   Codale.Mcp.Phone/             codale-phone MCP server (Android device/emulator control over adb)
   Codale.Mcp.Common/            Shared MCP protocol definitions and JSON-RPC primitives
   Codale.Search/                Workspace search, file indexing, and autonomous SearchAgentLoop
-  Codale.Storage/               SQLite database engine (sessions, todos, artifacts, settings)
+  Codale.Db/                    Embedded multi-model database (key-value, semantic + keyword search, graph, blobs, pub/sub, encryption)
   Codale.ShellExt/              C++ IExplorerCommand Windows 11 shell context menu extension (vcxproj)
 tests/
   Codale.Agents.Tests/          Agent driver, stream parser, and CLI locator tests
@@ -221,7 +221,7 @@ tests/
   Codale.Git.Tests/             Git CLI integration and diff parsing tests
   Codale.Mcp.Tests/             MCP servers and tool invocation tests
   Codale.Search.Tests/          Workspace search and search loop tests
-  Codale.Storage.Tests/         SQLite persistence and migrations tests
+  Codale.Db.Tests/              Database engine tests
   Codale.Terminal.Tests/        ConPTY and terminal session unit tests
   fixtures/                     Offline byte-for-byte CLI wire captures and test fixtures
 ```

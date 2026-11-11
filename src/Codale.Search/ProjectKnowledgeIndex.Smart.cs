@@ -45,7 +45,7 @@ public sealed partial class ProjectKnowledgeIndex
                     // Let startup finish before spending CPU/GPU time on optional summaries.
                     await Task.Delay(SummaryStartupDelay, _stopping.Token).ConfigureAwait(false);
                     if (!SummariesEnabled() || Smart.Status.State != SmartState.Ready) return;
-                    var paths = store.SourceHashes(worktree);
+                    var paths = SourceHashes(worktree);
                     Summaries.Prune(worktree, paths.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase));
                     var thinking = Smart.Thinking;
                     var pending = paths.Where(p => Summaries.Get(worktree, p.Key, p.Value, thinking) is null && !SummaryFailedRecently(worktree, p.Key, p.Value))

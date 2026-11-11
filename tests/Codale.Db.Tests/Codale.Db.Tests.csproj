@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Codale.Storage\Codale.Storage.csproj" />
+    <ProjectReference Include="..\..\src\Codale.Db\Codale.Db.csproj" />
     <ProjectReference Include="..\..\src\Codale.Core\Codale.Core.csproj" />
   </ItemGroup>
 

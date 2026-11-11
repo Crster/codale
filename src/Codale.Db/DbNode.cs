@@ -1,4 +1,6 @@
-namespace Codale.Storage;
+using System.Text.Json;
+
+namespace Codale.Db;
 
 /// <summary>
 /// A path inside a <see cref="CodaleDb"/>. Creating one is free (just a string); every terminal call does one
@@ -32,6 +34,11 @@ public readonly struct DbNode
     /// <summary>Names of the direct children, sorted.</summary>
     public IReadOnlyList<string> Children() => _db.Children(_path);
 
+    public int ChildCount() => _db.ChildCount(_path);
+
+    /// <summary>Every node below this one that holds a value (in path order when <paramref name="sorted"/>).</summary>
+    public IReadOnlyList<DbNode> Descendants(bool sorted = false) => _db.Descendants(_path, sorted);
+
     // key-value
 
     public void Write(string value) => _db.WriteText(_path, value);
@@ -43,6 +50,11 @@ public readonly struct DbNode
 
     /// <summary>Removes this node and everything beneath it.</summary>
     public bool Remove() => _db.Remove(_path);
+
+    /// <summary>Stores <paramref name="value"/> as JSON.</summary>
+    public void WriteJson<T>(T value) => _db.WriteText(_path, JsonSerializer.Serialize(value));
+
+    public T? ReadJson<T>() => Read() is { } json ? JsonSerializer.Deserialize<T>(json) : default;
 
     // protection
 
@@ -66,11 +78,28 @@ public readonly struct DbNode
 
     // semantic search
 
-    /// <summary>Stores each text as a child of this node (named by the text itself) and indexes it for <see cref="Query"/>.</summary>
+    /// <summary>Stores each text as a child of this node (named by the text itself) and embeds it for <see cref="Query"/>.</summary>
     public void Write(IEnumerable<string> texts) => _db.WriteTexts(_path, texts);
 
-    /// <summary>The entries at or below this node most similar to <paramref name="text"/>, best first.</summary>
+    /// <summary>Attaches the embedding of <paramref name="text"/> to this node; the node's value is untouched.</summary>
+    public void Embed(string text) => _db.Embed(_path, text);
+
+    /// <summary>True when this node has an embedding made by the database's current embedder.</summary>
+    public bool HasVector() => _db.HasCurrentVector(_path);
+
+    /// <summary>Forgets the embeddings below this node that a different embedder made (they cannot be compared).</summary>
+    public void DropStaleVectors() => _db.DropStaleVectors(_path);
+
+    /// <summary>The embedded nodes at or below this one most similar to <paramref name="text"/>, best first.</summary>
     public IReadOnlyList<DbHit> Query(string text, int k = 5) => _db.Query(_path, text, k);
+
+    // keyword search
+
+    /// <summary>Indexes the words of this node under a named field, replacing the field's earlier words.</summary>
+    public void Index(string field, IEnumerable<string> words) => _db.Index(_path, field, words);
+
+    /// <summary>The nodes at or below this one whose <paramref name="field"/> words match <paramref name="terms"/> (any of them), best BM25 first.</summary>
+    public IReadOnlyList<DbHit> Match(string field, IReadOnlyList<KeywordTerm> terms, int k = 10) => _db.Match(_path, field, terms, k);
 
     // graph
 

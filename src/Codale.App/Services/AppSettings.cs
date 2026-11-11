@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Text.Json;
 
 using Codale.Agents.Claude;
-using Codale.Storage;
 
 using Microsoft.UI.Dispatching;
 
@@ -569,7 +568,7 @@ public static class AppSettings
     /// <c>%LOCALAPPDATA%\Codale\settings.json</c> (redirected into the package folder under MSIX).
     /// </summary>
     private static string FilePath { get; } = Path.Combine(
-        Path.GetDirectoryName(CodaleStore.DefaultDatabasePath)!,
+        AppDb.Folder,
         "settings.json");
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };

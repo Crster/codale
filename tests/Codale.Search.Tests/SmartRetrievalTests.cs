@@ -1,16 +1,16 @@
 using Codale.Smart;
-using Codale.Storage;
+using Codale.Db;
 
 namespace Codale.Search.Tests;
 
 public sealed class SmartRetrievalTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("codale-smart-retrieval-").FullName;
-    private readonly FeatureStore _store;
+    private readonly CodaleDb _store;
     private readonly ProjectKnowledgeIndex _index;
     public SmartRetrievalTests()
     {
-        _store = new FeatureStore(Path.Combine(_root, "knowledge.db"));
+        _store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
         _index = new ProjectKnowledgeIndex(_store);
     }
     [Fact]
@@ -234,7 +234,6 @@ public sealed class SmartRetrievalTests : IDisposable
     public void Dispose()
     {
         _index.Dispose(); _store.Dispose();
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         Directory.Delete(_root, true);
     }
 }

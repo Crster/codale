@@ -1,6 +1,6 @@
 using Codale.Core.Agents;
 using Codale.Mcp;
-using Codale.Storage;
+using Codale.Db;
 
 namespace Codale.App.Services;
 
@@ -22,13 +22,11 @@ public sealed class McpServerSettings
     private const string ComputerKey = "mcp.computer.enabled";
     private const string PhoneKey = "mcp.phone.enabled";
 
-    private readonly CodaleStore _store;
     private readonly string _projectPath;
     private readonly string _baseDirectory;
 
-    public McpServerSettings(CodaleStore store, string projectPath, string? baseDirectory = null)
+    public McpServerSettings(string projectPath, string? baseDirectory = null)
     {
-        _store = store;
         _projectPath = projectPath;
         _baseDirectory = baseDirectory ?? AppContext.BaseDirectory;
     }
@@ -36,22 +34,46 @@ public sealed class McpServerSettings
     /// <summary>On unless the user turned it off.</summary>
     public bool BrowserEnabled
     {
-        get => _store.GetSetting(BrowserKey) != "0";
-        set => _store.SetSetting(BrowserKey, value ? "1" : "0");
+        get
+        {
+            using var db = AppDb.Open();
+            return db.Setting(BrowserKey).Read() != "0";
+        }
+        set
+        {
+            using var db = AppDb.Open();
+            db.Setting(BrowserKey).Write(value ? "1" : "0");
+        }
     }
 
     /// <summary>Off unless the user turned it on for this project.</summary>
     public bool ComputerEnabled
     {
-        get => _store.GetUiState(_projectPath, ComputerKey) == "1";
-        set => _store.SetUiState(_projectPath, ComputerKey, value ? "1" : "0");
+        get
+        {
+            using var db = AppDb.Open();
+            return db.Project(_projectPath).Open("ui").Open(ComputerKey).Read() == "1";
+        }
+        set
+        {
+            using var db = AppDb.Open();
+            db.Project(_projectPath).Open("ui").Open(ComputerKey).Write(value ? "1" : "0");
+        }
     }
 
     /// <summary>Off unless the user turned it on for this project: it acts on a real attached device.</summary>
     public bool PhoneEnabled
     {
-        get => _store.GetUiState(_projectPath, PhoneKey) == "1";
-        set => _store.SetUiState(_projectPath, PhoneKey, value ? "1" : "0");
+        get
+        {
+            using var db = AppDb.Open();
+            return db.Project(_projectPath).Open("ui").Open(PhoneKey).Read() == "1";
+        }
+        set
+        {
+            using var db = AppDb.Open();
+            db.Project(_projectPath).Open("ui").Open(PhoneKey).Write(value ? "1" : "0");
+        }
     }
 
     public bool PhoneAvailable => File.Exists(ExePath("Codale.Mcp.Phone"));

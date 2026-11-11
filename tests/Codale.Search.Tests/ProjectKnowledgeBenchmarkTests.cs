@@ -2,7 +2,7 @@ using System.Text;
 using Codale.Core.Agents;
 using Codale.Core.Features;
 using Codale.Core.Helper;
-using Codale.Storage;
+using Codale.Db;
 using Xunit.Abstractions;
 
 namespace Codale.Search.Tests;
@@ -22,7 +22,7 @@ public sealed class ProjectKnowledgeBenchmarkTests(ITestOutputHelper output)
             const string chart = "class RevenueChart { void RenderGraph() { DrawRevenueBars(); } }";
             File.WriteAllText(Path.Combine(source, "Authentication.cs"), auth);
             File.WriteAllText(Path.Combine(source, "RevenueChart.cs"), chart);
-            using var store = new FeatureStore(Path.Combine(root, "project.db"));
+            using var store = new CodaleDb(Path.Combine(root, "project.db"));
             using var index = new ProjectKnowledgeIndex(store);
             await index.RefreshAsync(source);
             var delivered = new HashSet<string>();
@@ -54,7 +54,6 @@ public sealed class ProjectKnowledgeBenchmarkTests(ITestOutputHelper output)
         }
         finally
         {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             try { Directory.Delete(root, true); } catch (IOException) { }
         }
     }

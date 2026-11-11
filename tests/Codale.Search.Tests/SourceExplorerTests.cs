@@ -1,5 +1,5 @@
 using Codale.Core.Helper;
-using Codale.Storage;
+using Codale.Db;
 using System.Text.Json;
 
 namespace Codale.Search.Tests;
@@ -221,7 +221,7 @@ public sealed class SourceExplorerTests : IDisposable
                     Source="Assets/AppIcon.ico" />
             </Grid>
             """);
-        using var store = new FeatureStore(Path.Combine(_root, "knowledge.db"));
+        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
         using var knowledge = new ProjectKnowledgeIndex(store);
         await knowledge.RefreshAsync(_root);
         var model = new ScriptedModel(Review([new
@@ -245,7 +245,7 @@ public sealed class SourceExplorerTests : IDisposable
             results = JsonSerializer.Serialize(results), paths,
         }});
 
-    private async Task<ProjectKnowledgeIndex> KnowledgeAsync(FeatureStore store)
+    private async Task<ProjectKnowledgeIndex> KnowledgeAsync(CodaleDb store)
     {
         var knowledge = new ProjectKnowledgeIndex(store);
         await knowledge.RefreshAsync(_root);
@@ -255,7 +255,7 @@ public sealed class SourceExplorerTests : IDisposable
     [Fact]
     public async Task Review_drops_unrelated_retrieved_files_and_keeps_its_order()
     {
-        using var store = new FeatureStore(Path.Combine(_root, "knowledge.db"));
+        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
         using var knowledge = await KnowledgeAsync(store);
         var model = new ScriptedModel(Review([
             new { path = "src/RetryPolicy.cs", reason = "computes the backoff delay",
@@ -275,7 +275,7 @@ public sealed class SourceExplorerTests : IDisposable
     [Fact]
     public async Task Review_rows_that_drifted_are_realigned_onto_the_line_holding_the_word()
     {
-        using var store = new FeatureStore(Path.Combine(_root, "knowledge.db"));
+        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
         using var knowledge = await KnowledgeAsync(store);
         // Execute is declared on line 6; the provider is three lines off.
         var model = new ScriptedModel(Review([new
@@ -293,7 +293,7 @@ public sealed class SourceExplorerTests : IDisposable
     [Fact]
     public async Task A_review_with_invented_words_keeps_the_retrieved_results()
     {
-        using var store = new FeatureStore(Path.Combine(_root, "knowledge.db"));
+        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
         using var knowledge = await KnowledgeAsync(store);
         var model = new ScriptedModel(Review([new
         {
@@ -358,7 +358,7 @@ public sealed class SourceExplorerTests : IDisposable
     [Fact]
     public async Task Enrichment_results_stream_before_review_and_skip_keyword_generation()
     {
-        using var store = new FeatureStore(Path.Combine(_root, "knowledge.db"));
+        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
         using var knowledge = new ProjectKnowledgeIndex(store);
         await knowledge.RefreshAsync(_root);
         var retrieved = knowledge.Search(_root, "retry backoff");
@@ -432,7 +432,7 @@ public sealed class SourceExplorerTests : IDisposable
     [Fact]
     public async Task Enrichment_survives_an_unavailable_background_provider()
     {
-        using var store = new FeatureStore(Path.Combine(_root, "knowledge.db"));
+        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
         using var knowledge = new ProjectKnowledgeIndex(store);
         await knowledge.RefreshAsync(_root);
         var model = new ScriptedModel { Throw = () => new HelperModelException("offline") };

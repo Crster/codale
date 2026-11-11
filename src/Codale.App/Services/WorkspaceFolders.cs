@@ -1,7 +1,7 @@
 using System.Text.Json;
 
 using Codale.Core.Projects;
-using Codale.Storage;
+using Codale.Db;
 
 namespace Codale.App.Services;
 
@@ -17,12 +17,10 @@ public sealed class WorkspaceFolders
     private readonly object _gate = new();
     private readonly List<string> _folders = [];
 
-    private readonly CodaleStore _store;
     private readonly string _projectPath;
 
-    public WorkspaceFolders(CodaleStore store, string projectPath)
+    public WorkspaceFolders(string projectPath)
     {
-        _store = store;
         _projectPath = projectPath;
     }
 
@@ -86,7 +84,8 @@ public sealed class WorkspaceFolders
         {
             try
             {
-                return _store.GetUiState(_projectPath, RecentKey) is { Length: > 0 } json
+                using var db = AppDb.Open();
+                return db.Project(_projectPath).Open("ui").Open(RecentKey).Read() is { Length: > 0 } json
                     ? (JsonSerializer.Deserialize<List<string>>(json) ?? []).Where(Directory.Exists).ToList()
                     : [];
             }
@@ -101,7 +100,8 @@ public sealed class WorkspaceFolders
     {
         var folder = ProjectPaths.Normalize(path);
         var recent = RecentCwds.Where(r => !string.Equals(r, folder, StringComparison.OrdinalIgnoreCase)).Prepend(folder).Take(MaxRecent);
-        _store.SetUiState(_projectPath, RecentKey, JsonSerializer.Serialize(recent));
+        using var db = AppDb.Open();
+        db.Project(_projectPath).Open("ui").Open(RecentKey).Write(JsonSerializer.Serialize(recent));
     }
 
     private static bool IsCovered(string folder, IEnumerable<string> roots) =>

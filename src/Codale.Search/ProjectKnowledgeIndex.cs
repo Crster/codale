@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Codale.Core.Features;
 using Codale.Core.Projects;
-using Codale.Storage;
+using Codale.Db;
 
 namespace Codale.Search;
 
@@ -13,7 +13,7 @@ namespace Codale.Search;
 /// Ranking fuses BM25 with the local hashed n-gram vectors (identifier fragments and inflections). There is no
 /// remote embedding model: every signal is computed in-process, so retrieval never waits on a server.
 /// </remarks>
-public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposable
+public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
 {
     // UTF-8 bytes are a conservative upper bound on byte-tokenizer tokens, including the briefing envelope.
     public const int MaxContextBytes = 3600;
@@ -39,8 +39,6 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
     private static readonly System.Text.RegularExpressions.Regex AgentInstructions = new(
         @"(^|[\\/])(CLAUDE|AGENTS|GEMINI)(\.local)?\.md$",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
-    // Keyed by worktree: one packed int8 matrix of the hashed vectors per project.
-    private readonly ConcurrentDictionary<string, QuantizedMatrix> _vectors = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, bool> _embedded = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Cancelled on dispose, so a closing window never keeps indexing.</summary>
     private readonly CancellationTokenSource _stopping = new();
@@ -84,7 +82,7 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
                     index.Invalidate(!watched || previousRevision != revision);
                     _revisions[worktree] = revision;
                     var snapshot = await index.GetSnapshotAsync().ConfigureAwait(false);
-                    var reChunk = store.SourceChunkVersion(worktree) != FileChunker.Version;
+                    var reChunk = SourceChunkVersion(worktree) != FileChunker.Version;
                     if (!reChunk && _snapshots.GetValueOrDefault(worktree) == snapshot.BuiltAt)
                     {
                         // An index built before vectors existed is embedded once, without re-chunking.
@@ -92,7 +90,7 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
                         WarmSummaries(worktree);
                         return;
                     }
-                    var old = store.SourceHashes(worktree);
+                    var old = SourceHashes(worktree);
                     var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     var changed = new List<string>();
                     foreach (var file in snapshot.Files)
@@ -108,13 +106,13 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
                         var hash = Hash(text);
                         if (reChunk || old.GetValueOrDefault(file.RelativePath) != hash)
                         {
-                            store.ReplaceSource(worktree, file.RelativePath, hash, FileChunker.Chunk(text, file.RelativePath));
+                            ReplaceSource(worktree, file.RelativePath, hash, FileChunker.Chunk(text, file.RelativePath));
                             if (!reChunk && old.Count > 0) changed.Add(file.RelativePath);
                         }
                         _indexedFiles[identity] = file;
                     }
                     var removedPaths = old.Keys.Where(p => !present.Contains(p)).ToArray();
-                    foreach (var removed in removedPaths) store.ReplaceSource(worktree, removed, null, []);
+                    foreach (var removed in removedPaths) ReplaceSource(worktree, removed, null, []);
                     // The first refresh in this process compares against an index from an earlier run, and a
                     // branch switch rewrites whatever differs: neither is work done in a session.
                     if (watched && SameBranch(previousRevision!, revision) && changed.Count is > 0 and <= MaxRecordedChanges)
@@ -123,7 +121,7 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
                         var log = _contentChanges.GetOrAdd(worktree, _ => new(StringComparer.OrdinalIgnoreCase));
                         foreach (var path in changed) log[path] = now;
                     }
-                    store.SetSourceChunkVersion(worktree, FileChunker.Version);
+                    SetSourceChunkVersion(worktree, FileChunker.Version);
                     if (reChunk || changed.Count > 0 || removedPaths.Length > 0 || old.Count == 0)
                         _embedded.TryRemove(worktree, out _);
                     EmbedPending(worktree);
@@ -145,27 +143,16 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
             CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
     }
 
-    /// <summary>Embeds chunks that have no hashed vector yet, in batches so the database lock is held briefly.</summary>
+    /// <summary>Embeds chunks that have no vector from the current model yet.</summary>
     private void EmbedPending(string worktree)
     {
-        var model = HashedTextEmbedder.Instance;
         if (_embedded.ContainsKey(worktree)) return;
-        while (!_disposed)
-        {
-            var pending = store.ChunksMissingVectors(worktree, model.Model, EmbedBatch);
-            if (pending.Count == 0) break;
-            store.PutVectors(model.Model, pending.Select(c => (c.Id, model.Embed(c.Path + "\n" + c.Symbols + "\n" + c.Text))).ToList());
-            _vectors.TryRemove(worktree, out _);
-        }
-        _vectors.TryRemove(worktree, out _);
+        EmbedChunks(worktree);
         if (_disposed) return;
         _embedded[worktree] = true;
         // Vectors of any retired embedding model are dead weight.
-        store.DeleteVectorsExcept([model.Model]);
+        ChunkRoot(worktree).DropStaleVectors();
     }
-
-    private QuantizedMatrix Vectors(string worktree) =>
-        _vectors.GetOrAdd(worktree, _ => store.SourceVectors(worktree, HashedTextEmbedder.Instance.Model));
 
     /// <summary>Shared hybrid retrieval for discovery and prompt enrichment; only fresh source is returned.</summary>
     public IReadOnlyList<SourceChunk> Search(string worktree, string prompt, string recent = "", int maxFiles = 12, int maxChunksPerFile = 1) =>
@@ -191,7 +178,7 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
             var rank = 0;
             foreach (var id in ranked) scores[id] = scores.GetValueOrDefault(id) + weight / (RrfK + ++rank);
         }
-        var lexical = store.SearchSourceTerms(prompt, worktree).Select(c => c.Id).ToList();
+        var lexical = SearchSourceTerms(prompt, worktree).Select(c => c.Id).ToList();
         var lexicalIds = lexical.ToHashSet();
         Fuse(lexical, 1.0);
         var terms = SearchText.RetrievalTerms(prompt);
@@ -206,7 +193,7 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
                 terms.Contains(SearchText.Stem(words[i])) && terms.Contains(SearchText.Stem(words[i + 1])))
             .Select(i => words[i] + words[i + 1]).Distinct().Take(8);
         foreach (var compound in compounds)
-            foreach (var chunk in store.SearchSourceIdentifierPrefix(compound, worktree))
+            foreach (var chunk in SearchSourceIdentifierPrefix(compound, worktree))
                 scores[chunk.Id] = scores.GetValueOrDefault(chunk.Id) + (IsViewPath(chunk.Path) ? 0.08 : 0.015);
 
         if (terms.Count > 0)
@@ -214,10 +201,11 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
             // Embed the topic, not the phrasing: "where does ... located" must not pull in prose that says "located".
             var topic = string.Join(' ', terms);
             var embedder = HashedTextEmbedder.Instance;
-            var vectors = Vectors(worktree);
-            if (vectors.Count > 0)
+            var similar = ChunkRoot(worktree).Query(topic, 40)
+                .Select(hit => (Id: ChunkId(hit.Node), hit.Score, hit.Node)).ToList();
+            foreach (var near in similar) _chunkNodes.TryAdd(near.Id, near.Node);
+            if (similar.Count > 0)
             {
-                var similar = vectors.Top(embedder.Embed(topic), 40);
                 // Relative cut: keep near-best neighbours only, so unrelated files never ride in on noise.
                 // Relative similarity alone always supplies neighbours, even for an absent topic.
                 // Lexical evidence can support weaker matches; otherwise require confidence.
@@ -227,12 +215,12 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
                 Fuse(similar.Where(v => v.Score >= floor && (lexicalIds.Contains(v.Id) || v.Score >= minimum)).Select(v => v.Id), 0.6);
             }
         }
-        if (!string.IsNullOrWhiteSpace(recent)) Fuse(store.SearchSourceTerms(recent, worktree, 20).Select(c => c.Id), 0.35);
+        if (!string.IsNullOrWhiteSpace(recent)) Fuse(SearchSourceTerms(recent, worktree, 20).Select(c => c.Id), 0.35);
 
         // What showed a file answered a similar earlier request is direct evidence for this one: an edit the agent
         // completed, a result the user opened from a search, a file the agent had to read. Reuse the association even
         // when the current source lacks the prompt's words; the kind sets how far it lifts the file.
-        var learned = store.SearchLearnedEdits(worktree, prompt)
+        var learned = SearchLearnedEdits(worktree, prompt)
             .Select(hit => (hit.Path, hit.Kind, Terms: SearchText.RetrievalTerms(hit.Prompt)))
             .Where(hit =>
             {
@@ -243,7 +231,7 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
         foreach (var file in learned)
         {
             var boost = file.Max(hit => LearnedKind.Boost(hit.Kind));
-            foreach (var chunk in store.SourceChunksForPath(worktree, file.Key))
+            foreach (var chunk in SourceChunksForPath(worktree, file.Key))
                 scores[chunk.Id] = scores.GetValueOrDefault(chunk.Id) + boost;
         }
 
@@ -256,10 +244,10 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
             var key = path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
             if (working.Count == MaxWorkingSet) break;
             if (AgentInstructions.IsMatch(key) || !working.TryAdd(key, working.Count)) continue;
-            foreach (var chunk in store.SourceChunksForPath(worktree, key)) scores.TryAdd(chunk.Id, 0);
+            foreach (var chunk in SourceChunksForPath(worktree, key)) scores.TryAdd(chunk.Id, 0);
         }
 
-        var chunks = store.SourceChunks(scores.Keys.ToList()).ToDictionary(c => c.Id);
+        var chunks = SourceChunks(scores.Keys.ToList()).ToDictionary(c => c.Id);
         // A specific word such as "minimap" should outweigh generic matches for "game" or
         // "unit". Count candidate files, not overlapping chunks, so long files get no bonus.
         var chunkTerms = chunks.Values.ToDictionary(c => c.Id,
@@ -424,8 +412,8 @@ public sealed partial class ProjectKnowledgeIndex(FeatureStore store) : IDisposa
         // 4. Earlier findings from either provider, valid only while the files they cite are unchanged.
         var findings = 0;
         var findingLimit = bytes + FindingBudget;
-        var hits = store.SearchKnowledgeTerms(prompt, 3, currentSessionId);
-        if (!string.IsNullOrWhiteSpace(recent)) hits = [.. hits, .. store.SearchKnowledgeTerms(recent, 2, currentSessionId)];
+        var hits = SearchKnowledgeTerms(prompt, 3, currentSessionId);
+        if (!string.IsNullOrWhiteSpace(recent)) hits = [.. hits, .. SearchKnowledgeTerms(recent, 2, currentSessionId)];
         foreach (var hit in hits)
         {
             // Findings are long prose: one shared word ("secret" in a database URL) is not relevance. Require

@@ -14,7 +14,7 @@
     <Project Path="src/Codale.Mcp.Tasks/Codale.Mcp.Tasks.csproj" />
     <Project Path="src/Codale.Search/Codale.Search.csproj" />
     <Project Path="src/Codale.Smart/Codale.Smart.csproj" />
-    <Project Path="src/Codale.Storage/Codale.Storage.csproj" />
+    <Project Path="src/Codale.Db/Codale.Db.csproj" />
     <Project Path="src/Codale.Terminal/Codale.Terminal.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -26,7 +26,7 @@
     <Project Path="tests/Codale.Search.Tests/Codale.Search.Tests.csproj" />
     <Project Path="tests/Codale.Smart.Smoke/Codale.Smart.Smoke.csproj" />
     <Project Path="tests/Codale.Smart.Tests/Codale.Smart.Tests.csproj" />
-    <Project Path="tests/Codale.Storage.Tests/Codale.Storage.Tests.csproj" />
+    <Project Path="tests/Codale.Db.Tests/Codale.Db.Tests.csproj" />
     <Project Path="tests/Codale.Terminal.Tests/Codale.Terminal.Tests.csproj" />
   </Folder>
 </Solution>
