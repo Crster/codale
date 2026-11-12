@@ -85,6 +85,51 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
                 ? $"This chat uses {provider.Name.Trim()}. It has no model name yet; add one in settings.json."
                 : $"This chat uses {provider.Name.Trim()}.";
 
+    /// <summary>The agent profile rows shown in the chat's dropdown, plus aliases from folded profile names to their row.</summary>
+    public static (List<ProviderChoice> Rows, Dictionary<(string Cli, string Name), ProviderChoice> Aliases) BuildChoices()
+    {
+        var wanted = new List<ProviderChoice>();
+        var aliases = new Dictionary<(string Cli, string Name), ProviderChoice>();
+        foreach (var cli in new[] { "claude", "codex" })
+        {
+            var label = cli == "codex" ? "Codex" : "Claude";
+            var profiles = AppSettings.ByokProviders.Where(p => p.Supports(cli)).ToList();
+            var accounts = profiles.Where(p => p.IsAccount).ToList();
+            var defaultEmail = AppSettings.AccountLabel(cli) is { } saved && saved != "Sign-in account"
+                ? saved
+                : accounts.FirstOrDefault(p => p.AccountId.Length == 0)?.Email;
+
+            ProviderChoice? defaultRow = null;
+            if (defaultEmail is not null || accounts.Count == 0)
+            {
+                defaultRow = new("", label + ": " + (defaultEmail ?? "Sign-in account"), "Sign-in account", cli);
+                wanted.Add(defaultRow);
+            }
+
+            foreach (var provider in profiles)
+            {
+                var name = provider.Name.Trim();
+                if (provider.IsAccount && defaultRow is not null && (provider.AccountId.Length == 0
+                    || string.Equals(provider.Email, defaultEmail, StringComparison.OrdinalIgnoreCase)))
+                {
+                    aliases[(cli, provider.Key.ToLowerInvariant())] = defaultRow;
+                    continue;
+                }
+
+                var detail = provider.IsAccount ? "Sign-in account" : cli == "codex" ? provider.BaseUrl : provider.AnthropicBaseUrl;
+                var row = new ProviderChoice(provider.Key, label + ": " + (provider.IsAccount ? provider.Email ?? name : name), detail, cli);
+                wanted.Add(row);
+                if (provider.IsAccount && defaultRow is null)
+                {
+                    // No separate default login row: the chat's default ("") shows as the first account.
+                    defaultRow = row;
+                    aliases[(cli, "")] = row;
+                }
+            }
+        }
+        return (wanted, aliases);
+    }
+
     /// <summary>Re-reads the provider list and the current choice; the flyout calls this when it opens.</summary>
     public void Reload()
     {
@@ -92,25 +137,25 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
 
         // Rebuild the rows only when the providers changed: replacing them under the open
         // flyout's ListView drops its selection and focus (typing in Settings fires this per keystroke).
-        var wanted = new List<ProviderChoice>();
-        foreach (var cli in new[] { "claude", "codex" })
-        {
-            var label = cli == "codex" ? "Codex" : "Claude";
-            wanted.Add(new("", label + ": " + AppSettings.AccountLabel(cli), "Sign-in account", cli));
-            foreach (var provider in AppSettings.ByokProviders.Where(p => p.Supports(cli)))
-            {
-                var name = provider.Name.Trim();
-                var detail = provider.IsAccount ? "Sign-in account" : cli == "codex" ? provider.BaseUrl : provider.AnthropicBaseUrl;
-                wanted.Add(new(provider.Key, label + ": " + (provider.IsAccount ? provider.Email ?? name : name), detail, cli));
-            }
-        }
+        // One row per real login: the CLI's default login ("") and an account profile for that same
+        // login (AccountId "", or the same email) are one account, so they share a row; the aliases
+        // map the folded profile names back to it for the selection.
+        var (wanted, aliases) = BuildChoices();
 
         if (!wanted.SequenceEqual(Choices))
         {
             Choices.ReplaceAll(wanted);
         }
 
-        Selected = Choices.FirstOrDefault(c => c.CliId == (_chat?.CliId ?? "claude") && string.Equals(c.Name, _chat?.EndpointName ?? "", StringComparison.OrdinalIgnoreCase)) ?? Choices[0];
+        var chatCli = _chat?.CliId ?? "claude";
+        var chatName = _chat?.EndpointName ?? "";
+        var match = Choices.FirstOrDefault(c => c.CliId == chatCli && string.Equals(c.Name, chatName, StringComparison.OrdinalIgnoreCase));
+        if (match is null && aliases.TryGetValue((chatCli, chatName.ToLowerInvariant()), out var alias))
+        {
+            match = Choices.FirstOrDefault(c => c == alias);
+        }
+
+        Selected = match ?? Choices.FirstOrDefault(c => c.CliId == chatCli) ?? Choices[0];
         _loading = false;
 
         OnPropertyChanged(nameof(IsActive));

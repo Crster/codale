@@ -21,7 +21,6 @@
   { "query": "download and verify the LFM3 model files", "path": "src/Codale.Smart/ModelInstaller.cs", "symbol": "EnsureAsync" },
   { "query": "run a shell command as a smart exploration tool", "path": "src/Codale.Smart/SmartTools.cs", "symbol": "ExecuteAsync" },
   { "query": "prune cached file summaries that no longer exist", "path": "src/Codale.Smart/SummaryCache.cs", "symbol": "Prune" },
-  { "query": "summary row showing what context was attached to the prompt", "path": "src/Codale.App/ViewModels/ChatItems.cs", "symbol": "ContextEnrichedItem" },
   { "query": "record input and output token usage of a retrieval", "path": "src/Codale.Search/ProjectKnowledgeIndex.Data.cs", "symbol": "RecordUsage" },
   { "query": "mark context keys as delivered to the provider session", "path": "src/Codale.Search/ProjectKnowledgeIndex.Features.cs", "symbol": "MarkContextDelivered" },
   { "query": "split camelCase identifiers into search tokens", "path": "src/Codale.Core/Features/SearchText.cs", "symbol": "Tokens" },

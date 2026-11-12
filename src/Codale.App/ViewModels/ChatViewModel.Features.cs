@@ -115,8 +115,6 @@ public sealed partial class ChatViewModel
         {
             case UserMessageRecorded user:
                 return new UserMessageItem { Text = user.Text };
-            case ContextEnrichmentRecorded context:
-                return new ContextEnrichedItem { Summary = context.Summary, Details = context.Details };
             case AssistantMessageCompleted reply:
                 var item = new AssistantMessageItem();
                 item.Complete(reply.Text);
@@ -413,23 +411,8 @@ public sealed partial class ChatViewModel
             cts.Token.ThrowIfCancellationRequested();
             if (!ReferenceEquals(session, _session)) throw new OperationCanceledException();
             if (newTopic) sent!.IsNewTopic = true;
-            if (Features is not { } features || !AppSettings.ProjectKnowledge) return null;
-            var recent = newTopic ? "" : string.Join("\n", earlier.TakeLast(2).Append(text));
-            // A new topic leaves the files the session has been editing behind.
-            // The slow model review runs only for a new topic or when the agent shifts to plan.
-            var smartReview = newTopic || earlier.Count == 0 || _routedIntent == Codale.Smart.SmartIntent.Plan;
-            var retrieval = features.RetrieveAsync(_projectPath, text, recent, new HashSet<string>(_deliveredContext),
-                _needsResumeContext ? null : FeatureId, newTopic ? null : FeatureId, smartDeadline.Token, preparationDeadline, _chatId, _routedIntent, smartReview);
-            // Smart retrieval bounds inference itself and returns verified basic context on timeout.
-            // An outer timeout would discard that fallback just as it becomes available.
-            var result = smartReview && AppSettings.SmartExperience
-                ? await retrieval.WaitAsync(cts.Token)
-                : await retrieval.WaitAsync(TimeSpan.FromSeconds(2), cts.Token);
-            if (newTopic) result = result with { NewTopic = true };
-            if (!ReferenceEquals(session, _session)) throw new OperationCanceledException();
-            _retrievalId = Guid.NewGuid().ToString("N");
-            if (FeatureId is { } id) features.RecordRetrieval(_retrievalId, id, result);
-            return result;
+            // Project context enrichment is removed: prompts go out as typed.
+            return null;
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception)
@@ -437,30 +420,6 @@ public sealed partial class ChatViewModel
             return null;
         }
         finally { _briefing = null; }
-    }
-
-    /// <summary>A row under the prompt saying what project context went with it, also kept in the session's log.</summary>
-    private void ShowContextEnrichment(RetrievalResult? result)
-    {
-        if (result is not { Text.Length: > 0 }) return;
-        var item = ContextEnrichedItem.From(result);
-        // Under the prompt, ahead of the running turn's timeline.
-        var at = _activeTurn is { } turn ? Items.IndexOf(turn) : -1;
-        if (at >= 0)
-        {
-            Items.Insert(at, item);
-            Reflow();
-        }
-        else
-        {
-            Add(item);
-        }
-
-        if (_recording)
-        {
-            try { _featureLog?.AppendContext(item.Summary, item.Details); }
-            catch (IOException) {  }
-        }
     }
 
     private void ContextDelivered(RetrievalResult? result)

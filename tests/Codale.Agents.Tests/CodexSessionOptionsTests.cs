@@ -101,9 +101,9 @@ public sealed class CodexSessionOptionsTests
     public void Permission_modes_map_onto_approval_and_sandbox_policies()
     {
         Assert.Equal(("untrusted", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("manual"));
-        Assert.Equal(("on-request", "readOnly"), CodexSessionOptions.PermissionPolicy("plan"));
-        Assert.Equal(("on-request", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("acceptEdits"));
-        Assert.Equal(("on-request", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("auto"));
+        Assert.Equal(("untrusted", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("plan"));
+        Assert.Equal(("untrusted", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("acceptEdits"));
+        Assert.Equal(("untrusted", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("auto"));
         Assert.Equal(("never", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("dontAsk"));
         Assert.Equal(("never", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("bypassPermissions"));
         Assert.Equal(("untrusted", "dangerFullAccess"), CodexSessionOptions.AskPolicy);
@@ -160,7 +160,7 @@ public sealed class CodexSessionOptionsTests
     [Fact]
     public void Foreign_modes_and_efforts_fall_back_to_the_defaults()
     {
-        Assert.Equal(("on-request", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("yolo"));
+        Assert.Equal(("untrusted", "dangerFullAccess"), CodexSessionOptions.PermissionPolicy("yolo"));
         Assert.Null(CodexSessionOptions.ClampEffort("max")); // codex has no "max"
         Assert.Equal("high", CodexSessionOptions.ClampEffort("high"));
         Assert.Null(CodexSessionOptions.ClampEffort(null));

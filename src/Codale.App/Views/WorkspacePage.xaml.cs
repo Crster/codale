@@ -499,56 +499,30 @@ public sealed partial class WorkspacePage : Page
             _loginPromptOpen = true;
             try
             {
-                Task? signInTask = null;
-                var setup = new Codale.App.Controls.SettingsPanel
+                var steps = new StackPanel { Spacing = 10, MaxWidth = 420 };
+                steps.Children.Add(new TextBlock
                 {
-                    Width = Math.Min(640, Math.Max(280, XamlRoot.Size.Width - 96)), Height = Math.Min(560, Math.Max(240, XamlRoot.Size.Height - 200)),
-                };
-                setup.ShowAccountSetup();
+                    Text = $"Codale can't find a signed-in {targetCli} account, and no other account or endpoint is available to use.",
+                    TextWrapping = TextWrapping.Wrap,
+                });
+                steps.Children.Add(new TextBlock
+                {
+                    Text = "1. Open Settings and choose AI & Providers.\n2. Under " + targetCli + " CLI, select Add account and sign in.\n3. Come back and start a new chat.",
+                    TextWrapping = TextWrapping.Wrap,
+                    Opacity = 0.8,
+                });
                 var dialog = AppDialog.Apply(new ContentDialog
                 {
                     XamlRoot = XamlRoot,
-                    Title = $"Set up an account for {targetCli}",
-                    Content = setup,
-                    PrimaryButtonText = "Continue",
-                    CloseButtonText = "Cancel",
+                    Title = $"Sign in to {targetCli}",
+                    Content = steps,
+                    PrimaryButtonText = "Open Settings",
+                    CloseButtonText = "Not now",
                     DefaultButton = ContentDialogButton.Primary,
                 }, DialogTone.Info, AppDialog.Glyphs.Account);
-                dialog.Resources["ContentDialogMaxWidth"] = 720d;
-                setup.SignInAsync = async (cli, account) =>
+                if (await dialog.ShowAsync() == ContentDialogResult.Primary)
                 {
-                    signInTask = RunAccountSignInAsync(cli, account);
-                    dialog.Hide();
-                    await signInTask;
-                };
-                setup.CloseRequested += (_, _) => dialog.Hide();
-                await setup.RefreshAccountsAsync();
-                ContentDialogResult result;
-                while (true)
-                {
-                    result = await dialog.ShowAsync();
-                    if (signInTask is null) break;
-                    try { await signInTask; }
-                    catch (Exception) { /* The shared account editor displays the sign-in error. */ }
-                    signInTask = null;
-                    await setup.RefreshAccountsAsync();
-                }
-                if (result == ContentDialogResult.Primary && sender is ChatViewModel chat)
-                {
-                    var cli = isCodex ? "codex" : "claude";
-                    var configured = AppSettings.ByokProviders.FirstOrDefault(p => p.Supports(cli) && !p.IsAccount);
-                    var accounts = await CodaleAccountCli.DiscoverAccountsAsync(cli);
-                    var accountProfile = AppSettings.ByokProviders.FirstOrDefault(p => p.Supports(cli) && p.IsAccount
-                        && accounts.Any(a => a.AccountId == p.AccountId));
-                    var profile = accountProfile is not null ? (Cli: cli, Provider: accountProfile.Key)
-                        : accounts.Any(a => a.AccountId.Length == 0) ? (Cli: cli, Provider: "")
-                        : configured is not null ? (Cli: cli, Provider: configured.Key)
-                        : await AppSettings.ResolveChatProfileAsync();
-                    if (chat.CliId != profile.Cli || chat.EndpointName != profile.Provider)
-                        await chat.SetProfileAsync(profile.Cli, profile.Provider);
-                    else
-                        await chat.ConnectAsync();
-                    ShowChatTab(chat);
+                    App.Current.MainWindow?.OpenAccountSettings();
                 }
             }
             finally
@@ -3000,12 +2974,141 @@ public sealed partial class WorkspacePage : Page
     /// Building it per tap keeps the contents honest - a folder offers creation, a
     /// file offers chat, clipboard and lifecycle entries.
     /// </summary>
+    private void OnHistorySessionClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is SessionListItem item &&
+            ViewModel.Sessions.OpenCommand.CanExecute(item))
+        {
+            ViewModel.Sessions.OpenCommand.Execute(item);
+        }
+    }
+
+    private async void OnRetitleSessionClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not SessionListItem session)
+        {
+            return;
+        }
+
+        var input = new TextBox
+        {
+            Text = session.Title,
+            PlaceholderText = "Give this history a short name",
+            SelectionStart = 0,
+            SelectionLength = session.Title.Length,
+        };
+
+        var suggestButton = new Button
+        {
+            Content = "Suggest with AI",
+            Margin = new Thickness(0, 8, 0, 0),
+        };
+
+        var hint = AppDialog.Note();
+        hint.Margin = new Thickness(0, 4, 0, 0);
+
+        var content = new StackPanel
+        {
+            Width = 380,
+            Spacing = 4,
+            Children = { input, suggestButton, hint },
+        };
+
+        var dialog = AppDialog.Apply(new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "Rename history",
+            Content = content,
+            PrimaryButtonText = "Save",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        }, DialogTone.Info, AppDialog.Glyphs.Rename);
+
+        using var cts = new CancellationTokenSource();
+        dialog.Closing += (_, _) => cts.Cancel();
+
+        suggestButton.Click += async (_, _) =>
+        {
+            suggestButton.IsEnabled = false;
+            hint.Text = "Thinking of a title…";
+            try
+            {
+                var suggestion = await ViewModel.SuggestTitleAsync(session, cts.Token);
+                if (suggestion is { Length: > 0 })
+                {
+                    input.Text = suggestion;
+                    input.SelectAll();
+                    hint.Text = "";
+                }
+                else
+                {
+                    hint.Text = "This history has no description to name it from.";
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                hint.Text = $"Could not suggest title: {ex.Message}";
+            }
+            finally
+            {
+                suggestButton.IsEnabled = true;
+            }
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary || string.IsNullOrWhiteSpace(input.Text))
+        {
+            return;
+        }
+
+        try
+        {
+            await ViewModel.Sessions.RetitleAsync(session, input.Text);
+        }
+        catch (Exception ex)
+        {
+            await AppDialog.AlertAsync(XamlRoot, "Could not rename history", ex.Message);
+        }
+    }
+
+    private async void OnDeleteSessionClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not SessionListItem session)
+        {
+            return;
+        }
+
+        var dialog = AppDialog.Apply(new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = $"Delete \"{session.Title}\"?",
+            Content = "This removes this history's summary, turns and file index. The work it did in your workspace is kept. Open chats stay open and are detached from this history.",
+            PrimaryButtonText = "Delete",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+        }, DialogTone.Danger, AppDialog.Glyphs.Delete);
+
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            try
+            {
+                ViewModel.Sessions.Delete(session);
+            }
+            catch (Exception ex)
+            {
+                await AppDialog.AlertAsync(XamlRoot, "Could not delete history", ex.Message);
+            }
+        }
+    }
+
     private void OnTreeRightTapped(object sender, RightTappedRoutedEventArgs e)
     {
         // Right-clicking empty space acts on the project root.
         var context = (e.OriginalSource as FrameworkElement)?.DataContext;
         var hit = context as FileNode ?? (context as FileSearchHit)?.Node;
-        if (hit is { IsPlaceholder: true })
+        if (hit is { IsPlaceholder: true } or { IsDraft: true } or { IsEditing: true })
         {
             return;
         }
@@ -3016,8 +3119,8 @@ public sealed partial class WorkspacePage : Page
 
         if (node.IsDirectory)
         {
-            menu.Items.Add(MenuAction("New file", () => _ = CreateChildAsync(node, file: true), ""));
-            menu.Items.Add(MenuAction("New folder", () => _ = CreateChildAsync(node, file: false), ""));
+            menu.Items.Add(MenuAction("New file", () => BeginCreate(node, file: true), ""));
+            menu.Items.Add(MenuAction("New folder", () => BeginCreate(node, file: false), ""));
         }
         else
         {
@@ -3071,7 +3174,7 @@ public sealed partial class WorkspacePage : Page
             }
             else
             {
-                menu.Items.Add(MenuAction("Rename…", () => _ = RenameAsync(node), ""));
+                menu.Items.Add(MenuAction("Rename…", () => BeginRename(node), ""));
                 menu.Items.Add(MenuAction("Delete", () => _ = DeleteAsync(node), ""));
             }
         }
@@ -3261,18 +3364,138 @@ public sealed partial class WorkspacePage : Page
     }
 
 
-    private async Task CreateChildAsync(FileNode parent, bool file)
+    /// <summary>Adds an empty, editable row under <paramref name="parent"/>; the entry is created when it is named.</summary>
+    private void BeginCreate(FileNode parent, bool file) => ViewModel.Files.BeginDraft(parent, isDirectory: !file);
+
+    private void BeginRename(FileNode node)
     {
-        var name = await PromptTextAsync(file ? "New file" : "New folder", $"Name for the new {(file ? "file" : "folder")} in {parent.Name}");
-        if (name is null)
+        node.EditText = node.Name;
+        node.IsEditing = true;
+    }
+
+    private DateTime _nameEditLoadedAt;
+
+    private void OnNameEditLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox { DataContext: FileNode node } box)
         {
             return;
         }
 
+        _nameEditLoadedAt = DateTime.UtcNow;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            box.Focus(FocusState.Programmatic);
+
+            // Renaming selects the name without its extension, like an explorer.
+            var dot = node.IsDirectory ? -1 : box.Text.LastIndexOf('.');
+            box.Select(0, dot > 0 ? dot : box.Text.Length);
+            box.StartBringIntoView();
+        });
+    }
+
+    private async void OnNameEditKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (sender is not TextBox { DataContext: FileNode node } box)
+        {
+            return;
+        }
+
+        if (e.Key == Windows.System.VirtualKey.Enter)
+        {
+            e.Handled = true;
+            await CommitNameEditAsync(node, box.Text);
+        }
+        else if (e.Key == Windows.System.VirtualKey.Escape)
+        {
+            e.Handled = true;
+            CancelNameEdit(node);
+        }
+    }
+
+    private async void OnNameEditLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox { DataContext: FileNode node } box || !node.IsEditing)
+        {
+            return;
+        }
+
+        // Closing the context menu hands focus back to the tree a moment after the box
+        // opened; that must not read as the user walking away from it.
+        if (DateTime.UtcNow - _nameEditLoadedAt < TimeSpan.FromMilliseconds(500))
+        {
+            DispatcherQueue.TryEnqueue(() => box.Focus(FocusState.Programmatic));
+            return;
+        }
+
+        await CommitNameEditAsync(node, box.Text);
+    }
+
+    private void CancelNameEdit(FileNode node)
+    {
+        node.IsEditing = false;
+        if (node.IsDraft)
+        {
+            ViewModel.Files.RemoveDraft(node);
+        }
+    }
+
+    private async Task CommitNameEditAsync(FileNode node, string text)
+    {
+        if (!node.IsEditing)
+        {
+            return;
+        }
+
+        // Cleared first: removing the box fires LostFocus again.
+        node.IsEditing = false;
+        var name = text.Trim();
+
+        if (node.IsDraft)
+        {
+            ViewModel.Files.RemoveDraft(node);
+            if (name.Length > 0 && node.DraftParent is { } parent)
+            {
+                await CreateEntryAsync(parent, name, file: !node.IsDirectory);
+            }
+
+            return;
+        }
+
+        if (name.Length > 0 && !string.Equals(name, node.Name, StringComparison.Ordinal))
+        {
+            await RenameEntryAsync(node, name);
+        }
+    }
+
+    private static string? NameProblem(string name)
+    {
+        if (name is "." or ".." || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            return $"\"{name}\" is not a valid name.";
+        }
+
+        return null;
+    }
+
+    private async Task CreateEntryAsync(FileNode parent, string name, bool file)
+    {
         var path = Path.Combine(parent.FullPath, name);
 
         try
         {
+            if (NameProblem(name) is { } problem)
+            {
+                await ShowTreeErrorAsync($"Could not create {name}", problem);
+                return;
+            }
+
+            if (File.Exists(path) || Directory.Exists(path))
+            {
+                await ShowTreeErrorAsync($"Could not create {name}", $"{name} already exists.");
+                return;
+            }
+
             if (file)
             {
                 File.WriteAllText(path, "");
@@ -3283,6 +3506,11 @@ public sealed partial class WorkspacePage : Page
             }
 
             AfterTreeMutation();
+
+            if (file)
+            {
+                ShowFile(path);
+            }
         }
         catch (Exception ex)
         {
@@ -3290,18 +3518,18 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
-    private async Task RenameAsync(FileNode node)
+    private async Task RenameEntryAsync(FileNode node, string name)
     {
-        var name = await PromptTextAsync($"Rename {node.Name}", "New name", node.Name);
-        if (name is null)
-        {
-            return;
-        }
-
         var target = Path.Combine(Path.GetDirectoryName(node.FullPath) ?? ViewModel.ProjectPath, name);
 
         try
         {
+            if (NameProblem(name) is { } problem)
+            {
+                await ShowTreeErrorAsync($"Could not rename {node.Name}", problem);
+                return;
+            }
+
             if (File.Exists(target) || Directory.Exists(target))
             {
                 await ShowTreeErrorAsync($"Could not rename {node.Name}", $"{name} already exists.");
@@ -3421,7 +3649,7 @@ public sealed partial class WorkspacePage : Page
                 return;
         }
 
-        if (node.IsPlaceholder)
+        if (node.IsPlaceholder || node.IsDraft)
         {
             return;
         }

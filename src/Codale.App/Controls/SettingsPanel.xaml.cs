@@ -94,9 +94,11 @@ public sealed partial class SettingsPanel : UserControl
 
     private void RefreshSmartFeatureRows()
     {
+        // The same agent profiles the chat's dropdown offers: signed-in accounts and API endpoints.
         var profiles = AppSettings.ByokProviders.Where(p => !p.IsAccount).ToArray();
+        var rows = CliEndpointViewModel.BuildChoices().Rows;
         var key = string.Join("|", SmartFeatureSettings.Groups.Select(g => AppSettings.SmartProviderFor(g.Id) + ":" + AppSettings.SmartApiProfileFor(g.Id)))
-            + string.Join("|", profiles.Select(p => p.Key + p.Name + p.BaseUrl + p.AnthropicBaseUrl));
+            + "#" + string.Join("|", rows.Select(r => r.CliId + r.Name + r.Label + r.Detail));
         if (_smartRowsKey != key)
         {
             _smartRowsKey = key;
@@ -114,31 +116,36 @@ public sealed partial class SettingsPanel : UserControl
                 label.Children.Add(new TextBlock { Text = group.Description, TextWrapping = TextWrapping.Wrap, Style = (Style)SettingsRootGrid.Resources["RowDesc"] });
                 heading.Children.Add(label);
                 var providers = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
-                foreach (var choice in group.Id == "embedding" ? new[] { "off", "openai" } : new[] { "off", "claude", "codex", "openai", "anthropic" })
-                    providers.Items.Add(new ComboBoxItem { Content = choice switch { "off" => "Off", "openai" => "OpenAI", _ => char.ToUpperInvariant(choice[0]) + choice[1..] }, Tag = choice });
-                providers.SelectedItem = providers.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == provider) ?? providers.Items[0];
+                providers.Items.Add(new ComboBoxItem { Content = "Off", Tag = ("off", "") });
+                var savedProfile = AppSettings.SmartApiProfileFor(group.Id);
+                foreach (var row in rows)
+                {
+                    var isAccount = row.Detail == "Sign-in account";
+                    var target = isAccount ? (row.CliId, "") : (row.CliId == "codex" ? "openai" : "anthropic", row.Name);
+                    if (group.Id == "embedding" && target.Item1 != "openai") continue; // embeddings need an OpenAI-compatible endpoint
+                    providers.Items.Add(new ComboBoxItem { Content = row.Label, Tag = target });
+                }
+                var current = providers.Items.OfType<ComboBoxItem>().FirstOrDefault(i =>
+                    i.Tag is (string p, string profile) && p == provider && (provider is "claude" or "codex" or "off" || profile == savedProfile));
+                if (current is null && provider != "off")
+                {
+                    current = new ComboBoxItem { Content = char.ToUpperInvariant(provider[0]) + provider[1..] + " (unavailable)", Tag = (provider, savedProfile) };
+                    providers.Items.Add(current); // keep a saved choice visible even if its profile is gone
+                }
+                providers.SelectedItem = current ?? providers.Items[0];
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(providers, group.Label + " provider");
                 providers.SelectionChanged += (_, _) =>
                 {
-                    if (_loading || providers.SelectedItem is not ComboBoxItem { Tag: string selected }) return;
+                    if (_loading || providers.SelectedItem is not ComboBoxItem { Tag: ValueTuple<string, string> selection }) return;
+                    var (selected, profile) = selection;
                     AppSettings.SetSmartProvider(group.Id, selected);
+                    if (profile.Length > 0) AppSettings.SetSmartApiProfile(group.Id, profile);
                     if (selected != "off" && AppSettings.SmartFeatureModel(group.Id).Equals("off", StringComparison.OrdinalIgnoreCase))
                         AppSettings.SetSmartFeatureModel(group.Id, "default");
                 };
                 Grid.SetColumn(providers, 1);
                 heading.Children.Add(providers);
                 section.Children.Add(heading);
-                if (provider is "openai" or "anthropic")
-                {
-                    var endpoint = new ComboBox { PlaceholderText = "Select endpoint", HorizontalAlignment = HorizontalAlignment.Right, Width = 220 };
-                    foreach (var profile in profiles.Where(p => provider == "anthropic" ? p.AnthropicBaseUrl.Length > 0 : p.BaseUrl.Length > 0))
-                        endpoint.Items.Add(new ComboBoxItem { Content = profile.Name, Tag = profile.Key });
-                    endpoint.SelectedItem = endpoint.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == AppSettings.SmartApiProfileFor(group.Id));
-                    Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(endpoint, group.Label + " endpoint");
-                    endpoint.SelectionChanged += (_, _) =>
-                    { if (!_loading && endpoint.SelectedItem is ComboBoxItem { Tag: string id }) AppSettings.SetSmartApiProfile(group.Id, id); };
-                    section.Children.Add(endpoint);
-                }
                 var model = new ComboBox { IsEditable = true, PlaceholderText = group.Id == "embedding" ? "Select model" : "Default model",
                     HorizontalAlignment = HorizontalAlignment.Right, Width = 220, Tag = group.Id, IsEnabled = provider != "off" };
                 if (group.Id != "embedding") model.Items.Add("Default");
@@ -213,7 +220,6 @@ public sealed partial class SettingsPanel : UserControl
         RefreshSyntaxSection();
         WordWrapToggle.IsOn = AppSettings.EditorWordWrap;
         SuggestNextPromptToggle.IsOn = AppSettings.SuggestNextPrompt;
-        SmartHistoryToggle.IsOn = AppSettings.ProjectKnowledge;
         RefreshSmartStatus();
 
         ThemeBox.SelectedIndex = AppSettings.Theme switch
@@ -1051,14 +1057,6 @@ public sealed partial class SettingsPanel : UserControl
         if (!_loading)
         {
             AppSettings.SuggestNextPrompt = SuggestNextPromptToggle.IsOn;
-        }
-    }
-
-    private void OnSmartHistoryToggled(object sender, RoutedEventArgs e)
-    {
-        if (!_loading)
-        {
-            AppSettings.ProjectKnowledge = SmartHistoryToggle.IsOn;
         }
     }
 

@@ -34,15 +34,14 @@ public sealed record CodexSessionOptions
     public static string ClampPermissionMode(string mode) => Claude.ClaudeSessionOptions.ClampPermissionMode(mode);
 
     /// <summary>
-    /// Planning allows inspection in a read-only sandbox. Work modes retain their
-    /// existing approval policy and full filesystem access.
+    /// Codex runs with no sandbox in every mode. Full never asks; every other mode uses "untrusted",
+    /// which asks for everything but a few known-harmless reads, so Codale's approval policy
+    /// (read-only in Ask and Plan, writes asked in Interactive and Auto) is the only gate.
     /// </summary>
     public static (string ApprovalPolicy, string SandboxType) PermissionPolicy(string? mode) => ClampPermissionMode(mode ?? "") switch
     {
-        "manual" => ("untrusted", "dangerFullAccess"),
-        "plan" => ("on-request", "readOnly"),
         "bypassPermissions" or "dontAsk" => ("never", "dangerFullAccess"),
-        _ => ("on-request", "dangerFullAccess"),
+        _ => ("untrusted", "dangerFullAccess"),
     };
 
     /// <summary>Ask turns request approval for commands, which the host denies in ask mode.</summary>

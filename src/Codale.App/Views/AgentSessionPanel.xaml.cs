@@ -25,8 +25,6 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 {
     private ChatViewModel? _session;
     private WorkspaceViewModel? _workspace;
-    private bool _historyShowAll;
-    private bool _hadConversation;
     private bool _historyLayoutQueued;
     private int _todoCountSeen;
 
@@ -114,6 +112,8 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         Session?.TerminalCli is { } cli
             ? cli.DisplayName
             : Workspace?.CliEndpoint.ActiveName is { Length: > 0 } name ? name : "Default";
+
+    private void OnProfileItemClick(object sender, ItemClickEventArgs e) => ProfileFlyout.Hide();
 
     public bool ShowSessionPickers => Session is not null && !Session.IsTerminalSession;
 
@@ -378,13 +378,13 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
                 }, flyout));
 
         Add(ChatViewModel.AutomaticMode, "\uE82F", "Auto",
-            "Uses the CLI automatic permission mode",
+            "Runs reads, builds and project edits; asks before writes, deletes, risky or unknown commands",
             current == ChatViewModel.AutomaticMode);
         Add("manual", "\uE7C9", "Interactive",
-            "Reads freely; edits, shell and deletes ask first",
+            "Reads and read-only commands run; every edit and other command asks first",
             current is "manual" or "default");
         Add("plan", "\uE707", "Plan",
-            "Plans and asks first, then implements with full permission",
+            "Plans read-only (no writes or unknown commands), then implements with full permission",
             current == "plan");
         Add("auto", "\uE945", "Full",
             "Fully automated; never stops to confirm, only for your answers",
@@ -522,178 +522,10 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             return;
         }
 
-        var sessions = Workspace.Sessions;
-        var conversation = Session.HasConversation;
-        var live = conversation || Session.IsTerminalSession || Session.SortedTasks.Count > 0 || Session.Todos.Count > 0;
+        var live = Session.HasConversation || Session.IsTerminalSession || Session.SortedTasks.Count > 0 || Session.Todos.Count > 0;
 
-        if (conversation != _hadConversation)
-        {
-            _hadConversation = conversation;
-            _historyShowAll = false;
-        }
-
-        var folded = conversation && !_historyShowAll;
-        var expanded = HistorySection.IsChecked == true;
-
-        IEnumerable<SessionListItem> source = folded ? sessions.OpenSessions : sessions.Sessions;
-        if (!ReferenceEquals(HistoryList.ItemsSource, source))
-        {
-            HistoryList.ItemsSource = source;
-        }
-
-        var star = new GridLength(1, GridUnitType.Star);
-        LiveRow.Height = live ? star : GridLength.Auto;
+        LiveRow.Height = live ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
         LiveHost.Visibility = live ? Visibility.Visible : Visibility.Collapsed;
-        HistoryRow.Height = expanded && !folded ? star : GridLength.Auto;
-
-        HistoryShowAllButton.Visibility = conversation ? Visibility.Visible : Visibility.Collapsed;
-        HistoryShowAllButton.Content = _historyShowAll ? "Show less" : $"Show all ({sessions.Sessions.Count})";
-        HistoryNotListedText.Visibility = folded && expanded && sessions.OpenSessions.Count == 0
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-    }
-
-    private void OnHistorySectionClick(object sender, RoutedEventArgs e) => UpdateHistoryLayout();
-
-    private void OnHistoryShowAllClick(object sender, RoutedEventArgs e)
-    {
-        _historyShowAll = !_historyShowAll;
-        HistorySection.IsChecked = true;
-        UpdateHistoryLayout();
-    }
-
-    private void OnSessionClick(object sender, ItemClickEventArgs e)
-    {
-        if (e.ClickedItem is SessionListItem item &&
-            Workspace?.Sessions.OpenCommand.CanExecute(item) == true)
-        {
-            Workspace.Sessions.OpenCommand.Execute(item);
-        }
-    }
-
-    private async void OnRetitleSessionClick(object sender, RoutedEventArgs e)
-    {
-        if ((sender as FrameworkElement)?.DataContext is not SessionListItem session || Workspace is null)
-        {
-            return;
-        }
-
-        var input = new TextBox
-        {
-            Text = session.Title,
-            PlaceholderText = "Give this history a short name",
-            SelectionStart = 0,
-            SelectionLength = session.Title.Length,
-        };
-
-        var suggestButton = new Button
-        {
-            Content = "Suggest with AI",
-            Margin = new Thickness(0, 8, 0, 0),
-        };
-
-        var hint = AppDialog.Note();
-        hint.Margin = new Thickness(0, 4, 0, 0);
-
-        var content = new StackPanel
-        {
-            Width = 380,
-            Spacing = 4,
-            Children = { input, suggestButton, hint },
-        };
-
-        var dialog = AppDialog.Apply(new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = "Rename history",
-            Content = content,
-            PrimaryButtonText = "Save",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-        }, DialogTone.Info, AppDialog.Glyphs.Rename);
-
-        using var cts = new CancellationTokenSource();
-        dialog.Closing += (_, _) => cts.Cancel();
-
-        suggestButton.Click += async (_, _) =>
-        {
-            suggestButton.IsEnabled = false;
-            hint.Text = "Thinking of a title…";
-            try
-            {
-                var suggestion = await Workspace.SuggestTitleAsync(session, cts.Token);
-                if (suggestion is { Length: > 0 })
-                {
-                    input.Text = suggestion;
-                    input.SelectAll();
-                    hint.Text = "";
-                }
-                else
-                {
-                    hint.Text = "This history has no description to name it from.";
-                }
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception ex)
-            {
-                hint.Text = $"Could not suggest title: {ex.Message}";
-            }
-            finally
-            {
-                suggestButton.IsEnabled = true;
-            }
-        };
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary || string.IsNullOrWhiteSpace(input.Text))
-        {
-            return;
-        }
-
-        try
-        {
-            await Workspace.Sessions.RetitleAsync(session, input.Text);
-        }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync("Could not rename history", ex.Message);
-        }
-    }
-
-    private async void OnDeleteSessionClick(object sender, RoutedEventArgs e)
-    {
-        if ((sender as FrameworkElement)?.DataContext is not SessionListItem session || Workspace is null)
-        {
-            return;
-        }
-
-        var dialog = AppDialog.Apply(new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = $"Delete \"{session.Title}\"?",
-            Content = "This removes this history's summary, turns and file index. The work it did in your workspace is kept. Open chats stay open and are detached from this history.",
-            PrimaryButtonText = "Delete",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close,
-        }, DialogTone.Danger, AppDialog.Glyphs.Delete);
-
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
-        {
-            try
-            {
-                Workspace.Sessions.Delete(session);
-            }
-            catch (Exception ex)
-            {
-                await ShowErrorAsync("Could not delete history", ex.Message);
-            }
-        }
-    }
-
-    private async Task ShowErrorAsync(string title, string message)
-    {
-        await AppDialog.AlertAsync(XamlRoot, title, message);
     }
 
     #endregion

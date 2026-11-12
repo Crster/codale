@@ -328,14 +328,6 @@ public sealed partial class ChatTab : UserControl
         }
     }
 
-    private void OnContextToggleClick(object sender, RoutedEventArgs e)
-    {
-        if (((FrameworkElement)sender).Tag is ContextEnrichedItem context)
-        {
-            context.IsExpanded = !context.IsExpanded;
-        }
-    }
-
     private void OnHandoffBriefToggleClick(object sender, RoutedEventArgs e)
     {
         if (((FrameworkElement)sender).Tag is HandoffBriefItem brief)

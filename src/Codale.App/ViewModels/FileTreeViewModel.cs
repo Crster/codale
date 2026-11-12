@@ -41,6 +41,32 @@ public sealed partial class FileNode : ObservableObject
 
     public bool IsPlaceholder { get; init; }
 
+    /// <summary>
+    /// A row that exists only while its name is being typed: the "New file" / "New
+    /// folder" entry the explorer shows inline before anything is created on disk.
+    /// </summary>
+    public bool IsDraft { get; init; }
+
+    /// <summary>The folder a draft row will be created in.</summary>
+    public FileNode? DraftParent { get; init; }
+
+    /// <summary>True while the row shows a text box instead of its name (new entry or rename).</summary>
+    [ObservableProperty]
+    public partial bool IsEditing { get; set; }
+
+    [ObservableProperty]
+    public partial string EditText { get; set; } = "";
+
+    internal static FileNode Draft(FileNode parent, bool isDirectory) => new()
+    {
+        Name = "",
+        FullPath = parent.FullPath,
+        IsDirectory = isDirectory,
+        IsDraft = true,
+        DraftParent = parent,
+        IsEditing = true,
+    };
+
     /// <summary>True for a folder the user added to the workspace; it is listed as a root beside the project.</summary>
     public bool IsWorkspaceRoot { get; init; }
 
@@ -748,6 +774,48 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
     /// <summary>Top level entries: the project's own, or - with added folders - one root per folder.</summary>
     public ObservableCollection<FileNode> Nodes { get; } = [];
 
+    /// <summary>The collection that actually displays a folder's children (the top level lists the project's entries directly).</summary>
+    public ObservableCollection<FileNode> ChildrenOf(FileNode directory) =>
+        ReferenceEquals(directory, Root) && !HasRoots ? Nodes : directory.Children;
+
+    /// <summary>
+    /// Opens the folder and puts an empty, editable row at the top of its folders (or
+    /// files), the way an explorer does. Nothing touches the disk until it is named.
+    /// </summary>
+    public FileNode BeginDraft(FileNode parent, bool isDirectory)
+    {
+        SearchText = "";
+        parent.IsExpanded = true;
+        parent.LoadChildren();
+
+        var list = ChildrenOf(parent);
+        foreach (var stale in list.Where(n => n.IsDraft).ToList())
+        {
+            list.Remove(stale);
+        }
+
+        var draft = FileNode.Draft(parent, isDirectory);
+        var index = 0;
+        if (!isDirectory)
+        {
+            while (index < list.Count && list[index].IsDirectory)
+            {
+                index++;
+            }
+        }
+
+        list.Insert(index, draft);
+        return draft;
+    }
+
+    public void RemoveDraft(FileNode draft)
+    {
+        if (draft.DraftParent is { } parent)
+        {
+            ChildrenOf(parent).Remove(draft);
+        }
+    }
+
     /// <summary>
     /// Expands the folder hierarchy leading down to <paramref name="path"/>, ensuring every
     /// intermediate directory is loaded and marked expanded. Returns the matching node for the
@@ -976,7 +1044,7 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
 
         for (var i = displayed.Count - 1; i >= 0; i--)
         {
-            if (!freshPaths.Contains(displayed[i].FullPath))
+            if (!displayed[i].IsDraft && !displayed[i].IsEditing && !freshPaths.Contains(displayed[i].FullPath))
             {
                 displayed.RemoveAt(i);
             }
@@ -1049,7 +1117,7 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
 
         foreach (var child in node.Children.ToList())
         {
-            if (!child.IsPlaceholder)
+            if (!child.IsPlaceholder && !child.IsDraft)
             {
                 WalkNested(child);
             }
@@ -1091,7 +1159,7 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
 
         foreach (var child in node.Children.ToList())
         {
-            if (child.IsPlaceholder)
+            if (child.IsPlaceholder || child.IsDraft)
             {
                 continue;
             }

@@ -5,16 +5,20 @@ using Codale.Core.Processes;
 
 namespace Codale.Agents.Codex;
 
-/// <summary>Runs npm outside Codale, after shutdown has released the Codex executable.</summary>
+/// <summary>Runs npm (or winget, for a winget install) outside Codale, after shutdown has released the Codex executable.</summary>
 public static class CodexUpdater
 {
     public static async Task StartAfterExitAsync(string logPath)
     {
-        var npm = CliLocator.Find("npm")
-            ?? throw new InvalidOperationException("npm was not found. Install Node.js before updating Codex.");
+        var codex = CliLocator.KnownClis.Single(cli => cli.Id == "codex");
+        var winget = CliVersionCheck.WingetPackage(codex);
+        var npm = winget is not null
+            ? CliLocator.Find("winget") ?? throw new InvalidOperationException("winget was not found.")
+            : CliLocator.Find("npm")
+                ?? throw new InvalidOperationException("npm was not found. Install Node.js before updating Codex.");
         Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
         var readyPath = logPath + ".ready-" + Guid.NewGuid().ToString("N");
-        var script = BuildScript(Environment.ProcessId, npm, logPath, readyPath);
+        var script = BuildScript(Environment.ProcessId, npm, logPath, readyPath, winget: winget);
         var start = new ProcessStartInfo
         {
             FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
@@ -56,7 +60,7 @@ public static class CodexUpdater
     }
 
     internal static string BuildScript(int ownerPid, string npm, string logPath, string? readyPath = null,
-        int shutdownTimeoutSeconds = 120) => $$"""
+        int shutdownTimeoutSeconds = 120, string? winget = null) => $$"""
         $ErrorActionPreference = 'Stop'
         $logPath = {{Quote(logPath)}}
         try {
@@ -69,7 +73,7 @@ public static class CodexUpdater
             'Updating Codex...' | Add-Content -LiteralPath $logPath
             # Windows PowerShell treats native stderr as an error record. npm emits warnings there.
             $ErrorActionPreference = 'Continue'
-            & {{Quote(npm)}} i -g '@openai/codex@latest' *>> $logPath
+            & {{Quote(npm)}} {{(winget is null ? "i -g '@openai/codex@latest'" : $"upgrade --id {winget} --source winget --exact --disable-interactivity --accept-source-agreements --accept-package-agreements")}} *>> $logPath
             $updateExitCode = $LASTEXITCODE
             $ErrorActionPreference = 'Stop'
             if ($updateExitCode -ne 0) {

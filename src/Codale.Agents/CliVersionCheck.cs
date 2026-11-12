@@ -14,7 +14,8 @@ public static partial class CliVersionCheck
 {
     /// <summary>The command that updates an installed CLI; null when there is no known way to.</summary>
     public static string? UpdateCommand(CliDescriptor cli) =>
-        cli.Id == "claude" ? cli.Executable + " update"
+        WingetPackage(cli) is { } wingetId ? $"winget upgrade --id {wingetId} --source winget --exact"
+        : cli.Id == "claude" ? cli.Executable + " update"
         : NpmPackage(cli) is { } package ? $"npm i -g {package}@latest"
         : null;
 
@@ -23,6 +24,29 @@ public static partial class CliVersionCheck
         cli.Id == "claude" ? "@anthropic-ai/claude-code"
         : cli.InstallCommand is { } install && NpmInstallPattern().Match(install) is { Success: true } match ? match.Groups[1].Value
         : null;
+
+    /// <summary>
+    /// The winget package id when the CLI on PATH was installed by winget (its portable
+    /// link or package folder), else null. winget lags the npm registry, so a winget
+    /// install is checked and updated against winget only.
+    /// </summary>
+    public static string? WingetPackage(CliDescriptor cli) =>
+        WingetPackage(cli, CliLocator.Find(cli.Executable));
+
+    internal static string? WingetPackage(CliDescriptor cli, string? path)
+    {
+        var id = cli.Id switch
+        {
+            "claude" => "Anthropic.ClaudeCode",
+            "codex" => "OpenAI.Codex",
+            _ => null,
+        };
+
+        return id is not null && path is not null &&
+               path.Contains(@"\Microsoft\WinGet\", StringComparison.OrdinalIgnoreCase)
+            ? id
+            : null;
+    }
 
     [GeneratedRegex(@"^npm\s+(?:i|install)\s+-g\s+(\S+)$")]
     private static partial Regex NpmInstallPattern();
@@ -72,6 +96,11 @@ public static partial class CliVersionCheck
     /// <summary>The newest published release; null when the registry cannot be reached.</summary>
     public static async Task<Version?> LatestAsync(CliDescriptor cli, CancellationToken cancellation = default)
     {
+        if (WingetPackage(cli) is { } wingetId)
+        {
+            return await LatestFromWingetAsync(wingetId, cancellation).ConfigureAwait(false);
+        }
+
         if (NpmPackage(cli) is not { } package)
         {
             return null;
@@ -88,6 +117,50 @@ public static partial class CliVersionCheck
             return null;
         }
     }
+
+    /// <summary>The version the winget source offers (<c>winget show</c>); null when winget cannot say.</summary>
+    private static async Task<Version?> LatestFromWingetAsync(string id, CancellationToken cancellation)
+    {
+        try
+        {
+            var startInfo = new ProcessStartInfo("winget")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            foreach (var argument in new[] { "show", "--id", id, "--exact", "--source", "winget", "--disable-interactivity" })
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
+
+            using var process = await ProcessUtil.StartAsync(startInfo).ConfigureAwait(false);
+            if (process is null)
+            {
+                return null;
+            }
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+            timeout.CancelAfter(TimeSpan.FromSeconds(30));
+            await using var kill = timeout.Token.Register(() => ProcessUtil.TryKillTree(process));
+
+            var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+            var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
+            await process.WaitForExitAsync(timeout.Token);
+            await errorTask;
+
+            var match = WingetVersionLine().Match(await outputTask);
+            return match.Success ? Parse(match.Groups[1].Value) : null;
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+        {
+            return null;
+        }
+    }
+
+    [GeneratedRegex(@"^Version:\s*(\S+)", RegexOptions.Multiline)]
+    private static partial Regex WingetVersionLine();
 
     /// <summary>Pulls "2.1.5" out of "2.1.5 (Claude Code)" or a bare version string.</summary>
     public static Version? Parse(string? text) =>

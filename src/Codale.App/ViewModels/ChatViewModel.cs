@@ -1488,12 +1488,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public bool IsFullMode => PermissionMode is "auto" or "dontAsk" or "bypassPermissions";
 
     /// <summary>
-    /// The CLI's automatic permission mode.
+    /// Codale's own automatic mode: the CLI runs with edits accepted and Codale answers its approvals.
     /// </summary>
-    // NOTE: Auto is Claude's own auto mode (--permission-mode auto): the model evaluates each
-    // action's risk and only asks or denies the risky ones. This is already handled; do not
-    // auto-approve in the host when the CLI reports "default" - that would bypass the risk check
-    // (see RidesOn and CliMode).
+    // NOTE: the CLI's own "auto" classifier is not used. The CLI runs on acceptEdits and Codale
+    // answers its approvals: reads and edits pass, shell goes through the host's risk analyzer
+    // (safe runs, risky asks), MCP tools through the MCP risk notes (see CliMode).
     public const string AutomaticMode = "automatic";
 
     public bool IsAutomaticMode => PermissionMode == AutomaticMode;
@@ -1502,15 +1501,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public static bool IsHostMode(string mode) => mode is AskMode or AutomaticMode;
 
     /// <summary>
-    /// What to hand the CLI for a host mode: ask runs on "manual", automatic on "auto", and
+    /// What to hand the CLI for a host mode: ask and automatic run on "manual", and
     /// Full (stored as "auto" or "dontAsk") on "bypassPermissions" - Claude's own "auto" is a
     /// classifier that can still deny or ask, which Full must never do.
     /// </summary>
     public static string CliMode(string mode) => ClaudeSessionOptions.ClampPermissionMode(mode switch
     {
         AskMode => "manual",
-        // The host's analyzer judges shell, so the CLI's opaque classifier is not used.
-        AutomaticMode => "acceptEdits",
+        // Auto, Ask and Interactive all run the CLI in its ask-everything mode: it has no sandbox
+        // and no opinion of its own, and Codale's ApprovalPolicy answers each request.
+        AutomaticMode => "manual",
         "auto" or "dontAsk" => "bypassPermissions",
         _ => mode,
     });
@@ -1520,7 +1520,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         AskMode => reported is "manual" or "default",
         // A CLI that does not offer its "auto" classifier starts in "default" instead; Auto is the host's routing either way.
-        AutomaticMode => reported is "acceptEdits" or "auto" or "default",
+        AutomaticMode => reported is "manual" or "acceptEdits" or "auto" or "default",
         "auto" or "dontAsk" => reported is "bypassPermissions" or "dontAsk",
         _ => false,
     };
@@ -1948,6 +1948,52 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// The chat's own profile has no login. Moves it (before the CLI starts) to another signed-in
+    /// account of the same CLI, a configured endpoint, or the other CLI's account. False when nothing is usable.
+    /// </summary>
+    private async Task<bool> TrySwitchToAvailableProfileAsync()
+    {
+        var current = IsCodexSession ? "codex" : "claude";
+        foreach (var cli in new[] { current, current == "claude" ? "codex" : "claude" })
+        {
+            var accounts = await CodaleAccountCli.DiscoverAccountsAsync(cli);
+            var candidates = new List<string>();
+            foreach (var account in accounts)
+            {
+                if (account.AccountId.Length == 0) candidates.Add("");
+                else if (AppSettings.ByokProviders.FirstOrDefault(p => p.Supports(cli) && p.IsAccount && p.AccountId == account.AccountId) is { } profile)
+                    candidates.Add(profile.Key);
+            }
+
+            candidates.AddRange(AppSettings.ByokProviders.Where(p => p.Supports(cli) && !p.IsAccount).Select(p => p.Key));
+
+            foreach (var name in candidates)
+            {
+                if (cli == current && string.Equals(name, EndpointName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (cli != CliId)
+                {
+                    CaptureHandoff();
+                    _needsResumeContext = true;
+                    ResumeSessionId = null;
+                    CliId = cli;
+                    RequestedModel = null;
+                    AvailableModels = [];
+                    HasModelCatalog = false;
+                    OnPropertyChanged(nameof(AvailableModels));
+                    OnPropertyChanged(nameof(HasModelCatalog));
+                    OnPropertyChanged(nameof(CanPickModel));
+                }
+
+                EndpointName = name;
+                OnPropertyChanged(nameof(EndpointName));
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private async Task ConnectCoreAsync()
     {
         // Never leave the mode to the CLI's own default (it asks about every edit and run):
@@ -1985,8 +2031,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (endpointEnv is null && (IsCodexSession || !EnvironmentOverridesEndpoint()) &&
             !await CodaleAccountCli.IsSignedInAsync(cliId, accountId: AppSettings.FindByok(EndpointName)?.AccountId))
         {
+            // Use whatever else is available before bothering the user.
+            if (await TrySwitchToAvailableProfileAsync())
+            {
+                await ConnectCoreAsync();
+                return;
+            }
+
             if (_loginNotice is not null) Items.Remove(_loginNotice);
-            _loginNotice = new NoticeItem { Text = $"Codale isn't signed in to {ProviderName}. Set up an account to continue.", Severity = NoticeSeverity.Warning };
+            _loginNotice = new NoticeItem { Text = $"No signed-in account is available for {ProviderName}. Add one in Settings → AI & Providers.", Severity = NoticeSeverity.Warning };
             Add(_loginNotice);
             LoginRequired?.Invoke(this, IsCodexSession ? "Codex" : ProviderName);
             return;
@@ -3414,7 +3467,21 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return new ShellAssessment("", ShellRisk.Caution, "");
         }
 
-        return ShellCommandAnalyzer.Assess(command, _projectPath, hint, ExtraRoots);
+        var assessment = ShellCommandAnalyzer.Assess(command, _projectPath, hint, ExtraRoots);
+        if (assessment.Risk == ShellRisk.Safe)
+        {
+            var kind = ShellCommandClassifier.Classify(command, _projectPath, ExtraRoots);
+            if (kind.Class is ShellClass.Write or ShellClass.Delete or ShellClass.Unknown)
+            {
+                assessment = assessment with { Risk = ShellRisk.Caution, Reason = kind.Reason };
+            }
+            else if (kind.Class == ShellClass.Danger)
+            {
+                assessment = assessment with { Risk = ShellRisk.Danger, Reason = kind.Reason };
+            }
+        }
+
+        return assessment;
     }
 
     private bool _phoneOffered;
@@ -3500,9 +3567,37 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        // Ask, Plan, Interactive and Auto are decided here, by what the tool would do. The CLIs run
+        // unsandboxed and hand every approval to Codale, so this is the only gate: reads and read-only
+        // shell run; Ask and Plan refuse writes and unknown shell; Interactive asks for every write;
+        // Auto asks for writes, deletes, dangerous and unknown commands.
+        var governed = ApprovalPolicy.Governs(PermissionMode);
+        if (governed)
+        {
+            var policyCommand = ToolCallItem.CommandInput(approval.ToolName, approval.Input);
+            var plan = ApprovalPolicy.Decide(PermissionMode, approval.ToolName, policyCommand, approval.Input,
+                _projectPath, ExtraRoots, McpRiskNote(approval.ToolName) is not null);
+            if (plan.Verdict != ApprovalVerdict.Ask)
+            {
+                if (plan.Verdict == ApprovalVerdict.Deny && _toolCalls.TryGetValue(approval.ToolUseId ?? "", out var blocked))
+                {
+                    blocked.Status = ToolCallStatus.Denied;
+                }
+
+                if (_session is { } deciding)
+                {
+                    await deciding.RespondToApprovalAsync(approval.RequestId, plan.Verdict == ApprovalVerdict.Allow
+                        ? ApprovalDecision.Allow()
+                        : ApprovalDecision.Deny(plan.Reason));
+                }
+
+                return;
+            }
+        }
+
         // Interactive and Auto never stop for MCP tools or read-only tools; only edits (Interactive)
         // and shell (both) can ask.
-        if ((IsAutomaticMode || PermissionMode is "manual" or "default") &&
+        if (!governed && (IsAutomaticMode || PermissionMode is "manual" or "default") &&
             (approval.ToolName.StartsWith("mcp__", StringComparison.Ordinal) ||
              approval.ToolName is "Read" or "Glob" or "Grep" or "LS" or "WebSearch" or "WebFetch"))
         {
@@ -3515,7 +3610,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         // In acceptEdits and Auto mode, file edits go through without asking.
-        if ((PermissionMode == "acceptEdits" || IsAutomaticMode) &&
+        if (!governed && (PermissionMode == "acceptEdits" || IsAutomaticMode) &&
             approval.ToolName is "Edit" or "Write" or "MultiEdit" or "NotebookEdit")
         {
 
@@ -3532,7 +3627,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // Questions for the user are conversation, not action, so they still get through.
         // Looking things up on the web reads, it changes nothing, and it often makes the
         // answer: ask mode lets it through unasked.
-        if (IsAskMode && approval.ToolName is "WebSearch" or "WebFetch")
+        if (!governed && IsAskMode && approval.ToolName is "WebSearch" or "WebFetch")
         {
 
             if (_session is { } searching)
@@ -3550,7 +3645,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // Risk "Safe" is insufficient here: it also includes builds and unknown programs.
         var requiresPlanApproval = PermissionMode == "plan" &&
             approval.ToolName is "Edit" or "Write" or "MultiEdit" or "NotebookEdit" or "Bash" or "PowerShell" or "Permissions";
-        if (await PlanningApproval.TryApproveInspectionAsync(
+        if (!governed && await PlanningApproval.TryApproveInspectionAsync(
             PermissionMode, IsAutomaticMode, approval.ToolName, shellCommand, async () =>
             {
                 if (_session is { } planning)
@@ -3560,7 +3655,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        if (!requiresPlanApproval && PermissionMode is not ("manual" or "default") &&
+        if (!governed && !requiresPlanApproval && PermissionMode is not ("manual" or "default") &&
             shellAssessment.Risk == ShellRisk.Safe && AppSettings.AutoApproveSafeShell)
         {
 
@@ -3574,7 +3669,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         // Shell commands are often just reads (listing, searching), and a CLI that cannot
         // sandbox them - codex on Windows - asks about every one: the reader decides those.
-        if (IsAskMode && approval.ToolName is not ("AskUserQuestion" or "Bash"))
+        if (!governed && IsAskMode && approval.ToolName is not ("AskUserQuestion" or "Bash"))
         {
             if (_toolCalls.TryGetValue(approval.ToolUseId ?? "", out var refused))
             {
@@ -4301,8 +4396,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        if (!silent) ShowContextEnrichment(retrieved);
-
         // "/compact" is housekeeping, not part of the conversation a resumed history replays.
         _preparingTask = null;
         if (_activeTurn is { } ready) ready.LiveStage = "";
@@ -4382,7 +4475,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         EndTurn(TurnOutcome.Completed);
         Add(sent);
         RecordUserTurn(text);
-        ShowContextEnrichment(retrieved);
         BeginTurn();
         _turnStarted = started;
         try

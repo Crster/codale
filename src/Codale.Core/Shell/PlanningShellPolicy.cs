@@ -11,7 +11,11 @@ public static class PlanningShellPolicy
         "Get-Content", "Get-ChildItem", "Get-Item", "Get-Location", "Test-Path", "Resolve-Path",
         "Select-String", "Select-Object", "Measure-Object", "Get-FileHash",
         "Format-Table", "Format-List", "Out-String", "Write-Output",
-        "rg", "grep", "cat", "head", "tail", "wc", "ls", "pwd",
+        "Get-Date", "Get-Process", "Get-Service", "Get-Command", "Get-Help", "Get-Member", "Get-Alias", "Get-PSDrive",
+        "Get-Host", "Get-Acl", "Get-ItemProperty", "Get-ItemPropertyValue", "Get-Variable", "Get-Random", "Get-Culture",
+        "Compare-Object", "Split-Path", "Join-Path", "Convert-Path", "ConvertFrom-Json", "ConvertTo-Json", "ConvertTo-Csv",
+        "ConvertFrom-Csv", "Write-Host", "Out-Host", "Sort-Object", "Group-Object", "Format-Wide", "Select-Xml",
+        "rg", "grep", "cat", "head", "tail", "wc", "ls", "pwd", "findstr", "dir", "type", "echo", "whoami", "hostname",
     };
 
     /// <summary>Reads may proceed during planning; writes and plan review still need approval.</summary>

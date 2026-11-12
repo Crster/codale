@@ -9,14 +9,15 @@ public sealed class CodexPlanModeTests
     [Theory]
     [InlineData("auto", true)]
     [InlineData("plan", false)]
-    public async Task Plan_turns_use_native_planning_and_read_only_access(string mode, bool planOnly)
+    public async Task Plan_turns_use_native_planning_without_a_sandbox(string mode, bool planOnly)
     {
         await using var session = Create(mode);
         var parameters = new Dictionary<string, object?>();
         session.ApplyTurnOverrides(parameters, false, planOnly);
         var json = JsonSerializer.SerializeToElement(parameters);
-        Assert.Equal("on-request", json.GetProperty("approvalPolicy").GetString());
-        Assert.Equal("readOnly", json.GetProperty("sandboxPolicy").GetProperty("type").GetString());
+        // No sandbox in any mode: Codale's approval policy keeps planning read-only.
+        Assert.Equal("untrusted", json.GetProperty("approvalPolicy").GetString());
+        Assert.Equal("dangerFullAccess", json.GetProperty("sandboxPolicy").GetProperty("type").GetString());
         var collaboration = json.GetProperty("collaborationMode");
         Assert.Equal("plan", collaboration.GetProperty("mode").GetString());
         var settings = collaboration.GetProperty("settings");

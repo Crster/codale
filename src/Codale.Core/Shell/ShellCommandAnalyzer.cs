@@ -108,6 +108,9 @@ public static class ShellCommandAnalyzer
         @"(?:^|\s|[""'])((?:[a-zA-Z]:\\|\\\\|/)[^\s""']*|\.\.[\\/][^\s""']*)",
         RegexOptions.Compiled);
 
+    // /s /q /f /a:h - cmd.exe switches look like one-letter root folders.
+    private static readonly Regex CmdSwitch = new(@"^/(?:[A-Za-z?]|[A-Za-z]:\w+)$", RegexOptions.Compiled);
+
     /// <summary>Every rule the command matches, most severe first.</summary>
     public static IReadOnlyList<ShellFinding> Analyze(string command, string? cwd = null, IReadOnlyList<string>? extraRoots = null)
     {
@@ -390,6 +393,11 @@ public static class ShellCommandAnalyzer
         foreach (Match match in AbsolutePath.Matches(segment))
         {
             var path = match.Groups[1].Value;
+            if (CmdSwitch.IsMatch(path))
+            {
+                continue;
+            }
+
             if (path.StartsWith("..", StringComparison.Ordinal) || string.IsNullOrEmpty(cwd))
             {
                 return true;

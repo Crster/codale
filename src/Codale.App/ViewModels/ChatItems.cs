@@ -1655,46 +1655,6 @@ public sealed partial class FeatureBriefingItem : ChatItem
 }
 
 /// <summary>
-/// Project context Codale attached to a prompt before sending it: a folded row with what was
-/// retrieved and its size, opening to the files and the exact text the agent received.
-/// </summary>
-public sealed partial class ContextEnrichedItem : ChatItem
-{
-    public override TranscriptBlock Block => TranscriptBlock.Notice;
-
-    protected override Thickness NaturalMargin => new(0, 2, 40, 2);
-
-    /// <summary>"3 files · 2 excerpts · 1 finding · ~640 tokens · 18 ms".</summary>
-    public required string Summary { get; init; }
-
-    /// <summary>Markdown of the files and the briefing as sent.</summary>
-    public required string Details { get; init; }
-
-    [ObservableProperty]
-    public partial bool IsExpanded { get; set; }
-
-    public static ContextEnrichedItem From(Codale.Core.Features.RetrievalResult result)
-    {
-        var parts = new List<string>();
-        if (result.NewTopic) parts.Add("new topic, re-enriched");
-        if (result.Files.Count > 0) parts.Add(Count(result.Files.Count, "file"));
-        if (result.Snippets > 0) parts.Add(Count(result.Snippets, "excerpt"));
-        if (result.Findings > 0) parts.Add(Count(result.Findings, "earlier finding"));
-        // Bytes / 4 is the usual estimate for code; the stored figure stays the conservative byte bound.
-        parts.Add($"~{Math.Max(1, result.Tokens / 4)} tokens");
-        parts.Add($"{result.ElapsedMilliseconds} ms");
-        var files = result.Files.Count > 0 ? string.Join("\n", result.Files.Select(f => $"- `{f}`")) + "\n\n" : "";
-        return new ContextEnrichedItem
-        {
-            Summary = string.Join(" · ", parts),
-            Details = $"{files}*{result.Method}*" + (result.SmartActivityId is { } activity ? $" · Smart process log: `{activity}`" : "") + $"\n\n~~~text\n{result.Text}\n~~~",
-        };
-    }
-
-    private static string Count(int n, string noun) => $"{n} {noun}{(n == 1 ? "" : "s")}";
-}
-
-/// <summary>
 /// The background model's pass over a feature's history before the first message goes out:
 /// while it runs, the stage it is at; after, folded to what it saved, it opens to the brief the
 /// session started from and the files the pass explored.

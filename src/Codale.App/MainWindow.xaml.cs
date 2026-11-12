@@ -185,6 +185,13 @@ public sealed partial class MainWindow : Window
 
     private void OnSettingsClick(object sender, RoutedEventArgs e) => SetSettingsOpen(!_settingsOpen);
 
+    /// <summary>Opens Settings on the AI &amp; Providers tab, where accounts are added.</summary>
+    public void OpenAccountSettings()
+    {
+        SetSettingsOpen(true);
+        SettingsHost.ShowAccountSetup();
+    }
+
     private void OnSettingsBackdropTapped(object sender, TappedRoutedEventArgs e) => SetSettingsOpen(false);
 
     /// <summary>Slides the Settings pane in from (or out to) the right edge.</summary>

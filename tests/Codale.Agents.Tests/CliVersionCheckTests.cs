@@ -27,6 +27,21 @@ public class CliVersionCheckTests
         var cli = CliLocator.KnownClis.Single(cli => cli.Id == cliId);
 
         Assert.Equal(package, CliVersionCheck.NpmPackage(cli));
-        Assert.Equal(command, CliVersionCheck.UpdateCommand(cli));
+        if (CliVersionCheck.WingetPackage(cli) is null)
+        {
+            Assert.Equal(command, CliVersionCheck.UpdateCommand(cli));
+        }
+    }
+
+    [Theory]
+    [InlineData("claude", @"C:\Users\a\AppData\Local\Microsoft\WinGet\Links\claude.exe", "Anthropic.ClaudeCode")]
+    [InlineData("codex", @"C:\Users\a\AppData\Local\Microsoft\WinGet\Links\codex.exe", "OpenAI.Codex")]
+    [InlineData("codex", @"C:\Users\a\AppData\Roaming\npm\codex.cmd", null)]
+    [InlineData("gemini", @"C:\Users\a\AppData\Local\Microsoft\WinGet\Links\gemini.exe", null)]
+    public void Winget_installs_are_recognised_by_where_the_executable_lives(string cliId, string path, string? expected)
+    {
+        var cli = CliLocator.KnownClis.Single(cli => cli.Id == cliId);
+
+        Assert.Equal(expected, CliVersionCheck.WingetPackage(cli, path));
     }
 }

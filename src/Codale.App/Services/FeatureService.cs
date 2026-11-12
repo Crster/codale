@@ -34,8 +34,6 @@ public sealed class FeatureService : IDisposable
         _knowledge.SmartProjectRoot = projectPath;
         UpdateSummaryCache();
         _knowledge.SummariesEnabled = () => AppSettings.SmartSummaries;
-        SmartExperienceHost.Instance.Changed += OnSmartChanged;
-        _knowledge.Warm(projectPath);
         AppSettings.Changed += OnAppSettingsChanged;
         _activity = FeatureActivity.For(projectPath);
         _activity.HistoryDeleted += OnHistoryDeleted;
@@ -149,23 +147,10 @@ public sealed class FeatureService : IDisposable
         _knowledge.Summaries = new Codale.Smart.SummaryCache(Path.Combine(ProjectPaths.KnowledgeDirectory(_projectPath), "smart-summaries"), _summaryIdentity);
     }
 
-    private void OnSmartChanged(object? sender, EventArgs e)
-    { if (SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready) _knowledge.Warm(_projectPath); }
-
-    /// <summary>Switching Smart thinking re-summarises the project now, not on the next prompt.</summary>
     private void OnAppSettingsChanged(object? sender, EventArgs e)
     {
         var client = SmartExperienceHost.CreateClient("summary");
-        var embedding = SmartExperienceHost.CreateClient("embedding").EmbeddingIdentity;
-        var summaryChanged = _summaryIdentity != client.FeatureIdentity("summary");
-        if (summaryChanged) UpdateSummaryCache();
-        if (summaryChanged || _embeddingIdentity != embedding || _smartThinking != AppSettings.SmartThinking || _smartSummaries != AppSettings.SmartSummaries)
-        {
-            _embeddingIdentity = embedding;
-            _smartThinking = AppSettings.SmartThinking;
-            _smartSummaries = AppSettings.SmartSummaries;
-            _knowledge.Warm(_projectPath);
-        }
+        if (_summaryIdentity != client.FeatureIdentity("summary")) UpdateSummaryCache();
     }
 
     private const int WorkingSetFiles = 8;
@@ -175,12 +160,11 @@ public sealed class FeatureService : IDisposable
     /// edits made through the shell, which never arrive as a tool's file change. Re-indexes first, so
     /// the next prompt's retrieval already sees those files fresh.
     /// </summary>
-    public Task RecordTurnChangesAsync(string sessionId, string worktree, DateTime startedUtc) => Task.Run(async () =>
+    public Task RecordTurnChangesAsync(string sessionId, string worktree, DateTime startedUtc) => Task.Run(() =>
     {
         var root = ProjectPaths.Normalize(worktree);
         try
         {
-            await _knowledge.RefreshAsync(root).ConfigureAwait(false);
             foreach (var relative in _knowledge.ChangedSince(root, startedUtc))
                 if (ProjectKnowledgeIndex.Eligible(relative)) _knowledge.RecordSessionFile(sessionId, relative);
         }
@@ -229,7 +213,6 @@ public sealed class FeatureService : IDisposable
         var root = _knowledge.GetProviderSession(sessionId)?.Worktree ?? _projectPath;
         var relative = Path.GetRelativePath(root, Path.GetFullPath(path));
         if (ProjectPaths.IsInside(root, path) && ProjectKnowledgeIndex.Eligible(relative)) _knowledge.RecordSessionFile(sessionId, relative);
-        _knowledge.Warm(root);
     }
 
     public void Dispose()
@@ -238,7 +221,6 @@ public sealed class FeatureService : IDisposable
         _historyRefresh.Dispose();
         _activity.HistoryDeleted -= OnHistoryDeleted;
         AppSettings.Changed -= OnAppSettingsChanged;
-        SmartExperienceHost.Instance.Changed -= OnSmartChanged;
         _knowledge.Dispose();
         _db.Dispose();
     }

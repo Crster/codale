@@ -560,7 +560,7 @@
                     <TreeView
                         x:Name="FileTree"
                         Grid.Row="2"
-                        Margin="16,0,0,0"
+                        Background="Transparent"
                         Visibility="{x:Bind ViewModel.Files.IsSearching, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}"
                         CanDragItems="False"
                         Expanding="OnTreeExpanding"
@@ -593,22 +593,33 @@
                                             <TextBlock
                                                 VerticalAlignment="Center"
                                                 Foreground="{Binding GitStatus, Mode=OneWay, Converter={StaticResource GitStatusBrush}}"
-                                                Text="{x:Bind Name}" />
+                                                Text="{x:Bind Name}"
+                                                Visibility="{x:Bind IsEditing, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}" />
+                                            <!--  Inline name entry for a new file / folder or a rename  -->
+                                            <TextBox
+                                                x:Name="NameEditBox"
+                                                x:Load="{x:Bind IsEditing, Mode=OneWay}"
+                                                Height="24"
+                                                MinWidth="120"
+                                                MinHeight="24"
+                                                MaxWidth="260"
+                                                Padding="6,2"
+                                                VerticalAlignment="Center"
+                                                FontSize="12"
+                                                KeyDown="OnNameEditKeyDown"
+                                                Loaded="OnNameEditLoaded"
+                                                LostFocus="OnNameEditLostFocus"
+                                                Text="{x:Bind EditText, Mode=TwoWay}">
+                                                <TextBox.Resources>
+                                                    <x:Double x:Key="TextControlThemeMinHeight">22</x:Double>
+                                                </TextBox.Resources>
+                                            </TextBox>
                                         </StackPanel>
                                     </StackPanel>
                                 </TreeViewItem>
                             </DataTemplate>
                         </TreeView.ItemTemplate>
                     </TreeView>
-                    <!-- Keep a root-menu target available even when the tree is full. -->
-                    <Border
-                        Grid.Row="2"
-                        Width="24"
-                        Margin="-8,0,0,0"
-                        HorizontalAlignment="Left"
-                        Background="Transparent"
-                        RightTapped="OnTreeRightTapped"
-                        Visibility="{x:Bind ViewModel.Files.IsSearching, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}" />
                     </Grid>
                 </PivotItem>
 
@@ -1281,6 +1292,115 @@
                             </ListView.ItemTemplate>
                         </ListView>
                     </Grid>
+                    </Grid>
+                </PivotItem>
+
+                <PivotItem Header="History">
+                    <Grid RowSpacing="4">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock
+                            Margin="8,16,8,0"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Top"
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Text="Work joins the history once you send a message."
+                            TextWrapping="Wrap"
+                            Visibility="{x:Bind ViewModel.Sessions.Sessions.Count, Mode=OneWay, Converter={StaticResource CountToInverseVisibility}}" />
+
+                        <ListView
+                            IsItemClickEnabled="True"
+                            ItemClick="OnHistorySessionClick"
+                            ItemContainerStyle="{StaticResource PanelItemFlush}"
+                            ItemsSource="{x:Bind ViewModel.Sessions.Sessions, Mode=OneWay}"
+                            SelectionMode="None">
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="vm:SessionListItem">
+                                    <Grid
+                                        Padding="8,6"
+                                        Background="Transparent"
+                                        ColumnSpacing="8"
+                                        ToolTipService.ToolTip="{x:Bind Summary.FirstPrompt}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.ContextFlyout>
+                                            <MenuFlyout>
+                                                <MenuFlyoutItem Click="OnRetitleSessionClick" Text="Rename history">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="&#xE70F;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <MenuFlyoutSeparator />
+                                                <MenuFlyoutItem
+                                                    Click="OnDeleteSessionClick"
+                                                    Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                                    Text="Delete history">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Foreground="{ThemeResource SystemFillColorCriticalBrush}" Glyph="&#xE74D;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                            </MenuFlyout>
+                                        </Grid.ContextFlyout>
+
+                                        <!--  The open conversation's accent bar  -->
+                                        <Grid Width="3">
+                                            <Border
+                                                Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                                CornerRadius="1.5"
+                                                Visibility="{x:Bind IsOpen, Mode=OneWay}" />
+                                        </Grid>
+
+                                        <StackPanel Grid.Column="1" Spacing="1">
+                                            <TextBlock
+                                                FontSize="12"
+                                                Text="{x:Bind Title, Mode=OneWay}"
+                                                TextTrimming="CharacterEllipsis"
+                                                TextWrapping="NoWrap" />
+                                            <TextBlock
+                                                FontSize="10.5"
+                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                TextTrimming="CharacterEllipsis"
+                                                TextWrapping="NoWrap">
+                                                <Run Text="{x:Bind TurnsText}" /><Run Text=" · " /><Run Text="{x:Bind UpdatedAt, Converter={StaticResource RelativeTime}}" />
+                                            </TextBlock>
+                                        </StackPanel>
+
+                                        <StackPanel
+                                            Grid.Column="2"
+                                            VerticalAlignment="Center"
+                                            Orientation="Horizontal"
+                                            Spacing="5">
+                                            <StackPanel
+                                                Orientation="Horizontal"
+                                                Spacing="5"
+                                                Visibility="{x:Bind IsWorking, Mode=OneWay}">
+                                                <Ellipse
+                                                    Width="6"
+                                                    Height="6"
+                                                    VerticalAlignment="Center"
+                                                    Fill="{StaticResource StatusRunningBrush}"
+                                                    views:Pulse.IsActive="{x:Bind IsWorking, Mode=OneWay}" />
+                                                <TextBlock
+                                                    FontSize="10.5"
+                                                    Foreground="{StaticResource StatusRunningBrush}"
+                                                    Text="running" />
+                                            </StackPanel>
+                                            <TextBlock
+                                                FontSize="10.5"
+                                                Foreground="{StaticResource StatusSuccessBrush}"
+                                                Text="open"
+                                                Visibility="{x:Bind IsOpenIdle, Mode=OneWay}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
                     </Grid>
                 </PivotItem>
             </Pivot>
