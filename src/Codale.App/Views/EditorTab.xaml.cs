@@ -369,7 +369,8 @@ public sealed partial class EditorTab : UserControl
         try
         {
             var snapshot = root is null ? null : SourceIndex.For(root).Current;
-            header = CompletionContext.Build(snapshot, root ?? "", path, FileEditor.LanguageId, nearby);
+            var related = root is null ? null : await RelatedCodeAsync(root, nearby, ct);
+            header = CompletionContext.Build(snapshot, root ?? "", path, FileEditor.LanguageId, nearby, related);
         }
         catch (Exception)
         {
@@ -386,6 +387,46 @@ public sealed partial class EditorTab : UserControl
 
         var line = Codale.Core.Text.FimText.FirstLine(raw, suffix, prefix);
         return Codale.Core.Text.FimText.LooksLikeProse(line) ? null : line;
+    }
+
+    private string _relatedKey = "";
+    private IReadOnlyList<(string Path, string Text)> _relatedCode = [];
+
+    /// <summary>
+    /// Chunks of the project's knowledge index related to the identifiers just before the caret. The lookup is
+    /// repeated only when those identifiers change, so typing within a word costs nothing.
+    /// </summary>
+    private async Task<IReadOnlyList<(string Path, string Text)>?> RelatedCodeAsync(string root, string nearby, CancellationToken ct)
+    {
+        if (Knowledge is not { } knowledge)
+        {
+            return null;
+        }
+
+        var words = System.Text.RegularExpressions.Regex.Matches(nearby, @"[A-Za-z_][A-Za-z0-9_]{3,}")
+            .Select(m => m.Value).Reverse().Distinct(StringComparer.Ordinal).Take(6).ToList();
+        if (words.Count == 0)
+        {
+            return null;
+        }
+
+        var key = string.Join(' ', words);
+        if (key == _relatedKey)
+        {
+            return _relatedCode;
+        }
+
+        try
+        {
+            var chunks = await knowledge.SearchAsync(root, key, "", maxFiles: 4, maxChunksPerFile: 1, ct);
+            _relatedCode = chunks.Select(c => (c.Path, c.Text)).ToList();
+            _relatedKey = key;
+            return _relatedCode;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

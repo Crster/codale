@@ -13,12 +13,21 @@ public sealed partial class WorkspaceHealthViewModel : ObservableObject, IDispos
     private readonly SourceIndex _index;
     private readonly SynchronizationContext? _ui;
 
-    public WorkspaceHealthViewModel(string projectPath)
+    private readonly ProjectKnowledgeIndex? _knowledge;
+    private (int Done, int Total) _summary;
+
+    public WorkspaceHealthViewModel(string projectPath, ProjectKnowledgeIndex? knowledge = null)
     {
         _ui = SynchronizationContext.Current;
         _index = SourceIndex.For(projectPath);
+        _knowledge = knowledge;
 
         _index.StateChanged += OnIndexStateChanged;
+        if (_knowledge is not null)
+        {
+            _knowledge.IndexingChanged += OnIndexStateChanged;
+            _knowledge.SummaryProgressChanged += OnSummaryProgress;
+        }
 
         _index.Warm();
         Refresh();
@@ -31,6 +40,12 @@ public sealed partial class WorkspaceHealthViewModel : ObservableObject, IDispos
     public partial string IndexTooltip { get; set; } = "";
 
     private void OnIndexStateChanged() => OnUi(Refresh);
+
+    private void OnSummaryProgress(int done, int total)
+    {
+        _summary = (done, total);
+        OnUi(Refresh);
+    }
 
     /// <summary>Scans and jobs report from background threads; the text is set on the UI thread.</summary>
     private void OnUi(Action action)
@@ -50,9 +65,14 @@ public sealed partial class WorkspaceHealthViewModel : ObservableObject, IDispos
         var snapshot = _index.Current;
         var model = _index.Model;
 
-        if (_index.IsScanning)
+        var (done, total) = _summary;
+        if (_index.IsScanning || _knowledge?.IsIndexing == true)
         {
             IndexText = "Indexing…";
+        }
+        else if (total > 0 && done < total)
+        {
+            IndexText = $"Summarizing {Math.Min(done + 1, total)}/{total}";
         }
         else if (snapshot is null)
         {
@@ -74,5 +94,10 @@ public sealed partial class WorkspaceHealthViewModel : ObservableObject, IDispos
     public void Dispose()
     {
         _index.StateChanged -= OnIndexStateChanged;
+        if (_knowledge is not null)
+        {
+            _knowledge.IndexingChanged -= OnIndexStateChanged;
+            _knowledge.SummaryProgressChanged -= OnSummaryProgress;
+        }
     }
 }

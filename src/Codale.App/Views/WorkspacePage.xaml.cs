@@ -119,7 +119,6 @@ public sealed partial class WorkspacePage : Page
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
         base.OnNavigatedFrom(e);
-        SmartActivityFlyout.Hide();
 
         AppSettings.Changed -= OnAppSettingsChanged;
         foreach (var entry in _terminalTabs) entry.Tab.CloseHost();
@@ -1833,7 +1832,7 @@ public sealed partial class WorkspacePage : Page
 
         // A save changes the working tree, so git re-colours the file tree now rather than on the next poll.
         editor.Saved += (_, _) => _ = ViewModel.Git.RefreshAsync();
-        var tab = new EditorTab { ProjectRoot = ViewModel.ProjectPath }.WithViewModel(editor);
+        var tab = new EditorTab { ProjectRoot = ViewModel.ProjectPath, Knowledge = ViewModel.Features.Knowledge }.WithViewModel(editor);
         tab.FindReferencesRequested += (_, text) =>
         {
             ShowReferences(text);

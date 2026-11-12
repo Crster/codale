@@ -43,7 +43,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         Sessions = new SessionsViewModel(ProjectPath, Features);
         _endpoints = new CliEndpointSettings();
         _mcp = new McpServerSettings(ProjectPath);
-        Health = new WorkspaceHealthViewModel(ProjectPath);
+        Health = new WorkspaceHealthViewModel(ProjectPath, Features.Knowledge);
         SmartActivity = new SmartActivityViewModel(ProjectPath);
         SmartActivity.ObserveIndex(Features.Knowledge);
         McpTools = new McpToolsViewModel(_mcp, FolderServers, ProjectPath);

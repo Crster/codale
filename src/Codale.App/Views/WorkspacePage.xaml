@@ -2000,7 +2000,7 @@
                     </StackPanel>
                 </StackPanel>
 
-                <!--  Right: the indexer  -->
+                <!--  Right: the indexer, then tool hosts  -->
                 <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="2">
                 <!--  Indexer: what the project index holds for this workspace, or that it is scanning  -->
                 <Border Style="{StaticResource StatusChip}" ToolTipService.ToolTip="{x:Bind ViewModel.Health.IndexTooltip, Mode=OneWay}">
@@ -2013,8 +2013,6 @@
                             Text="{x:Bind ViewModel.Health.IndexText, Mode=OneWay}" />
                     </StackPanel>
                 </Border>
-                <Rectangle Style="{StaticResource StatusDivider}" />
-
                     <!--  Built-in MCP servers: a browser to verify work in, and desktop control  -->
                     <!--  Opened from the title bar's Browser button; this host only owns the flyout  -->
                     <Border x:Name="McpToolsHost" Width="0" Height="0" Margin="-16,0,0,0">
@@ -2227,53 +2225,6 @@
                             </Flyout>
                         </FlyoutBase.AttachedFlyout>
                     </Border>
-                    <!--  Far right: Smart process log, latest prompt only. Opens its flyout on click only  -->
-                    <Button x:Name="SmartActivityButton" Style="{StaticResource StatusButton}"
-                            AutomationProperties.Name="Smart process log">
-                        <StackPanel Orientation="Horizontal" Spacing="5">
-                            <Path Width="11" Height="11" Stretch="Uniform" VerticalAlignment="Center" Fill="{ThemeResource TextFillColorSecondaryBrush}"
-                                  Data="M8,0 C8.6,4.6 11.4,7.4 16,8 C11.4,8.6 8.6,11.4 8,16 C7.4,11.4 4.6,8.6 0,8 C4.6,7.4 7.4,4.6 8,0 Z" />
-                            <TextBlock FontSize="11.5" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind ViewModel.SmartActivity.Text, Mode=OneWay}" />
-                        </StackPanel>
-                        <Button.Flyout>
-                            <Flyout x:Name="SmartActivityFlyout" Placement="TopEdgeAlignedRight" ShouldConstrainToRootBounds="True">
-                                <Flyout.FlyoutPresenterStyle>
-                                    <Style TargetType="FlyoutPresenter">
-                                        <Setter Property="Padding" Value="2,2,2,4" />
-                                        <Setter Property="MinWidth" Value="0" />
-                                        <Setter Property="CornerRadius" Value="6" />
-                                    </Style>
-                                </Flyout.FlyoutPresenterStyle>
-                                <Grid Width="360" MaxHeight="260" RowDefinitions="Auto,*">
-                                    <TextBlock Margin="8,2,8,6" FontSize="11.5" FontWeight="SemiBold"
-                                               Text="{x:Bind ViewModel.SmartActivity.Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
-                                    <ListView Grid.Row="1" ItemsSource="{x:Bind ViewModel.SmartActivity.Runs}" SelectionMode="None"
-                                              IsItemClickEnabled="False" HorizontalContentAlignment="Stretch" ScrollViewer.VerticalScrollBarVisibility="Auto">
-                                        <ListView.ItemContainerStyle>
-                                            <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
-                                                <Setter Property="MinHeight" Value="0" />
-                                                <Setter Property="Padding" Value="8,2" />
-                                            </Style>
-                                        </ListView.ItemContainerStyle>
-                                        <ListView.ItemTemplate>
-                                            <DataTemplate x:DataType="vm:SmartActivityItem">
-                                                <Grid Margin="{x:Bind Indent}" ColumnSpacing="8">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="Auto" />
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <TextBlock FontSize="11.5" Foreground="{x:Bind KindBrush, Mode=OneWay}" Text="{x:Bind Verb, Mode=OneWay}" />
-                                                    <TextBlock Grid.Column="1" FontSize="11.5" Text="{x:Bind Target, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Grid.Column="2" FontSize="11" Opacity="0.6" Text="{x:Bind Meta, Mode=OneWay}" />
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ListView.ItemTemplate>
-                                    </ListView>
-                                </Grid>
-                            </Flyout>
-                        </Button.Flyout>
-                    </Button>
                 </StackPanel>
             </Grid>
         </Border>

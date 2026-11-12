@@ -103,6 +103,9 @@ public sealed class SourceIndex : IDisposable
     /// <summary>The latest finished snapshot, or null before the first scan completes.</summary>
     public SourceSnapshot? Current => Volatile.Read(ref _current);
 
+    /// <summary>True when a snapshot exists and nothing has marked it stale since (no age limit).</summary>
+    public bool IsUpToDate => Current is { } snapshot && snapshot.Version == Interlocked.Read(ref _version);
+
     /// <summary>True while a scan is running: the first one, or a refresh after a change.</summary>
     public bool IsScanning => Volatile.Read(ref _scanning) == 1;
 
@@ -223,7 +226,7 @@ public sealed class SourceIndex : IDisposable
         var read = 0;
         long retained = previous?.Files.Where(f => f.IsRetained).Sum(f => (long)f.Length) ?? 0;
 
-        Parallel.For(0, paths.Count, new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 2, 1, 4) }, i =>
+        Parallel.For(0, paths.Count, new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 4, 1, 2) }, i =>
         {
             var relative = paths[i];
             var full = Path.Combine(Root, relative);
@@ -285,8 +288,43 @@ public sealed class SourceIndex : IDisposable
             _model.Remove(gone);
         }
 
-        _model.Save();
+        // The first scan is saved at once, so a restart finds the model. After that a burst of edits is
+        // folded into one write: the model is rewritten whole, and rewriting it per saved file is megabytes of disk.
+        if (previous is null)
+        {
+            _model.Save();
+        }
+        else
+        {
+            ScheduleSave();
+        }
+
         return snapshot;
+    }
+
+    private const int SaveDelayMs = 20_000;
+    private Timer? _saveTimer;
+
+    private void ScheduleSave()
+    {
+        lock (_gate)
+        {
+            if (_disposed || _saveTimer is not null)
+            {
+                return;
+            }
+
+            _saveTimer = new Timer(_ =>
+            {
+                lock (_gate)
+                {
+                    _saveTimer?.Dispose();
+                    _saveTimer = null;
+                }
+
+                _model.Save();
+            }, null, SaveDelayMs, Timeout.Infinite);
+        }
     }
 
     private SourceFile? Load(string relative, string full, FileInfo info, ref long retained)
@@ -387,5 +425,12 @@ public sealed class SourceIndex : IDisposable
         _disposed = true;
         _watcher?.Dispose();
         _watcher = null;
+        lock (_gate)
+        {
+            _saveTimer?.Dispose();
+            _saveTimer = null;
+        }
+
+        _model.Save();
     }
 }

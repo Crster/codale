@@ -35,7 +35,8 @@ public sealed partial class CodeEditor
         Property,
     }
 
-    private sealed record CompletionItem(string Text, CompletionKind Kind, int Score);
+    /// <param name="Rank">Position in the project model's own ranking (learned order, declared names first); -1 for local words.</param>
+    private sealed record CompletionItem(string Text, CompletionKind Kind, int Score, int Rank = -1);
 
     private const int MaxCompletionItems = 50;
 
@@ -370,7 +371,7 @@ public sealed partial class CodeEditor
 
         var found = new Dictionary<string, CompletionItem>(StringComparer.Ordinal);
 
-        void Offer(string text, CompletionKind kind)
+        void Offer(string text, CompletionKind kind, int rank = -1)
         {
             if (text == prefix && prefix.Length > 0 && !found.ContainsKey(text) && kind is CompletionKind.Variable or CompletionKind.Function)
             {
@@ -387,7 +388,7 @@ public sealed partial class CodeEditor
                 return;
             }
 
-            found[text] = new CompletionItem(text, kind, score);
+            found[text] = new CompletionItem(text, kind, score, rank);
         }
 
         if (markup && MarkupContext(line, start) is { } place)
@@ -465,9 +466,10 @@ public sealed partial class CodeEditor
         // Then the whole project's index: declared names first, then the identifiers it uses.
         if (prefix.Length > 0 && WorkspaceSuggest?.Invoke(prefix, PreviousWord(line, start)) is { } workspace)
         {
+            var rank = 0;
             foreach (var suggestion in workspace)
             {
-                Offer(suggestion.Text, WorkspaceKind(suggestion.Kind));
+                Offer(suggestion.Text, WorkspaceKind(suggestion.Kind), rank++);
             }
         }
 
@@ -511,6 +513,9 @@ public sealed partial class CodeEditor
         var prefix = _doc.GetLine(_caret.Line)[start.._caret.Col];
         var items = found.Values
             .OrderBy(i => i.Score)
+            // Among equal matches the project model's order stands (what the code learned to write here); local words by length.
+            .ThenBy(i => i.Rank < 0 ? 0 : 1)
+            .ThenBy(i => i.Rank < 0 ? 0 : i.Rank)
             .ThenBy(i => i.Text.Length)
             .ThenBy(i => i.Text, StringComparer.OrdinalIgnoreCase)
             .Take(MaxCompletionItems)

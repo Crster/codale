@@ -218,7 +218,8 @@ public sealed class WorkspaceModel
             _termIndex ??= [.. _termFiles.Keys.OrderBy(k => k, StringComparer.Ordinal)];
             foreach (var term in Range(_termIndex, prefix.ToLowerInvariant(), StringComparer.Ordinal, StringComparison.Ordinal))
             {
-                if (scores.ContainsKey(term))
+                // A word that is already fully typed has nothing left to complete.
+                if (scores.ContainsKey(term) || term.Length == prefix.Length)
                 {
                     continue;
                 }
