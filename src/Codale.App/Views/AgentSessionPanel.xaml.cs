@@ -113,7 +113,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     public string EndpointLabel =>
         Session?.TerminalCli is { } cli
             ? cli.DisplayName
-            : Workspace?.CliEndpoint.IsActive == true && Workspace?.CliEndpoint.ActiveName is { Length: > 0 } name ? name : "Default";
+            : Workspace?.CliEndpoint.ActiveName is { Length: > 0 } name ? name : "Default";
 
     public bool ShowSessionPickers => Session is not null && !Session.IsTerminalSession;
 

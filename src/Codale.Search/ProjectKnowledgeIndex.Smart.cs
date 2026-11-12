@@ -32,6 +32,7 @@ public sealed partial class ProjectKnowledgeIndex
     private void WarmSummaries(string worktree)
     {
         if (_disposed || Smart?.Status.State != SmartState.Ready || Summaries is null || !SummariesEnabled()) return;
+        var cache = Summaries;
         lock (_gate)
         {
             if (_summaryTasks.TryGetValue(worktree, out var task) && !task.IsCompleted) return;
@@ -46,9 +47,9 @@ public sealed partial class ProjectKnowledgeIndex
                     await Task.Delay(SummaryStartupDelay, _stopping.Token).ConfigureAwait(false);
                     if (!SummariesEnabled() || Smart.Status.State != SmartState.Ready) return;
                     var paths = SourceHashes(worktree);
-                    Summaries.Prune(worktree, paths.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase));
+                    cache.Prune(worktree, paths.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase));
                     var thinking = Smart.Thinking;
-                    var pending = paths.Where(p => Summaries.Get(worktree, p.Key, p.Value, thinking) is null && !SummaryFailedRecently(worktree, p.Key, p.Value))
+                    var pending = paths.Where(p => cache.Get(worktree, p.Key, p.Value, thinking) is null && !SummaryFailedRecently(worktree, p.Key, p.Value))
                         .Take(MaxSummariesPerPass).ToList();
                     total = pending.Count;
                     int failures = 0;
@@ -67,7 +68,7 @@ public sealed partial class ProjectKnowledgeIndex
                             && summary.Evidence.Any(e => e.Kind == "file" && string.Equals(e.Path, Path.GetFullPath(path, worktree), StringComparison.OrdinalIgnoreCase))
                             && ReadSource(worktree, path) is { } current && Hash(current) == hash)
                         {
-                            Summaries.Put(worktree, path, hash, summary.Value!, thinking, summary.Evidence);
+                            cache.Put(worktree, path, hash, summary.Value!, thinking, summary.Evidence);
                             failures = 0;
                         }
                         else

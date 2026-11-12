@@ -2,15 +2,15 @@ using Codale.Smart;
 
 namespace Codale.App.Services;
 
-/// <summary>One independent native model service per app process.</summary>
+/// <summary>Routes each Smart task to its independently configured provider.</summary>
 public static class SmartExperienceHost
 {
     public static SmartExperience Instance { get; } = new(
-        Path.Combine(McpServerSettings.CodaleDataRoot(), "smart", "models"),
-        Path.Combine(AppContext.BaseDirectory, "SmartNative"),
         Path.Combine(McpServerSettings.CodaleDataRoot(), "smart", "history"));
-    private static bool _started, _enabled;
-    private static string? _modelId;
+    private static bool _started;
+    private static string? _configuration;
+    public static SmartProviderClient CreateClient(string feature) => new(AppSettings.SmartProviderFor(feature), AppSettings.FindByok(AppSettings.SmartApiProfileFor(feature)),
+        SmartFeatureSettings.Features.ToDictionary(f => f.Id, f => AppSettings.SmartFeatureModel(f.Id)));
     public static void Start()
     {
         if (_started) return;
@@ -21,13 +21,11 @@ public static class SmartExperienceHost
     private static void Apply()
     {
         Instance.Thinking = AppSettings.SmartThinking;
-        var enabled = AppSettings.SmartExperience;
-        var model = SmartModels.Resolve(AppSettings.SmartModel);
-        if (enabled == _enabled && model.Id == _modelId) return;
-        _enabled = enabled;
-        _modelId = model.Id;
-        _ = Instance.ConfigureAsync(enabled, model);
+        var router = new SmartFeatureRouter(SmartFeatureSettings.Groups.ToDictionary(g => g.Id, g => CreateClient(g.Id)));
+        if (router.ConfigurationKey == _configuration) return;
+        _configuration = router.ConfigurationKey;
+        _ = Instance.ConfigureRemoteAsync("Smart experience", router.HasGeneration ? router.CompleteAsync : null,
+            featureEnabled: router.IsFeatureEnabled);
     }
-    public static void Cancel() { AppSettings.SmartExperience = false; }
-    public static void Retry() { if (AppSettings.SmartExperience) _ = Instance.ConfigureAsync(true, SmartModels.Resolve(AppSettings.SmartModel)); }
+    public static void Retry() { _configuration = null; Apply(); }
 }

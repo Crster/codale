@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace Codale.Smart;
 
 /// <summary>Content-addressed, per-worktree summaries; callers never use a stale entry.</summary>
-public sealed class SummaryCache(string directory)
+public sealed class SummaryCache(string directory, string? modelIdentity = null)
 {
     public const int PromptVersion = 2;
     private sealed record Entry(string Path, string Hash, string Model, int Prompt, string Summary,
@@ -18,7 +18,7 @@ public sealed class SummaryCache(string directory)
         try
         {
             var entry = JsonSerializer.Deserialize<Entry>(File.ReadAllText(CachePath(worktree, path)));
-            return entry is not null && entry.Hash == contentHash && entry.Model == ModelInstaller.Revision && entry.Prompt == PromptVersion && entry.Thinking == thinking
+            return entry is not null && entry.Hash == contentHash && entry.Model == (modelIdentity ?? ModelInstaller.Revision) && entry.Prompt == PromptVersion && entry.Thinking == thinking
                 && (entry.Dependencies ?? []).All(Fresh)
                 ? entry.Summary : null;
         }
@@ -41,7 +41,7 @@ public sealed class SummaryCache(string directory)
         var temp = dest + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            File.WriteAllText(temp, JsonSerializer.Serialize(new Entry(path, contentHash, ModelInstaller.Revision, PromptVersion, summary, thinking, dependencies?.Where(d => d.Kind == "file").ToArray())));
+            File.WriteAllText(temp, JsonSerializer.Serialize(new Entry(path, contentHash, modelIdentity ?? ModelInstaller.Revision, PromptVersion, summary, thinking, dependencies?.Where(d => d.Kind == "file").ToArray())));
             File.Move(temp, dest, true);
         }
         finally { if (File.Exists(temp)) File.Delete(temp); }

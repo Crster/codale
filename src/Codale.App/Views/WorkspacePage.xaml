@@ -392,12 +392,7 @@
                     <Setter Property="CornerRadius" Value="8" />
                 </Style>
             </MenuFlyout.MenuFlyoutPresenterStyle>
-            <MenuFlyoutItem x:Name="ClaudeMenuItem" Click="OnNewTabMenuItemClick" Tag="claude" Text="Claude chat">
-                <MenuFlyoutItem.Icon>
-                    <FontIcon Glyph="&#xE8BD;" />
-                </MenuFlyoutItem.Icon>
-            </MenuFlyoutItem>
-            <MenuFlyoutItem x:Name="CodexMenuItem" Click="OnNewTabMenuItemClick" Tag="codex" Text="Codex chat">
+            <MenuFlyoutItem x:Name="ClaudeMenuItem" Click="OnNewTabMenuItemClick" Tag="chat" Text="Chat">
                 <MenuFlyoutItem.Icon>
                     <FontIcon Glyph="&#xE8BD;" />
                 </MenuFlyoutItem.Icon>
@@ -1501,16 +1496,10 @@
                         HorizontalAlignment="Center"
                         Orientation="Horizontal"
                         Spacing="8">
-                        <Button Click="OnNewTabMenuItemClick" Tag="claude">
+                        <Button Click="OnNewTabMenuItemClick" Tag="chat">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <FontIcon FontSize="14" Glyph="&#xE8BD;" />
                                 <TextBlock x:Name="ClaudeEmptyLabel" Text="Claude chat" />
-                            </StackPanel>
-                        </Button>
-                        <Button Click="OnNewTabMenuItemClick" Tag="codex">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon FontSize="14" Glyph="&#xE8BD;" />
-                                <TextBlock x:Name="CodexEmptyLabel" Text="Codex chat" />
                             </StackPanel>
                         </Button>
                     </StackPanel>

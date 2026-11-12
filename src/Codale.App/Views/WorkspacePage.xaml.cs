@@ -358,6 +358,9 @@ public sealed partial class WorkspacePage : Page
 
         switch ((sender as FrameworkElement)?.Tag as string)
         {
+            case "chat":
+                await OpenChatOrOfferInstallAsync();
+                break;
             case "claude":
                 await OpenChatOrOfferInstallAsync("claude");
                 break;
@@ -381,32 +384,28 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>
-    /// The chat entries name the CLI's state: "Claude chat" when it is on the PATH,
-    /// "Install Claude CLI…" when it is not. Checked on every opening, so a CLI
-    /// installed from the offered terminal shows up without a restart.
+    /// Refreshes the single Chat entry when the menu opens.
     /// </summary>
     private void OnNewTabMenuOpening(object? sender, object e) => RefreshCliLabels();
 
     private void RefreshCliLabels()
     {
-        ClaudeMenuItem.Text = CliLabel("claude");
-        CodexMenuItem.Text = CliLabel("codex");
-        ClaudeEmptyLabel.Text = CliLabel("claude");
-        CodexEmptyLabel.Text = CliLabel("codex");
+        ClaudeMenuItem.Text = "Chat";
+        ClaudeEmptyLabel.Text = "Chat";
     }
-
-    /// <summary>"Claude chat" when the CLI is on the PATH, "Install Claude…" when it is not.</summary>
-    private static string CliLabel(string cliId) =>
-        CliLocator.Find(cliId) is not null
-            ? $"{CliLocator.KnownClis.First(cli => cli.Id == cliId).DisplayName} chat"
-            : $"Install {CliLocator.KnownClis.First(cli => cli.Id == cliId).DisplayName}…";
 
     /// <summary>
     /// Opens the chat when the CLI exists; otherwise offers to install it, running the
     /// installer in a new terminal tab so the user sees its output.
     /// </summary>
-    private async Task OpenChatOrOfferInstallAsync(string cliId)
+    private async Task OpenChatOrOfferInstallAsync(string? cliId = null)
     {
+        if (cliId is null)
+        {
+            var profile = await AppSettings.ResolveChatProfileAsync();
+            AppSettings.SetCliProvider(profile.Cli, profile.Provider);
+            cliId = profile.Cli;
+        }
         var cli = CliLocator.KnownClis.First(known => known.Id == cliId);
         if (CliLocator.Find(cliId) is not null)
         {
@@ -441,10 +440,10 @@ public sealed partial class WorkspacePage : Page
     private static readonly TimeSpan ShellPromptDelay = TimeSpan.FromMilliseconds(1500);
 
     /// <summary>Starts login with the terminal, keeping its output visible after it exits.</summary>
-    public async Task RunAccountSignInAsync(string cliId)
+    public async Task RunAccountSignInAsync(string cliId, string? accountId = null)
     {
         var cli = CliLocator.KnownClis.First(known => known.Id == cliId);
-        var terminal = ViewModel.CreateTerminal(CodaleAccountCli.LoginCommand(cliId), $"{cli.DisplayName} sign in", cliId);
+        var terminal = ViewModel.CreateTerminal(CodaleAccountCli.LoginCommand(cliId, accountId), $"{cli.DisplayName} sign in", cliId);
         AddTerminalTab(terminal);
         if (terminal.StartupError is { Length: > 0 } error)
         {
@@ -497,29 +496,59 @@ public sealed partial class WorkspacePage : Page
                           (sender is ChatViewModel { SessionCli.Id: "codex" });
             var targetCli = isCodex ? "Codex" : "Claude";
 
-            // Codale keeps its own login, apart from the CLI's default one: the login runs
-            // against Codale's folder, so a terminal's claude/codex stays on its own account.
-            var command = CodaleAccountCli.LoginCommand(isCodex ? "codex" : "claude");
-            var description = isCodex
-                ? "Open a terminal to log in? It runs 'codex login' for Codale's own Codex account, separate from the codex you run in a terminal."
-                : "Open a terminal to log in? It runs 'claude auth login' for Codale's own Claude account, separate from the claude you run in a terminal.";
-
             _loginPromptOpen = true;
             try
             {
+                Task? signInTask = null;
+                var setup = new Codale.App.Controls.SettingsPanel
+                {
+                    Width = Math.Min(640, Math.Max(280, XamlRoot.Size.Width - 96)), Height = Math.Min(560, Math.Max(240, XamlRoot.Size.Height - 200)),
+                };
+                setup.ShowAccountSetup();
                 var dialog = AppDialog.Apply(new ContentDialog
                 {
                     XamlRoot = XamlRoot,
-                    Title = $"Codale isn't signed in to {targetCli}",
-                    Content = description,
-                    PrimaryButtonText = "Open terminal",
+                    Title = $"Set up an account for {targetCli}",
+                    Content = setup,
+                    PrimaryButtonText = "Continue",
                     CloseButtonText = "Cancel",
                     DefaultButton = ContentDialogButton.Primary,
                 }, DialogTone.Info, AppDialog.Glyphs.Account);
-
-                if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+                dialog.Resources["ContentDialogMaxWidth"] = 720d;
+                setup.SignInAsync = async (cli, account) =>
                 {
-                    await RunInNewTerminalAsync(command);
+                    signInTask = RunAccountSignInAsync(cli, account);
+                    dialog.Hide();
+                    await signInTask;
+                };
+                setup.CloseRequested += (_, _) => dialog.Hide();
+                await setup.RefreshAccountsAsync();
+                ContentDialogResult result;
+                while (true)
+                {
+                    result = await dialog.ShowAsync();
+                    if (signInTask is null) break;
+                    try { await signInTask; }
+                    catch (Exception) { /* The shared account editor displays the sign-in error. */ }
+                    signInTask = null;
+                    await setup.RefreshAccountsAsync();
+                }
+                if (result == ContentDialogResult.Primary && sender is ChatViewModel chat)
+                {
+                    var cli = isCodex ? "codex" : "claude";
+                    var configured = AppSettings.ByokProviders.FirstOrDefault(p => p.Supports(cli) && !p.IsAccount);
+                    var accounts = await CodaleAccountCli.DiscoverAccountsAsync(cli);
+                    var accountProfile = AppSettings.ByokProviders.FirstOrDefault(p => p.Supports(cli) && p.IsAccount
+                        && accounts.Any(a => a.AccountId == p.AccountId));
+                    var profile = accountProfile is not null ? (Cli: cli, Provider: accountProfile.Key)
+                        : accounts.Any(a => a.AccountId.Length == 0) ? (Cli: cli, Provider: "")
+                        : configured is not null ? (Cli: cli, Provider: configured.Key)
+                        : await AppSettings.ResolveChatProfileAsync();
+                    if (chat.CliId != profile.Cli || chat.EndpointName != profile.Provider)
+                        await chat.SetProfileAsync(profile.Cli, profile.Provider);
+                    else
+                        await chat.ConnectAsync();
+                    ShowChatTab(chat);
                 }
             }
             finally
@@ -2490,7 +2519,7 @@ public sealed partial class WorkspacePage : Page
             return;
         }
 
-        await OpenChatOrOfferInstallAsync(Codale.Agents.CliLocator.ActiveCli.Id);
+        await OpenChatOrOfferInstallAsync();
     }
 
     private void OnTitleBarLeftPanelToggled(object? sender, EventArgs e) => ToggleLeftPanel();
@@ -4077,7 +4106,7 @@ public sealed partial class WorkspacePage : Page
             StatusBarCommandBox.IsEnabled = false;
             StatusBarRunButton.IsEnabled = false;
             StatusBarRunProgress.Visibility = Visibility.Visible;
-            StatusBarCommandBox.PlaceholderText = $"Translating with {SmartExperienceHost.Instance.Model.Name}…";
+            StatusBarCommandBox.PlaceholderText = $"Translating with {AppSettings.SmartProviderFor("shell")}…";
             try
             {
                 var result = await SmartExperienceHost.Instance.ShellCommandAsync(
@@ -4092,7 +4121,7 @@ public sealed partial class WorkspacePage : Page
                     TerminalDrawerSpinner.Visibility = Visibility.Collapsed;
                     TerminalDrawerStatusIcon.Visibility = Visibility.Collapsed;
                     TerminalDrawerStatusText.Text = "Translation failed";
-                    TerminalDrawerOutputBox.Text = $"{SmartExperienceHost.Instance.Model.Name} could not translate this request. Rephrase it and try again.";
+                    TerminalDrawerOutputBox.Text = $"{AppSettings.SmartProviderFor("shell")} could not translate this request. Rephrase it and try again.";
                     return;
                 }
                 command = translated;

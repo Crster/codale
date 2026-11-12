@@ -57,6 +57,31 @@ public static class CodaleAccount
     public const string ClaudeVariable = "CLAUDE_CONFIG_DIR";
 
     public const string CodexVariable = "CODEX_HOME";
+    public const string UserAccountId = "user";
+
+    public static string ProfileHome(string cli, string? accountId = null)
+    {
+        if (cli is not ("claude" or "codex")) throw new ArgumentException("Unknown CLI", nameof(cli));
+        if (accountId == UserAccountId) return cli == "codex" ? UserCodexHome : UserClaudeHome;
+        if (string.IsNullOrEmpty(accountId)) return cli == "codex" ? CodexHome : ClaudeHome;
+        if (!Guid.TryParseExact(accountId, "N", out _)) throw new ArgumentException("Invalid account ID", nameof(accountId));
+        return Ensure(Path.Combine(Root, cli, "profiles", accountId));
+    }
+
+    /// <summary>Known credential locations, including CLI accounts created outside Codale.</summary>
+    public static IReadOnlyList<string> AccountIds(string cli)
+    {
+        var home = ProfileHome(cli);
+        var ids = new List<string> { "" };
+        if (!string.Equals(Path.GetFullPath(home).TrimEnd(Path.DirectorySeparatorChar),
+            Path.GetFullPath(ProfileHome(cli, UserAccountId)).TrimEnd(Path.DirectorySeparatorChar),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) ids.Add(UserAccountId);
+        var profiles = Path.Combine(home, "profiles");
+        if (Directory.Exists(profiles))
+            ids.AddRange(Directory.EnumerateDirectories(profiles).Select(Path.GetFileName)
+                .OfType<string>().Where(id => Guid.TryParseExact(id, "N", out _)));
+        return ids;
+    }
 
     private static string Ensure(string path)
     {

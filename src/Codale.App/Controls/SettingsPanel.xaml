@@ -9,7 +9,7 @@
         Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
         BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
         BorderThickness="1,0,0,0">
-        <Grid RowDefinitions="Auto,Auto,*">
+        <Grid x:Name="SettingsRootGrid" RowDefinitions="Auto,Auto,*">
             <Grid.Resources>
                 <Style x:Key="CategoryRadioButton" TargetType="RadioButton">
                     <Setter Property="FontSize" Value="12" />
@@ -253,181 +253,45 @@
                     <!-- 2. AI & PROVIDERS                         -->
                     <!-- ========================================== -->
                     <StackPanel x:Name="SectionAi" Spacing="16" Visibility="Collapsed">
-                        <TextBlock Style="{StaticResource SectionTitle}" Text="CLI accounts" />
-                        <Border Style="{StaticResource Card}">
-                            <StackPanel>
-                                <TextBlock
-                                    Margin="16,12,16,4"
-                                    Style="{StaticResource RowDesc}"
-                                    Text="Codale maintains dedicated credentials for Claude and Codex, isolated from your terminal CLI logins." />
-                                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" Style="{StaticResource SettingRow}">
-                                    <StackPanel VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Style="{StaticResource RowTitle}" Text="Claude account" />
-                                        <TextBlock x:Name="ClaudeAccountStatus" Style="{StaticResource RowDesc}" Text="Checking..." />
-                                    </StackPanel>
-                                    <Button Grid.Column="1" x:Name="ClaudeSignInButton" Click="OnSignInClick" Tag="claude" Content="Sign in" />
-                                    <Button Grid.Column="2" x:Name="ClaudeSignOutButton" Click="OnSignOutClick" Tag="claude" Content="Sign out" />
-                                </Grid>
-                                <Rectangle Style="{StaticResource Divider}" />
-                                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" Style="{StaticResource SettingRow}">
-                                    <StackPanel VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Style="{StaticResource RowTitle}" Text="Codex account" />
-                                        <TextBlock x:Name="CodexAccountStatus" Style="{StaticResource RowDesc}" Text="Checking..." />
-                                    </StackPanel>
-                                    <Button Grid.Column="1" x:Name="CodexSignInButton" Click="OnSignInClick" Tag="codex" Content="Sign in" />
-                                    <Button Grid.Column="2" x:Name="CodexSignOutButton" Click="OnSignOutClick" Tag="codex" Content="Sign out" />
-                                </Grid>
-                            </StackPanel>
-                        </Border>
-
-                        <TextBlock Style="{StaticResource SectionTitle}" Text="Custom endpoints (BYOK)" />
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="Claude CLI" />
                         <Border Style="{StaticResource Card}">
                             <StackPanel Padding="16,14" Spacing="10">
-                                <TextBlock
-                                    Style="{StaticResource RowDesc}"
-                                    Text="Add OpenAI or Anthropic compatible API endpoints with custom models." />
+                                <TextBlock Style="{StaticResource RowDesc}" Text="Accounts are detected automatically. Add another account or an Anthropic compatible endpoint." />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock x:Name="ClaudeAccountStatus" VerticalAlignment="Center" />
+                                </StackPanel>
                                 <StackPanel x:Name="ProvidersPanel" Spacing="6" />
-                                <Button Click="OnAddProviderClick">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <FontIcon Glyph="&#xE710;" FontSize="12" />
-                                        <TextBlock Text="Add provider" />
-                                    </StackPanel>
-                                </Button>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Click="OnAddProviderClick" Tag="claude" Content="Add endpoint" />
+                                    <Button Click="OnAddAccountClick" Tag="claude" Content="Add account" />
+                                </StackPanel>
                             </StackPanel>
                         </Border>
-
-                        <TextBlock Style="{StaticResource SectionTitle}" Text="Claude chat defaults" />
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="Codex CLI" />
                         <Border Style="{StaticResource Card}">
-                            <StackPanel>
-                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                    <StackPanel VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Style="{StaticResource RowTitle}" Text="Chat mode" />
-                                        <TextBlock Style="{StaticResource RowDesc}" Text="Starting execution mode for new Claude sessions." />
-                                    </StackPanel>
-                                    <ComboBox x:Name="ClaudeModeBox" Grid.Column="1" VerticalAlignment="Center" Width="220">
-                                        <ComboBoxItem Content="Auto" Tag="automatic" />
-                                        <ComboBoxItem Content="Interactive" Tag="manual" />
-                                        <ComboBoxItem Content="Plan" Tag="plan" />
-                                        <ComboBoxItem Content="Full (no prompts)" Tag="auto" />
-                                    </ComboBox>
-                                </Grid>
-                                <Rectangle Style="{StaticResource Divider}" />
-                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                    <StackPanel VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Style="{StaticResource RowTitle}" Text="Flash model" />
-                                        <TextBlock Style="{StaticResource RowDesc}" Text="Default model for Lite and Flash tiers." />
-                                    </StackPanel>
-                                    <ComboBox x:Name="ClaudeFlashBox" Grid.Column="1" VerticalAlignment="Center" Width="220" DropDownOpened="OnModelDropDownOpened" />
-                                </Grid>
-                                <Rectangle Style="{StaticResource Divider}" />
-                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                    <StackPanel VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Style="{StaticResource RowTitle}" Text="Pro model" />
-                                        <TextBlock Style="{StaticResource RowDesc}" Text="Default model for Pro and Plus tiers." />
-                                    </StackPanel>
-                                    <ComboBox x:Name="ClaudeProBox" Grid.Column="1" VerticalAlignment="Center" Width="220" DropDownOpened="OnModelDropDownOpened" />
-                                </Grid>
-                            </StackPanel>
-                        </Border>
-
-                        <TextBlock Style="{StaticResource SectionTitle}" Text="Codex chat defaults" />
-                        <Border Style="{StaticResource Card}">
-                            <StackPanel>
-                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                    <StackPanel VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Style="{StaticResource RowTitle}" Text="Chat mode" />
-                                        <TextBlock Style="{StaticResource RowDesc}" Text="Starting execution mode for new Codex sessions." />
-                                    </StackPanel>
-                                    <ComboBox x:Name="CodexModeBox" Grid.Column="1" VerticalAlignment="Center" Width="220">
-                                        <ComboBoxItem Content="Auto" Tag="automatic" />
-                                        <ComboBoxItem Content="Interactive" Tag="manual" />
-                                        <ComboBoxItem Content="Plan" Tag="plan" />
-                                        <ComboBoxItem Content="Full (no prompts)" Tag="auto" />
-                                    </ComboBox>
-                                </Grid>
-                                <Rectangle Style="{StaticResource Divider}" />
-                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                    <StackPanel VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Style="{StaticResource RowTitle}" Text="Flash model" />
-                                        <TextBlock Style="{StaticResource RowDesc}" Text="Default model for Lite and Flash tiers." />
-                                    </StackPanel>
-                                    <ComboBox x:Name="CodexFlashBox" Grid.Column="1" VerticalAlignment="Center" Width="220" DropDownOpened="OnModelDropDownOpened" />
-                                </Grid>
-                                <Rectangle Style="{StaticResource Divider}" />
-                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                    <StackPanel VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Style="{StaticResource RowTitle}" Text="Pro model" />
-                                        <TextBlock Style="{StaticResource RowDesc}" Text="Default model for Pro and Plus tiers." />
-                                    </StackPanel>
-                                    <ComboBox x:Name="CodexProBox" Grid.Column="1" VerticalAlignment="Center" Width="220" DropDownOpened="OnModelDropDownOpened" />
-                                </Grid>
-                            </StackPanel>
-                        </Border>
-
-                        <TextBlock Style="{StaticResource SectionTitle}" Text="Routing &amp; overrides" />
-                        <Border Style="{StaticResource Card}">
-                            <StackPanel>
-                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                    <StackPanel VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Style="{StaticResource RowTitle}" Text="Claude CLI provider" />
-                                        <TextBlock Style="{StaticResource RowDesc}" Text="Active backend provider used by Claude." />
-                                    </StackPanel>
-                                    <ComboBox x:Name="ClaudeProviderBox" Grid.Column="1" VerticalAlignment="Center" Width="200" SelectionChanged="OnCliProviderChanged" />
-                                </Grid>
-                                <Rectangle Style="{StaticResource Divider}" />
-                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                    <StackPanel VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Style="{StaticResource RowTitle}" Text="Codex CLI provider" />
-                                        <TextBlock Style="{StaticResource RowDesc}" Text="Active backend provider used by Codex." />
-                                    </StackPanel>
-                                    <ComboBox x:Name="CodexProviderBox" Grid.Column="1" VerticalAlignment="Center" Width="200" SelectionChanged="OnCliProviderChanged" />
-                                </Grid>
+                            <StackPanel Padding="16,14" Spacing="10">
+                                <TextBlock Style="{StaticResource RowDesc}" Text="Accounts are detected automatically. Add another account or an OpenAI compatible endpoint." />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock x:Name="CodexAccountStatus" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <StackPanel x:Name="CodexProfilesPanel" Spacing="6" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Click="OnAddProviderClick" Tag="codex" Content="Add endpoint" />
+                                    <Button Click="OnAddAccountClick" Tag="codex" Content="Add account" />
+                                </StackPanel>
                             </StackPanel>
                         </Border>
 
                         <TextBlock Style="{StaticResource SectionTitle}" Text="Smart experience" />
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
-                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="24" Padding="16">
-                                    <TextBlock Style="{StaticResource RowDesc}" VerticalAlignment="Center" TextWrapping="Wrap" Text="Use local AI for summaries, context, routing, shell commands, commit messages, and code completions." />
-                                    <ToggleSwitch x:Name="SmartExperienceToggle" Grid.Column="1" MinWidth="0" VerticalAlignment="Center" AutomationProperties.Name="Smart experience" Toggled="OnSmartExperienceToggled" />
-                                </Grid>
+                                <StackPanel x:Name="SmartFeatureRows" Padding="16" Spacing="16" />
                                 <Border x:Name="SmartExperienceStatusPanel" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="16,12" Visibility="Collapsed">
-                                    <StackPanel Spacing="8">
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-                                            <TextBlock x:Name="SmartExperienceStatus" Style="{StaticResource RowDesc}" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
-                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                                                <Button x:Name="SmartExperienceCancel" Content="Cancel" Click="OnSmartExperienceCancel" Visibility="Collapsed" />
-                                                <Button x:Name="SmartExperienceRetry" Content="Retry" Click="OnSmartExperienceRetry" Visibility="Collapsed" />
-                                            </StackPanel>
-                                        </Grid>
-                                        <ProgressBar x:Name="SmartExperienceProgress" Maximum="100" Visibility="Collapsed" />
-                                    </StackPanel>
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                                        <TextBlock x:Name="SmartExperienceStatus" Style="{StaticResource RowDesc}" VerticalAlignment="Center" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+                                        <Button Grid.Column="1" Content="Retry" Click="OnSmartExperienceRetry" />
+                                    </Grid>
                                 </Border>
-                                <Rectangle Style="{StaticResource Divider}" />
-                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                    <StackPanel VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Style="{StaticResource RowTitle}" Text="Summarize files in the background" />
-                                        <TextBlock Style="{StaticResource RowDesc}" Text="Run the local model over project files to pre-write summaries (up to 25 per pass). Uses CPU/GPU while it works." />
-                                    </StackPanel>
-                                    <ToggleSwitch x:Name="SmartSummariesToggle" Grid.Column="1" MinWidth="0" VerticalAlignment="Center" IsEnabled="{Binding IsOn, ElementName=SmartExperienceToggle}" AutomationProperties.Name="Summarize files in the background" Toggled="OnSmartSummariesToggled" />
-                                </Grid>
-                                <Rectangle Style="{StaticResource Divider}" />
-                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                    <StackPanel VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Style="{StaticResource RowTitle}" Text="Enable thinking" />
-                                        <TextBlock Style="{StaticResource RowDesc}" Text="Allow the local model to reason before using tools and answering." />
-                                    </StackPanel>
-                                    <ToggleSwitch x:Name="SmartThinkingToggle" Grid.Column="1" MinWidth="0" VerticalAlignment="Center" IsEnabled="{Binding IsOn, ElementName=SmartExperienceToggle}" AutomationProperties.Name="Enable thinking" Toggled="OnSmartThinkingToggled" />
-                                </Grid>
-                                <Rectangle Style="{StaticResource Divider}" />
-                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
-                                    <StackPanel VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Style="{StaticResource RowTitle}" Text="Inline code completions" />
-                                        <TextBlock Style="{StaticResource RowDesc}" Text="Suggest the rest of the line in the editor when you pause typing. Tab accepts, Esc dismisses, Ctrl+Space asks again." />
-                                    </StackPanel>
-                                    <ToggleSwitch x:Name="SmartCompletionsToggle" Grid.Column="1" MinWidth="0" VerticalAlignment="Center" IsEnabled="{Binding IsOn, ElementName=SmartExperienceToggle}" AutomationProperties.Name="Inline code completions" Toggled="OnSmartCompletionsToggled" />
-                                </Grid>
                             </StackPanel>
                         </Border>
 

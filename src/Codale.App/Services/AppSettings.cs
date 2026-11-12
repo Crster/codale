@@ -185,39 +185,38 @@ public static class AppSettings
         set => Set("chat.projectKnowledge", value, FormatFlag);
     }
 
-    public static bool SmartExperience
-    {
-        get => Get("ai.smartExperience", () => ReadFlag("ai.smartExperience", false));
-        set => Set("ai.smartExperience", value, FormatFlag);
-    }
+    public static string SmartProviderFor(string feature) =>
+        Get($"ai.smart.groups.{SmartFeatureSettings.GroupFor(feature)}.provider",
+            () => Read($"ai.smart.groups.{SmartFeatureSettings.GroupFor(feature)}.provider", "off")) is var provider
+            && provider is "claude" or "codex" or "openai" or "anthropic" ? provider : "off";
 
-    /// <summary>The released model shared by all Smart features. Unknown or gated IDs use the default (Granite 4.2 8B).</summary>
-    public static string SmartModel
-    {
-        get => Codale.Smart.SmartModels.Resolve(Get("ai.smartModel", () => Read("ai.smartModel", ""))).Id;
-        set => Set("ai.smartModel", Codale.Smart.SmartModels.Resolve(value).Id, FormatText);
-    }
+    public static void SetSmartProvider(string feature, string provider) =>
+        Set($"ai.smart.groups.{SmartFeatureSettings.GroupFor(feature)}.provider",
+            provider is "claude" or "codex" or "openai" or "anthropic" ? provider : "off", FormatText);
 
-    /// <summary>Whether Smart summarises project files in the background (a model run per file); off by default.</summary>
-    public static bool SmartSummaries
-    {
-        get => Get("ai.smartSummaries", () => ReadFlag("ai.smartSummaries", false));
-        set => Set("ai.smartSummaries", value, FormatFlag);
-    }
+    public static bool SmartExperience => SmartFeatureSettings.Groups.Any(g => SmartProviderFor(g.Id) != "off");
 
-    public static bool SmartThinking
-    {
-        get => Get("ai.smartThinking", () => ReadFlag("ai.smartThinking", false));
-        set => Set("ai.smartThinking", value, FormatFlag);
-    }
+    public static string SmartFeatureModel(string feature) =>
+        Get($"ai.smart.{SmartProviderFor(feature)}.groups.{SmartFeatureSettings.GroupFor(feature)}.model",
+            () => Read($"ai.smart.{SmartProviderFor(feature)}.groups.{SmartFeatureSettings.GroupFor(feature)}.model", "default")) is var model
+            && model.Equals("default", StringComparison.OrdinalIgnoreCase) ? "" : model;
 
-    /// <summary>Whether the editor shows Smart's fill-in-the-middle ghost text as you type (Ctrl+Space asks on demand); on by default.</summary>
-    public static bool SmartCompletions
-    {
-        get => Get("ai.smartCompletions", () => ReadFlag("ai.smartCompletions", true));
-        set => Set("ai.smartCompletions", value, FormatFlag);
-    }
+    public static void SetSmartFeatureModel(string feature, string model) =>
+        Set($"ai.smart.{SmartProviderFor(feature)}.groups.{SmartFeatureSettings.GroupFor(feature)}.model",
+            string.IsNullOrWhiteSpace(model) || model.Trim().Equals("default", StringComparison.OrdinalIgnoreCase) ? "default" : model.Trim(), FormatText);
 
+    public static string SmartApiProfileFor(string feature) =>
+        Get($"ai.smart.groups.{SmartFeatureSettings.GroupFor(feature)}.{SmartProviderFor(feature)}.profile",
+            () => Read($"ai.smart.groups.{SmartFeatureSettings.GroupFor(feature)}.{SmartProviderFor(feature)}.profile", ""));
+
+    public static void SetSmartApiProfile(string feature, string profile) =>
+        Set($"ai.smart.groups.{SmartFeatureSettings.GroupFor(feature)}.{SmartProviderFor(feature)}.profile", profile, FormatText);
+
+    public static bool SmartFeatureEnabled(string feature) => SmartProviderFor(feature) != "off"
+        && !SmartFeatureModel(feature).Equals("off", StringComparison.OrdinalIgnoreCase);
+    public static bool SmartSummaries => SmartFeatureEnabled("context");
+    public static bool SmartThinking => false;
+    public static bool SmartCompletions => SmartFeatureEnabled("completion");
     /// <summary>Whether the editor draws the gutter with line numbers.</summary>
     public static bool EditorLineNumbers
     {
@@ -379,7 +378,44 @@ public static class AppSettings
 
     /// <summary>The provider new chats of a CLI connect through: a name from <see cref="ByokProviders"/>, or "" for the CLI's own login.</summary>
     public static string CliProviderFor(string cli) =>
-        ReadDefault(cli, "provider") is { } name && FindByok(name) is not null ? name : "";
+        ReadDefault(cli, "provider") is { } name && FindByok(name)?.Supports(cli) == true ? name : "";
+
+    public static string DefaultChatCli => Read("chat.lastCli", "") is { } saved && saved is ("claude" or "codex")
+        ? saved
+        : ByokProviders.FirstOrDefault() is { } profile
+            ? profile.Supports("claude") ? "claude" : "codex"
+            : Codale.Agents.CliLocator.ActiveCli.Id;
+
+    public static void RememberProfile(string cli, string name)
+    {
+        SetCliProvider(cli, name);
+        Set("chat.lastCli", cli, FormatText);
+    }
+
+    public static async Task<(string Cli, string Provider)> ResolveChatProfileAsync()
+    {
+        var cli = DefaultChatCli;
+        var provider = CliProviderFor(cli);
+        if (Read("chat.lastCli", "") is "claude" or "codex") return (cli, provider);
+        if (FindByok(provider) is not null) return (cli, provider);
+        if (ByokProviders.FirstOrDefault(p => p.Supports(cli)) is { } configured) return (cli, configured.Key);
+        foreach (var candidate in new[] { cli, cli == "claude" ? "codex" : "claude" })
+        {
+            var accounts = await Codale.Agents.CodaleAccountCli.DiscoverAccountsAsync(candidate);
+            if (accounts.FirstOrDefault() is not { } account) continue;
+            if (account.AccountId.Length == 0) return (candidate, "");
+            var profiles = ByokProviders;
+            var detected = new ByokProvider { Id = Guid.NewGuid().ToString("N"), CliId = candidate,
+                IsAccount = true, AccountId = account.AccountId, Email = account.Email,
+                Name = account.Email ?? "Detected account" };
+            profiles.Add(detected);
+            ByokProviders = profiles;
+            return (candidate, detected.Key);
+        }
+        return (cli, provider);
+    }
+    public static string AccountLabel(string cli) => Read("account." + cli + ".email", "Sign-in account");
+    public static void SetAccountLabel(string cli, string? email) => Set("account." + cli + ".email", email ?? "Sign-in account", FormatText);
 
     public static void SetCliProvider(string cli, string? name) => WriteDefault(cli, "provider", name?.Trim());
 
@@ -427,7 +463,12 @@ public static class AppSettings
 
     private static ByokProvider Clone(ByokProvider p, string? apiKey = null) => new()
     {
+        Id = p.Id,
         Name = p.Name,
+        CliId = p.CliId,
+        IsAccount = p.IsAccount,
+        AccountId = p.AccountId,
+        Email = p.Email,
         BaseUrl = p.BaseUrl,
         AnthropicBaseUrl = p.AnthropicBaseUrl,
         ApiKey = apiKey ?? p.ApiKey,
@@ -448,7 +489,7 @@ public static class AppSettings
     private static List<ByokProvider> Normalize(IEnumerable<ByokProvider> providers)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        return providers.Where(p => p is not null && !string.IsNullOrWhiteSpace(p.Name) && seen.Add(p.Name.Trim())).ToList();
+        return providers.Where(p => p is not null && !string.IsNullOrWhiteSpace(p.Name) && seen.Add(p.Key)).ToList();
     }
 
     /// <summary>The cached providers (decrypted); callers copy before handing them out. Call under <see cref="FileLock"/>.</summary>
@@ -518,7 +559,7 @@ public static class AppSettings
 
         lock (FileLock)
         {
-            var found = Providers().FirstOrDefault(p => string.Equals(p.Name.Trim(), wanted, StringComparison.OrdinalIgnoreCase));
+            var found = Providers().FirstOrDefault(p => string.Equals(p.Key, wanted, StringComparison.OrdinalIgnoreCase));
             return found is null ? null : Clone(found);
         }
     }
@@ -673,7 +714,9 @@ public static class AppSettings
             ("terminal.fontFamily", "Cascadia Mono"), ("terminal.fontSize", "13"), ("terminal.scrollback", "10000"),
             ("chat.fontSize", "12.5"), ("chat.fontFamily", "Segoe UI"),
             ("chat.defaultMode", " "), ("chat.defaultModel", " "), ("chat.defaultEffort", " "),
-            ("git.pollSeconds", "5"), ("ai.smartThinking", "0"),
+            ("git.pollSeconds", "5"), ("ai.smart.groups.assistance.provider", "off"),
+            ("ai.smart.groups.completion.provider", "off"), ("ai.smart.groups.context.provider", "off"),
+            ("ai.smart.groups.embedding.provider", "off"),
         })
         {
             result.TryAdd(key, value);

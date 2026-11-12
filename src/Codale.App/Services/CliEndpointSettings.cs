@@ -59,7 +59,7 @@ public sealed class CliEndpointSettings
     public IReadOnlyDictionary<string, string>? ClaudeEnvironment(string providerName)
     {
         var active = AppSettings.FindByok(providerName);
-        if (active is null)
+        if (active is null || active.IsAccount)
         {
             return null;
         }
@@ -67,15 +67,9 @@ public sealed class CliEndpointSettings
         var anthropicBase = Clean(active.AnthropicBaseUrl);
         if (anthropicBase.Length == 0)
         {
-            var openAiBase = Clean(active.BaseUrl);
-            if (openAiBase.Length == 0)
-            {
-                return null;
-            }
-
             throw new InvalidOperationException(
                 $"Provider \"{active.Name}\" has no Anthropic-compatible base URL, so Claude cannot reach it. " +
-                "Add the Anthropic base URL in BYOK settings, or use Codex for this provider.");
+                "Add the Anthropic compatible endpoint in Claude CLI settings.");
         }
 
         var env = new Dictionary<string, string>
@@ -101,10 +95,9 @@ public sealed class CliEndpointSettings
     public IReadOnlyDictionary<string, string>? CodexEnvironment(string providerName)
     {
         var active = AppSettings.FindByok(providerName);
-        if (Clean(active?.BaseUrl) is not { Length: > 0 } baseUrl)
-        {
-            return null;
-        }
+        if (active is null || active.IsAccount) return null;
+        if (Clean(active.BaseUrl) is not { Length: > 0 } baseUrl)
+            throw new InvalidOperationException($"Profile {active.Name} needs an OpenAI compatible base URL in Codex CLI settings.");
 
         var env = new Dictionary<string, string>
         {

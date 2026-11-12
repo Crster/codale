@@ -27,6 +27,7 @@ public sealed partial class CodaleDb : IDisposable
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.SupportsRecursion);
     private readonly TNode _root = new("", null);
     private readonly IEmbedder _embedder;
+    public string EmbeddingModel => _embedder.Model;
     private readonly Timer? _flushTimer;
     private string? _sharedKey;
     private int _leases = 1;

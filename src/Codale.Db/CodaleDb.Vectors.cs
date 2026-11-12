@@ -17,6 +17,7 @@ public sealed partial class CodaleDb
     /// <summary>The embedded nodes under each path queried since the vectors last changed.</summary>
     private readonly Dictionary<string, TNode[]> _scans = [];
     private long _scansVersion = -1;
+    private string? _scansModel;
     private long _vectorVersion;
 
     /// <summary>One string per model name, however many vectors carry it.</summary>
@@ -131,10 +132,11 @@ public sealed partial class CodaleDb
         lock (_scans)
         {
             // Sets made before the vectors last changed would pin removed nodes (and their vectors): let them all go.
-            if (_scansVersion != version)
+            if (_scansVersion != version || _scansModel != _embedder.Model)
             {
                 _scans.Clear();
                 _scansVersion = version;
+                _scansModel = _embedder.Model;
             }
             if (_scans.TryGetValue(path, out var known)) return known;
         }

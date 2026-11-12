@@ -10,8 +10,8 @@ namespace Codale.Search;
 
 /// <summary>Local project retrieval. Indexing is asynchronous; retrieval uses only committed rows and fresh source.</summary>
 /// <remarks>
-/// Ranking fuses BM25 with the local hashed n-gram vectors (identifier fragments and inflections). There is no
-/// remote embedding model: every signal is computed in-process, so retrieval never waits on a server.
+/// Ranking fuses BM25 with vectors from the database's configured embedder. The library defaults to hashed
+/// n-grams; the app supplies the user's selected embedding provider, or disables vector matching.
 /// </remarks>
 public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
 {
@@ -39,7 +39,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
     private static readonly System.Text.RegularExpressions.Regex AgentInstructions = new(
         @"(^|[\\/])(CLAUDE|AGENTS|GEMINI)(\.local)?\.md$",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
-    private readonly ConcurrentDictionary<string, bool> _embedded = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, string> _embedded = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Cancelled on dispose, so a closing window never keeps indexing.</summary>
     private readonly CancellationTokenSource _stopping = new();
     private readonly object _gate = new();
@@ -146,10 +146,11 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
     /// <summary>Embeds chunks that have no vector from the current model yet.</summary>
     private void EmbedPending(string worktree)
     {
-        if (_embedded.ContainsKey(worktree)) return;
+        var model = db.EmbeddingModel;
+        if (_embedded.TryGetValue(worktree, out var previous) && previous == model) return;
         EmbedChunks(worktree);
-        if (_disposed) return;
-        _embedded[worktree] = true;
+        if (_disposed || model != db.EmbeddingModel) return;
+        _embedded[worktree] = model;
         // Vectors of any retired embedding model are dead weight.
         ChunkRoot(worktree).DropStaleVectors();
     }

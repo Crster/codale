@@ -253,19 +253,19 @@ public sealed partial class MainWindow : Window
 
     private void OnSettingsCloseRequested(object? sender, EventArgs e) => SetSettingsOpen(false);
 
-    private async Task RunAccountSignInAsync(string cliId)
+    private async Task RunAccountSignInAsync(string cliId, string? accountId = null)
     {
         if (RootFrame.Content is WorkspacePage workspace)
         {
             SetSettingsOpen(false);
-            await workspace.RunAccountSignInAsync(cliId);
+            await workspace.RunAccountSignInAsync(cliId, accountId);
             return;
         }
 
         // The project picker has no embedded terminal. Shell execution gives login
         // a visible console there, rather than an invisible child of this GUI app.
         using var login = await Codale.Core.Processes.ProcessUtil.StartAsync(
-            new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c " + Codale.Agents.CodaleAccountCli.LoginCommand(cliId))
+            new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c " + Codale.Agents.CodaleAccountCli.LoginCommand(cliId, accountId))
             {
                 UseShellExecute = true,
                 WindowStyle = System.Diagnostics.ProcessWindowStyle.Normal,

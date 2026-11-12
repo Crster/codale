@@ -168,14 +168,13 @@ public sealed partial class ProjectKnowledgeIndex
         for (var start = 0; start < missing.Count && !_disposed; start += EmbedBatch)
         {
             var batch = missing.Skip(start).Take(EmbedBatch).ToList();
-            db.Batch(() =>
+            // Embedding providers may perform network I/O. Do not hold the database's
+            // batch write lock while waiting for a vector; Embed locks only to store it.
+            foreach (var node in batch)
             {
-                foreach (var node in batch)
-                {
-                    if (node.ReadJson<ChunkRecord>() is { } chunk)
-                        node.Embed(node.Location.Segments[3] + "\n" + chunk.Symbols + "\n" + chunk.Text);
-                }
-            });
+                if (node.ReadJson<ChunkRecord>() is { } chunk)
+                    node.Embed(node.Location.Segments[3] + "\n" + chunk.Symbols + "\n" + chunk.Text);
+            }
         }
     }
 

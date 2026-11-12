@@ -123,7 +123,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     public string EndpointLabel =>
         Panel.TerminalCli is { } cli
             ? cli.DisplayName
-            : CliEndpoint.IsActive && CliEndpoint.ActiveName is { Length: > 0 } name ? name : "Default";
+            : CliEndpoint.ActiveName is { Length: > 0 } name ? name : "Default";
 
     /// <summary>The model, effort and mode tiles: only a Claude chat has them; a CLI in a terminal gets the simple panel.</summary>
     public bool ShowSessionPickers => !Panel.IsTerminalSession;
@@ -213,7 +213,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             ExtraFolders = ExtraFolders,
             Terminals = new TerminalSource(this),
             FolderServers = FolderServers,
-            CliId = cliId is { Length: > 0 } ? cliId : Codale.Agents.CliLocator.ActiveCli.Id,
+            CliId = cliId is { Length: > 0 } ? cliId : AppSettings.DefaultChatCli,
         };
 
         // Model and effort come from the CLI's saved default pick (or its own default);

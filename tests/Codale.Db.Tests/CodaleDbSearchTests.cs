@@ -16,6 +16,27 @@ public sealed class CodaleDbSearchTests : IDisposable
     private static IReadOnlyList<KeywordTerm> Words(params string[] words) => [.. words.Select(w => new KeywordTerm(w))];
 
     [Fact]
+    public void Cached_vector_scans_follow_live_model_changes()
+    {
+        var embedder = new SwitchingEmbedder();
+        using var db = NewDb(new() { Embedder = embedder });
+        var docs = db.Open("docs");
+        docs.Open("source").Write("source text");
+        docs.Open("source").Embed("source text");
+        Assert.Single(docs.Query("source text"));
+        embedder.Model = "off";
+        Assert.Empty(docs.Query("source text"));
+        embedder.Model = "enabled";
+        Assert.Single(docs.Query("source text"));
+    }
+
+    private sealed class SwitchingEmbedder : IEmbedder
+    {
+        public string Model { get; set; } = "enabled";
+        public float[] Embed(string text) => Model == "off" ? [] : [1f, 0f];
+    }
+
+    [Fact]
     public void Keyword_match_ranks_the_document_with_the_rarer_and_more_frequent_word_first()
     {
         using var db = NewDb();

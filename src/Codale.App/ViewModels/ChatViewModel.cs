@@ -128,7 +128,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// picked by the button that opened the chat ("Claude chat" / "Codex chat").
     /// Terminal-CLI chats are unaffected. Settable until the session connects.
     /// </summary>
-    private string _cliId = Codale.Agents.CliLocator.ActiveCli.Id;
+    private string _cliId = AppSettings.DefaultChatCli;
 
     public string CliId
     {
@@ -141,6 +141,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 OnPropertyChanged(nameof(CliId));
                 OnPropertyChanged(nameof(SessionCli));
                 OnPropertyChanged(nameof(ProviderName));
+                OnPropertyChanged(nameof(TabTitle));
 
                 // Provider and tier are per CLI: the constructor read them for the default CLI.
                 ReloadCliDefaults();
@@ -1664,7 +1665,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return (pick ?? models.FirstOrDefault())?.Id;
         }
 
-        if (AppSettings.TierModelFor(CliId, tier) is { Length: > 0 } configured)
+        var account = AppSettings.FindByok(EndpointName) ?? AppSettings.ByokProviders.FirstOrDefault(p => p.IsAccount && p.CliId == CliId && p.AccountId.Length == 0);
+        var configured = account is { IsAccount: true } ? account.ModelForTier(tier) : null;
+        if (!string.IsNullOrWhiteSpace(configured))
         {
             return configured;
         }
@@ -1723,6 +1726,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async Task ApplyTierAsync(string tier)
     {
+        if (IsBusy || IsConnecting) return;
         var (model, effort) = TierConfig(tier);
         if (RequestedModel == model && RequestedEffort == effort)
         {
@@ -1768,17 +1772,22 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private static readonly Dictionary<string, IReadOnlyList<AgentModelInfo>> CachedModels = new(StringComparer.Ordinal);
 
     /// <summary>The catalogue <paramref name="cliId"/> reported this run, or null before its first chat connected.</summary>
-    public static IReadOnlyList<AgentModelInfo>? KnownCatalogue(string cliId) =>
-        CachedModels.TryGetValue(cliId, out var models) ? models : null;
+    public static IReadOnlyList<AgentModelInfo>? KnownCatalogue(string cliId, string? accountId = null) =>
+        CachedModels.TryGetValue(CatalogueKey(cliId, accountId), out var models) ? models : null;
+
+    private static string CatalogueKey(string cliId, string? accountId) => string.IsNullOrEmpty(accountId) ? cliId : cliId + ":" + accountId;
 
     /// <summary>Drops <paramref name="cliId"/>'s cached catalogue: the account changed, and with it the plan's models.</summary>
-    public static void ForgetCatalogue(string cliId) => CachedModels.Remove(cliId);
+    public static void ForgetCatalogue(string cliId)
+    {
+        foreach (var key in CachedModels.Keys.Where(k => k == cliId || k.StartsWith(cliId + ":", StringComparison.Ordinal)).ToArray()) CachedModels.Remove(key);
+    }
 
     /// <summary>
     /// Asks the CLI itself for its model list by starting a throwaway session, caches the
     /// answer and returns it. Empty when the CLI is missing, signed out or too old to say.
     /// </summary>
-    public static async Task<IReadOnlyList<AgentModelInfo>> FetchCatalogueAsync(string cliId)
+    public static async Task<IReadOnlyList<AgentModelInfo>> FetchCatalogueAsync(string cliId, string? accountId = null)
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         IAgentSession? session = null;
@@ -1786,15 +1795,19 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             // A signed-out CLI still answers with a generic list that ignores the plan; caching
             // it would keep offering models the account cannot use after the login.
-            if ((cliId == "codex" || !EnvironmentOverridesEndpoint()) && !await CodaleAccountCli.IsSignedInAsync(cliId))
+            if ((cliId == "codex" || !EnvironmentOverridesEndpoint() || accountId is not null) && !await CodaleAccountCli.IsSignedInAsync(cliId, accountId: accountId))
             {
-                CachedModels.Remove(cliId);
+                CachedModels.Remove(CatalogueKey(cliId, accountId));
                 return [];
             }
 
+            var environment = new Dictionary<string, string>
+            {
+                [cliId == "codex" ? CodaleAccount.CodexVariable : CodaleAccount.ClaudeVariable] = CodaleAccount.ProfileHome(cliId, accountId),
+            };
             session = cliId == "codex"
-                ? new Codale.Agents.Codex.CodexAgentSession(new Codale.Agents.Codex.CodexSessionOptions { WorkingDirectory = home })
-                : new ClaudeAgentSession(new ClaudeSessionOptions { WorkingDirectory = home });
+                ? new Codale.Agents.Codex.CodexAgentSession(new Codale.Agents.Codex.CodexSessionOptions { WorkingDirectory = home, Environment = environment })
+                : new ClaudeAgentSession(new ClaudeSessionOptions { WorkingDirectory = home, Environment = environment });
             await session.StartAsync();
             // StartAsync returns once the CLI answered its handshake; it can still be loading
             // its catalogue, so ask again until it answers instead of giving up on one reply.
@@ -1811,7 +1824,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             if (models.Count > 0)
             {
-                CachedModels[cliId] = models;
+                CachedModels[CatalogueKey(cliId, accountId)] = models;
             }
             else
             {
@@ -1837,6 +1850,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// Logging in is interactive, so the page offers a terminal for it.
     /// </summary>
     public event EventHandler<string?>? LoginRequired;
+    private NoticeItem? _loginNotice;
 
     /// <summary>
     /// The conversation needs the reader: a question or permission is open, or the turn
@@ -1901,6 +1915,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>True while <see cref="ConnectAsync"/> runs; a second call would spawn a second CLI and orphan the first.</summary>
     private bool _connecting;
+    public bool IsConnecting => _connecting;
 
     /// <summary>The BYOK provider the live session was spawned with ("" for Default); null before the first connect.</summary>
     private string? _connectedProvider;
@@ -1911,7 +1926,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public string EndpointName { get; private set; } = "";
 
-    private string SelectedProviderName() => AppSettings.FindByok(EndpointName)?.Name.Trim() ?? "";
+    private string SelectedProviderName() => AppSettings.FindByok(EndpointName)?.Key ?? "";
 
     public async Task ConnectAsync()
     {
@@ -1921,6 +1936,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         _connecting = true;
+        OnPropertyChanged(nameof(IsConnecting));
         try
         {
             await ConnectCoreAsync();
@@ -1928,6 +1944,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         finally
         {
             _connecting = false;
+            OnPropertyChanged(nameof(IsConnecting));
         }
     }
 
@@ -1966,13 +1983,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // ANTHROPIC_* override brings its own credentials and needs no login.
         var cliId = IsCodexSession ? "codex" : "claude";
         if (endpointEnv is null && (IsCodexSession || !EnvironmentOverridesEndpoint()) &&
-            !await CodaleAccountCli.IsSignedInAsync(cliId))
+            !await CodaleAccountCli.IsSignedInAsync(cliId, accountId: AppSettings.FindByok(EndpointName)?.AccountId))
         {
-            Add(new NoticeItem { Text = $"Codale isn't signed in to {ProviderName}. Sign in, then resend your message.", Severity = NoticeSeverity.Warning });
+            if (_loginNotice is not null) Items.Remove(_loginNotice);
+            _loginNotice = new NoticeItem { Text = $"Codale isn't signed in to {ProviderName}. Set up an account to continue.", Severity = NoticeSeverity.Warning };
+            Add(_loginNotice);
             LoginRequired?.Invoke(this, IsCodexSession ? "Codex" : ProviderName);
             return;
         }
 
+        AppSettings.RememberProfile(CliId, EndpointName);
         _connectedProvider = SelectedProviderName();
         _status.IsCustomProvider = endpointEnv is not null;
         var endpointModels = endpointEnv is not null ? EndpointModels() : [];
@@ -2045,6 +2065,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             _status.CliName = cliName;
 
+            environment[IsCodexSession ? CodaleAccount.CodexVariable : CodaleAccount.ClaudeVariable] =
+                CodaleAccount.ProfileHome(CliId, AppSettings.FindByok(EndpointName)?.AccountId);
+
             IAgentSession session = starting = IsCodexSession
                 ? new Codale.Agents.Codex.CodexAgentSession(new Codale.Agents.Codex.CodexSessionOptions
                 {
@@ -2086,6 +2109,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             await session.StartAsync();
 
             IsConnected = true;
+            if (_loginNotice is not null) { Items.Remove(_loginNotice); _loginNotice = null; }
 
             SessionStateChanged?.Invoke(this, EventArgs.Empty);
 
@@ -3995,7 +4019,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         var text = Draft.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
         var attachments = Attachments.Select(a => a.ToTurnAttachment()).ToList();
 
-        if ((text.Length == 0 && attachments.Count == 0) || _session is null || !IsConnected || _briefing is not null)
+        if ((text.Length == 0 && attachments.Count == 0) || _session is null || !IsConnected || IsConnecting || _briefing is not null)
         {
             return;
         }
@@ -4514,16 +4538,52 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// The picker is disabled while a turn runs, so a turn is never cut off here.
     /// Nothing connected: the next connect reads the choice anyway.
     /// </summary>
+    public async Task SetProfileAsync(string cli, string name)
+    {
+        if (IsBusy || IsTerminalSession || _connecting) return;
+        if (cli == CliId) { await SetEndpointAsync(name); return; }
+        CaptureHandoff();
+        _needsResumeContext = true;
+        await DisposeSessionAsync();
+        IsConnected = false;
+        EndTurn(TurnOutcome.Stopped);
+        _streaming = null;
+        ResumeSessionId = null;
+        CliId = cli;
+        EndpointName = name;
+        OnPropertyChanged(nameof(EndpointName));
+        RequestedModel = null;
+        AvailableModels = [];
+        HasModelCatalog = false;
+        OnPropertyChanged(nameof(AvailableModels));
+        OnPropertyChanged(nameof(HasModelCatalog));
+        OnPropertyChanged(nameof(CanPickModel));
+        await ConnectAsync();
+    }
+
     public async Task SetEndpointAsync(string name)
     {
+        if (_connecting || IsTerminalSession) return;
         name = name.Trim();
         if (string.Equals(EndpointName, name, StringComparison.OrdinalIgnoreCase) || IsBusy)
         {
             return;
         }
 
+        var accountChanged = (AppSettings.FindByok(EndpointName)?.AccountId ?? "") != (AppSettings.FindByok(name)?.AccountId ?? "");
         EndpointName = name;
         OnPropertyChanged(nameof(EndpointName));
+
+        if (accountChanged)
+        {
+            CaptureHandoff();
+            _needsResumeContext = true;
+            await DisposeSessionAsync();
+            IsConnected = false;
+            EndTurn(TurnOutcome.Stopped);
+            _streaming = null;
+            ResumeSessionId = null;
+        }
 
         if (!IsConnected || _session is null || _connecting)
         {
@@ -4558,7 +4618,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (IsConnected)
         {
             var defaultLogin = $"the {ProviderName} login";
-            var targetName = SelectedProviderName() is { Length: > 0 } now ? now : defaultLogin;
+            var targetName = AppSettings.FindByok(EndpointName) is { } profile ? profile.Email ?? profile.Name : defaultLogin;
             var text = Items.Any(i => i is UserMessageItem or TurnActivityItem)
                 ? $"Switched to {targetName}. The conversation continues."
                 : $"Switched to {targetName}.";

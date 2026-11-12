@@ -1,4 +1,5 @@
 using Codale.Agents;
+using Codale.Core.Agents;
 using Codale.Agents.Claude;
 using Codale.Core.Helper;
 using Codale.App.Services;
@@ -33,7 +34,7 @@ public sealed partial class SettingsPanel : UserControl
     public event EventHandler? CloseRequested;
 
     /// <summary>The owning window runs interactive sign-in in its workspace terminal.</summary>
-    public Func<string, Task>? SignInAsync { get; set; }
+    public Func<string, string?, Task>? SignInAsync { get; set; }
 
     public SettingsPanel()
     {
@@ -44,6 +45,8 @@ public sealed partial class SettingsPanel : UserControl
 
         Reload();
     }
+
+    public void ShowAccountSetup() => TabNavAi.IsChecked = true;
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => CloseRequested?.Invoke(this, EventArgs.Empty);
 
@@ -86,32 +89,111 @@ public sealed partial class SettingsPanel : UserControl
     }
 
     private void OnSmartStatusChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(RefreshSmartStatus);
+    private string? _smartRowsKey;
+    private readonly Dictionary<string, ComboBox> _smartModelBoxes = [];
+
+    private void RefreshSmartFeatureRows()
+    {
+        var profiles = AppSettings.ByokProviders.Where(p => !p.IsAccount).ToArray();
+        var key = string.Join("|", SmartFeatureSettings.Groups.Select(g => AppSettings.SmartProviderFor(g.Id) + ":" + AppSettings.SmartApiProfileFor(g.Id)))
+            + string.Join("|", profiles.Select(p => p.Key + p.Name + p.BaseUrl + p.AnthropicBaseUrl));
+        if (_smartRowsKey != key)
+        {
+            _smartRowsKey = key;
+            _smartModelBoxes.Clear();
+            SmartFeatureRows.Children.Clear();
+            foreach (var group in SmartFeatureSettings.Groups)
+            {
+                var provider = AppSettings.SmartProviderFor(group.Id);
+                var section = new StackPanel { Spacing = 8 };
+                var heading = new Grid { ColumnSpacing = 16 };
+                heading.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                heading.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
+                var label = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+                label.Children.Add(new TextBlock { Text = group.Label, Style = (Style)SettingsRootGrid.Resources["RowTitle"] });
+                label.Children.Add(new TextBlock { Text = group.Description, TextWrapping = TextWrapping.Wrap, Style = (Style)SettingsRootGrid.Resources["RowDesc"] });
+                heading.Children.Add(label);
+                var providers = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
+                foreach (var choice in group.Id == "embedding" ? new[] { "off", "openai" } : new[] { "off", "claude", "codex", "openai", "anthropic" })
+                    providers.Items.Add(new ComboBoxItem { Content = choice switch { "off" => "Off", "openai" => "OpenAI", _ => char.ToUpperInvariant(choice[0]) + choice[1..] }, Tag = choice });
+                providers.SelectedItem = providers.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == provider) ?? providers.Items[0];
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(providers, group.Label + " provider");
+                providers.SelectionChanged += (_, _) =>
+                {
+                    if (_loading || providers.SelectedItem is not ComboBoxItem { Tag: string selected }) return;
+                    AppSettings.SetSmartProvider(group.Id, selected);
+                    if (selected != "off" && AppSettings.SmartFeatureModel(group.Id).Equals("off", StringComparison.OrdinalIgnoreCase))
+                        AppSettings.SetSmartFeatureModel(group.Id, "default");
+                };
+                Grid.SetColumn(providers, 1);
+                heading.Children.Add(providers);
+                section.Children.Add(heading);
+                if (provider is "openai" or "anthropic")
+                {
+                    var endpoint = new ComboBox { PlaceholderText = "Select endpoint", HorizontalAlignment = HorizontalAlignment.Right, Width = 220 };
+                    foreach (var profile in profiles.Where(p => provider == "anthropic" ? p.AnthropicBaseUrl.Length > 0 : p.BaseUrl.Length > 0))
+                        endpoint.Items.Add(new ComboBoxItem { Content = profile.Name, Tag = profile.Key });
+                    endpoint.SelectedItem = endpoint.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == AppSettings.SmartApiProfileFor(group.Id));
+                    Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(endpoint, group.Label + " endpoint");
+                    endpoint.SelectionChanged += (_, _) =>
+                    { if (!_loading && endpoint.SelectedItem is ComboBoxItem { Tag: string id }) AppSettings.SetSmartApiProfile(group.Id, id); };
+                    section.Children.Add(endpoint);
+                }
+                var model = new ComboBox { IsEditable = true, PlaceholderText = group.Id == "embedding" ? "Select model" : "Default model",
+                    HorizontalAlignment = HorizontalAlignment.Right, Width = 220, Tag = group.Id, IsEnabled = provider != "off" };
+                if (group.Id != "embedding") model.Items.Add("Default");
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(model, group.Label + " model");
+                model.LostFocus += (_, _) => { if (!_loading && _smartModelBoxes.GetValueOrDefault(group.Id) == model) AppSettings.SetSmartFeatureModel(group.Id, model.Text); };
+                model.TextSubmitted += (_, args) => { if (!_loading) AppSettings.SetSmartFeatureModel(group.Id, args.Text); };
+                model.SelectionChanged += (_, _) => { if (!_loading && model.SelectedItem is string id) AppSettings.SetSmartFeatureModel(group.Id, id); };
+                model.DropDownOpened += async (_, _) => await LoadSmartModelsAsync(model, group.Id, provider);
+                section.Children.Add(model);
+                _smartModelBoxes[group.Id] = model;
+                SmartFeatureRows.Children.Add(section);
+            }
+        }
+        foreach (var (id, box) in _smartModelBoxes)
+        {
+            if (box.FocusState == FocusState.Unfocused)
+            {
+                var model = AppSettings.SmartFeatureModel(id);
+                box.Text = model.Length == 0 ? id == "embedding" ? "" : "Default" : model;
+            }
+        }
+    }
+
+    private async Task LoadSmartModelsAsync(ComboBox box, string group, string provider)
+    {
+        try
+        {
+            var client = SmartExperienceHost.CreateClient(group);
+            var ids = provider is "claude" or "codex"
+                ? (await ChatViewModel.FetchCatalogueAsync(provider)).Select(m => m.Id).ToArray()
+                : await client.ModelsAsync(CancellationToken.None);
+            if (provider != AppSettings.SmartProviderFor(group) || !_smartModelBoxes.ContainsValue(box)) return;
+            var current = box.Text;
+            var loading = _loading; _loading = true;
+            try
+            {
+                box.Items.Clear();
+                if (group != "embedding") box.Items.Add("Default");
+                foreach (var id in ids.Distinct()) box.Items.Add(id);
+                box.Text = current;
+            }
+            finally { _loading = loading; }
+            ToolTipService.SetToolTip(box, ids.Length == 0 ? "Enter a model ID." : null);
+        }
+        catch (Exception ex) { ToolTipService.SetToolTip(box, ex.Message); }
+    }
     private void RefreshSmartStatus()
     {
         var status = SmartExperienceHost.Instance.Status;
         var loading = _loading; _loading = true;
-        SmartExperienceToggle.IsOn = AppSettings.SmartExperience;
-        SmartThinkingToggle.IsOn = AppSettings.SmartThinking;
-        SmartSummariesToggle.IsOn = AppSettings.SmartSummaries;
-        SmartCompletionsToggle.IsOn = AppSettings.SmartCompletions;
+        RefreshSmartFeatureRows();
         _loading = loading;
         SmartExperienceStatus.Text = status.Message;
-        SmartExperienceStatusPanel.Visibility = status.State != Codale.Smart.SmartState.Disabled ? Visibility.Visible : Visibility.Collapsed;
-        SmartExperienceProgress.Value = status.Progress * 100;
-        SmartExperienceProgress.IsIndeterminate = status.State == Codale.Smart.SmartState.Loading;
-        SmartExperienceProgress.Visibility = status.State is Codale.Smart.SmartState.Downloading or Codale.Smart.SmartState.Loading ? Visibility.Visible : Visibility.Collapsed;
-        SmartExperienceCancel.Visibility = SmartExperienceProgress.Visibility;
-        SmartExperienceRetry.Visibility = status.State == Codale.Smart.SmartState.Error ? Visibility.Visible : Visibility.Collapsed;
+        SmartExperienceStatusPanel.Visibility = status.State == Codale.Smart.SmartState.Error ? Visibility.Visible : Visibility.Collapsed;
     }
-    private void OnSmartExperienceToggled(object sender, RoutedEventArgs e)
-    { if (!_loading) AppSettings.SmartExperience = SmartExperienceToggle.IsOn; }
-    private void OnSmartSummariesToggled(object sender, RoutedEventArgs e)
-    { if (!_loading) AppSettings.SmartSummaries = SmartSummariesToggle.IsOn; }
-    private void OnSmartThinkingToggled(object sender, RoutedEventArgs e)
-    { if (!_loading) AppSettings.SmartThinking = SmartThinkingToggle.IsOn; }
-    private void OnSmartCompletionsToggled(object sender, RoutedEventArgs e)
-    { if (!_loading) AppSettings.SmartCompletions = SmartCompletionsToggle.IsOn; }
-    private void OnSmartExperienceCancel(object sender, RoutedEventArgs e) => SmartExperienceHost.Cancel();
     private void OnSmartExperienceRetry(object sender, RoutedEventArgs e) => SmartExperienceHost.Retry();
 
     /// <summary>Re-reads every setting into the controls; another window may have changed them since.</summary>
@@ -158,7 +240,6 @@ public sealed partial class SettingsPanel : UserControl
             _ => 3,
         };
 
-        BuildTierModelRows();
 
         ChatFontSizeBox.Value = AppSettings.ChatFontSize;
         PopulateChatFontFamilies();
@@ -360,129 +441,124 @@ public sealed partial class SettingsPanel : UserControl
         RefreshShortcutRows();
     }
 
-    /// <summary>
-    /// Asks each CLI whether Codale's account is signed in and shows it beside the sign in / out buttons.
-    /// The pane stays in the window collapsed, so this runs every time it opens rather than once on load:
-    /// a login made from the chat's prompt would otherwise never show here.
-    /// </summary>
+    private bool _refreshingAccounts;
+    private readonly HashSet<string> _removingAccounts = [];
+    private readonly Dictionary<string, bool> _accountStates = [];
+    private string? _expandedAccountKey;
+    private static string AccountKey(string cli, string accountId) => cli + ":" + accountId;
+
+    /// <summary>Detect accounts from stored CLI credentials whenever Settings opens.</summary>
     public async Task RefreshAccountsAsync()
     {
-        foreach (var (cli, status, signIn, signOut) in new[]
+        if (_refreshingAccounts) return;
+        _refreshingAccounts = true;
+        try
         {
-            ("claude", ClaudeAccountStatus, ClaudeSignInButton, ClaudeSignOutButton),
-            ("codex", CodexAccountStatus, CodexSignInButton, CodexSignOutButton),
-        })
-        {
-            var (signedIn, email) = await CodaleAccountCli.GetAccountAsync(cli);
-            status.Text = signedIn ? "Signed in" : "Signed out";
-            signIn.Content = signedIn ? "Sign in again" : "Sign in";
-            signOut.Content = signedIn && email is not null ? $"Sign out {email}" : "Sign out";
-            signOut.IsEnabled = signedIn;
+            foreach (var cli in new[] { "claude", "codex" })
+            {
+                var status = cli == "codex" ? CodexAccountStatus : ClaudeAccountStatus;
+                try
+                {
+                    var accounts = await CodaleAccountCli.DiscoverAccountsAsync(cli);
+                    foreach (var profile in _providers.Where(p => p.IsAccount && p.CliId == cli))
+                        _accountStates[AccountKey(cli, profile.AccountId)] = accounts.Any(a => a.AccountId == profile.AccountId);
+                    foreach (var account in accounts)
+                    {
+                        var key = AccountKey(cli, account.AccountId);
+                        if (_removingAccounts.Contains(key)) continue;
+                        _accountStates[key] = true;
+                        var profile = _providers.FirstOrDefault(p => p.IsAccount && p.CliId == cli && p.AccountId == account.AccountId);
+                        if (profile is null)
+                        {
+                            profile = new ByokProvider { Id = Guid.NewGuid().ToString("N"), CliId = cli, IsAccount = true, AccountId = account.AccountId,
+                                Name = account.Email ?? (account.AccountId == CodaleAccount.UserAccountId ? "Detected CLI account" : "Detected account") };
+                            _providers.Add(profile);
+                        }
+                        profile.Email = account.Email;
+                    }
+                    WriteSettings(() => AppSettings.SetAccountLabel(cli, accounts.FirstOrDefault(a => a.AccountId == "")?.Email));
+                    status.Text = accounts.Count == 0 ? "No accounts detected" : $"{accounts.Count} account{(accounts.Count == 1 ? "" : "s")} detected";
+                }
+                catch (Exception ex) { status.Text = $"Could not detect accounts: {ex.Message}"; }
+            }
+            SaveProviders();
+            BuildProviderEditors();
         }
+        finally { _refreshingAccounts = false; }
     }
 
-    /// <summary>Runs interactive login visibly and re-reads the account when it finishes.</summary>
-    private async void OnSignInClick(object sender, RoutedEventArgs e)
+    private async void OnAddAccountClick(object sender, RoutedEventArgs e)
     {
-        var cli = (string)((FrameworkElement)sender).Tag;
         var button = (Button)sender;
+        var cli = (string)button.Tag;
+        var status = cli == "codex" ? CodexAccountStatus : ClaudeAccountStatus;
+        var id = Guid.NewGuid().ToString("N");
         button.IsEnabled = false;
         try
         {
-            if (SignInAsync is not { } signIn)
-            {
-                throw new InvalidOperationException("Sign-in is unavailable in this window.");
-            }
-
-            await signIn(cli);
+            if (SignInAsync is null) throw new InvalidOperationException("Account setup is unavailable in this window.");
+            status.Text = "Connecting account…";
+            await SignInAsync(cli, id);
+            var account = await CodaleAccountCli.GetAccountAsync(cli, accountId: id);
+            if (!account.SignedIn) { status.Text = "Account setup did not complete. No account was added."; return; }
+            if (!_providers.Any(p => p.IsAccount && p.CliId == cli && p.AccountId == id))
+                _providers.Add(new ByokProvider { Id = Guid.NewGuid().ToString("N"), Name = account.Email ?? "Connected account", CliId = cli,
+                    IsAccount = true, AccountId = id, Email = account.Email });
+            _accountStates[AccountKey(cli, id)] = true;
+            _expandedAccountKey = _providers.First(p => p.IsAccount && p.CliId == cli && p.AccountId == id).Key;
+            SaveProviders();
+            BuildProviderEditors();
             await RefreshAccountsAsync();
             await ReloadCatalogueAfterAccountChangeAsync(cli);
         }
-        catch (Exception ex)
-        {
-            var status = cli == "codex" ? CodexAccountStatus : ClaudeAccountStatus;
-            status.Text = $"Could not start sign-in: {ex.Message}";
-        }
-        finally
-        {
-            button.IsEnabled = true;
-        }
+        catch (Exception ex) { status.Text = $"Could not add account: {ex.Message}"; }
+        finally { button.IsEnabled = true; }
     }
 
-    private async void OnSignOutClick(object sender, RoutedEventArgs e)
+    private async Task RemoveAccountAsync(ByokProvider provider, string cli, Button button, TextBlock status)
     {
-        var cli = (string)((FrameworkElement)sender).Tag;
-        await CodaleAccountCli.SignOutAsync(cli);
-        await RefreshAccountsAsync();
-        await ReloadCatalogueAfterAccountChangeAsync(cli);
+        var key = AccountKey(cli, provider.AccountId);
+        if (!_removingAccounts.Add(key)) return;
+        button.IsEnabled = false;
+        try
+        {
+            status.Text = "Removing account…";
+            if (!await AccountProfileRemoval.RemoveAsync(provider,
+                p => CodaleAccountCli.SignOutAsync(cli, accountId: p.AccountId),
+                p => _providers.RemoveAll(candidate => candidate.IsAccount && candidate.CliId == cli && candidate.AccountId == p.AccountId)))
+            { status.Text = "Could not sign out. The account was kept; try removing it again."; return; }
+            if (provider.AccountId.Length == 0) WriteSettings(() => AppSettings.SetAccountLabel(cli, null));
+            SaveProviders();
+            BuildProviderEditors();
+            await RefreshAccountsAsync();
+            await ReloadCatalogueAfterAccountChangeAsync(cli);
+        }
+        catch (Exception ex) { status.Text = $"Could not remove account: {ex.Message}"; }
+        finally { _removingAccounts.Remove(key); button.IsEnabled = true; }
     }
 
     /// <summary>A different account (or none) may have a different plan, so the old model list is dropped and read again.</summary>
-    private async Task ReloadCatalogueAfterAccountChangeAsync(string cli)
+    private Task ReloadCatalogueAfterAccountChangeAsync(string cli)
     {
         ChatViewModel.ForgetCatalogue(cli);
-        FillTierBoxes(cli, null);
-        await RefreshCatalogueAsync(cli);
+        return Task.CompletedTask;
     }
 
     private void BuildProviderEditors()
     {
         ProvidersPanel.Children.Clear();
-        foreach (var provider in _providers)
+        CodexProfilesPanel.Children.Clear();
+        foreach (var cli in new[] { "claude", "codex" })
+        foreach (var provider in _providers.Where(p => p.Supports(cli)))
         {
-            ProvidersPanel.Children.Add(BuildProviderEditor(provider, expanded: false));
+            (cli == "codex" ? CodexProfilesPanel : ProvidersPanel).Children.Add(BuildProviderEditor(provider, expanded: provider.Key == _expandedAccountKey, cli));
         }
 
-        RefreshCliProviderBoxes();
     }
 
-    private ComboBox CliProviderBoxFor(string cli) => cli == "codex" ? CodexProviderBox : ClaudeProviderBox;
-
-    /// <summary>Default plus the providers each CLI can reach: Claude needs a Claude account or an Anthropic-compatible base URL, Codex an OpenAI-compatible one.</summary>
-    private void RefreshCliProviderBoxes()
+    private Expander BuildProviderEditor(ByokProvider provider, bool expanded, string cli)
     {
-        var wasLoading = _loading;
-        _loading = true;
-        try
-        {
-            foreach (var cli in new[] { "claude", "codex" })
-            {
-                var box = CliProviderBoxFor(cli);
-                var wanted = AppSettings.CliProviderFor(cli);
-                box.Items.Clear();
-                box.Items.Add(new ComboBoxItem { Content = "Default (CLI login)", Tag = "" });
-                foreach (var provider in _providers.Where(p => p.Name.Trim().Length > 0 &&
-                    (cli == "claude"
-                        ? p.AnthropicBaseUrl.Trim().Length > 0
-                        : p.BaseUrl.Trim().Length > 0)))
-                {
-                    box.Items.Add(new ComboBoxItem { Content = provider.Name.Trim(), Tag = provider.Name.Trim() });
-                }
-
-                var index = box.Items.ToList().FindIndex(i => string.Equals((i as ComboBoxItem)?.Tag as string, wanted, StringComparison.OrdinalIgnoreCase));
-                box.SelectedIndex = Math.Max(index, 0);
-            }
-        }
-        finally
-        {
-            _loading = wasLoading;
-        }
-    }
-
-    private void OnCliProviderChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_loading || sender is not ComboBox box || box.SelectedItem is not ComboBoxItem item)
-        {
-            return;
-        }
-
-        var cli = ReferenceEquals(box, CodexProviderBox) ? "codex" : "claude";
-        WriteSettings(() => AppSettings.SetCliProvider(cli, item.Tag as string));
-    }
-
-    private Expander BuildProviderEditor(ByokProvider provider, bool expanded)
-    {
-        var header = new TextBlock { Text = provider.Name };
+        var header = new TextBlock { Text = provider.Email ?? provider.Name };
         var expander = new Expander
         {
             Header = header,
@@ -508,18 +584,27 @@ public sealed partial class SettingsPanel : UserControl
 
         Field("Name", "Shown in the status bar", provider.Name, v => provider.Name = v, () => header.Text = provider.Name);
 
-        Field("OpenAI-compatible base URL", "https://api.example.com/v1 (used by Codex CLI)", provider.BaseUrl, v => provider.BaseUrl = v);
-        Field("Anthropic-compatible base URL", "https://api.example.com (used by Claude CLI)", provider.AnthropicBaseUrl, v => provider.AnthropicBaseUrl = v);
+        if (!provider.IsAccount && cli == "codex") Field("OpenAI-compatible base URL", "https://api.example.com/v1 (used by Codex CLI)", provider.BaseUrl, v => provider.BaseUrl = v);
+        else if (!provider.IsAccount) Field("Anthropic-compatible base URL", "https://api.example.com (used by Claude CLI)", provider.AnthropicBaseUrl, v => provider.AnthropicBaseUrl = v);
 
-        var key = new PasswordBox { Header = "API key", Password = provider.ApiKey };
-        key.PasswordChanged += (_, _) =>
+        if (provider.IsAccount)
         {
-            provider.ApiKey = key.Password;
-            SaveProviders();
-        };
-        panel.Children.Add(key);
+            var status = new TextBlock { Text = _accountStates.GetValueOrDefault(AccountKey(cli, provider.AccountId), true)
+                ? provider.Email ?? "Connected account" : "Not connected. Remove this account and add it again to reconnect.", TextWrapping = TextWrapping.Wrap };
+            panel.Children.Add(status);
+        }
+        if (!provider.IsAccount)
+        {
+            var key = new PasswordBox { Header = "API key", Password = provider.ApiKey };
+            key.PasswordChanged += (_, _) =>
+            {
+                provider.ApiKey = key.Password;
+                SaveProviders();
+            };
+            panel.Children.Add(key);
+        }
 
-        // Model pickers list what the endpoint's /models returns; typing an id still works.
+        // Accounts and endpoints share model controls; their catalogues use their own credentials.
         var modelBoxes = new List<ComboBox>();
 
         ComboBox ModelField(string label, string placeholder, string value, Action<string> apply)
@@ -557,9 +642,18 @@ public sealed partial class SettingsPanel : UserControl
             return box;
         }
 
-        ModelField("Flash model", "Select a model", provider.FlashModel, v => provider.FlashModel = v);
-        ModelField("Pro model", "Select a model (optional)", provider.ProModel, v => provider.ProModel = v);
+        ModelField("Flash model", provider.IsAccount ? "CLI default" : "Select a model", provider.FlashModel, v => provider.FlashModel = v);
+        ModelField("Pro model", "Flash model when blank", provider.ProModel, v => provider.ProModel = v);
 
+        if (provider.IsAccount)
+        {
+            var accountStatus = panel.Children.OfType<TextBlock>().First();
+            var removeAccount = new Button { Content = "Remove account" };
+            removeAccount.Click += async (_, _) => await RemoveAccountAsync(provider, cli, removeAccount, accountStatus);
+            panel.Children.Add(removeAccount);
+            expander.Content = panel;
+            return expander;
+        }
         var remove = new Button { Content = "Remove provider", HorizontalAlignment = HorizontalAlignment.Right };
         remove.Click += (_, _) =>
         {
@@ -588,6 +682,25 @@ public sealed partial class SettingsPanel : UserControl
     /// <summary>Fills the model dropdowns from the endpoint's OpenAI-style GET /models; failures leave the current list.</summary>
     private async Task LoadModelsAsync(ByokProvider provider, List<ComboBox> boxes)
     {
+        if (provider.IsAccount)
+        {
+            var accountModels = ChatViewModel.KnownCatalogue(provider.CliId, provider.AccountId)
+                ?? await ChatViewModel.FetchCatalogueAsync(provider.CliId, provider.AccountId);
+            if (accountModels.Count == 0)
+            {
+                SetModelStatus(boxes, "No models reported for this account. Enter a model ID manually.");
+                return;
+            }
+            SetModelStatus(boxes, null);
+            foreach (var box in boxes)
+            {
+                var current = box.Text;
+                box.Items.Clear();
+                foreach (var model in accountModels) box.Items.Add(model.Id);
+                box.Text = current;
+            }
+            return;
+        }
         var anthropicOnly = string.IsNullOrWhiteSpace(provider.BaseUrl);
         if (anthropicOnly && string.IsNullOrWhiteSpace(provider.AnthropicBaseUrl))
         {
@@ -680,9 +793,6 @@ public sealed partial class SettingsPanel : UserControl
         if (!_loading)
         {
             WriteSettings(() => AppSettings.ByokProviders = _providers);
-
-            // The CLI provider lists mirror the providers: add, rename and remove show up at once.
-            RefreshCliProviderBoxes();
         }
     }
 
@@ -731,10 +841,10 @@ public sealed partial class SettingsPanel : UserControl
         }
         while (_providers.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)));
 
-        var provider = new ByokProvider { Name = name };
+        var provider = new ByokProvider { Id = Guid.NewGuid().ToString("N"), Name = name, CliId = (string)((FrameworkElement)sender).Tag };
         _providers.Add(provider);
         SaveProviders();
-        ProvidersPanel.Children.Add(BuildProviderEditor(provider, expanded: true));
+        BuildProviderEditors();
     }
 
     /// <summary>The chat reading fonts worth offering; a stored custom family stays selectable.</summary>
@@ -1041,128 +1151,6 @@ public sealed partial class SettingsPanel : UserControl
             3 => 100_000,
             _ => 10_000,
         };
-    }
-
-    private ComboBox ModeBoxFor(string cli) => cli == "codex" ? CodexModeBox : ClaudeModeBox;
-
-    private ComboBox TierBoxFor(string cli, string tier) => (cli, tier) switch
-    {
-        ("codex", "flash") => CodexFlashBox,
-        ("codex", _) => CodexProBox,
-        (_, "flash") => ClaudeFlashBox,
-        _ => ClaudeProBox,
-    };
-
-    /// <summary>
-    /// Per CLI: the start mode and which model plays "flash" (fast) and "pro" (capable).
-    /// The model lists come from the CLI itself, read live in the background and again
-    /// whenever a dropdown opens.
-    /// </summary>
-    private void BuildTierModelRows()
-    {
-        foreach (var cli in new[] { "claude", "codex" })
-        {
-            var modeBox = ModeBoxFor(cli);
-            var current = AppSettings.DefaultModeFor(cli);
-            modeBox.SelectedIndex = Math.Max(0, modeBox.Items.ToList().FindIndex(i => (i as ComboBoxItem)?.Tag as string == current));
-            FillTierBoxes(cli, ChatViewModel.KnownCatalogue(cli));
-            _ = RefreshCatalogueAsync(cli);
-            if (_tierHandlersWired)
-            {
-                continue;
-            }
-
-            var pickedCli = cli;
-            modeBox.SelectionChanged += (_, _) =>
-            {
-                if (!_loading && modeBox.SelectedItem is ComboBoxItem item)
-                {
-                    AppSettings.SetDefaultMode(pickedCli, item.Tag as string);
-                }
-            };
-
-            foreach (var tier in new[] { "flash", "pro" })
-            {
-                var combo = TierBoxFor(cli, tier);
-                var pickedTier = tier;
-                combo.SelectionChanged += (sender, _) =>
-                {
-                    if (!_populating && sender is ComboBox box && box.SelectedItem is ComboBoxItem item)
-                    {
-                        AppSettings.SetTierModel(pickedCli, pickedTier, item.Tag as string);
-                    }
-                };
-            }
-        }
-
-        // Reload runs on every open; the handlers are attached once.
-        _tierHandlersWired = true;
-    }
-
-    private bool _tierHandlersWired;
-
-    private bool _populating;
-
-    private void FillTierBoxes(string cli, IReadOnlyList<Codale.Core.Agents.AgentModelInfo>? catalogue)
-    {
-        _populating = true;
-        try
-        {
-            foreach (var tier in new[] { "flash", "pro" })
-            {
-                var combo = TierBoxFor(cli, tier);
-                var configured = AppSettings.TierModelFor(cli, tier) ?? "";
-                combo.Items.Clear();
-                combo.PlaceholderText = "Select a model";
-                var selected = -1;
-                var found = false;
-                foreach (var model in catalogue ?? [])
-                {
-                    combo.Items.Add(new ComboBoxItem { Content = string.IsNullOrEmpty(model.DisplayName) ? model.Id : model.DisplayName, Tag = model.Id });
-                    if (string.Equals(model.Id, configured, StringComparison.OrdinalIgnoreCase))
-                    {
-                        selected = combo.Items.Count - 1;
-                        found = true;
-                    }
-                }
-
-                if (!found && configured.Length > 0)
-                {
-                    combo.Items.Add(new ComboBoxItem { Content = configured, Tag = configured });
-                    selected = combo.Items.Count - 1;
-                }
-
-                combo.SelectedIndex = selected;
-            }
-        }
-        finally
-        {
-            _populating = false;
-        }
-    }
-
-    private async Task RefreshCatalogueAsync(string cli)
-    {
-        try
-        {
-            var models = await ChatViewModel.FetchCatalogueAsync(cli);
-            if (models.Count > 0)
-            {
-                FillTierBoxes(cli, models);
-            }
-        }
-        catch (Exception)
-        {
-        }
-    }
-
-    private void OnModelDropDownOpened(object? sender, object e)
-    {
-        var cli = ReferenceEquals(sender, CodexFlashBox) || ReferenceEquals(sender, CodexProBox) ? "codex" : "claude";
-        if (ChatViewModel.KnownCatalogue(cli) is null)
-        {
-            _ = RefreshCatalogueAsync(cli);
-        }
     }
 
     private void OnGitPollChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)

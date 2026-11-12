@@ -6,19 +6,18 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Codale.App.ViewModels;
 
-/// <summary>One row of the status bar's provider picker: Default, or a BYOK provider by name.</summary>
-public sealed record ProviderChoice(string Name, string Label, string Detail);
+/// <summary>One account or compatible endpoint in the combined agent profile picker.</summary>
+public sealed record ProviderChoice(string Name, string Label, string Detail, string CliId = "claude");
 
 /// <summary>
-/// The status bar's provider picker. The providers themselves are configured in the
-/// Settings window (settings.json); here the user only chooses which one Claude
-/// uses: Default (no BYOK - the Claude CLI login) or one provider.
-/// The choice is stored at once and reaches the next spawned session.
+/// Chooses the CLI and its account or endpoint for the active chat. Profiles are
+/// configured per CLI in Settings; the most recent choice is also the new-chat default.
 /// </summary>
 public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
 {
     /// <summary>Set while the list rebuilds, so re-selecting the current row is not a write.</summary>
     private bool _loading;
+    private bool _switching;
 
     public CliEndpointViewModel()
     {
@@ -55,12 +54,12 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
 
     private void OnChatPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(ChatViewModel.IsBusy))
+        if (e.PropertyName is nameof(ChatViewModel.IsBusy) or nameof(ChatViewModel.IsConnecting))
         {
             OnPropertyChanged(nameof(CanSwitch));
             OnPropertyChanged(nameof(RouteText));
         }
-        else if (e.PropertyName == nameof(ChatViewModel.EndpointName) && !_loading)
+        else if (e.PropertyName is nameof(ChatViewModel.EndpointName) or nameof(ChatViewModel.CliId) && !_loading)
         {
             Reload();
         }
@@ -69,19 +68,19 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
     private ByokProvider? ActiveProvider => AppSettings.FindByok(_chat?.EndpointName);
 
     /// <summary>False while the chat in front runs a turn (a switch restarts its CLI and would cut the turn off), and for a terminal CLI's session, which has no provider of its own to switch.</summary>
-    public bool CanSwitch => _chat is not { IsBusy: true } and not { IsTerminalSession: true };
+    public bool CanSwitch => !_switching && _chat is not { IsBusy: true } and not { IsTerminalSession: true } and not { IsConnecting: true };
 
     /// <summary>True when a BYOK provider (not Default) is in use.</summary>
-    public bool IsActive => ActiveProvider is not null;
+    public bool IsActive => ActiveProvider is { IsAccount: false };
 
     /// <summary>The chat's provider name, or "" for Default.</summary>
-    public string ActiveName => ActiveProvider?.Name.Trim() ?? "";
+    public string ActiveName => Selected?.Label ?? "Choose profile";
 
     /// <summary>Where Claude goes with the current choice, in words.</summary>
     public string RouteText => !CanSwitch
         ? "A turn is running. Switch the provider when it finishes."
-        : ActiveProvider is not { } provider
-            ? "Claude uses Codale's Claude login in this chat."
+        : ActiveProvider is not { IsAccount: false } provider
+            ? $"This chat uses Codale's {_chat?.ProviderName} account."
             : provider.FlashModel.Length == 0 && provider.ProModel.Length == 0
                 ? $"This chat uses {provider.Name.Trim()}. It has no model name yet; add one in settings.json."
                 : $"This chat uses {provider.Name.Trim()}.";
@@ -93,13 +92,17 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
 
         // Rebuild the rows only when the providers changed: replacing them under the open
         // flyout's ListView drops its selection and focus (typing in Settings fires this per keystroke).
-        var wanted = new List<ProviderChoice> { new("", "Default", "Claude CLI login") };
-
-        foreach (var provider in AppSettings.ByokProviders)
+        var wanted = new List<ProviderChoice>();
+        foreach (var cli in new[] { "claude", "codex" })
         {
-            var name = provider.Name.Trim();
-            var detail = provider.BaseUrl.Length > 0 ? provider.BaseUrl : "No base URL set";
-            wanted.Add(new ProviderChoice(name, name, detail));
+            var label = cli == "codex" ? "Codex" : "Claude";
+            wanted.Add(new("", label + ": " + AppSettings.AccountLabel(cli), "Sign-in account", cli));
+            foreach (var provider in AppSettings.ByokProviders.Where(p => p.Supports(cli)))
+            {
+                var name = provider.Name.Trim();
+                var detail = provider.IsAccount ? "Sign-in account" : cli == "codex" ? provider.BaseUrl : provider.AnthropicBaseUrl;
+                wanted.Add(new(provider.Key, label + ": " + (provider.IsAccount ? provider.Email ?? name : name), detail, cli));
+            }
         }
 
         if (!wanted.SequenceEqual(Choices))
@@ -107,8 +110,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
             Choices.ReplaceAll(wanted);
         }
 
-        var active = ActiveName;
-        Selected = Choices.FirstOrDefault(c => string.Equals(c.Name, active, StringComparison.OrdinalIgnoreCase)) ?? Choices[0];
+        Selected = Choices.FirstOrDefault(c => c.CliId == (_chat?.CliId ?? "claude") && string.Equals(c.Name, _chat?.EndpointName ?? "", StringComparison.OrdinalIgnoreCase)) ?? Choices[0];
         _loading = false;
 
         OnPropertyChanged(nameof(IsActive));
@@ -130,13 +132,13 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
         }
 
         // Our own write raises Changed; rebuilding the list from inside the ListView's selection change is what to avoid.
-        // Per chat and never stored: a new chat starts on Default.
+        // Switch only this chat; other open conversations retain their profiles.
         _loading = true;
         try
         {
             if (_chat is not null)
             {
-                _ = _chat.SetEndpointAsync(value.Name);
+                _ = SwitchAsync(value);
             }
         }
         finally
@@ -147,6 +149,27 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsActive));
         OnPropertyChanged(nameof(ActiveName));
         OnPropertyChanged(nameof(RouteText));
+    }
+
+    private async Task SwitchAsync(ProviderChoice choice)
+    {
+        _switching = true;
+        OnPropertyChanged(nameof(CanSwitch));
+        try
+        {
+            if (_chat is not null)
+            {
+                await _chat.SetProfileAsync(choice.CliId, choice.Name);
+                if (_chat.CliId == choice.CliId && _chat.EndpointName == choice.Name)
+                    AppSettings.RememberProfile(choice.CliId, choice.Name);
+            }
+        }
+        finally
+        {
+            _switching = false;
+            Reload();
+            OnPropertyChanged(nameof(CanSwitch));
+        }
     }
 
     private void OnSettingsChanged(object? sender, EventArgs e)

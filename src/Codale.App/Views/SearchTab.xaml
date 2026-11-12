@@ -36,7 +36,7 @@
                 Opacity="0.7"
                 TextAlignment="Center"
                 TextWrapping="Wrap"
-                Text="Type what you are looking for in the search box at the top, like &quot;where are settings saved&quot; or &quot;player jump&quot;. The local model finds the files and shows the code." />
+                Text="Type what you are looking for in the search box at the top, like &quot;where are settings saved&quot; or &quot;player jump&quot;. Search finds the files and shows the code." />
         </StackPanel>
 
         <Grid Visibility="{x:Bind ViewModel.HasQuery, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">

@@ -7,6 +7,8 @@ using Codale.Core.Processes;
 
 namespace Codale.Agents;
 
+public sealed record DetectedCliAccount(string AccountId, string? Email);
+
 /// <summary>
 /// Asks a CLI whether Codale's own account (<see cref="CodaleAccount"/>) is signed in, and
 /// signs it out. Both CLIs answer from their stored credentials with an exit code, so a
@@ -17,23 +19,23 @@ public static class CodaleAccountCli
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(20);
 
-    private static (string Executable, string Variable, string Home, string StatusArgs, string LogoutArgs, string LoginArgs) Describe(string cliId) =>
+    private static (string Executable, string Variable, string Home, string StatusArgs, string LogoutArgs, string LoginArgs) Describe(string cliId, string? accountId = null) =>
         cliId == "codex"
-            ? ("codex", CodaleAccount.CodexVariable, CodaleAccount.CodexHome, "login status", "logout", "login")
-            : (CliLocator.Executable, CodaleAccount.ClaudeVariable, CodaleAccount.ClaudeHome, "auth status", "auth logout", "auth login");
+            ? ("codex", CodaleAccount.CodexVariable, CodaleAccount.ProfileHome("codex", accountId), "login status", "logout", "login")
+            : (CliLocator.Executable, CodaleAccount.ClaudeVariable, CodaleAccount.ProfileHome("claude", accountId), "auth status", "auth logout", "auth login");
 
     /// <summary>True when the account folder holds a login the CLI still accepts; false for an empty folder, a missing CLI or a signed-out one.</summary>
-    public static async Task<bool> IsSignedInAsync(string cliId, CancellationToken ct = default) =>
-        (await GetAccountAsync(cliId, ct).ConfigureAwait(false)).SignedIn;
+    public static async Task<bool> IsSignedInAsync(string cliId, CancellationToken ct = default, string? accountId = null) =>
+        (await GetAccountAsync(cliId, ct, accountId).ConfigureAwait(false)).SignedIn;
 
     /// <summary>
     /// Whether the account is signed in, plus its email when the CLI lets us know it: claude prints
     /// it in its JSON status, codex keeps it as a claim of the id token in <c>auth.json</c>.
     /// </summary>
-    public static async Task<(bool SignedIn, string? Email)> GetAccountAsync(string cliId, CancellationToken ct = default)
+    public static async Task<(bool SignedIn, string? Email)> GetAccountAsync(string cliId, CancellationToken ct = default, string? accountId = null)
     {
-        var cli = Describe(cliId);
-        if (!Directory.EnumerateFileSystemEntries(cli.Home).Any() || CliLocator.Find(cli.Executable) is not { } path)
+        var cli = Describe(cliId, accountId);
+        if (!Directory.Exists(cli.Home) || CliLocator.Find(cli.Executable) is not { } path)
         {
             return (false, null);
         }
@@ -44,7 +46,29 @@ public static class CodaleAccountCli
             return (false, null);
         }
 
+        if (cliId == "claude" && ReadLoggedIn(output) == false) return (false, null);
         return (true, cliId == "codex" ? ReadCodexEmail(cli.Home) : ReadJsonString(output, "email"));
+    }
+
+    internal static bool? ReadLoggedIn(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("loggedIn", out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? value.GetBoolean() : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    public static async Task<IReadOnlyList<DetectedCliAccount>> DiscoverAccountsAsync(string cliId, CancellationToken ct = default)
+    {
+        var results = await Task.WhenAll(CodaleAccount.AccountIds(cliId).Select(async id =>
+        {
+            var status = await GetAccountAsync(cliId, ct, id).ConfigureAwait(false);
+            return status.SignedIn ? new DetectedCliAccount(id, status.Email) : null;
+        })).ConfigureAwait(false);
+        return results.OfType<DetectedCliAccount>().ToArray();
     }
 
     private static string? ReadCodexEmail(string home)
@@ -88,9 +112,9 @@ public static class CodaleAccountCli
     }
 
     /// <summary>Removes the stored login; true when the CLI reports success.</summary>
-    public static async Task<bool> SignOutAsync(string cliId, CancellationToken ct = default)
+    public static async Task<bool> SignOutAsync(string cliId, CancellationToken ct = default, string? accountId = null)
     {
-        var cli = Describe(cliId);
+        var cli = Describe(cliId, accountId);
         return CliLocator.Find(cli.Executable) is { } path
             && (await RunAsync(path, cli.LogoutArgs, cli.Variable, cli.Home, ct).ConfigureAwait(false)).ExitCode == 0;
     }
@@ -99,9 +123,9 @@ public static class CodaleAccountCli
     /// A command line that signs Codale's account in, to type into any shell: it starts the CLI
     /// through cmd with the account folder set, so the terminal's own claude/codex stays untouched.
     /// </summary>
-    public static string LoginCommand(string cliId)
+    public static string LoginCommand(string cliId, string? accountId = null)
     {
-        var cli = Describe(cliId);
+        var cli = Describe(cliId, accountId);
         return $"cmd /c \"set {cli.Variable}={cli.Home}&& {cli.Executable} {cli.LoginArgs}\"";
     }
 

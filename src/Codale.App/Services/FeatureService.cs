@@ -32,7 +32,7 @@ public sealed class FeatureService : IDisposable
         _knowledge = new ProjectKnowledgeIndex(_db);
         _knowledge.Smart = SmartExperienceHost.Instance;
         _knowledge.SmartProjectRoot = projectPath;
-        _knowledge.Summaries = new Codale.Smart.SummaryCache(Path.Combine(ProjectPaths.KnowledgeDirectory(projectPath), "smart-summaries"));
+        UpdateSummaryCache();
         _knowledge.SummariesEnabled = () => AppSettings.SmartSummaries;
         SmartExperienceHost.Instance.Changed += OnSmartChanged;
         _knowledge.Warm(projectPath);
@@ -55,11 +55,11 @@ public sealed class FeatureService : IDisposable
     {
         try
         {
-            return new CodaleDb(ProjectPaths.FeatureDatabasePath(projectPath));
+            return new CodaleDb(ProjectPaths.FeatureDatabasePath(projectPath), new() { Embedder = new SmartEmbedder() });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException)
         {
-            return new CodaleDb(Path.Combine(Path.GetTempPath(), "codale-features-" + Guid.NewGuid().ToString("N")));
+            return new CodaleDb(Path.Combine(Path.GetTempPath(), "codale-features-" + Guid.NewGuid().ToString("N")), new() { Embedder = new SmartEmbedder() });
         }
     }
 
@@ -141,6 +141,13 @@ public sealed class FeatureService : IDisposable
 
     private bool _smartThinking = AppSettings.SmartThinking;
     private bool _smartSummaries = AppSettings.SmartSummaries;
+    private string? _summaryIdentity;
+    private string? _embeddingIdentity;
+    private void UpdateSummaryCache()
+    {
+        _summaryIdentity = SmartExperienceHost.CreateClient("summary").FeatureIdentity("summary");
+        _knowledge.Summaries = new Codale.Smart.SummaryCache(Path.Combine(ProjectPaths.KnowledgeDirectory(_projectPath), "smart-summaries"), _summaryIdentity);
+    }
 
     private void OnSmartChanged(object? sender, EventArgs e)
     { if (SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready) _knowledge.Warm(_projectPath); }
@@ -148,8 +155,13 @@ public sealed class FeatureService : IDisposable
     /// <summary>Switching Smart thinking re-summarises the project now, not on the next prompt.</summary>
     private void OnAppSettingsChanged(object? sender, EventArgs e)
     {
-        if (_smartThinking != AppSettings.SmartThinking || _smartSummaries != AppSettings.SmartSummaries)
+        var client = SmartExperienceHost.CreateClient("summary");
+        var embedding = SmartExperienceHost.CreateClient("embedding").EmbeddingIdentity;
+        var summaryChanged = _summaryIdentity != client.FeatureIdentity("summary");
+        if (summaryChanged) UpdateSummaryCache();
+        if (summaryChanged || _embeddingIdentity != embedding || _smartThinking != AppSettings.SmartThinking || _smartSummaries != AppSettings.SmartSummaries)
         {
+            _embeddingIdentity = embedding;
             _smartThinking = AppSettings.SmartThinking;
             _smartSummaries = AppSettings.SmartSummaries;
             _knowledge.Warm(_projectPath);
