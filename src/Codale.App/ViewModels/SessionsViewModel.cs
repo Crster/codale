@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 
 using Codale.Agents.History;
+using Codale.Core.Agents;
 using Codale.App.Services;
 using Codale.Core.Features;
 using Codale.Core.Projects;
@@ -199,9 +200,15 @@ public sealed partial class SessionsViewModel : ObservableObject
             byId = [];
             try
             {
-                foreach (var s in CliResume.CreateReader(mapping.Provider, mapping.Worktree)?.ListSessions() ?? [])
+                // Codale runs the CLI under its own account home (or a profile's), not the terminal's default:
+                // the session's transcript and title live in whichever of them started it.
+                foreach (var accountId in CodaleAccount.AccountIds(mapping.Provider))
                 {
-                    byId[s.SessionId] = s;
+                    var home = CodaleAccount.ProfileHome(mapping.Provider, accountId);
+                    foreach (var s in CliResume.CreateReader(mapping.Provider, mapping.Worktree, home)?.ListSessions() ?? [])
+                    {
+                        byId.TryAdd(s.SessionId, s);
+                    }
                 }
             }
             catch (IOException)

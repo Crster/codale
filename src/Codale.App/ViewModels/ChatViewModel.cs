@@ -2230,12 +2230,25 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    /// <summary>Shows the subscription usage as soon as the chat is open, before any message.</summary>
+    /// <summary>
+    /// Reads the subscription usage of the account this chat signed in with: shown as soon as the
+    /// chat is open, and refreshed after each turn, since a turn's rate_limit_event often carries no windows.
+    /// </summary>
     private async Task LoadUsageAsync()
     {
-        if (await ClaudeUsageClient.FetchAsync().ConfigureAwait(false) is { } limits)
+        // The CLI runs under the selected profile's folder; the default folder may hold no login at all.
+        var accountId = AppSettings.FindByok(EndpointName)?.AccountId;
+        var home = CodaleAccount.ProfileHome("claude", accountId);
+        if (await ClaudeUsageClient.FetchAsync(home).ConfigureAwait(false) is { } limits)
         {
-            _dispatcher.TryEnqueue(() => _status.Apply(limits));
+            _dispatcher.TryEnqueue(() =>
+            {
+                // The user switched accounts while the call ran: these windows are the old one's.
+                if ((AppSettings.FindByok(EndpointName)?.AccountId ?? "") == (accountId ?? ""))
+                {
+                    _status.Apply(limits);
+                }
+            });
         }
     }
 
@@ -2662,6 +2675,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
                 RestoreAfterPlanTurn();
                 _status.Apply(turn);
+
+                if (!IsCodexSession && !_status.IsOverrideCli)
+                {
+                    RunInBackground(LoadUsageAsync, "usage fetch");
+                }
 
                 // The terminal panel cannot read the window from a transcript; it borrows this one.
                 if (!IsCodexSession && turn.ContextWindow is int turnWindow && _status.Model is { Length: > 0 } turnModel && turnModel != StatusViewModel.NotConnected)
@@ -4680,6 +4698,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             CaptureHandoff();
             _needsResumeContext = true;
             await DisposeSessionAsync();
+            // The previous account's subscription windows are not this one's.
+            _status.ResetCliReadings();
             IsConnected = false;
             EndTurn(TurnOutcome.Stopped);
             _streaming = null;
