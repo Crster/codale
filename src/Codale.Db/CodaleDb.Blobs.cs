@@ -20,9 +20,9 @@ public sealed partial class CodaleDb
         _lock.EnterReadLock();
         try
         {
-            var value = FindNode(path, create: false)?.Value;
-            if (value is null) return null;
-            if ((value.Flags & ValueFlags.Blob) == 0) throw new InvalidOperationException("This value was not written with WriteBlob().");
+            var value = FindNode(path, create: false);
+            if (value is not { HasValue: true }) return null;
+            if ((value.ValueFlags & ValueFlags.Blob) == 0) throw new InvalidOperationException("This value was not written with WriteBlob().");
             var raw = ReadRaw(value);
             var output = new byte[BinaryPrimitives.ReadInt32LittleEndian(raw)];
             if (!BrotliDecoder.TryDecompress(raw.AsSpan(4), output, out var written) || written != output.Length)

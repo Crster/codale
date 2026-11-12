@@ -6,8 +6,8 @@
     <RootNamespace>Codale.App</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x64;ARM64</Platforms>
+    <Platform Condition="'$(Platform)' == '' Or '$(Platform)' == 'AnyCPU'">$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</Platform>
     <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>
-    <PublishProfile Condition="Exists('Properties\PublishProfiles\win-$(Platform).pubxml')">win-$(Platform).pubxml</PublishProfile>
     <UseWinUI>true</UseWinUI>
     <WinUISDKReferences>false</WinUISDKReferences>
     <EnableMsixTooling>true</EnableMsixTooling>
@@ -41,54 +41,55 @@
     <Manifest Include="$(ApplicationManifest)" />
   </ItemGroup>
 
-  <!--
-    The Explorer context menu handler. It is a native vcxproj, which the .NET SDK's
-    MSBuild cannot build, so it is not a ProjectReference: run.ps1 builds it with
-    Visual Studio's MSBuild first and this picks up the output. The condition keeps a
-    plain `dotnet build` working (the app just ships without the shell extension).
-  -->
+  <!-- Restore server dependencies without referencing their executable assemblies. -->
   <ItemGroup>
-    <Content Include="..\Codale.ShellExt\bin\$(Platform)\$(Configuration)\Codale.ShellExt.dll" Condition="Exists('..\Codale.ShellExt\bin\$(Platform)\$(Configuration)\Codale.ShellExt.dll')">
-      <Link>Codale.ShellExt.dll</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+    <ProjectReference Include="..\Codale.Mcp.Browser\Codale.Mcp.Browser.csproj;..\Codale.Mcp.Computer\Codale.Mcp.Computer.csproj;..\Codale.Mcp.Phone\Codale.Mcp.Phone.csproj;..\Codale.Mcp.Tasks\Codale.Mcp.Tasks.csproj" ReferenceOutputAssembly="false" Private="false" PrivateAssets="all" />
+    <BundledMcpProject Include="..\Codale.Mcp.Browser\Codale.Mcp.Browser.csproj;..\Codale.Mcp.Computer\Codale.Mcp.Computer.csproj;..\Codale.Mcp.Phone\Codale.Mcp.Phone.csproj;..\Codale.Mcp.Tasks\Codale.Mcp.Tasks.csproj" />
   </ItemGroup>
 
-  <!--
-    The built-in MCP servers ship the same way, one folder each beside the app exe, where
-    McpServerSettings looks for them. The browser folder carries Playwright's driver
-    (.playwright); run.ps1 builds both before this project. Playwright's vite UIs
-    (trace viewer, recorder, dashboard) are excluded: the driver runs headless, and their
-    hashed asset names (codicon-DCmgc-ay.ttf, ...) parse as invalid resource qualifiers
-    and raise PRI249.
-  -->
-  <ItemGroup>
-    <Content
-      Include="..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\**\*.*"
-      Exclude="..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\.playwright\package\lib\vite\**;..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\.playwright\node\darwin*\**;..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\.playwright\node\linux*\**"
-      Condition="Exists('..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\Codale.Mcp.Browser.exe')">
-      <Link>Codale.Mcp.Browser\%(RecursiveDir)%(Filename)%(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content
-      Include="..\Codale.Mcp.Computer\bin\$(Configuration)\net10.0-windows10.0.26100.0\**\*.*"
-      Condition="Exists('..\Codale.Mcp.Computer\bin\$(Configuration)\net10.0-windows10.0.26100.0\Codale.Mcp.Computer.exe')">
-      <Link>Codale.Mcp.Computer\%(RecursiveDir)%(Filename)%(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content
-      Include="..\Codale.Mcp.Phone\bin\$(Configuration)\net10.0\**\*.*"
-      Condition="Exists('..\Codale.Mcp.Phone\bin\$(Configuration)\net10.0\Codale.Mcp.Phone.exe')">
-      <Link>Codale.Mcp.Phone\%(RecursiveDir)%(Filename)%(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content
-      Include="..\Codale.Mcp.Tasks\bin\$(Configuration)\net10.0\**\*.*"
-      Condition="Exists('..\Codale.Mcp.Tasks\bin\$(Configuration)\net10.0\Codale.Mcp.Tasks.exe')">
-      <Link>Codale.Mcp.Tasks\%(RecursiveDir)%(Filename)%(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
+  <!-- Build before evaluating payload globs, including on a fresh checkout. -->
+  <Target Name="IncludeBundledServers" BeforeTargets="AssignTargetPaths" Condition="'$(DesignTimeBuild)' != 'true'">
+    <MSBuild Condition="'$(NoBuild)' != 'true'" Projects="@(BundledMcpProject)" Targets="Build" BuildInParallel="true" Properties="Configuration=$(Configuration)" RemoveProperties="RuntimeIdentifier;Platform;TargetFramework;SelfContained;PublishReadyToRun;GenerateAppxPackageOnBuild" />
+    <ItemGroup>
+      <_McpBrowserPayload
+        Include="..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\**\*.*"
+        Exclude="..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\.playwright\package\lib\vite\**;..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\.playwright\node\darwin*\**;..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\.playwright\node\linux*\**"
+        Condition="Exists('..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\Codale.Mcp.Browser.exe')" />
+      <_McpBrowserPayload Update="@(_McpBrowserPayload)">
+        <Link>Codale.Mcp.Browser\%(_McpBrowserPayload.RecursiveDir)%(_McpBrowserPayload.Filename)%(_McpBrowserPayload.Extension)</Link>
+        <TargetPath>Codale.Mcp.Browser\%(_McpBrowserPayload.RecursiveDir)%(_McpBrowserPayload.Filename)%(_McpBrowserPayload.Extension)</TargetPath>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </_McpBrowserPayload>
+      <Content Include="@(_McpBrowserPayload)" />
+      <_McpComputerPayload
+        Include="..\Codale.Mcp.Computer\bin\$(Configuration)\net10.0-windows10.0.26100.0\**\*.*"
+        Condition="Exists('..\Codale.Mcp.Computer\bin\$(Configuration)\net10.0-windows10.0.26100.0\Codale.Mcp.Computer.exe')" />
+      <_McpComputerPayload Update="@(_McpComputerPayload)">
+        <Link>Codale.Mcp.Computer\%(_McpComputerPayload.RecursiveDir)%(_McpComputerPayload.Filename)%(_McpComputerPayload.Extension)</Link>
+        <TargetPath>Codale.Mcp.Computer\%(_McpComputerPayload.RecursiveDir)%(_McpComputerPayload.Filename)%(_McpComputerPayload.Extension)</TargetPath>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </_McpComputerPayload>
+      <Content Include="@(_McpComputerPayload)" />
+      <_McpPhonePayload
+        Include="..\Codale.Mcp.Phone\bin\$(Configuration)\net10.0\**\*.*"
+        Condition="Exists('..\Codale.Mcp.Phone\bin\$(Configuration)\net10.0\Codale.Mcp.Phone.exe')" />
+      <_McpPhonePayload Update="@(_McpPhonePayload)">
+        <Link>Codale.Mcp.Phone\%(_McpPhonePayload.RecursiveDir)%(_McpPhonePayload.Filename)%(_McpPhonePayload.Extension)</Link>
+        <TargetPath>Codale.Mcp.Phone\%(_McpPhonePayload.RecursiveDir)%(_McpPhonePayload.Filename)%(_McpPhonePayload.Extension)</TargetPath>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </_McpPhonePayload>
+      <Content Include="@(_McpPhonePayload)" />
+      <_McpTasksPayload
+        Include="..\Codale.Mcp.Tasks\bin\$(Configuration)\net10.0\**\*.*"
+        Condition="Exists('..\Codale.Mcp.Tasks\bin\$(Configuration)\net10.0\Codale.Mcp.Tasks.exe')" />
+      <_McpTasksPayload Update="@(_McpTasksPayload)">
+        <Link>Codale.Mcp.Tasks\%(_McpTasksPayload.RecursiveDir)%(_McpTasksPayload.Filename)%(_McpTasksPayload.Extension)</Link>
+        <TargetPath>Codale.Mcp.Tasks\%(_McpTasksPayload.RecursiveDir)%(_McpTasksPayload.Filename)%(_McpTasksPayload.Extension)</TargetPath>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </_McpTasksPayload>
+      <Content Include="@(_McpTasksPayload)" />
+    </ItemGroup>
+  </Target>
 
   <!--
     Defining the "Msix" ProjectCapability here allows the Single-project MSIX Packaging
@@ -117,10 +118,8 @@
   </ItemGroup>
 
   <!--
-    Memory: a ceiling on the managed heap (normal use stays under 200 MB; a runaway once
-    reached 24 GB and paged the machine, with the ceiling it fails at 4 GB instead), and
-    ConserveMemory, which has the GC compact the large-object heap rather than let it
-    fragment, trading a little GC time for a smaller working set.
+    Bound the managed heap to 4 GB. ConserveMemory favors a smaller working set
+    at the cost of more frequent garbage collection.
   -->
   <ItemGroup>
     <RuntimeHostConfigurationOption Include="System.GC.HeapHardLimit" Value="4294967296" />
@@ -176,13 +175,11 @@
 
   <!-- Publish Properties -->
   <PropertyGroup>
-    <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
-    <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
+    <PublishReadyToRun Condition="'$(PublishReadyToRun)' == '' And '$(Configuration)' == 'Release'">true</PublishReadyToRun>
     <!--
-      PublishTrimmed stays off: XAML-reflection metadata means WinUI 3 does not support
-      full trimming, and the Windows SDK projection (26MB) survives regardless - so the
-      size win was never there while the risk of Release-only stowed failures was.
+      Keep reflection metadata used by WinUI bindings and activation.
     -->
     <PublishTrimmed>False</PublishTrimmed>
   </PropertyGroup>
+  <Import Project="Build\ShellExtension.targets" />
 </Project>

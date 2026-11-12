@@ -13,7 +13,7 @@ public sealed partial class CodaleDb
         try
         {
             if (FindNode(from, create: false)?.Links?.Contains((rel, to)) == true) return;
-            _log.Append(RecordType.Link, 0, EncodeStrings(from, rel, to));
+            Append(RecordType.Link, 0, EncodeStrings(from, rel, to));
             ApplyLink(from, rel, to);
             Committed();
         }
@@ -27,7 +27,7 @@ public sealed partial class CodaleDb
         {
             var node = FindNode(from, create: false);
             if (node?.Links is null || !node.Links.Contains((rel, to))) return false;
-            var append = _log.Append(RecordType.Unlink, 0, EncodeStrings(from, rel, to));
+            var append = Append(RecordType.Unlink, 0, EncodeStrings(from, rel, to));
             _dead += append.Size;
             ApplyUnlink(from, rel, to);
             Committed();
@@ -75,7 +75,7 @@ public sealed partial class CodaleDb
                 foreach (var child in node.Children.Values.OrderBy(c => c.Name, StringComparer.Ordinal))
                 {
                     var childPath = child.PathString();
-                    if (child.Value is not null && Matches(childPath[prefixLength..], filter)) found.Add(childPath);
+                    if (child.HasValue && Matches(childPath[prefixLength..], filter)) found.Add(childPath);
                     Walk(child);
                 }
             }

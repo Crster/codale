@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
@@ -49,7 +49,7 @@
       <Extensions>
         <!--
           Single activation path for opening a project: the Explorer context menu, the
-          project picker and run.ps1 -ProjectPath all launch codale://open?path=...
+          project picker and protocol shortcuts all launch codale://open?path=...
           so instancing is decided in exactly one place.
         -->
         <uap:Extension Category="windows.protocol">

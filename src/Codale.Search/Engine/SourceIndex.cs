@@ -12,8 +12,11 @@ public sealed record SourceIndexOptions
     /// <summary>Text files larger than this are listed but not indexed - generated data, not source.</summary>
     public long MaxFileBytes { get; init; } = 1_000_000;
 
-    /// <summary>How much text stays in memory; files past it are re-read from disk when needed.</summary>
-    public long MaxRetainedChars { get; init; } = 48_000_000;
+    /// <summary>
+    /// How much text stays in memory (held as UTF-8, about a byte a char for source); files past it are re-read
+    /// from disk when a search needs their text.
+    /// </summary>
+    public long MaxRetainedChars { get; init; } = 8_000_000;
 
     /// <summary>Without a file watcher, how old a snapshot may get before a search refreshes it.</summary>
     public TimeSpan MaxAge { get; init; } = TimeSpan.FromSeconds(5);
@@ -304,9 +307,10 @@ public sealed class SourceIndex : IDisposable
             return null;
         }
 
-        var (keys, counts, total) = SourceTokens.Count(text);
-        var symbols = SourceSymbols.Extract(text);
-        var transitions = SourceTokens.Transitions(text);
+        var pool = _model.Pool;
+        var (keys, counts, total) = SourceTokens.Count(text, pool);
+        var symbols = SourceSymbols.Extract(text, pool);
+        var transitions = SourceTokens.Transitions(text, pool);
         var keep = Interlocked.Add(ref retained, text.Length) <= _options.MaxRetainedChars;
         if (!keep)
         {

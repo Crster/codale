@@ -197,7 +197,7 @@ Codale searches with its own managed engine, so no external binary is needed. A 
 
 ```
 Codale.slnx                     .NET 10 solution specification
-run.ps1                         Build, sign, install MSIX package, and launch
+src/Codale.App/Codale.App.csproj Native WinUI build, run, watch, and publish entry point
 docs/                           Documentation assets and screenshots
 src/
   Codale.App/                   WinUI 3 application shell (Mica, views, viewmodels, single-project MSIX)
@@ -340,32 +340,38 @@ Commands are also automatically detected from `.claude/launch.json`, `.vscode/ta
 ### Prerequisites
 
 - **Operating System**: Windows 11 (Build 22621 or newer).
-- **Runtime & SDK**: [.NET 10 SDK](https://dotnet.microsoft.com/).
-- **Build Tools**: Visual Studio 2026 / 2022 with the **Desktop development with C++** and **MSVC v143+** toolsets (required to compile the native `Codale.ShellExt` COM DLL).
+- **Runtime & SDK**: [.NET SDK](https://dotnet.microsoft.com/) selected by `global.json` (10.0.401 minimum, with roll-forward to a newer major SDK). Projects target .NET 10.
+- **Build Tools**: Visual Studio 2026 with the **Desktop development with C++** workload and **MSVC v145** toolset (required to compile the native `Codale.ShellExt` COM DLL).
 - **AI Agent CLI**: [Claude Code](https://claude.com/claude-code) or OpenAI Codex installed and authenticated for full integration.
 
-### Build, Package, and Launch
+### Build, Run, Watch, and Publish
 
-Codale must run with **MSIX Package Identity** so that modern Windows 11 shell extensions, protocol activation (`codale://`), and sandboxed local storage function correctly. 
-
-The repository provides `run.ps1` to automate building, code-signing with a local test certificate, deploying the package, and launching:
+The executable project is `src/Codale.App/Codale.App.csproj`; `Codale.slnx` groups the app, libraries, and tests. Run app commands from the app directory:
 
 ```powershell
-# Build signed MSIX package -> install in-place -> launch
-.\run.ps1
+cd src\Codale.App
 
-# Build an optimized Release package (ReadyToRun) and install
-.\run.ps1 -Deploy
-
-# Force a full rebuild even if source files haven't changed
-.\run.ps1 -Force
-
-# Launch Codale directly into a specific project folder
-.\run.ps1 -ProjectPath "C:\Projects\MyAwesomeApp"
+dotnet run
+dotnet watch --no-hot-reload
+dotnet run -c Release
+dotnet publish -c Release -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false
 ```
 
-> [!TIP]
-> Subsequent runs when source files have not changed take under one second because the script detects up-to-date binaries and immediately launches the installed app.
+The WinApp NuGet integration registers a development package identity and launches the app. MSBuild builds and bundles the MCP servers and Explorer shell extension. Visual Studio's C++ build tools are required for the extension. The native inference library retains its own incremental build helper.
+
+Release publishing enables ReadyToRun to reduce startup JIT work, at the cost of a larger package and longer publish time. Use `-p:PublishReadyToRun=false` to opt out. Trimming remains disabled to preserve reflection metadata. The app limits its managed heap to 4 GB; this does not cap total process or native memory. Visual Studio discovery supplies both the C++ compiler and MSIX symbol tools.
+
+Use watch in rebuild/restart mode; packaged WinUI XAML Hot Reload is not promised by this workflow. Close Codale if Windows reports that its binaries are in use.
+
+From the repository root, select the executable project explicitly:
+
+```powershell
+dotnet run --project src/Codale.App/Codale.App.csproj
+dotnet watch --project src/Codale.App/Codale.App.csproj --no-hot-reload
+dotnet build Codale.slnx
+```
+
+`dotnet publish` produces deployment artifacts; there is no built-in `dotnet deploy` command for this WinUI project. The unsigned MSIX above must be signed with a trusted certificate before installation or distribution. Set `AppxPackageSigningEnabled=true` and `PackageCertificateThumbprint` to your signing certificate when producing a signed package. Development launch uses WinApp registration rather than repeatedly installing a signed release MSIX.
 
 ---
 

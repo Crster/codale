@@ -46,6 +46,14 @@ public sealed partial class CodaleDb : IDisposable
         try
         {
             _log.Open(Replay);
+            if (_unfinishedBatch is { } batch)
+            {
+                // The process died inside a Batch: cut the log back to where the batch began and read it again.
+                _log.TruncateAt(batch.Segment, batch.Offset);
+                ResetState();
+                _log.Scan(Replay);
+            }
+            foreach (var index in _keywords.Values) index.SweepIfNeeded();
             MaybeCompact();
         }
         catch
@@ -115,6 +123,7 @@ public sealed partial class CodaleDb : IDisposable
         _lock.EnterWriteLock();
         try
         {
+            try { CommitBatch(); } catch (IOException) { }
             _log.Dispose();
             _directoryLock.Dispose();
             if (_masterKey is not null) CryptographicOperations.ZeroMemory(_masterKey);

@@ -23,8 +23,7 @@ public static class AppDb
     private static CodaleDb? _pin;
 
     /// <summary>
-    /// Under MSIX this redirects into the package's local folder, so it survives the in-place updates
-    /// run.ps1 performs. Settings files such as <c>settings.json</c> live beside the database.
+    /// Under MSIX this redirects into the package's local folder, so it survives in-place package updates. Settings files such as <c>settings.json</c> live beside the database.
     /// </summary>
     public static string Folder { get; private set; } =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale");

@@ -58,7 +58,27 @@ public sealed class MemoryFootprintTests(ITestOutputHelper output) : IDisposable
         var textBytes = sources.Sum(f => (long)File.ReadAllText(f).Length * 2);
         foreach (var node in nodes) node.Embed(node.Location.ToString());
         var withVectors = Heap();
-        output.WriteLine($"attribution chunks={chunkCount} source_text={Mb(textBytes)}MB text_and_keywords_and_tree={Mb(withText - baseline)}MB vectors={Mb(withVectors - withText)}MB");
+        // Read speed on the same data: keyword match, vector query, value read.
+        var chunkRoot = alone.Open("source").Open("w");
+        KeywordTerm[] terms = [new("token"), new("refresh", Prefix: true), new("index")];
+        chunkRoot.Match("source", terms, 40);
+        chunkRoot.Query("refresh token", 40);
+        const int rounds = 200;
+        clock.Restart();
+        for (var i = 0; i < rounds; i++) chunkRoot.Match("source", terms, 40);
+        var matchMs = clock.Elapsed.TotalMilliseconds / rounds;
+        clock.Restart();
+        for (var i = 0; i < rounds; i++) chunkRoot.Query("refresh token", 40);
+        var queryMs = clock.Elapsed.TotalMilliseconds / rounds;
+        clock.Restart();
+        foreach (var node in nodes) node.Read();
+        var readMicros = clock.Elapsed.TotalMilliseconds * 1000 / Math.Max(1, nodes.Count);
+        var afterReads = Heap();
+        clock.Restart();
+        alone.Dispose();
+        using (var reopened = new CodaleDb(Path.Combine(_directory, "alone")))
+            output.WriteLine($"speed match={matchMs:F3}ms query={queryMs:F3}ms read={readMicros:F1}us reopen={clock.Elapsed.TotalMilliseconds:F0}ms held_after_queries={(afterReads - baseline) / 1048576.0:F1}MB");
+        output.WriteLine($"attribution chunks={chunkCount} source_text={Mb(textBytes)}MB text_and_keywords_and_tree={(withText - baseline) / 1048576.0:F1}MB vectors={(withVectors - withText) / 1048576.0:F1}MB");
     }
 
     private static long Heap()

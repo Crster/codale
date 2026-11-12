@@ -14,6 +14,10 @@ internal enum RecordType : byte
     Link = 4,
     Unlink = 5,
     Index = 6,
+
+    /// <summary>Opens a batch: everything up to the matching <see cref="Commit"/> is one unit, dropped at open if the commit never made it.</summary>
+    Begin = 7,
+    Commit = 8,
 }
 
 internal delegate void ReplayHandler(int segment, long offset, int size, RecordType type, byte flags, ReadOnlySpan<byte> body);
@@ -55,12 +59,20 @@ internal sealed class SegmentLog : IDisposable
             .ToList();
         if (ids.Count == 0) ids.Add(1);
 
+        foreach (var id in ids)
+            _handles[id] = File.OpenHandle(SegmentPath(id), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+        Scan(handler);
+    }
+
+    /// <summary>Replays every open segment from the start.</summary>
+    public void Scan(ReplayHandler handler)
+    {
+        var ids = _handles.Keys.Order().ToList();
+        TotalBytes = 0;
         for (var i = 0; i < ids.Count; i++)
         {
             var id = ids[i];
-            var handle = File.OpenHandle(SegmentPath(id), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
-            _handles[id] = handle;
-            var length = Replay(id, handle, i == ids.Count - 1, handler);
+            var length = Replay(id, _handles[id], i == ids.Count - 1, handler);
             _lengths[id] = length;
             TotalBytes += length;
             _active = id;
@@ -68,26 +80,28 @@ internal sealed class SegmentLog : IDisposable
         }
     }
 
+    /// <summary>Reads a segment front to back through one buffer (a read per 64 KB, not two per record).</summary>
     private static long Replay(int id, SafeFileHandle handle, bool last, ReplayHandler handler)
     {
         var length = RandomAccess.GetLength(handle);
-        var header = new byte[8];
-        byte[] buffer = [];
+        var buffer = new byte[64 << 10];
+        var start = 0; // buffer[start..end] is the file from `position` on
+        var end = 0;
         long position = 0;
         while (position < length)
         {
             var good = false;
-            if (length - position >= HeaderSize && ReadFull(handle, header, position))
+            if (Fill(8))
             {
-                var crc = BinaryPrimitives.ReadUInt32LittleEndian(header);
-                var len = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(4));
-                if (len is >= 2 and <= MaxRecord && position + 8 + len <= length)
+                var crc = BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(start));
+                var len = BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(start + 4));
+                if (len is >= 2 and <= MaxRecord && position + 8 + len <= length && Fill(8 + (int)len))
                 {
-                    if (buffer.Length < len) buffer = new byte[Math.Max(len, 4096)];
-                    var span = buffer.AsSpan(0, (int)len);
-                    if (ReadFull(handle, span, position + 8) && Crc32.Compute(span) == crc)
+                    var span = buffer.AsSpan(start + 8, (int)len);
+                    if (Crc32.Compute(span) == crc)
                     {
                         handler(id, position, (int)(8 + len), (RecordType)span[0], span[1], span[2..]);
+                        start += 8 + (int)len;
                         position += 8 + len;
                         good = true;
                     }
@@ -100,6 +114,30 @@ internal sealed class SegmentLog : IDisposable
             return position;
         }
         return length;
+
+        bool Fill(int need)
+        {
+            if (end - start >= need) return true;
+            if (need > buffer.Length)
+            {
+                var larger = new byte[Math.Max(need, buffer.Length * 2)];
+                buffer.AsSpan(start, end - start).CopyTo(larger);
+                buffer = larger;
+            }
+            else if (start > 0)
+            {
+                buffer.AsSpan(start, end - start).CopyTo(buffer);
+            }
+            end -= start;
+            start = 0;
+            while (end < need)
+            {
+                var read = RandomAccess.Read(handle, buffer.AsSpan(end), position + end);
+                if (read <= 0) return false;
+                end += read;
+            }
+            return true;
+        }
     }
 
     private static bool ReadFull(SafeFileHandle handle, Span<byte> buffer, long offset)
@@ -143,6 +181,29 @@ internal sealed class SegmentLog : IDisposable
         return (_active, offset, total);
     }
 
+    /// <summary>Appends a copy of an existing record as it is (compaction): its checksum travels with it, so nothing is re-encoded.</summary>
+    public (int Segment, long Offset, int Size) Copy(int segment, long offset, int size)
+    {
+        if (_tail > 0 && _tail + size > _segmentBytes) Roll();
+        var buffer = ArrayPool<byte>.Shared.Rent(size);
+        try
+        {
+            var record = buffer.AsSpan(0, size);
+            Read(segment, offset, record);
+            RandomAccess.Write(_handles[_active], record, _tail);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+        var at = _tail;
+        _tail += size;
+        _lengths[_active] = _tail;
+        TotalBytes += size;
+        _dirty = true;
+        return (_active, at, size);
+    }
+
     public void Read(int segment, long offset, Span<byte> destination)
     {
         if (!ReadFull(_handles[segment], destination, offset)) throw new InvalidDataException($"Segment {segment} is shorter than the index expects.");
@@ -173,9 +234,36 @@ internal sealed class SegmentLog : IDisposable
         return _active;
     }
 
+    /// <summary>
+    /// Deletes the segments compaction replaced, oldest first. The order matters: if the process dies part-way, what
+    /// is left is a tail of the old log followed by the complete new one, which replays to the same state. Deleting
+    /// a newer segment before an older one could bring back data that the newer one had removed.
+    /// </summary>
     public void DeleteSegmentsBefore(int first)
     {
-        foreach (var id in _handles.Keys.Where(id => id < first).ToList())
+        var blocked = false;
+        foreach (var id in _handles.Keys.Where(id => id < first).Order().ToList())
+        {
+            _handles[id].Dispose();
+            _handles.Remove(id);
+            TotalBytes -= _lengths[id];
+            _lengths.Remove(id);
+            if (blocked) continue;
+            // A file something else holds open (a scanner, a backup) is left for the next open to replay and the
+            // next compaction to delete; so is everything newer than it, to keep what remains a tail.
+            try { File.Delete(SegmentPath(id)); }
+            catch (IOException) { blocked = true; }
+            catch (UnauthorizedAccessException) { blocked = true; }
+        }
+    }
+
+    /// <summary>
+    /// Cuts the log back to a point (an unfinished batch found at open): later segments go, newest first, then the
+    /// segment itself is truncated. Dying part-way leaves the unfinished batch in place to be cut again.
+    /// </summary>
+    public void TruncateAt(int segment, long offset)
+    {
+        foreach (var id in _handles.Keys.Where(id => id > segment).OrderDescending().ToList())
         {
             _handles[id].Dispose();
             _handles.Remove(id);
@@ -183,6 +271,12 @@ internal sealed class SegmentLog : IDisposable
             _lengths.Remove(id);
             File.Delete(SegmentPath(id));
         }
+        RandomAccess.SetLength(_handles[segment], offset);
+        RandomAccess.FlushToDisk(_handles[segment]);
+        TotalBytes -= _lengths[segment] - offset;
+        _lengths[segment] = offset;
+        _active = segment;
+        _tail = offset;
     }
 
     private string SegmentPath(int id) => Path.Combine(_dir, $"seg-{id:D8}.log");

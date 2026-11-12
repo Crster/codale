@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text.RegularExpressions;
 
 using Microsoft.Extensions.FileSystemGlobbing;
@@ -24,16 +25,22 @@ public sealed record WorkspaceSuggestion(string Text, SourceSymbolKind? Kind, in
 public sealed class SourceSnapshot
 {
     private readonly Dictionary<string, int> _byPath;
-    private readonly Dictionary<string, Posting> _postings;
+
+    // The inverted index, flat: a term's postings are the stretch of _postingFiles / _postingCounts
+    // from _postingStarts[id] to _postingStarts[id + 1], in file order. No object per term.
+    private readonly Dictionary<string, int> _termIds;
+    private readonly int[] _postingStarts;
+    private readonly int[] _postingFiles;
+    private readonly int[] _postingCounts;
     private readonly Dictionary<string, List<SymbolLocation>> _definitions;
     private readonly string[] _vocabulary;
     private readonly string[] _symbolNames;
 
-    internal sealed class Posting(string term)
+    /// <summary>The files that contain one term, by id in ascending order, and how often each does.</summary>
+    internal readonly struct Posting(ArraySegment<int> files, ArraySegment<int> counts)
     {
-        public string Term { get; } = term;
-        public List<int> Files { get; } = [];
-        public List<int> Counts { get; } = [];
+        public ArraySegment<int> Files { get; } = files;
+        public ArraySegment<int> Counts { get; } = counts;
     }
 
     internal SourceSnapshot(
@@ -49,10 +56,12 @@ public sealed class SourceSnapshot
         BuiltAt = DateTime.UtcNow;
 
         _byPath = new Dictionary<string, int>(files.Count, StringComparer.OrdinalIgnoreCase);
-        _postings = new Dictionary<string, Posting>(StringComparer.Ordinal);
+        _termIds = new Dictionary<string, int>(StringComparer.Ordinal);
         _definitions = new Dictionary<string, List<SymbolLocation>>(StringComparer.OrdinalIgnoreCase);
 
         long tokens = 0;
+        var terms = new List<string>();
+        var frequencies = new List<int>();
         for (var id = 0; id < files.Count; id++)
         {
             var file = files[id];
@@ -62,18 +71,19 @@ public sealed class SourceSnapshot
             var keys = file.TermKeys;
             for (var t = 0; t < keys.Length; t++)
             {
-                if (!_postings.TryGetValue(keys[t], out var posting))
+                if (!_termIds.TryGetValue(keys[t], out var term))
                 {
-                    _postings[keys[t]] = posting = new Posting(keys[t]);
+                    _termIds[keys[t]] = term = terms.Count;
+                    terms.Add(keys[t]);
+                    frequencies.Add(0);
                 }
                 else
                 {
                     // One string per term across every file: the per-file copies go.
-                    keys[t] = posting.Term;
+                    keys[t] = terms[term];
                 }
 
-                posting.Files.Add(id);
-                posting.Counts.Add(file.TermCounts[t]);
+                frequencies[term]++;
             }
 
             foreach (var symbol in file.Symbols)
@@ -87,8 +97,29 @@ public sealed class SourceSnapshot
             }
         }
 
+        _postingStarts = new int[terms.Count + 1];
+        for (var term = 0; term < terms.Count; term++)
+        {
+            _postingStarts[term + 1] = _postingStarts[term] + frequencies[term];
+        }
+
+        _postingFiles = new int[_postingStarts[^1]];
+        _postingCounts = new int[_postingStarts[^1]];
+        var next = _postingStarts.AsSpan(0, terms.Count).ToArray();
+        for (var id = 0; id < files.Count; id++)
+        {
+            var keys = files[id].TermKeys;
+            var counts = files[id].TermCounts;
+            for (var t = 0; t < keys.Length; t++)
+            {
+                var at = next[_termIds[keys[t]]]++;
+                _postingFiles[at] = id;
+                _postingCounts[at] = counts[t];
+            }
+        }
+
         AverageTokens = files.Count == 0 ? 1 : Math.Max(1, (double)tokens / files.Count);
-        _vocabulary = [.. _postings.Keys];
+        _vocabulary = [.. terms];
         Array.Sort(_vocabulary, StringComparer.Ordinal);
         _symbolNames = [.. _definitions.Keys];
         Array.Sort(_symbolNames, StringComparer.OrdinalIgnoreCase);
@@ -122,11 +153,22 @@ public sealed class SourceSnapshot
     internal int IdOf(SourceFile file) => _byPath.TryGetValue(file.RelativePath, out var id) ? id : -1;
 
     /// <summary>How many files contain the token (already lower case).</summary>
-    public int DocumentFrequency(string token) => _postings.TryGetValue(token, out var p) ? p.Files.Count : 0;
+    public int DocumentFrequency(string token) =>
+        _termIds.TryGetValue(token, out var term) ? _postingStarts[term + 1] - _postingStarts[term] : 0;
 
-    internal Posting? PostingOf(string token) => _postings.GetValueOrDefault(token);
+    internal Posting? PostingOf(string token)
+    {
+        if (!_termIds.TryGetValue(token, out var term))
+        {
+            return null;
+        }
 
-    public bool Contains(string token) => _postings.ContainsKey(token);
+        var start = _postingStarts[term];
+        var count = _postingStarts[term + 1] - start;
+        return new Posting(new ArraySegment<int>(_postingFiles, start, count), new ArraySegment<int>(_postingCounts, start, count));
+    }
+
+    public bool Contains(string token) => _termIds.ContainsKey(token);
 
     /// <summary>Indexed tokens starting with <paramref name="prefix"/> (lower case), most widespread first.</summary>
     public IReadOnlyList<string> TokensWithPrefix(string prefix, int max = 16)
@@ -311,37 +353,27 @@ public sealed class SourceSnapshot
                 }
 
                 var file = candidates[i];
-                if (file.ReadText() is not { } text)
+                List<SearchHit>? hits;
+
+                // Retained text is decoded into a pooled buffer: a pass over every file allocates no string per file.
+                if (file.TryRentText(out var buffer, out var length))
+                {
+                    try
+                    {
+                        hits = GrepFile(file, buffer.AsSpan(0, length), pattern, maxPerFile);
+                    }
+                    finally
+                    {
+                        ArrayPool<char>.Shared.Return(buffer);
+                    }
+                }
+                else if (file.ReadText() is { } text)
+                {
+                    hits = GrepFile(file, text, pattern, maxPerFile);
+                }
+                else
                 {
                     return;
-                }
-
-                List<SearchHit>? hits = null;
-                var number = 0;
-                foreach (var line in text.AsSpan().EnumerateLines())
-                {
-                    number++;
-                    var enumerator = pattern.EnumerateMatches(line);
-                    if (!enumerator.MoveNext())
-                    {
-                        continue;
-                    }
-
-                    var match = enumerator.Current;
-                    (hits ??= []).Add(new SearchHit
-                    {
-                        FilePath = file.FullPath,
-                        RelativePath = file.RelativePath,
-                        LineNumber = number,
-                        Line = line.ToString(),
-                        MatchStart = match.Index,
-                        MatchLength = match.Length,
-                    });
-
-                    if (hits.Count >= maxPerFile)
-                    {
-                        break;
-                    }
                 }
 
                 if (hits is not null)
@@ -376,6 +408,39 @@ public sealed class SourceSnapshot
         }
 
         return all;
+    }
+
+    private static List<SearchHit>? GrepFile(SourceFile file, ReadOnlySpan<char> text, Regex pattern, int maxPerFile)
+    {
+        List<SearchHit>? hits = null;
+        var number = 0;
+        foreach (var line in text.EnumerateLines())
+        {
+            number++;
+            var enumerator = pattern.EnumerateMatches(line);
+            if (!enumerator.MoveNext())
+            {
+                continue;
+            }
+
+            var match = enumerator.Current;
+            (hits ??= []).Add(new SearchHit
+            {
+                FilePath = file.FullPath,
+                RelativePath = file.RelativePath,
+                LineNumber = number,
+                Line = line.ToString(),
+                MatchStart = match.Index,
+                MatchLength = match.Length,
+            });
+
+            if (hits.Count >= maxPerFile)
+            {
+                break;
+            }
+        }
+
+        return hits;
     }
 
     /// <summary>Paths from the full listing that match a glob - binaries included, as <c>find_files</c> wants.</summary>

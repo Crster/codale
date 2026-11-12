@@ -1,9 +1,6 @@
 {
   "profiles": {
-    "Codale.App (Package)": {
-      "commandName": "MsixPackage"
-    },
-    "Codale.App (Unpackaged)": {
+    "Codale.App": {
       "commandName": "Project",
       "hotReloadEnabled": true,
       "environmentVariables": {

@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -29,7 +31,12 @@ public sealed record SourceSymbol(string Name, SourceSymbolKind Kind, int Line, 
 /// </remarks>
 public sealed class SourceFile
 {
-    private readonly string? _text;
+    /// <summary>Strict, so text that would not survive the round trip is not retained at all.</summary>
+    private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
+    /// <summary>The retained text as UTF-8: half the size of the string for source code.</summary>
+    private readonly byte[]? _utf8;
+    private readonly SourceSymbol[] _symbols;
 
     internal SourceFile(
         string relativePath,
@@ -47,11 +54,11 @@ public sealed class SourceFile
         FullPath = fullPath;
         Length = length;
         LastWriteUtc = lastWriteUtc;
-        _text = text;
+        _utf8 = Encode(text);
         TermKeys = termKeys;
         TermCounts = termCounts;
         TokenCount = tokenCount;
-        Symbols = symbols;
+        _symbols = symbols;
         Transitions = transitions ?? [];
         NameKey = Path.GetFileNameWithoutExtension(relativePath).ToLowerInvariant();
         DirectoryKey = (Path.GetDirectoryName(relativePath) ?? "").ToLowerInvariant();
@@ -67,16 +74,18 @@ public sealed class SourceFile
 
     public DateTime LastWriteUtc { get; }
 
-    public IReadOnlyList<SourceSymbol> Symbols { get; }
+    public IReadOnlyList<SourceSymbol> Symbols => _symbols;
+
+    internal SourceSymbol[] SymbolArray => _symbols;
 
     /// <summary>The identifier pairs written next to each other in the file, with their counts (the model's transition channel).</summary>
-    internal IReadOnlyList<WordPair> Transitions { get; }
+    internal WordPair[] Transitions { get; }
 
     /// <summary>Identifiers (and their camelCase/snake_case parts) in the file: its length for ranking.</summary>
     public int TokenCount { get; }
 
     /// <summary>True when the text is held in memory; false past the index's budget, when it is read from disk.</summary>
-    public bool IsRetained => _text is not null;
+    public bool IsRetained => _utf8 is not null;
 
     public bool IsTestOrDoc { get; }
 
@@ -94,9 +103,9 @@ public sealed class SourceFile
     /// <summary>The file's text: the retained copy, else read from disk; null when it can no longer be read.</summary>
     public string? ReadText()
     {
-        if (_text is not null)
+        if (_utf8 is not null)
         {
-            return _text;
+            return Utf8.GetString(_utf8);
         }
 
         try
@@ -109,9 +118,61 @@ public sealed class SourceFile
         }
     }
 
+    /// <summary>
+    /// The retained text decoded into a pooled buffer, for a pass over many files that should not allocate a
+    /// string per file. False when the text is not retained; the buffer goes back to <see cref="ArrayPool{T}.Shared"/>.
+    /// </summary>
+    internal bool TryRentText(out char[] buffer, out int length)
+    {
+        if (_utf8 is null)
+        {
+            buffer = [];
+            length = 0;
+            return false;
+        }
+
+        buffer = ArrayPool<char>.Shared.Rent(Math.Max(1, _utf8.Length));
+        length = Utf8.GetChars(_utf8, buffer);
+        return true;
+    }
+
+    private static byte[]? Encode(string? text)
+    {
+        if (text is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return Utf8.GetBytes(text);
+        }
+        catch (EncoderFallbackException)
+        {
+            // A lone surrogate: the text is read from disk instead.
+            return null;
+        }
+    }
+
     public string[] ReadLines() => ReadText() is { } text ? SourceText.SplitLines(text) : [];
 
     public override string ToString() => RelativePath;
+}
+
+/// <summary>
+/// One instance per distinct word across an index: its files' terms and word pairs and the workspace model's
+/// aggregates all point at the same strings. Grows with the project's vocabulary and is never trimmed.
+/// </summary>
+internal sealed class StringPool
+{
+    private readonly ConcurrentDictionary<string, string> _strings = new(StringComparer.Ordinal);
+
+    public string Intern(string value) => _strings.GetOrAdd(value, value);
+
+    public string Intern(ReadOnlySpan<char> value) =>
+        _strings.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(value, out var known)
+            ? known
+            : Intern(value.ToString());
 }
 
 internal static class SourceText
@@ -169,7 +230,7 @@ internal static class SourceTokens
     public const int MaxLength = 64;
     public const int MinPartLength = 3;
 
-    public static (string[] Keys, int[] Counts, int Total) Count(string text)
+    public static (string[] Keys, int[] Counts, int Total) Count(string text, StringPool? pool = null)
     {
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         var lookup = counts.GetAlternateLookup<ReadOnlySpan<char>>();
@@ -215,7 +276,7 @@ internal static class SourceTokens
         var n = 0;
         foreach (var (key, value) in counts)
         {
-            keys[n] = key;
+            keys[n] = pool?.Intern(key) ?? key;
             values[n++] = value;
         }
 
@@ -283,31 +344,35 @@ internal static class SourceTokens
     /// model learns what tends to follow what from. Only identifiers of at least <see cref="MinLength"/>
     /// letters count, and a short word breaks the chain.
     /// </summary>
-    public static WordPair[] Transitions(string text)
+    public static WordPair[] Transitions(string text, StringPool? pool = null)
     {
         var counts = new Dictionary<(string, string), int>();
         string? previous = null;
+        var span = text.AsSpan();
         var i = 0;
-        while (i < text.Length)
+        while (i < span.Length)
         {
-            if (!IsStart(text[i]))
+            if (!IsStart(span[i]))
             {
                 i++;
                 continue;
             }
 
             var start = i++;
-            while (i < text.Length && IsPart(text[i]))
+            while (i < span.Length && IsPart(span[i]))
             {
                 i++;
             }
 
-            var word = text[start..i];
-            if (word.Length < MinLength)
+            var letters = span[start..i];
+            if (letters.Length < MinLength)
             {
                 previous = null;
                 continue;
             }
+
+            // A run past any identifier's length is data, not a word worth keeping one copy of.
+            var word = pool is null || letters.Length > MaxLength ? letters.ToString() : pool.Intern(letters);
 
             if (previous is not null)
             {
@@ -378,7 +443,7 @@ internal static partial class SourceSymbols
     /// <summary>A block cannot run longer than this many lines; past it the body is cut short rather than scanned on.</summary>
     private const int MaxBodyLines = 5000;
 
-    public static SourceSymbol[] Extract(string text)
+    public static SourceSymbol[] Extract(string text, StringPool? pool = null)
     {
         var symbols = new List<SourceSymbol>();
         var lineStarts = SourceText.LineStarts(text);
@@ -398,7 +463,7 @@ internal static partial class SourceSymbols
             {
                 // A variable is one line; a type or function runs to the end of the block it opens.
                 var end = kind == SourceSymbolKind.Variable ? line : BodyEnd(lines, line);
-                symbols.Add(new SourceSymbol(name, kind, line, end));
+                symbols.Add(new SourceSymbol(pool?.Intern(name) ?? name, kind, line, end));
             }
         }
 

@@ -63,6 +63,9 @@ public sealed class WorkspaceModel
     /// <param name="path">Where the model is saved and loaded; null keeps it in memory only.</param>
     public WorkspaceModel(string? path = null) => _path = path;
 
+    /// <summary>The one copy of each word the model and the index's files share.</summary>
+    internal StringPool Pool { get; } = new();
+
     /// <summary>Files the model holds statistics for.</summary>
     public int FileCount
     {
@@ -95,21 +98,32 @@ public sealed class WorkspaceModel
     {
         lock (_gate)
         {
-            if (_files.TryGetValue(file.RelativePath, out var known) &&
-                known.Length == file.Length && known.LastWriteTicks == file.LastWriteUtc.Ticks)
-            {
-                return;
-            }
-
+            // The entry shares the file's arrays: a file is immutable, so one copy serves both.
             var entry = new Entry(
                 file.RelativePath,
                 file.Length,
                 file.LastWriteUtc.Ticks,
-                (string[])file.TermKeys.Clone(),
-                (int[])file.TermCounts.Clone(),
+                file.TermKeys,
+                file.TermCounts,
                 file.TokenCount,
-                file.Symbols.ToArray(),
-                file.Transitions.ToArray());
+                file.SymbolArray,
+                file.Transitions);
+
+            if (_files.TryGetValue(file.RelativePath, out var known) &&
+                known.Length == file.Length && known.LastWriteTicks == file.LastWriteUtc.Ticks)
+            {
+                if (ReferenceEquals(known.Terms, file.TermKeys))
+                {
+                    return;
+                }
+
+                // Read again but unchanged: the statistics stand, and the stored arrays give way to the file's.
+                if (SameStatistics(known, entry))
+                {
+                    _files[entry.Path] = entry;
+                    return;
+                }
+            }
 
             if (known is not null)
             {
@@ -166,8 +180,8 @@ public sealed class WorkspaceModel
                 entry.Length,
                 lastWriteUtc,
                 null,
-                (string[])entry.Terms.Clone(),
-                (int[])entry.Counts.Clone(),
+                entry.Terms,
+                entry.Counts,
                 entry.TokenCount,
                 entry.Symbols,
                 entry.Transitions);
@@ -277,6 +291,7 @@ public sealed class WorkspaceModel
                     continue;
                 }
 
+                Intern(file);
                 var entry = new Entry(
                     file.Path,
                     file.Length,
@@ -355,6 +370,38 @@ public sealed class WorkspaceModel
             _dirty = false;
         }
     }
+
+    /// <summary>A loaded file's words become the pool's, so it holds no copies of its own.</summary>
+    private void Intern(StoredFile file)
+    {
+        for (var t = 0; t < file.Terms.Length; t++)
+        {
+            file.Terms[t] = Pool.Intern(file.Terms[t]);
+        }
+
+        for (var s = 0; s < file.Symbols.Length; s++)
+        {
+            var symbol = file.Symbols[s];
+            var name = Pool.Intern(symbol.Name);
+            if (!ReferenceEquals(name, symbol.Name))
+            {
+                file.Symbols[s] = symbol with { Name = name };
+            }
+        }
+
+        for (var p = 0; p < file.Transitions.Length; p++)
+        {
+            var pair = file.Transitions[p];
+            file.Transitions[p] = new WordPair(Pool.Intern(pair.Previous), Pool.Intern(pair.Next), pair.Count);
+        }
+    }
+
+    private static bool SameStatistics(Entry a, Entry b) =>
+        a.TokenCount == b.TokenCount &&
+        a.Terms.AsSpan().SequenceEqual(b.Terms) &&
+        a.Counts.AsSpan().SequenceEqual(b.Counts) &&
+        a.Symbols.AsSpan().SequenceEqual(b.Symbols) &&
+        a.Transitions.AsSpan().SequenceEqual(b.Transitions);
 
     private static bool ChannelsCurrent(Dictionary<string, int>? channels) =>
         channels is not null &&

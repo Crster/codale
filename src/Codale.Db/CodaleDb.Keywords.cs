@@ -25,8 +25,8 @@ public sealed partial class CodaleDb
         _lock.EnterWriteLock();
         try
         {
-            var (segment, offset, size) = AppendIndex(path, field, text);
-            ApplyIndex(path, field, text, segment, offset, size);
+            var (segment, offset, size) = Append(RecordType.Index, 0, EncodeStrings(path, field, text));
+            ApplyIndex(FindNode(path, create: true)!, field, text, segment, offset, size);
             Committed();
         }
         finally { _lock.ExitWriteLock(); }
@@ -42,20 +42,10 @@ public sealed partial class CodaleDb
             var start = FindNode(path, create: false);
             if (start is null || !_keywords.TryGetValue(field, out var index)) return [];
 
-            var documents = 0;
-            long words = 0;
-            var scan = new List<TNode>();
-            Collect(start, scan, node => node.Docs is not null && node.Docs.ContainsKey(field));
-            foreach (var node in scan)
-            {
-                documents++;
-                words += node.Docs![field].Length;
-            }
-            if (documents == 0) return [];
-
-            return index.Search(start, terms, k, documents, (double)words / documents, null)
-                .Select(hit => new DbHit(new DbNode(this, hit.Doc.Node.PathString()), (float)hit.Score))
-                .ToList();
+            var hits = index.Search(start, terms, k);
+            var result = new List<DbHit>(hits.Count);
+            foreach (var (node, score) in hits) result.Add(new DbHit(new DbNode(this, node.PathString()), (float)score));
+            return result;
         }
         finally { _lock.ExitReadLock(); }
     }

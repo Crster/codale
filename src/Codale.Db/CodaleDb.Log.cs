@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
 
@@ -6,55 +7,89 @@ namespace Codale.Db;
 /// <summary>The plumbing between the log on disk and the in-memory tree: appending records, replaying them, applying them.</summary>
 public sealed partial class CodaleDb
 {
-    private long _documentSequence;
+    /// <summary>Where a batch that was never committed begins, found while replaying; the log is cut back to it.</summary>
+    private (int Segment, long Offset)? _unfinishedBatch;
+    private bool _batchOpen;
 
-    private ValueRef AppendPut(string path, ReadOnlySpan<byte> value, byte flags)
+    /// <summary>
+    /// Every write goes through here. Inside <see cref="Batch"/> the first record is preceded by a Begin marker and
+    /// the batch ends with a Commit; replay drops a Begin that has no Commit, so a batch is all or nothing.
+    /// </summary>
+    private (int Segment, long Offset, int Size) Append(RecordType type, byte flags, ReadOnlySpan<byte> part1, ReadOnlySpan<byte> part2 = default)
     {
-        var keyLength = Encoding.UTF8.GetByteCount(path);
-        var head = new byte[4 + keyLength];
-        BinaryPrimitives.WriteInt32LittleEndian(head, keyLength);
-        Encoding.UTF8.GetBytes(path, head.AsSpan(4));
-        var append = _log.Append(RecordType.Put, flags, head, value);
-        var reference = new ValueRef(append.Segment, append.Offset + SegmentLog.HeaderSize + head.Length, value.Length, flags, append.Size);
-        if (flags == 0 && value.Length <= CacheLimit) reference.Cache = value.ToArray();
-        return reference;
+        if (_batchDepth == 0) CommitBatch(); // a commit that failed to write earlier (disk full) is written before anything else
+        else if (!_batchOpen)
+        {
+            _dead += _log.Append(RecordType.Begin, 0, default).Size;
+            _batchOpen = true;
+        }
+        return _log.Append(type, flags, part1, part2);
     }
 
-    private int AppendVector(string path, string model, byte[] vector)
+    private void CommitBatch()
+    {
+        if (!_batchOpen) return;
+        _dead += _log.Append(RecordType.Commit, 0, default).Size;
+        _batchOpen = false;
+    }
+
+    private void AppendPut(TNode node, string path, ReadOnlySpan<byte> value, byte flags)
+    {
+        var keyLength = Encoding.UTF8.GetByteCount(path);
+        var head = ArrayPool<byte>.Shared.Rent(4 + keyLength);
+        try
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(head, keyLength);
+            Encoding.UTF8.GetBytes(path, head.AsSpan(4));
+            var append = Append(RecordType.Put, flags, head.AsSpan(0, 4 + keyLength), value);
+            if (node.HasValue) _dead += node.ValueRecordSize;
+            node.SetValue(append.Segment, append.Offset, append.Size, value.Length, flags);
+            node.Cache = flags == 0 && value.Length <= CacheLimit ? value.ToArray() : null;
+        }
+        finally { ArrayPool<byte>.Shared.Return(head); }
+    }
+
+    private void AppendVector(TNode node, string path, byte[] vector)
+    {
+        var size = AppendVectorRecord(path, _embedder.Model, vector);
+        SetVector(node, _embedder.Model, vector, size);
+    }
+
+    private int AppendVectorRecord(string path, string model, byte[] vector, bool compacting = false)
     {
         var keyLength = Encoding.UTF8.GetByteCount(path);
         var modelLength = Encoding.UTF8.GetByteCount(model);
-        var head = new byte[4 + keyLength + 2 + modelLength];
-        BinaryPrimitives.WriteInt32LittleEndian(head, keyLength);
-        Encoding.UTF8.GetBytes(path, head.AsSpan(4));
-        BinaryPrimitives.WriteUInt16LittleEndian(head.AsSpan(4 + keyLength), (ushort)modelLength);
-        Encoding.UTF8.GetBytes(model, head.AsSpan(6 + keyLength));
-        return _log.Append(RecordType.Vector, 0, head, vector).Size;
-    }
-
-    private (int Segment, long Offset, int Size) AppendIndex(string path, string field, string text) =>
-        _log.Append(RecordType.Index, 0, EncodeStrings(path, field, text));
-
-    /// <summary>The words of a document, read back from its record: they are not kept in memory.</summary>
-    private string ReadIndexText(KeywordDoc doc)
-    {
-        var body = new byte[doc.RecordSize - SegmentLog.HeaderSize];
-        _log.Read(doc.Segment, doc.Offset + SegmentLog.HeaderSize, body);
-        return DecodeStrings(body, 3)[2];
-    }
-
-    private static byte[] EncodeStrings(params string[] values)
-    {
-        using var stream = new MemoryStream();
-        Span<byte> length = stackalloc byte[4];
-        foreach (var value in values)
+        var length = 4 + keyLength + 2 + modelLength;
+        var head = ArrayPool<byte>.Shared.Rent(length);
+        try
         {
-            var bytes = Encoding.UTF8.GetBytes(value);
-            BinaryPrimitives.WriteInt32LittleEndian(length, bytes.Length);
-            stream.Write(length);
-            stream.Write(bytes);
+            BinaryPrimitives.WriteInt32LittleEndian(head, keyLength);
+            Encoding.UTF8.GetBytes(path, head.AsSpan(4));
+            BinaryPrimitives.WriteUInt16LittleEndian(head.AsSpan(4 + keyLength), (ushort)modelLength);
+            Encoding.UTF8.GetBytes(model, head.AsSpan(6 + keyLength));
+            return compacting
+                ? _log.Append(RecordType.Vector, 0, head.AsSpan(0, length), vector).Size
+                : Append(RecordType.Vector, 0, head.AsSpan(0, length), vector).Size;
         }
-        return stream.ToArray();
+        finally { ArrayPool<byte>.Shared.Return(head); }
+    }
+
+    private static byte[] EncodeStrings(string first, string second, ReadOnlySpan<char> third)
+    {
+        var encoding = Encoding.UTF8;
+        var body = new byte[12 + encoding.GetByteCount(first) + encoding.GetByteCount(second) + encoding.GetByteCount(third)];
+        var at = 0;
+        Write(first, body);
+        Write(second, body);
+        Write(third, body);
+        return body;
+
+        void Write(ReadOnlySpan<char> value, byte[] into)
+        {
+            var written = encoding.GetBytes(value, into.AsSpan(at + 4));
+            BinaryPrimitives.WriteInt32LittleEndian(into.AsSpan(at), written);
+            at += 4 + written;
+        }
     }
 
     private static string[] DecodeStrings(ReadOnlySpan<byte> body, int count)
@@ -69,12 +104,27 @@ public sealed partial class CodaleDb
         return result;
     }
 
-    private byte[] ReadRaw(ValueRef value)
+    /// <summary>The node's value bytes: the cached copy of a tiny value, or a read from the log.</summary>
+    private byte[] ReadRaw(TNode node)
     {
-        if (value.Cache is not null) return value.Cache;
-        var bytes = new byte[value.Length];
-        _log.Read(value.Segment, value.Offset, bytes);
+        if (node.Cache is not null) return node.Cache;
+        var bytes = new byte[node.ValueLength];
+        _log.Read(node.ValueSegment, node.ValueOffset, bytes);
         return bytes;
+    }
+
+    /// <summary>The node's value as text, decoded without an intermediate array for anything that fits a pooled buffer.</summary>
+    private string ReadString(TNode node)
+    {
+        if (node.Cache is not null) return Encoding.UTF8.GetString(node.Cache);
+        var buffer = ArrayPool<byte>.Shared.Rent(node.ValueLength);
+        try
+        {
+            var bytes = buffer.AsSpan(0, node.ValueLength);
+            _log.Read(node.ValueSegment, node.ValueOffset, bytes);
+            return Encoding.UTF8.GetString(bytes);
+        }
+        finally { ArrayPool<byte>.Shared.Return(buffer); }
     }
 
     private void Replay(int segment, long offset, int size, RecordType type, byte flags, ReadOnlySpan<byte> body)
@@ -84,11 +134,11 @@ public sealed partial class CodaleDb
             case RecordType.Put:
             {
                 var keyLength = BinaryPrimitives.ReadInt32LittleEndian(body);
-                var path = Encoding.UTF8.GetString(body.Slice(4, keyLength));
+                var node = FindNode(Encoding.UTF8.GetString(body.Slice(4, keyLength)), create: true)!;
                 var value = body[(4 + keyLength)..];
-                var reference = new ValueRef(segment, offset + SegmentLog.HeaderSize + 4 + keyLength, value.Length, flags, size);
-                if (flags == 0 && value.Length <= CacheLimit) reference.Cache = value.ToArray();
-                ApplyPut(path, reference);
+                if (node.HasValue) _dead += node.ValueRecordSize;
+                node.SetValue(segment, offset, size, value.Length, flags);
+                node.Cache = flags == 0 && value.Length <= CacheLimit ? value.ToArray() : null;
                 break;
             }
             case RecordType.Remove:
@@ -97,16 +147,16 @@ public sealed partial class CodaleDb
             case RecordType.Vector:
             {
                 var keyLength = BinaryPrimitives.ReadInt32LittleEndian(body);
-                var path = Encoding.UTF8.GetString(body.Slice(4, keyLength));
+                var node = FindNode(Encoding.UTF8.GetString(body.Slice(4, keyLength)), create: true)!;
                 var modelLength = BinaryPrimitives.ReadUInt16LittleEndian(body[(4 + keyLength)..]);
-                var model = Encoding.UTF8.GetString(body.Slice(6 + keyLength, modelLength));
-                ApplyVector(path, model, body[(6 + keyLength + modelLength)..].ToArray(), size);
+                var model = ModelName(body.Slice(6 + keyLength, modelLength));
+                SetVector(node, model, body[(6 + keyLength + modelLength)..].ToArray(), size);
                 break;
             }
             case RecordType.Index:
             {
                 var parts = DecodeStrings(body, 3);
-                ApplyIndex(parts[0], parts[1], parts[2], segment, offset, size);
+                ApplyIndex(FindNode(parts[0], create: true)!, parts[1], parts[2], segment, offset, size);
                 break;
             }
             case RecordType.Link:
@@ -122,38 +172,46 @@ public sealed partial class CodaleDb
                 ApplyUnlink(parts[0], parts[1], parts[2]);
                 break;
             }
+            case RecordType.Begin:
+                _dead += size;
+                _unfinishedBatch ??= (segment, offset);
+                break;
+            case RecordType.Commit:
+                _dead += size;
+                _unfinishedBatch = null;
+                break;
         }
+    }
+
+    /// <summary>Forgets everything replayed so far (the log was cut back and is replayed again).</summary>
+    private void ResetState()
+    {
+        _root.Children = null;
+        _keywords.Clear();
+        _models.Clear();
+        _dead = 0;
+        _unfinishedBatch = null;
+        _vectorVersion++;
     }
 
     // Derived data (a vector, keyword documents) belongs to the node, not to one value: rewriting the value keeps
     // it, and the caller embeds or indexes again when the text changed.
-    private void ApplyPut(string path, ValueRef reference)
+    private void SetVector(TNode node, string model, byte[] vector, int recordSize)
     {
-        var node = FindNode(path, create: true)!;
-        if (node.Value is not null) _dead += node.Value.RecordSize;
-        node.Value = reference;
-    }
-
-    private void ApplyVector(string path, string model, byte[] vector, int recordSize)
-    {
-        var node = FindNode(path, create: true)!;
-        if (node.Vector is not null) _dead += node.Vector.RecordSize;
-        node.Vector = new VectorDoc(model, vector, recordSize);
+        if (node.Vector is not null) _dead += node.VectorRecordSize;
+        node.Vector = vector;
+        node.VectorModel = model;
+        node.VectorRecordSize = recordSize;
         _vectorVersion++;
     }
 
-    private void ApplyIndex(string path, string field, string text, int segment, long offset, int size)
+    private void ApplyIndex(TNode node, string field, ReadOnlySpan<char> text, int segment, long offset, int size)
     {
-        var node = FindNode(path, create: true)!;
-        node.Docs ??= [];
-        if (node.Docs.Remove(field, out var old))
-        {
-            _dead += old.RecordSize;
-            Keywords(field).Kill(old);
-        }
-        var doc = new KeywordDoc(node, field, ++_documentSequence) { Segment = segment, Offset = offset, RecordSize = size };
-        Keywords(field).Add(doc, text);
-        node.Docs[field] = doc;
+        var index = Keywords(field);
+        var replaced = index.Remove(node);
+        if (replaced > 0) _dead += replaced;
+        else node.Documents++;
+        index.Add(node, text, segment, offset, size);
     }
 
     private void ApplyRemove(string path, int removeRecordSize)
@@ -166,20 +224,14 @@ public sealed partial class CodaleDb
         Collect(node, all, _ => true);
         foreach (var removed in all)
         {
-            _dead += removed.Value?.RecordSize ?? 0;
+            if (removed.HasValue) _dead += removed.ValueRecordSize;
             if (removed.Vector is not null)
             {
-                _dead += removed.Vector.RecordSize;
+                _dead += removed.VectorRecordSize;
                 _vectorVersion++;
             }
-            if (removed.Docs is not null)
-            {
-                foreach (var doc in removed.Docs.Values)
-                {
-                    _dead += doc.RecordSize;
-                    Keywords(doc.Field).Kill(doc);
-                }
-            }
+            if (removed.Documents > 0)
+                foreach (var index in _keywords.Values) _dead += index.Remove(removed);
         }
 
         node.Parent.Children!.Remove(node.Name);

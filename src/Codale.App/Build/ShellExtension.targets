@@ -1,0 +1,27 @@
+<Project>
+  <!-- Share the Visual Studio location with native compilation and MSIX symbol packaging. -->
+  <Target Name="LocateVisualStudio" BeforeTargets="PrepareForBuild" Condition="'$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup>
+      <_VsWhere>$(MSBuildProgramFiles32)\Microsoft Visual Studio\Installer\vswhere.exe</_VsWhere>
+    </PropertyGroup>
+    <Exec Condition="'$(VsInstallRoot)' == '' And Exists('$(_VsWhere)')" Command="&quot;$(_VsWhere)&quot; -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath" ConsoleToMSBuild="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="VsInstallRoot" />
+    </Exec>
+    <PropertyGroup>
+      <_VisualStudioMSBuild>$(VsInstallRoot)\MSBuild\Current\Bin\MSBuild.exe</_VisualStudioMSBuild>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_VisualStudioMSBuild)')" Text="Install Visual Studio Desktop development with C++ to build Codale's Explorer extension." />
+  </Target>
+
+  <!-- vcxproj requires Visual Studio MSBuild rather than dotnet's MSBuild. -->
+  <Target Name="BuildShellExtension" BeforeTargets="AssignTargetPaths" DependsOnTargets="LocateVisualStudio" Condition="'$(DesignTimeBuild)' != 'true'">
+    <Exec Condition="'$(NoBuild)' != 'true'" Command="&quot;$(_VisualStudioMSBuild)&quot; &quot;$(MSBuildProjectDirectory)\..\Codale.ShellExt\Codale.ShellExt.vcxproj&quot; -p:Configuration=$(Configuration) -p:Platform=$(Platform) -v:minimal -nologo" />
+    <ItemGroup>
+      <Content Include="..\Codale.ShellExt\bin\$(Platform)\$(Configuration)\Codale.ShellExt.dll">
+        <Link>Codale.ShellExt.dll</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </Content>
+    </ItemGroup>
+  </Target>
+</Project>

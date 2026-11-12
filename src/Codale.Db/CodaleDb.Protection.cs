@@ -66,9 +66,9 @@ public sealed partial class CodaleDb
         _lock.EnterReadLock();
         try
         {
-            var value = FindNode(path, create: false)?.Value;
-            if (value is null) return null;
-            if ((value.Flags & ValueFlags.Protected) == 0) throw new InvalidOperationException("This value was not written with WriteProtect().");
+            var value = FindNode(path, create: false);
+            if (value is not { HasValue: true }) return null;
+            if ((value.ValueFlags & ValueFlags.Protected) == 0) throw new InvalidOperationException("This value was not written with WriteProtect().");
             return Encoding.UTF8.GetString(RecordCipher.Open(key, path, ReadRaw(value)));
         }
         finally { _lock.ExitReadLock(); }

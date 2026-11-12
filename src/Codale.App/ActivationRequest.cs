@@ -17,7 +17,7 @@ public sealed record ActivationRequest(string? ProjectPath)
 
     /// <summary>
     /// Every entry point funnels through here: the Explorer context menu, the picker and
-    /// run.ps1 all launch <c>codale://open?path=...</c>, and a bare command line is
+    /// protocol shortcuts all launch <c>codale://open?path=...</c>, and a bare command line is
     /// supported so the app can be started from a terminal.
     /// </summary>
     public static ActivationRequest From(AppActivationArguments? activation, string[] commandLineArgs)

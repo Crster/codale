@@ -12,10 +12,10 @@ public sealed partial class CodaleDb
         _lock.EnterReadLock();
         try
         {
-            var value = FindNode(path, create: false)?.Value;
-            if (value is null) return null;
-            if (value.Flags != 0) throw new InvalidOperationException("This value is protected or a blob; use ReadProtect()/ReadBlob().");
-            return Encoding.UTF8.GetString(ReadRaw(value));
+            var node = FindNode(path, create: false);
+            if (node is not { HasValue: true }) return null;
+            if (node.ValueFlags != 0) throw new InvalidOperationException("This value is protected or a blob; use ReadProtect()/ReadBlob().");
+            return ReadString(node);
         }
         finally { _lock.ExitReadLock(); }
     }
@@ -23,7 +23,7 @@ public sealed partial class CodaleDb
     internal bool Exists(string path)
     {
         _lock.EnterReadLock();
-        try { return FindNode(path, create: false)?.Value is not null; }
+        try { return FindNode(path, create: false) is { HasValue: true }; }
         finally { _lock.ExitReadLock(); }
     }
 
@@ -38,7 +38,7 @@ public sealed partial class CodaleDb
         _lock.EnterWriteLock();
         try
         {
-            ApplyPut(path, AppendPut(path, value, flags));
+            AppendPut(FindNode(path, create: true)!, path, value, flags);
             Emit(path, DbEventKind.Written, eventValue);
             Committed();
         }
@@ -51,7 +51,7 @@ public sealed partial class CodaleDb
         try
         {
             if (FindNode(path, create: false) is null) return false;
-            var append = _log.Append(RecordType.Remove, 0, Encoding.UTF8.GetBytes(path));
+            var append = Append(RecordType.Remove, 0, Encoding.UTF8.GetBytes(path));
             ApplyRemove(path, append.Size);
             Emit(path, DbEventKind.Removed, null);
             Committed();
@@ -97,7 +97,7 @@ public sealed partial class CodaleDb
                 if (sorted) children = children.OrderBy(c => c.Name, StringComparer.Ordinal);
                 foreach (var child in children)
                 {
-                    if (child.Value is not null) found.Add(new DbNode(this, child.PathString()));
+                    if (child.HasValue) found.Add(new DbNode(this, child.PathString()));
                     Walk(child);
                 }
             }
