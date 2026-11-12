@@ -46,6 +46,7 @@ public sealed partial class CliUpdateViewModel : ObservableObject
     {
         var generation = ++_refreshGeneration;
         _cli = cli;
+        OnPropertyChanged(nameof(Cli));
         Installed = null;
         Latest = null;
 

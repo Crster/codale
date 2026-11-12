@@ -864,12 +864,20 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
     private async void OnSessionOpened(object? sender, TranscriptSummary summary)
     {
+        if (!Sessions.TryBeginOpening(summary.SessionId)) return;
         try
         {
-            await OpenSessionAsync(summary);
+            await Task.Yield();
+            if (await OpenSessionAsync(summary) is null)
+                Sessions.OpenError = "This conversation is no longer available. Refresh History and try again.";
         }
         catch (Exception)
         {
+            Sessions.OpenError = "Could not open this conversation. Please try again.";
+        }
+        finally
+        {
+            Sessions.EndOpening();
         }
     }
 

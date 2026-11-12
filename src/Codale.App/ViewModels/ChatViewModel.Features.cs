@@ -77,11 +77,14 @@ public sealed partial class ChatViewModel
         SetFeature(feature);
         if (handoff) CaptureHandoff();
         Title = feature.Name;
-        // The whole conversation replays as prompts and answers; each turn's tool activity waits behind a Load row.
-        foreach (var row in ReplayRows(_featureLog!.ReadTail(int.MaxValue, out _)))
+        // Read history off-thread so the opening indicator can animate. Tool details stay unloaded.
+        var historyLog = _featureLog!;
+        var events = await Task.Run(() => historyLog.ReadTail(int.MaxValue, out _));
+        foreach (var row in ReplayRows(events))
         {
-            Add(row);
+            Items.Add(row);
         }
+        Reflow();
         RestorePendingPlan();
         await ConnectAsync();
         return IsConnected;

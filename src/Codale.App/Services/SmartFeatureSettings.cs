@@ -15,11 +15,15 @@ public static class SmartFeatureSettings
 
     public static readonly (string Id, string Label, string Description)[] Groups =
     [
-        ("assistance", "Assistance", "Commit messages and shell commands"),
-        ("completion", "Autocomplete", "Suggestions as you type"),
-        ("context", "Project context", "Background summaries and search"),
-        ("embedding", "Embeddings", "Semantic search · reopen project to apply"),
+        ("assistance", "Developer Tools", "Commit messages and shell commands"),
+        ("context", "Codebase Context", "Background summaries and search"),
+        ("completion", "Code Completion", "Inline suggestions · requires a fill-in-the-middle (FIM) model"),
+        ("embedding", "Search Embeddings", "Semantic search · requires a vector embedding model · reopen project to apply"),
     ];
+
+    public static bool RequiresDedicatedModel(string feature) => feature is "completion" or "embedding";
+    public static bool SupportsProvider(string feature, string provider) => provider == "off"
+        || !RequiresDedicatedModel(feature) || provider == "openai";
 
     public static string GroupFor(string feature) => feature switch
     {

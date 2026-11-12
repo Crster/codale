@@ -133,31 +133,31 @@
                     <RadioButton x:Name="TabNavGeneral" Checked="OnCategoryTabChanged" IsChecked="True" Style="{StaticResource CategoryRadioButton}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <FontIcon FontSize="14" Glyph="&#xE80F;" />
-                            <TextBlock Text="Appearance &amp; Chat" />
+                            <TextBlock Text="General" />
                         </StackPanel>
                     </RadioButton>
                     <RadioButton x:Name="TabNavAi" Checked="OnCategoryTabChanged" Style="{StaticResource CategoryRadioButton}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <FontIcon FontSize="14" Glyph="&#xE99A;" />
-                            <TextBlock Text="Agents &amp; Models" />
+                            <TextBlock Text="AI Providers" />
                         </StackPanel>
                     </RadioButton>
                     <RadioButton x:Name="TabNavEditor" Checked="OnCategoryTabChanged" Style="{StaticResource CategoryRadioButton}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <FontIcon FontSize="14" Glyph="&#xE943;" />
-                            <TextBlock Text="Code Editor" />
+                            <TextBlock Text="Editor" />
                         </StackPanel>
                     </RadioButton>
                     <RadioButton x:Name="TabNavTerminal" Checked="OnCategoryTabChanged" Style="{StaticResource CategoryRadioButton}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <FontIcon FontSize="14" Glyph="&#xE756;" />
-                            <TextBlock Text="Shell &amp; Terminal" />
+                            <TextBlock Text="Terminal" />
                         </StackPanel>
                     </RadioButton>
                     <RadioButton x:Name="TabNavGitShortcuts" Checked="OnCategoryTabChanged" Style="{StaticResource CategoryRadioButton}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <FontIcon FontSize="14" Glyph="&#xE765;" />
-                            <TextBlock Text="Key Bindings" />
+                            <TextBlock Text="Keyboard Shortcuts" />
                         </StackPanel>
                     </RadioButton>
                 </StackPanel>
@@ -173,7 +173,7 @@
             <Grid Grid.Column="1" RowDefinitions="Auto,*">
                 <Grid Padding="32,22,14,6" ColumnDefinitions="*,Auto">
                     <StackPanel Spacing="4">
-                        <TextBlock x:Name="PageTitle" FontSize="20" FontWeight="SemiBold" Text="Appearance &amp; Chat" />
+                        <TextBlock x:Name="PageTitle" FontSize="20" FontWeight="SemiBold" Text="General" />
                         <TextBlock x:Name="PageSubtitle" Style="{StaticResource Hint}" Text="Appearance, folders and the chat." />
                     </StackPanel>
                     <Button
@@ -308,7 +308,7 @@
                             </StackPanel>
                         </Border>
 
-                        <TextBlock Style="{StaticResource SectionTitle}" Text="Smart experience" />
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="AI Features" />
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <StackPanel x:Name="SmartFeatureRows" Padding="16" Spacing="16" />

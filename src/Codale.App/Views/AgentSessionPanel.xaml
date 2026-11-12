@@ -26,34 +26,6 @@
         <views:FileChangeBrushConverter x:Key="FileChangeBrush" />
         <views:ArtifactStatusBrushConverter x:Key="ArtifactStatusBrush" />
 
-        <!--  The session card's model / effort / mode controls: labelled tiles  -->
-        <Style x:Key="SessionControlButton" TargetType="Button">
-            <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
-            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="10" />
-            <Setter Property="Padding" Value="10,7,8,8" />
-            <Setter Property="MinWidth" Value="0" />
-            <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-            <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
-        </Style>
-
-        <Style x:Key="SessionControlCaption" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="10" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="CharacterSpacing" Value="40" />
-            <Setter Property="Foreground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
-        </Style>
-
-        <Style x:Key="SessionControlValue" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
-            <Setter Property="TextWrapping" Value="NoWrap" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-        </Style>
-
         <!--  Collapsible sidebar section header  -->
         <Style x:Key="SectionHeader" TargetType="ToggleButton">
             <Setter Property="HorizontalContentAlignment" Value="Left" />
@@ -165,20 +137,6 @@
             <Setter Property="ScrollViewer.VerticalScrollMode" Value="Disabled" />
         </Style>
 
-        <Style x:Key="EndpointFlyout" TargetType="FlyoutPresenter">
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="CornerRadius" Value="10" />
-            <Setter Property="Background" Value="{ThemeResource SolidBackgroundFillColorBaseBrush}" />
-            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="MinWidth" Value="0" />
-            <Setter Property="MaxWidth" Value="420" />
-            <Setter Property="ScrollViewer.HorizontalScrollMode" Value="Disabled" />
-            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
-            <Setter Property="ScrollViewer.VerticalScrollMode" Value="Auto" />
-            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
-        </Style>
-
         <Style x:Key="PickerTitleText" TargetType="TextBlock">
             <Setter Property="FontSize" Value="11" />
             <Setter Property="FontWeight" Value="SemiBold" />
@@ -252,37 +210,6 @@
             </Setter>
         </Style>
         <!--  A flat, full-width row inside the session card (model, mode)  -->
-        <Style x:Key="PropertyRowButton" TargetType="Button">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="Padding" Value="8,7" />
-            <Setter Property="MinWidth" Value="0" />
-            <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-            <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
-        </Style>
-
-        <Style x:Key="MetricLabel" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="11.5" />
-            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-        </Style>
-
-        <Style x:Key="MetricValue" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="Foreground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
-            <Setter Property="HorizontalAlignment" Value="Right" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
-            <Setter Property="TextWrapping" Value="NoWrap" />
-        </Style>
-
-        <Style x:Key="MetricBar" TargetType="ProgressBar">
-            <Setter Property="MinHeight" Value="3" />
-            <Setter Property="CornerRadius" Value="1.5" />
-            <Setter Property="Maximum" Value="100" />
-        </Style>
 
         <Style x:Key="CountChip" TargetType="Border">
             <Setter Property="Padding" Value="6,0" />
@@ -304,94 +231,83 @@
             <Setter Property="Margin" Value="4,0" />
             <Setter Property="Background" Value="{ThemeResource DividerStrokeColorDefaultBrush}" />
         </Style>
+
+        <Style x:Key="CompactAction" TargetType="Button">
+            <Setter Property="Width" Value="48" />
+            <Setter Property="Height" Value="48" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="4" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="CompactCaption" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="9" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="DetailFlyout" TargetType="FlyoutPresenter">
+            <Setter Property="IsDefaultShadowEnabled" Value="False" />
+            <Setter Property="MinHeight" Value="64" />
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="CornerRadius" Value="14" />
+            <Setter Property="MaxWidth" Value="420" />
+            <Setter Property="Background" Value="{ThemeResource SolidBackgroundFillColorBaseBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
     </UserControl.Resources>
 
-    <!--  Flush with the chat, divided from it by one hairline: a side column, not a floating card.  -->
-    <Border
-        Background="{ThemeResource ShellSidePanelBackgroundBrush}"
-        BorderBrush="{ThemeResource ShellHairlineBrush}"
-        BorderThickness="1,0,0,0">
-        <Grid>
-            <views:SessionPanelRail
-                x:Name="Rail"
-                ExpandRequested="OnRailExpandRequested"
-                UpdateRequested="OnUpdateCliClick"
-                Visibility="Collapsed" />
-
-            <Grid x:Name="ExpandedView">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-
-                <!--  Header: collapse, profile, CLI version  -->
-                <Grid
-                    Height="40"
-                    Padding="6,0,6,0"
-                    BorderBrush="{ThemeResource ShellHairlineBrush}"
-                    BorderThickness="0,0,0,1"
-                    ColumnSpacing="2">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-
-                    <Button
-                        AutomationProperties.Name="Collapse session panel"
-                        Click="OnPanelToggleClick"
-                        Style="{StaticResource ShellIconButton}"
-                        ToolTipService.ToolTip="Collapse session panel">
-                        <FontIcon FontSize="13" Glyph="&#xE89F;" />
-                    </Button>
-
-                    <Button
-                        x:Name="ProfileButton"
-                        Grid.Column="1"
-                        Height="28"
-                        Padding="6,0"
-                        HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Stretch"
-                        AutomationProperties.Name="Agent profile"
-                        Background="Transparent"
-                        BorderThickness="0"
-                        CornerRadius="6"
-                        IsEnabled="{x:Bind Workspace.CliEndpoint.CanSwitch, Mode=OneWay}"
-                        ToolTipService.ToolTip="{x:Bind Workspace.CliEndpoint.RouteText, Mode=OneWay}"
-                        Visibility="{x:Bind ShowSessionPickers, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                        <Grid ColumnSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <Grid Width="8" Height="8" VerticalAlignment="Center">
-                                <Ellipse Fill="{ThemeResource ControlStrongStrokeColorDefaultBrush}" />
-                                <Ellipse Fill="{StaticResource StatusSuccessBrush}" Visibility="{x:Bind Session.IsConnected, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
-                            </Grid>
-                            <TextBlock
-                                Grid.Column="1"
-                                VerticalAlignment="Center"
-                                FontSize="12.5"
-                                FontWeight="SemiBold"
-                                Text="{x:Bind Workspace.CliEndpoint.ActiveName, Mode=OneWay}"
-                                TextTrimming="CharacterEllipsis"
-                                TextWrapping="NoWrap" />
-                            <FontIcon
-                                Grid.Column="2"
-                                FontSize="9"
-                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                Glyph="&#xE70D;" />
-                        </Grid>
-                        <Button.Flyout>
-                            <Flyout x:Name="ProfileFlyout" FlyoutPresenterStyle="{StaticResource PickerFlyout}" Placement="BottomEdgeAlignedLeft">
-                                <StackPanel MinWidth="280" Spacing="2">
-                                    <TextBlock Style="{StaticResource PickerTitleText}" Text="Agent profile" />
-                                    <ListView
+    <!-- The chat always uses a compact rail. Details open beside it without resizing the conversation. -->
+    <Border Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1,0,0,0">
+        <ScrollViewer HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Hidden">
+            <StackPanel Padding="8,12" Spacing="10">
+                <Button x:Name="ProfileButton" Style="{StaticResource CompactAction}"
+                        AutomationProperties.Name="Agent account" ToolTipService.ToolTip="{x:Bind Workspace.CliEndpoint.ActiveName, Mode=OneWay}">
+                    <Grid Width="30" Height="30">
+                        <PersonPicture Width="30" Height="30"
+                                       Initials="{x:Bind Workspace.CliEndpoint.AvatarInitials, Mode=OneWay}"
+                                       Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                       Background="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                        <Ellipse Width="7" Height="7" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                 Fill="{StaticResource StatusSuccessBrush}"
+                                 Visibility="{x:Bind Session.IsConnected, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                    </Grid>
+                    <Button.Flyout>
+                        <Flyout x:Name="ProfileFlyout" AreOpenCloseAnimationsEnabled="False"
+                                Opening="OnDetailFlyoutOpening" Closed="OnDetailFlyoutClosed" Placement="LeftEdgeAlignedTop" FlyoutPresenterStyle="{StaticResource DetailFlyout}">
+                            <StackPanel Width="320" Spacing="10">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{x:Bind CliUpdate.Cli.DisplayName, Mode=OneWay}" FontSize="16"
+                                               FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="1" Text="{x:Bind CliUpdate.VersionText, Mode=OneWay}" FontSize="11"
+                                               VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Visibility="{x:Bind CliUpdate.IsVersionKnown, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                    <Button Grid.Column="2" Click="OnUpdateCliClick" VerticalAlignment="Center"
+                                            Padding="10,6" CornerRadius="8" AutomationProperties.Name="Update CLI"
+                                            ToolTipService.ToolTip="{x:Bind CliUpdate.UpdateTip, Mode=OneWay}"
+                                            Visibility="{x:Bind CliUpdate.UpdateAvailable, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <FontIcon Glyph="&#xE896;" FontSize="12" />
+                                            <TextBlock Text="Update" FontSize="12" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                                <TextBlock Text="Choose an account" FontSize="12" FontWeight="SemiBold" />
+                                <ListView
                                         MaxHeight="340"
                                         IsItemClickEnabled="True"
                                         ItemClick="OnProfileItemClick"
                                         ItemContainerStyle="{StaticResource PanelItem}"
+                                        IsEnabled="{x:Bind Workspace.CliEndpoint.CanSwitch, Mode=OneWay}"
                                         ItemsSource="{x:Bind Workspace.CliEndpoint.Choices, Mode=OneWay}"
                                         SelectedItem="{x:Bind Workspace.CliEndpoint.Selected, Mode=TwoWay}"
                                         SelectionMode="Single">
@@ -411,216 +327,43 @@
                                             </DataTemplate>
                                         </ListView.ItemTemplate>
                                     </ListView>
-                                </StackPanel>
-                            </Flyout>
-                        </Button.Flyout>
-                    </Button>
-
-                    <!--  A terminal CLI's session has no profile to pick: name the CLI instead  -->
-                    <TextBlock
-                        Grid.Column="1"
-                        Margin="8,0"
-                        VerticalAlignment="Center"
-                        FontSize="13"
-                        FontWeight="SemiBold"
-                        Text="{x:Bind EndpointLabel, Mode=OneWay}"
-                        TextTrimming="CharacterEllipsis"
-                        Visibility="{x:Bind ShowSessionPickers, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}" />
-
-                    <StackPanel
-                        Grid.Column="2"
-                        Margin="0,0,4,0"
-                        VerticalAlignment="Center"
-                        Orientation="Horizontal"
-                        Spacing="4">
-                        <TextBlock
-                            VerticalAlignment="Center"
-                            FontFamily="Cascadia Mono, Consolas"
-                            FontSize="11"
-                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="{x:Bind CliUpdate.VersionText, Mode=OneWay}"
-                            Visibility="{x:Bind CliUpdate.IsVersionKnown, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
-                        <Button
-                            Width="26"
-                            Height="26"
-                            Padding="0"
-                            VerticalAlignment="Center"
-                            Background="Transparent"
-                            BorderThickness="0"
-                            Click="OnUpdateCliClick"
-                            CornerRadius="6"
-                            ToolTipService.ToolTip="{x:Bind CliUpdate.UpdateTip, Mode=OneWay}"
-                            Visibility="{x:Bind CliUpdate.UpdateAvailable, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                            <FontIcon
-                                FontSize="13"
-                                Foreground="{ThemeResource SystemFillColorCautionBrush}"
-                                Glyph="&#xE896;" />
-                        </Button>
-                    </StackPanel>
-                </Grid>
-
-                <!--  Body  -->
-                <Grid Grid.Row="1" Margin="8,6,8,8">
-                    <Grid.RowDefinitions>
-                        <!--  Session card  -->
-                        <RowDefinition Height="Auto" />
-                        <!--  Live sections  -->
-                        <RowDefinition x:Name="LiveRow" Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <StackPanel Grid.Row="0" Spacing="8">
-                        <!--  Reading history  -->
-                        <InfoBar
-                            IsClosable="False"
-                            IsOpen="{x:Bind Workspace.IsViewingHistory, Mode=OneWay}"
-                            Message="{x:Bind Workspace.HistoryTitle, Mode=OneWay}"
-                            Severity="Informational"
-                            Title="Viewing history"
-                            Visibility="{x:Bind Workspace.IsViewingHistory, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                            <InfoBar.ActionButton>
-                                <Button Click="OnReturnToLiveClick" Content="Back to live session" />
-                            </InfoBar.ActionButton>
-                        </InfoBar>
-
-                        <!--  The live session: model, mode, context and usage  -->
-                        <Border Padding="0">
-                            <StackPanel Spacing="0">
-                                <!--  Model and mode are picked in the composer, where the prompt is written.  -->
-
-                                <!--  Meters  -->
-                                <StackPanel Padding="6,2,6,4" Spacing="9">
-                                    <!--  Context, with compact beside it  -->
-                                    <StackPanel Spacing="5">
-                                        <Grid ColumnSpacing="8">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Style="{StaticResource MetricLabel}" Text="Context" />
-                                            <TextBlock
-                                                Grid.Column="1"
-                                                Style="{StaticResource MetricValue}"
-                                                Text="{x:Bind Workspace.Status.ContextSummary, Mode=OneWay}" />
-                                            <Button
-                                                Grid.Column="2"
-                                                Height="22"
-                                                Margin="0,-3,-4,-3"
-                                                Padding="6,0"
-                                                Background="Transparent"
-                                                BorderThickness="0"
-                                                Click="OnCompactContextClick"
-                                                CornerRadius="5"
-                                                ToolTipService.ToolTip="Compact the context (/compact)">
-                                                <StackPanel Orientation="Horizontal" Spacing="4">
-                                                    <FontIcon
-                                                        FontSize="10"
-                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                        Glyph="&#xE73F;" />
-                                                    <TextBlock
-                                                        FontSize="11"
-                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                        Text="Compact" />
-                                                </StackPanel>
-                                            </Button>
-                                        </Grid>
-                                        <ProgressBar
-                                            Foreground="{x:Bind Workspace.Status.ContextPercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}"
-                                            Style="{StaticResource MetricBar}"
-                                            Value="{x:Bind Workspace.Status.ContextPercent, Mode=OneWay}" />
-                                    </StackPanel>
-
-                                    <!--  5-hour window: total in caution, the history drawn over it (the visible tail is the latest prompt)  -->
-                                    <StackPanel Spacing="5" Visibility="{x:Bind Workspace.Status.HasFiveHour, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                        <Grid ColumnSpacing="8">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Style="{StaticResource MetricLabel}" Text="Usage" />
-                                            <TextBlock
-                                                Grid.Column="1"
-                                                Style="{StaticResource MetricValue}"
-                                                Text="{x:Bind Workspace.Status.FiveHourSummary, Mode=OneWay}" />
-                                        </Grid>
-                                        <Grid>
-                                            <ProgressBar
-                                                Foreground="{ThemeResource SystemFillColorCautionBrush}"
-                                                Style="{StaticResource MetricBar}"
-                                                Value="{x:Bind Workspace.Status.FiveHourPercent, Mode=OneWay}" />
-                                            <ProgressBar
-                                                Background="Transparent"
-                                                Foreground="{x:Bind Workspace.Status.FiveHourPercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}"
-                                                Style="{StaticResource MetricBar}"
-                                                Value="{x:Bind Workspace.Status.PreviousFiveHourPercent, Mode=OneWay}" />
-                                        </Grid>
-                                    </StackPanel>
-
-                                    <StackPanel Spacing="5" Visibility="{x:Bind Workspace.Status.HasLongWindowOnly, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                        <Grid ColumnSpacing="8">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Style="{StaticResource MetricLabel}" Text="Usage" />
-                                            <TextBlock
-                                                Grid.Column="1"
-                                                Style="{StaticResource MetricValue}"
-                                                Text="{x:Bind Workspace.Status.SevenDaySummary, Mode=OneWay}" />
-                                        </Grid>
-                                        <ProgressBar
-                                            Foreground="{x:Bind Workspace.Status.SevenDayPercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}"
-                                            Style="{StaticResource MetricBar}"
-                                            Value="{x:Bind Workspace.Status.SevenDayPercent, Mode=OneWay}" />
-                                    </StackPanel>
-
-                                    <StackPanel Spacing="5" Visibility="{x:Bind Workspace.Status.ShowEmptyUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                        <Grid ColumnSpacing="8">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Style="{StaticResource MetricLabel}" Text="Usage" />
-                                            <TextBlock
-                                                Grid.Column="1"
-                                                Style="{StaticResource MetricValue}"
-                                                Text="0%" />
-                                        </Grid>
-                                        <ProgressBar Style="{StaticResource MetricBar}" Value="0" />
-                                    </StackPanel>
-
-                                    <!--  A BYOK endpoint has no readable quota: session tokens against a fixed budget  -->
-                                    <StackPanel Spacing="5" Visibility="{x:Bind Workspace.Status.HasTokenUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                        <Grid ColumnSpacing="8">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Style="{StaticResource MetricLabel}" Text="Tokens" />
-                                            <TextBlock
-                                                Grid.Column="1"
-                                                Style="{StaticResource MetricValue}"
-                                                Text="{x:Bind Workspace.Status.TokenUsageSummary, Mode=OneWay}" />
-                                        </Grid>
-                                        <ProgressBar
-                                            Foreground="{x:Bind Workspace.Status.TokenUsagePercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}"
-                                            Style="{StaticResource MetricBar}"
-                                            Value="{x:Bind Workspace.Status.TokenUsagePercent, Mode=OneWay}" />
-                                    </StackPanel>
-                                </StackPanel>
                             </StackPanel>
-                        </Border>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
+                <Border Width="48" Height="48" Padding="4" CornerRadius="12" Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                        ToolTipService.ToolTip="{x:Bind UsageSummary, Mode=OneWay}"
+                        Visibility="{x:Bind HasUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel VerticalAlignment="Center">
+                        <Grid Width="34" Height="34">
+                            <ProgressRing Width="34" Height="34" IsIndeterminate="False" Minimum="0" Maximum="100"
+                                          Value="{x:Bind UsagePercent, Mode=OneWay}"
+                                          Foreground="{x:Bind UsagePercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}" />
+                            <TextBlock Text="{x:Bind UsagePercentText, Mode=OneWay}" FontSize="9" FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Grid>
                     </StackPanel>
+                </Border>
+                <Border Height="1" Margin="8,2" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
-                    <!--  Live sections: flat, separated by hairlines  -->
-                    <ScrollViewer
-                        x:Name="LiveHost"
-                        Grid.Row="1"
-                        Margin="-8,6,-8,0"
-                        Padding="8,0">
-                        <StackPanel Spacing="4">
-                            <!--  Todos  -->
-                            <StackPanel Spacing="2" Visibility="{x:Bind Session.Todos.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                <Button Style="{StaticResource CompactAction}" AutomationProperties.Name="Todos"
+                        ToolTipService.ToolTip="Todos">
+                    <StackPanel Spacing="1" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE9D5;" FontSize="10"
+                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                        <TextBlock Text="{x:Bind Session.TasksTotal, Mode=OneWay}" FontSize="18" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="38" />
+                    </StackPanel>
+                    <Button.Flyout>
+                        <Flyout x:Name="TodosFlyout" AreOpenCloseAnimationsEnabled="False"
+                                Opening="OnDetailFlyoutOpening" Closed="OnDetailFlyoutClosed" Placement="LeftEdgeAlignedTop" FlyoutPresenterStyle="{StaticResource DetailFlyout}">
+                            <StackPanel Width="340" Spacing="10">
+                                <TextBlock Text="No todos yet." FontSize="12" Margin="8"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           Visibility="{x:Bind Session.Todos.Count, Mode=OneWay, Converter={StaticResource CountToInverseVisibility}}" />
+                                <ScrollViewer MaxHeight="480" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
+                                              Visibility="{x:Bind Session.Todos.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                    <StackPanel Spacing="2" Visibility="{x:Bind Session.Todos.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
                                 <ToggleButton
                                     x:Name="TodosSection"
                                     HorizontalAlignment="Stretch"
@@ -682,9 +425,30 @@
                                 </StackPanel>
                                 <Border Style="{StaticResource SectionDivider}" />
                             </StackPanel>
+                                </ScrollViewer>
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
 
-                            <!--  Running tasks  -->
-                            <StackPanel Spacing="2" Visibility="{x:Bind Session.SortedTasks.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                <Button Style="{StaticResource CompactAction}" AutomationProperties.Name="Tasks"
+                        ToolTipService.ToolTip="Tasks">
+                    <StackPanel Spacing="1" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE945;" FontSize="10"
+                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                        <TextBlock Text="{x:Bind Session.SortedTasks.Count, Mode=OneWay}" FontSize="18" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="38" />
+                    </StackPanel>
+                    <Button.Flyout>
+                        <Flyout x:Name="TasksFlyout" AreOpenCloseAnimationsEnabled="False"
+                                Opening="OnDetailFlyoutOpening" Closed="OnDetailFlyoutClosed" Placement="LeftEdgeAlignedTop" FlyoutPresenterStyle="{StaticResource DetailFlyout}">
+                            <StackPanel Width="340" Spacing="10">
+                                <TextBlock Text="No background tasks." FontSize="12" Margin="8"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           Visibility="{x:Bind Session.SortedTasks.Count, Mode=OneWay, Converter={StaticResource CountToInverseVisibility}}" />
+                                <ScrollViewer MaxHeight="480" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
+                                              Visibility="{x:Bind Session.SortedTasks.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                    <StackPanel Spacing="2" Visibility="{x:Bind Session.SortedTasks.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
                                 <ToggleButton
                                     x:Name="RunningTasksSection"
                                     HorizontalAlignment="Stretch"
@@ -775,9 +539,30 @@
                                 </ListView>
                                 <Border Style="{StaticResource SectionDivider}" />
                             </StackPanel>
+                                </ScrollViewer>
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
 
-                            <!--  Session changes  -->
-                            <StackPanel Spacing="2" Visibility="{x:Bind Session.Status.ChangeCount, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                <Button Style="{StaticResource CompactAction}" AutomationProperties.Name="Files"
+                        ToolTipService.ToolTip="Files">
+                    <StackPanel Spacing="1" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE70F;" FontSize="10"
+                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                        <TextBlock Text="{x:Bind Session.Status.ChangeCount, Mode=OneWay}" FontSize="18" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="38" />
+                    </StackPanel>
+                    <Button.Flyout>
+                        <Flyout x:Name="FilesFlyout" AreOpenCloseAnimationsEnabled="False"
+                                Opening="OnDetailFlyoutOpening" Closed="OnDetailFlyoutClosed" Placement="LeftEdgeAlignedTop" FlyoutPresenterStyle="{StaticResource DetailFlyout}">
+                            <StackPanel Width="340" Spacing="10">
+                                <TextBlock Text="No files changed in this session." FontSize="12" Margin="8"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           Visibility="{x:Bind Session.Status.ChangeCount, Mode=OneWay, Converter={StaticResource CountToInverseVisibility}}" />
+                                <ScrollViewer MaxHeight="480" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
+                                              Visibility="{x:Bind Session.Status.ChangeCount, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                    <StackPanel Spacing="2" Visibility="{x:Bind Session.Status.ChangeCount, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
                                 <ToggleButton
                                     x:Name="SessionChangesSection"
                                     HorizontalAlignment="Stretch"
@@ -858,9 +643,30 @@
                                 </StackPanel>
                                 <Border Style="{StaticResource SectionDivider}" />
                             </StackPanel>
+                                </ScrollViewer>
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
 
-                            <!--  Artifacts  -->
-                            <StackPanel Spacing="2" Visibility="{x:Bind Session.Artifacts.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                <Button Style="{StaticResource CompactAction}" AutomationProperties.Name="Artifacts"
+                        ToolTipService.ToolTip="Artifacts">
+                    <StackPanel Spacing="1" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE8A5;" FontSize="10"
+                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                        <TextBlock Text="{x:Bind Session.Artifacts.Count, Mode=OneWay}" FontSize="18" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="38" />
+                    </StackPanel>
+                    <Button.Flyout>
+                        <Flyout x:Name="ArtifactsFlyout" AreOpenCloseAnimationsEnabled="False"
+                                Opening="OnDetailFlyoutOpening" Closed="OnDetailFlyoutClosed" Placement="LeftEdgeAlignedTop" FlyoutPresenterStyle="{StaticResource DetailFlyout}">
+                            <StackPanel Width="340" Spacing="10">
+                                <TextBlock Text="No artifacts yet." FontSize="12" Margin="8"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           Visibility="{x:Bind Session.Artifacts.Count, Mode=OneWay, Converter={StaticResource CountToInverseVisibility}}" />
+                                <ScrollViewer MaxHeight="480" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
+                                              Visibility="{x:Bind Session.Artifacts.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                    <StackPanel Spacing="2" Visibility="{x:Bind Session.Artifacts.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
                                 <ToggleButton
                                     x:Name="PlansSection"
                                     HorizontalAlignment="Stretch"
@@ -929,11 +735,12 @@
                                 </ListView>
                                 <Border Style="{StaticResource SectionDivider}" />
                             </StackPanel>
-                        </StackPanel>
-                    </ScrollViewer>
-
-                </Grid>
-            </Grid>
-        </Grid>
+                                </ScrollViewer>
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
+            </StackPanel>
+        </ScrollViewer>
     </Border>
 </UserControl>

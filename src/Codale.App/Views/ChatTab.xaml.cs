@@ -366,7 +366,7 @@ public sealed partial class ChatTab : UserControl
         }
     }
 
-    private void OnLoadActivityClick(object sender, RoutedEventArgs e)
+    private void OnExpandActivityClick(object sender, RoutedEventArgs e)
     {
         if (((FrameworkElement)sender).Tag is HiddenActivityItem placeholder)
         {
@@ -545,7 +545,7 @@ public sealed partial class ChatTab : UserControl
     {
         if (((FrameworkElement)sender).Tag is TurnActivityItem turn)
         {
-            ChatViewModel.ToggleTurn(turn);
+            ViewModel.ToggleTurn(turn);
         }
     }
 

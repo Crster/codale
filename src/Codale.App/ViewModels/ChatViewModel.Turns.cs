@@ -93,8 +93,10 @@ public sealed partial class ChatViewModel
     }
 
     /// <summary>Opens or folds a turn's timeline from its header.</summary>
-    public static void ToggleTurn(TurnActivityItem turn)
+    public void ToggleTurn(TurnActivityItem turn)
     {
+        if (turn.Loaded && turn.IsExpanded && TryUnloadActivity(turn)) return;
+
         if (turn.HasSteps)
         {
             turn.IsExpanded = !turn.IsExpanded;

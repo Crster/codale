@@ -1188,15 +1188,22 @@
                             VerticalAlignment="Center"
                             FontSize="{x:Bind S11, Mode=OneWay}"
                             Foreground="{x:Bind Outcome, Mode=OneWay, Converter={StaticResource TurnOutcomeBrush}}"
-                            Glyph="{x:Bind StatusGlyph, Mode=OneWay}" />
+                            Glyph="{x:Bind StatusGlyph, Mode=OneWay}"
+                            Visibility="{x:Bind Loaded, Converter={StaticResource InverseBoolToVisibility}}" />
                         <TextBlock
                             VerticalAlignment="Center"
                             FontSize="{x:Bind S12, Mode=OneWay}"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Text="{x:Bind HeaderText, Mode=OneWay}" />
+                        <TextBlock VerticalAlignment="Center" FontSize="{x:Bind S11_5, Mode=OneWay}"
+                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                   Visibility="{x:Bind Loaded, Converter={StaticResource BoolToVisibility}}">
+                            <Run Text=" · " /><Run Text="{x:Bind CallsText}" />
+                        </TextBlock>
                         <ItemsControl
                             VerticalAlignment="Center"
-                            ItemsSource="{x:Bind Pills, Mode=OneWay}">
+                            ItemsSource="{x:Bind Pills, Mode=OneWay}"
+                            Visibility="{x:Bind Loaded, Converter={StaticResource InverseBoolToVisibility}}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <StackPanel Orientation="Horizontal" Spacing="0" />
@@ -1299,25 +1306,23 @@
                 IsTabStop="False" />
         </DataTemplate>
 
-        <!--  Where an older turn's tool block was: a count and the way to read the block back from the history.  -->
+        <!-- A finished turn summary; tool rows are read only when the reader expands it. -->
         <DataTemplate x:Key="HiddenActivityTemplate" x:DataType="vm:HiddenActivityItem">
-            <StackPanel
-                Margin="{x:Bind RowMargin, Mode=OneWay}"
-                Orientation="Horizontal"
-                Spacing="8">
-                <TextBlock
-                    VerticalAlignment="Center"
-                    FontSize="{x:Bind S12, Mode=OneWay}"
-                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                    Text="{x:Bind Title}" />
-                <HyperlinkButton
-                    Padding="0"
-                    VerticalAlignment="Center"
-                    Click="OnLoadActivityClick"
-                    Content="Load"
-                    FontSize="{x:Bind S12, Mode=OneWay}"
-                    Tag="{x:Bind}"
-                    ToolTipService.ToolTip="Show this turn's tool activity again, read from the chat's history" />
+            <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="4">
+                <Button Padding="4,3,8,3" Click="OnExpandActivityClick"
+                        Style="{StaticResource ToolToggle}" Tag="{x:Bind}"
+                        ToolTipService.ToolTip="Show or hide the steps of this turn">
+                    <StackPanel Orientation="Horizontal" Spacing="8" views:TextBaseline.IsAligned="True">
+                        <TextBlock Text="{x:Bind Summary}" FontSize="{x:Bind S12, Mode=OneWay}" VerticalAlignment="Center"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock VerticalAlignment="Center" FontSize="{x:Bind S11_5, Mode=OneWay}"
+                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}">
+                            <Run Text=" · " /><Run Text="{x:Bind Title}" />
+                        </TextBlock>
+                        <FontIcon Glyph="&#xE76C;" FontSize="{x:Bind S8, Mode=OneWay}" VerticalAlignment="Center"
+                                  Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    </StackPanel>
+                </Button>
             </StackPanel>
         </DataTemplate>
 
@@ -1909,10 +1914,14 @@
 
         <ScrollViewer
             x:Name="ChatScroller"
+            HorizontalScrollMode="Disabled"
+            HorizontalScrollBarVisibility="Disabled"
             HorizontalContentAlignment="Stretch"
             VerticalScrollBarVisibility="Auto">
             <ItemsControl
                 x:Name="Transcript"
+                Width="{Binding ViewportWidth, ElementName=ChatScroller}"
+                HorizontalAlignment="Center"
                 MaxWidth="920"
                 Padding="12,16,16,16"
                 ItemTemplateSelector="{StaticResource ChatTemplateSelector}"

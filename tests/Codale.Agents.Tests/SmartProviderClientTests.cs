@@ -7,6 +7,56 @@ namespace Codale.Agents.Tests;
 
 public sealed class SmartProviderClientTests
 {
+    [Fact]
+    public async Task Code_completion_uses_fim_prefix_and_suffix_and_preserves_inserted_whitespace()
+    {
+        using var http = new HttpClient(new Handler(async request =>
+        {
+            Assert.Equal("https://example.test/v1/completions", request.RequestUri!.AbsoluteUri);
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            var root = body.RootElement;
+            Assert.Equal("fim-code-model", root.GetProperty("model").GetString());
+            Assert.Equal("function test() {", root.GetProperty("prompt").GetString());
+            Assert.Equal("\n}", root.GetProperty("suffix").GetString());
+            Assert.Equal(128, root.GetProperty("max_tokens").GetInt32());
+            Assert.False(root.TryGetProperty("messages", out _));
+            return Json(JsonSerializer.Serialize(new { choices = new[] { new { text = "\n    return 1;" } } }));
+        }));
+        var client = new SmartProviderClient("openai", Profile(), new Dictionary<string, string> { ["completion"] = "fim-code-model" }, http);
+        var input = JsonSerializer.Serialize(new { prefix = "function test() {", suffix = "\n}", fileName = "test.js" });
+        Assert.Equal("\n    return 1;", await client.CompleteAsync("completion", "ignored chat instructions", input, 128, default));
+    }
+
+    [Theory]
+    [InlineData("claude", "fim-model")]
+    [InlineData("codex", "fim-model")]
+    [InlineData("anthropic", "fim-model")]
+    [InlineData("openai", "")]
+    [InlineData("openai", "default")]
+    public async Task Specialized_features_require_compatible_provider_and_explicit_model(string provider, string model)
+    {
+        using var http = new HttpClient(new Handler(_ => throw new Exception("No HTTP request expected")));
+        var client = new SmartProviderClient(provider, Profile(), new Dictionary<string, string>
+        {
+            ["completion"] = model, ["embedding"] = model,
+        }, http);
+        Assert.False(client.IsFeatureEnabled("completion"));
+        Assert.False(client.IsFeatureEnabled("embedding"));
+        Assert.Equal("off", client.EmbeddingIdentity);
+        Assert.Empty(await client.EmbedAsync("code", default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.CompleteAsync("completion", "", "{}", 64, default));
+    }
+
+    [Fact]
+    public void Specialized_models_do_not_inherit_flash_but_chat_features_do()
+    {
+        var client = new SmartProviderClient("openai", Profile(), new Dictionary<string, string>());
+        Assert.Equal("", client.ModelFor("completion"));
+        Assert.Equal("", client.ModelFor("embedding"));
+        Assert.Equal("default-model", client.ModelFor("commit"));
+        Assert.Equal("default-model", client.ModelFor("summary"));
+    }
+
     [Theory]
     [InlineData("claude", "", "account-flash")]
     [InlineData("codex", "default", "account-flash")]

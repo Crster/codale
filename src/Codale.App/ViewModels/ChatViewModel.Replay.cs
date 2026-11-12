@@ -39,10 +39,16 @@ public sealed partial class ChatViewModel
             var lastTool = tools.Count == 0 ? -1 : turn.IndexOf(tools[^1]);
             if (tools.Count > 0)
             {
+                // TurnAround starts after the prompt; use the same clock before expanding.
+                var first = turn.Where(e => e is not UserMessageRecorded)
+                    .Select(e => e.Timestamp).FirstOrDefault(t => t is not null);
+                var last = turn.Select(e => e.Timestamp).LastOrDefault(t => t is not null);
                 rows.Add(new HiddenActivityItem
                 {
                     FirstToolUseId = tools[0].ToolUseId,
                     Calls = tools.Count,
+                    Summary = first is { } from && last is { } to && to >= from
+                        ? $"Worked for {ToolKinds.FormatElapsed(to - from)}" : "Worked",
                     Timestamp = tools[0].Timestamp ?? DateTimeOffset.Now,
                 });
             }
@@ -146,7 +152,34 @@ public sealed partial class ChatViewModel
         return activity;
     }
 
-    /// <summary>Reads a turn's tool activity back from the history and puts its block where the placeholder was.</summary>
+    /// <summary>Collapsing replayed activity drops the tool graph and restores its lightweight summary.</summary>
+    private bool TryUnloadActivity(TurnActivityItem activity)
+    {
+        var at = Items.IndexOf(activity);
+        if (!activity.Loaded || !activity.IsFinished || _featureLog is null || at < 0)
+            return false;
+
+        var tools = activity.AllTools.ToList();
+        if (tools.Count == 0) return false;
+
+        var summary = new HiddenActivityItem
+        {
+            FirstToolUseId = tools[0].ToolUseId,
+            Calls = tools.Count,
+            Summary = activity.HeaderText,
+            Timestamp = activity.Timestamp,
+        };
+
+        activity.IsExpanded = false;
+        Items[at] = summary;
+        // Clear even the old container's references while XAML releases the replaced row.
+        activity.Steps.Clear();
+        activity.Pills = [];
+        Reflow();
+        return true;
+    }
+
+    /// <summary>Reads a turn's tool activity back from the history and expands it on demand.</summary>
     public void LoadActivity(HiddenActivityItem placeholder)
     {
         if (_featureLog is null)
@@ -168,7 +201,9 @@ public sealed partial class ChatViewModel
             return;
         }
 
-        Items[at] = BuildActivity(turn);
+        var activity = BuildActivity(turn);
+        activity.IsExpanded = true;
+        Items[at] = activity;
         Reflow();
     }
 }

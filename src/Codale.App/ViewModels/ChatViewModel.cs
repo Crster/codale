@@ -5177,10 +5177,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         var removed = false;
         for (var i = cut - 1; i >= 0; i--)
         {
-            // A block the reader loaded back stays; the rest is replaced by a Load row that holds no tool state.
+            // A block the reader loaded back stays; the rest is replaced by a collapsed summary that holds no tool state.
             if (Items[i] is TurnActivityItem { Loaded: false } or ToolCallItem)
             {
                 var calls = ToolsOf(Items[i]).ToList();
+                var summary = Items[i] is TurnActivityItem activity ? activity.HeaderText
+                    : calls.FirstOrDefault()?.Duration is { } duration
+                        ? $"Worked for {ToolKinds.FormatElapsed(duration)}" : "Worked";
                 Items.RemoveAt(i);
                 removed = true;
                 if (calls.Count > 0)
@@ -5189,6 +5192,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     {
                         FirstToolUseId = calls[0].ToolUseId,
                         Calls = calls.Count,
+                        Summary = summary,
                         Timestamp = calls[0].Timestamp,
                     });
                 }

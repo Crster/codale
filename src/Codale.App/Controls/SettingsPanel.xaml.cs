@@ -86,11 +86,11 @@ public sealed partial class SettingsPanel : UserControl
         }
 
         (PageTitle.Text, PageSubtitle.Text) =
-            TabNavAi.IsChecked == true ? ("Agents & Models", "Accounts, models and Smart features.")
-            : TabNavEditor.IsChecked == true ? ("Code Editor", "How code is shown and edited.")
-            : TabNavTerminal.IsChecked == true ? ("Shell & Terminal", "Shell, font and scrollback for terminal tabs.")
-            : TabNavGitShortcuts.IsChecked == true ? ("Key Bindings", "Click a shortcut, then press the new keys.")
-            : ("Appearance & Chat", "Appearance, folders and the chat.");
+            TabNavAi.IsChecked == true ? ("AI Providers", "Accounts, models and Smart features.")
+            : TabNavEditor.IsChecked == true ? ("Editor", "How code is shown and edited.")
+            : TabNavTerminal.IsChecked == true ? ("Terminal", "Shell, font and scrollback for terminal tabs.")
+            : TabNavGitShortcuts.IsChecked == true ? ("Keyboard Shortcuts", "Click a shortcut, then press the new keys.")
+            : ("General", "Appearance, folders and the chat.");
     }
 
     private void OnAppSettingsChanged(object? sender, EventArgs e)
@@ -147,7 +147,7 @@ public sealed partial class SettingsPanel : UserControl
                 {
                     var isAccount = row.Detail == "Sign-in account";
                     var target = isAccount ? (row.CliId, row.Name) : (row.CliId == "codex" ? "openai" : "anthropic", row.Name);
-                    if (group.Id == "embedding" && target.Item1 != "openai") continue; // embeddings need an OpenAI-compatible endpoint
+                    if (!SmartFeatureSettings.SupportsProvider(group.Id, target.Item1)) continue;
                     providers.Items.Add(new ComboBoxItem { Content = row.Label, Tag = target });
                 }
                 var selectedProfile = savedProfile;
@@ -157,7 +157,9 @@ public sealed partial class SettingsPanel : UserControl
                     i.Tag is (string p, string profile) && p == provider && (provider == "off" || profile == selectedProfile));
                 if (current is null && provider != "off")
                 {
-                    current = new ComboBoxItem { Content = char.ToUpperInvariant(provider[0]) + provider[1..] + " (unavailable)", Tag = (provider, savedProfile) };
+                    current = new ComboBoxItem { Content = char.ToUpperInvariant(provider[0]) + provider[1..] +
+                        (SmartFeatureSettings.SupportsProvider(group.Id, provider) ? " (unavailable)" : " (requires API endpoint)"),
+                        Tag = (provider, savedProfile), IsEnabled = false };
                     providers.Items.Add(current); // keep a saved choice visible even if its profile is gone
                 }
                 providers.SelectedItem = current ?? providers.Items[0];
@@ -174,8 +176,10 @@ public sealed partial class SettingsPanel : UserControl
                 Grid.SetColumn(providers, 1);
                 heading.Children.Add(providers);
                 section.Children.Add(heading);
-                var model = new ComboBox { IsEditable = true, PlaceholderText = group.Id == "embedding" ? "Select model" : "Account Flash model",
-                    HorizontalAlignment = HorizontalAlignment.Right, Width = 220, Tag = group.Id, IsEnabled = provider != "off" };
+                var model = new ComboBox { IsEditable = true, PlaceholderText = group.Id switch
+                    { "completion" => "Select FIM model", "embedding" => "Select embedding model", _ => "Account Flash model" },
+                    HorizontalAlignment = HorizontalAlignment.Right, Width = 220, Tag = group.Id,
+                    IsEnabled = provider != "off" && SmartFeatureSettings.SupportsProvider(group.Id, provider) };
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(model, group.Label + " model");
                 model.LostFocus += (_, _) => { if (!_loading && _smartModelBoxes.GetValueOrDefault(group.Id) == model) AppSettings.SetSmartFeatureModel(group.Id, model.Text); };
                 model.TextSubmitted += (_, args) => { if (!_loading) AppSettings.SetSmartFeatureModel(group.Id, args.Text); };
@@ -193,7 +197,7 @@ public sealed partial class SettingsPanel : UserControl
         }
         foreach (var (id, box) in _smartModelBoxes)
         {
-            if (id != "embedding")
+            if (!SmartFeatureSettings.RequiresDedicatedModel(id))
             {
                 var flash = SmartExperienceHost.CreateClient(id).DefaultModel;
                 box.PlaceholderText = flash.Length > 0 ? $"Flash model: {flash}" : "Account Flash model";
@@ -208,7 +212,14 @@ public sealed partial class SettingsPanel : UserControl
 
     private async Task LoadSmartModelsAsync(ComboBox box, TextBlock status, string group, string provider)
     {
-        if (provider == "off" || !_loadingSmartModels.Add(box)) return;
+        if (provider == "off") return;
+        if (!SmartFeatureSettings.SupportsProvider(group, provider))
+        {
+            status.Text = "Choose a compatible API endpoint for this feature.";
+            status.Visibility = Visibility.Visible;
+            return;
+        }
+        if (!_loadingSmartModels.Add(box)) return;
         status.Text = "Loading models…";
         status.Visibility = Visibility.Visible;
         var profileKey = AppSettings.SmartApiProfileFor(group);
@@ -233,8 +244,13 @@ public sealed partial class SettingsPanel : UserControl
                 box.Text = current;
             }
             finally { _loading = loading; }
-            status.Text = ids.Length == 0 ? "No models reported. Check the account sign-in or enter a model ID." : "";
-            status.Visibility = ids.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+            status.Text = ids.Length == 0 ? "No models reported. Check the provider or enter a model ID." : group switch
+            {
+                "completion" => "Choose a FIM model served by a completions endpoint with prefix/suffix support.",
+                "embedding" => "Choose a model that returns embedding vectors. Chat models cannot be used here.",
+                _ => "",
+            };
+            status.Visibility = status.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             ToolTipService.SetToolTip(box, ids.Length == 0 ? status.Text : null);
         }
         catch (Exception ex)

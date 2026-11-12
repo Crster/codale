@@ -332,8 +332,11 @@ public sealed partial class TurnActivityItem : ChatItem
     /// <summary>Narration (<see cref="AssistantMessageItem"/>), tool calls, explore groups and the todo row.</summary>
     public ObservableCollection<ChatItem> Steps { get; } = [];
 
-    /// <summary>Read back from the history on request: the transcript keeps it instead of folding it away again.</summary>
+    /// <summary>Read back from history on expansion; collapsing releases its steps and restores the summary.</summary>
     public bool Loaded { get; init; }
+
+    /// <summary>The same lightweight count shown before history is expanded.</summary>
+    public string CallsText => AllTools.Count() is var count && count == 1 ? "1 tool call" : $"{count} tool calls";
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsRunning))]

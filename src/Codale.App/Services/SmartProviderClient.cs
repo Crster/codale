@@ -29,11 +29,15 @@ public sealed class SmartProviderClient
         _profile?.BaseUrl, _profile?.AnthropicBaseUrl, Model = ModelFor(feature) });
     public string DefaultModel => _profile?.FlashModel.Trim() ?? "";
     public string ModelFor(string feature) => _models.GetValueOrDefault(feature, "").Trim() is var model
-        && model.Length > 0 && !model.Equals("default", StringComparison.OrdinalIgnoreCase) ? model : DefaultModel;
+        && model.Length > 0 && !model.Equals("default", StringComparison.OrdinalIgnoreCase) ? model
+        : SmartFeatureSettings.RequiresDedicatedModel(feature) ? "" : DefaultModel;
     public string ConfigurationKey => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
         System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { _provider, _profile, _models }))));
     public string? AccountId => _provider is "claude" or "codex" && _profile is { IsAccount: true } ? _profile.AccountId : null;
-    public bool IsFeatureEnabled(string feature) => _provider != "off" && !_models.GetValueOrDefault(feature, "").Equals("off", StringComparison.OrdinalIgnoreCase);
+    public bool IsFeatureEnabled(string feature) => _provider != "off"
+        && SmartFeatureSettings.SupportsProvider(feature, _provider)
+        && !_models.GetValueOrDefault(feature, "").Equals("off", StringComparison.OrdinalIgnoreCase)
+        && (!SmartFeatureSettings.RequiresDedicatedModel(feature) || ModelFor(feature).Length > 0);
 
     public string? ConfigurationError => _provider switch
     {
@@ -56,6 +60,7 @@ public sealed class SmartProviderClient
         feature = feature switch { "shell-command" => "shell", "assessment" => "assess", "rank" => "ranking", _ => feature };
         var model = ModelFor(feature);
         if (!IsFeatureEnabled(feature)) throw new InvalidOperationException("This Smart feature is off.");
+        if (feature == "completion") return await CompleteFimAsync(model, input, tokens, ct).ConfigureAwait(false);
         if (_provider is "claude" or "codex") return await CliAsync(model, system, input, ct).ConfigureAwait(false);
         var anthropic = _provider == "anthropic";
         var profile = RequireProfile();
@@ -71,7 +76,19 @@ public sealed class SmartProviderClient
         return string.IsNullOrWhiteSpace(text) ? throw new InvalidDataException("The provider returned an empty answer.") : text;
     }
 
-    public string EmbeddingIdentity => _provider == "openai" && _models.GetValueOrDefault("embedding", "") is { Length: > 0 } model && !model.Equals("off", StringComparison.OrdinalIgnoreCase)
+    private async Task<string> CompleteFimAsync(string model, string input, int tokens, CancellationToken ct)
+    {
+        using var context = JsonDocument.Parse(input);
+        var prefix = context.RootElement.GetProperty("prefix").GetString() ?? "";
+        var suffix = context.RootElement.GetProperty("suffix").GetString() ?? "";
+        using var request = Request(RequireProfile(), "completions");
+        request.Content = JsonContent.Create(new { model, prompt = prefix, suffix, max_tokens = tokens, temperature = 0, stream = false });
+        using var json = await SendAsync(request, ct).ConfigureAwait(false);
+        // Preserve whitespace: these bytes are inserted directly at the cursor.
+        return json.RootElement.GetProperty("choices")[0].GetProperty("text").GetString() ?? "";
+    }
+
+    public string EmbeddingIdentity => IsFeatureEnabled("embedding") && ModelFor("embedding") is { Length: > 0 } model
         ? $"openai:{_profile?.Key}:{_profile?.BaseUrl}:{model}" : "off";
 
     public async Task<float[]> EmbedAsync(string text, CancellationToken ct)
@@ -79,7 +96,7 @@ public sealed class SmartProviderClient
         if (EmbeddingIdentity == "off") return [];
         var profile = RequireProfile();
         using var request = Request(profile, "embeddings");
-        request.Content = JsonContent.Create(new { model = _models["embedding"], input = text, encoding_format = "float" });
+        request.Content = JsonContent.Create(new { model = ModelFor("embedding"), input = text, encoding_format = "float" });
         using var json = await SendAsync(request, ct).ConfigureAwait(false);
         var vector = json.RootElement.GetProperty("data")[0].GetProperty("embedding").EnumerateArray().Select(x => x.GetSingle()).ToArray();
         if (vector.Length == 0 || vector.Any(v => !float.IsFinite(v))) throw new InvalidDataException("Invalid embedding vector.");

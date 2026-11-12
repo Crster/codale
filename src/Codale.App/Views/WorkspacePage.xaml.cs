@@ -248,18 +248,19 @@ public sealed partial class WorkspacePage : Page
         _editorTabs.FirstOrDefault(t => ReferenceEquals(t.Item, ActiveTabItem))?.Tab;
 
     /// <summary>
-    /// Shows the language colouring the file in front (or "No File", disabled, when the tab in front is not
-    /// a saved file). A language picked by hand is marked so it is not mistaken for detection.
+    /// Shows the language colouring the file in front, hiding the chip and its divider
+    /// when no saved file is active. A language picked by hand is marked as manual.
     /// </summary>
     private void UpdateLanguageButton()
     {
         if (ActiveEditorTab() is not { } tab || !tab.ViewModel.HasFile)
         {
-            LanguageText.Text = "No File";
+            LanguageHost.Visibility = Visibility.Collapsed;
             LanguageButton.IsEnabled = false;
             return;
         }
 
+        LanguageHost.Visibility = Visibility.Visible;
         LanguageButton.IsEnabled = true;
 
         var name = SyntaxService.Catalog.ById(tab.LanguageId)?.Name ?? "Plain Text";
@@ -374,7 +375,7 @@ public sealed partial class WorkspacePage : Page
     private void RefreshCliLabels()
     {
         ClaudeMenuItem.Text = "Chat";
-        ClaudeEmptyLabel.Text = "Chat";
+        ClaudeEmptyLabel.Text = "Start a chat";
     }
 
     /// <summary>

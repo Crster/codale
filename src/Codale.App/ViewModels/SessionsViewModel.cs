@@ -83,6 +83,35 @@ public sealed partial class SessionsViewModel : ObservableObject
     /// <summary>Raised when the user picks a row: a feature to work on, or a terminal CLI's conversation to read.</summary>
     public event EventHandler<TranscriptSummary>? SessionOpened;
 
+    private string? _openingSessionId;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanOpen))]
+    [NotifyCanExecuteChangedFor(nameof(OpenCommand))]
+    public partial bool IsOpening { get; private set; }
+
+    [ObservableProperty]
+    public partial string OpenError { get; set; } = "";
+
+    public bool CanOpen => !IsOpening;
+
+    public bool TryBeginOpening(string sessionId)
+    {
+        if (IsOpening) return false;
+        _openingSessionId = sessionId;
+        OpenError = "";
+        IsOpening = true;
+        foreach (var item in Sessions) item.IsOpening = item.SessionId == sessionId;
+        return true;
+    }
+
+    public void EndOpening()
+    {
+        _openingSessionId = null;
+        foreach (var item in Sessions) item.IsOpening = false;
+        IsOpening = false;
+    }
+
     private bool _refreshing;
     private bool _refreshQueued;
 
@@ -230,6 +259,7 @@ public sealed partial class SessionsViewModel : ObservableObject
 
             var fresh = new SessionListItem { Summary = summary };
             fresh.ApplyOpenState(_open);
+            fresh.IsOpening = fresh.SessionId == _openingSessionId;
 
             if (item is not null)
             {
@@ -247,10 +277,10 @@ public sealed partial class SessionsViewModel : ObservableObject
         SyncOpenSessions();
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanOpen))]
     private void Open(SessionListItem? item)
     {
-        if (item is not null)
+        if (item is not null && CanOpen)
         {
             SessionOpened?.Invoke(this, item.Summary);
         }

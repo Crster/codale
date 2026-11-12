@@ -42,6 +42,15 @@
         <views:ArtifactStatusBrushConverter x:Key="ArtifactStatusBrush" />
         <views:TodoTextBrushConverter x:Key="TodoTextBrush" />
 
+        <Style x:Key="WelcomeActionButton" TargetType="Button">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="16,14" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+        </Style>
+
         <!--  A small rounded label, for model / permission / status facts in the
               session panel  -->
         <Style x:Key="Chip" TargetType="Border">
@@ -200,6 +209,13 @@
               rounded, hairline stroke, the theme's shadow. The fill is the solid base
               color, not the card fill: card fills are translucent for layering on
               Mica, and a popup that shows the page through itself reads as broken.  -->
+        <Style x:Key="HistoryItem" TargetType="ListViewItem" BasedOn="{StaticResource PanelItemFlush}">
+            <Setter Property="Margin" Value="0,0,0,2" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+
         <Style x:Key="PickerFlyout" TargetType="FlyoutPresenter">
             <Setter Property="Padding" Value="6" />
             <Setter Property="CornerRadius" Value="10" />
@@ -1325,6 +1341,7 @@
                 <!--  History  -->
                     <Grid x:Name="HistoryPage" RowSpacing="4" Visibility="Collapsed">
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
 
@@ -1341,20 +1358,17 @@
                         <ListView
                             IsItemClickEnabled="True"
                             ItemClick="OnHistorySessionClick"
-                            ItemContainerStyle="{StaticResource PanelItemFlush}"
+                            ItemContainerStyle="{StaticResource HistoryItem}"
+                            Padding="0,4,0,8"
                             ItemsSource="{x:Bind ViewModel.Sessions.Sessions, Mode=OneWay}"
                             SelectionMode="None">
                             <ListView.ItemTemplate>
                                 <DataTemplate x:DataType="vm:SessionListItem">
-                                    <Grid
-                                        Padding="8,6"
-                                        Background="Transparent"
-                                        ColumnSpacing="8"
-                                        ToolTipService.ToolTip="{x:Bind Summary.FirstPrompt}">
+                                    <Grid Padding="8,7" ColumnSpacing="8" Background="Transparent"
+                                          ToolTipService.ToolTip="{x:Bind Title}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="2" />
                                             <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <Grid.ContextFlyout>
                                             <MenuFlyout>
@@ -1374,54 +1388,49 @@
                                                 </MenuFlyoutItem>
                                             </MenuFlyout>
                                         </Grid.ContextFlyout>
-
-                                        <!--  The open conversation's accent bar  -->
-                                        <Grid Width="3">
-                                            <Border
-                                                Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                                CornerRadius="1.5"
+                                        <Border Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="1"
                                                 Visibility="{x:Bind IsOpen, Mode=OneWay}" />
-                                        </Grid>
-
-                                        <StackPanel Grid.Column="1" Spacing="1">
-                                            <TextBlock
-                                                FontSize="12"
-                                                Text="{x:Bind Title, Mode=OneWay}"
-                                                TextWrapping="Wrap" />
-                                            <TextBlock
-                                                FontSize="10.5"
-                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                TextTrimming="CharacterEllipsis"
-                                                TextWrapping="NoWrap">
-                                                <Run Text="{x:Bind TurnsText}" /><Run Text=" · " /><Run Text="{x:Bind UpdatedAt, Converter={StaticResource RelativeTime}}" />
-                                            </TextBlock>
-                                        </StackPanel>
-
-                                        <StackPanel
-                                            Grid.Column="2"
-                                            VerticalAlignment="Center"
-                                            Orientation="Horizontal"
-                                            Spacing="5">
-                                            <StackPanel
-                                                Orientation="Horizontal"
-                                                Spacing="5"
-                                                Visibility="{x:Bind IsWorking, Mode=OneWay}">
-                                                <Ellipse
-                                                    Width="6"
-                                                    Height="6"
-                                                    VerticalAlignment="Center"
-                                                    Fill="{StaticResource StatusRunningBrush}"
-                                                    views:Pulse.IsActive="{x:Bind IsWorking, Mode=OneWay}" />
-                                                <TextBlock
-                                                    FontSize="10.5"
-                                                    Foreground="{StaticResource StatusRunningBrush}"
-                                                    Text="running" />
-                                            </StackPanel>
-                                            <TextBlock
-                                                FontSize="10.5"
-                                                Foreground="{StaticResource StatusSuccessBrush}"
-                                                Text="open"
-                                                Visibility="{x:Bind IsOpenIdle, Mode=OneWay}" />
+                                        <StackPanel Grid.Column="1" Spacing="4">
+                                            <TextBlock Text="{x:Bind Title, Mode=OneWay}" FontSize="12"
+                                                       LineHeight="18" MaxLines="2" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
+                                            <Grid ColumnSpacing="8" MinHeight="18">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock FontSize="10.5" VerticalAlignment="Center"
+                                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                           TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                                           Visibility="{x:Bind IsOpening, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
+                                                    <Run Text="{x:Bind TurnsText}" /><Run Text=" · " />
+                                                    <Run Text="{x:Bind UpdatedAt, Converter={StaticResource RelativeTime}}" />
+                                                </TextBlock>
+                                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
+                                                            Visibility="{x:Bind IsOpening, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                                    <ProgressRing Width="12" Height="12" MinWidth="0" MinHeight="0"
+                                                                  IsActive="{x:Bind IsOpening, Mode=OneWay}" />
+                                                    <TextBlock Text="Loading…" FontSize="10.5" VerticalAlignment="Center"
+                                                               Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                                                </StackPanel>
+                                                <Border Grid.Column="1" VerticalAlignment="Center"
+                                                        Visibility="{x:Bind IsWorking, Mode=OneWay}">
+                                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                                        <Ellipse Width="5" Height="5" VerticalAlignment="Center"
+                                                                 Fill="{StaticResource StatusRunningBrush}"
+                                                                 views:Pulse.IsActive="{x:Bind IsWorking, Mode=OneWay}" />
+                                                        <TextBlock Text="Working" FontSize="10"
+                                                                   Foreground="{StaticResource StatusRunningBrush}" />
+                                                    </StackPanel>
+                                                </Border>
+                                                <Border Grid.Column="1" VerticalAlignment="Center"
+                                                        Visibility="{x:Bind IsOpenIdle, Mode=OneWay}">
+                                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                                        <Ellipse Width="5" Height="5" VerticalAlignment="Center" Fill="{StaticResource StatusSuccessBrush}" />
+                                                        <TextBlock Text="Open" FontSize="10"
+                                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </Grid>
                                         </StackPanel>
                                     </Grid>
                                 </DataTemplate>
@@ -1684,69 +1693,149 @@
                         </Grid>
                     </Grid>
 
-                <StackPanel
-                    x:Name="EmptyState"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    Spacing="10">
-                    <FontIcon
-                        FontSize="36"
-                        Glyph="&#xE8A5;"
-                        Opacity="0.4" />
-                    <TextBlock
-                        HorizontalAlignment="Center"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource SubtitleTextBlockStyle}"
-                        Text="Nothing open" />
-                    <TextBlock
-                        HorizontalAlignment="Center"
-                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                        TextAlignment="Center"
-                        TextWrapping="Wrap"
-                        MaxWidth="380"
-                        Text="Pick something to start on this project." />
-                    <StackPanel
-                        Margin="0,10,0,0"
-                        HorizontalAlignment="Center"
-                        Orientation="Horizontal"
-                        Spacing="8">
-                        <Button Click="OnNewTabMenuItemClick" Tag="chat">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon FontSize="14" Glyph="&#xE8BD;" />
-                                <TextBlock x:Name="ClaudeEmptyLabel" Text="Claude chat" />
+                <!-- A useful home for an idle workspace; chat stays one click away. -->
+                <ScrollViewer x:Name="EmptyState" HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch"
+                              VerticalContentAlignment="Center">
+                    <StackPanel MaxWidth="560" Margin="32,36" Spacing="24">
+                        <StackPanel Spacing="14">
+
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="What will you build?" FontSize="32" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                <TextBlock Text="Bring an idea, work through a problem, or pick up where you left off."
+                                           FontSize="14" LineHeight="21" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                             </StackPanel>
+                        </StackPanel>
+                        <Button Click="OnNewTabMenuItemClick" Tag="chat" Style="{StaticResource AccentButtonStyle}"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="20,18"
+                                CornerRadius="12" AutomationProperties.Name="Start a chat">
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <FontIcon Glyph="&#xE8BD;" FontSize="24" />
+                                <StackPanel Grid.Column="1" Spacing="4">
+                                    <TextBlock x:Name="ClaudeEmptyLabel" Text="Start a chat" FontSize="17" FontWeight="SemiBold" />
+                                    <TextBlock Text="Build, explore, or fix something with your agent." FontSize="12" Opacity="0.85" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <FontIcon Grid.Column="2" Glyph="&#xE72A;" FontSize="16" />
+                            </Grid>
                         </Button>
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="YOUR WORKSPACE" FontSize="10" FontWeight="SemiBold" CharacterSpacing="120"
+                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                            <Grid ColumnSpacing="10" RowSpacing="10">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                <Button Grid.Row="0" Grid.Column="0" Click="OnNewTabMenuItemClick" Tag="openfile"
+                                        Style="{StaticResource WelcomeActionButton}" AutomationProperties.Name="Open a file">
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                        <FontIcon Glyph="&#xE8E5;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <StackPanel Grid.Column="1" Spacing="3">
+                                            <TextBlock Text="Open a file" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock Text="Jump into your code" FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Button>
+                                <Button Grid.Row="0" Grid.Column="1" Click="OnNewTabMenuItemClick" Tag="terminal"
+                                        Style="{StaticResource WelcomeActionButton}" AutomationProperties.Name="Open terminal">
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                        <FontIcon Glyph="&#xE756;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <StackPanel Grid.Column="1" Spacing="3">
+                                            <TextBlock Text="Open terminal" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock Text="Run commands here" FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Button>
+                                <Button Grid.Row="1" Grid.Column="0" Click="OnNewTabMenuItemClick" Tag="newfile"
+                                        Style="{StaticResource WelcomeActionButton}" AutomationProperties.Name="New file">
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                        <FontIcon Glyph="&#xE710;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <StackPanel Grid.Column="1" Spacing="3">
+                                            <TextBlock Text="New file" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock Text="Start with a blank canvas" FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Button>
+                                <Button Grid.Row="1" Grid.Column="1" Click="OnNewTabMenuItemClick" Tag="search"
+                                        Style="{StaticResource WelcomeActionButton}" AutomationProperties.Name="Search project">
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                        <FontIcon Glyph="&#xE721;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <StackPanel Grid.Column="1" Spacing="3">
+                                            <TextBlock Text="Search project" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock Text="Find code and answers" FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Button>
+                            </Grid>
+                        </StackPanel>
+                        <StackPanel Spacing="10">
+                            <Grid>
+                                <TextBlock Text="PREVIOUS CONVERSATIONS" FontSize="10" FontWeight="SemiBold"
+                                           CharacterSpacing="120" VerticalAlignment="Center"
+                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                <Button HorizontalAlignment="Right" Padding="7" MinWidth="28" MinHeight="28"
+                                        Background="Transparent" BorderThickness="0"
+                                        Command="{x:Bind ViewModel.Sessions.RefreshCommand}"
+                                        IsEnabled="{x:Bind ViewModel.Sessions.CanOpen, Mode=OneWay}"
+                                        AutomationProperties.Name="Refresh conversations" ToolTipService.ToolTip="Refresh conversations">
+                                    <FontIcon Glyph="&#xE72C;" FontSize="12" />
+                                </Button>
+                            </Grid>
+                            <ProgressBar IsIndeterminate="True"
+                                         Visibility="{x:Bind ViewModel.Sessions.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                            <TextBlock Text="Your conversations will appear here after you send your first message."
+                                       FontSize="12" TextWrapping="Wrap"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Visibility="{x:Bind ViewModel.Sessions.Sessions.Count, Mode=OneWay, Converter={StaticResource CountToInverseVisibility}}" />
+                            <TextBlock Text="{x:Bind ViewModel.Sessions.OpenError, Mode=OneWay}" FontSize="12" TextWrapping="Wrap"
+                                       Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                       Visibility="{x:Bind ViewModel.Sessions.OpenError.Length, Mode=OneWay, Converter={StaticResource CountToVisibility}}" />
+                            <ListView MaxHeight="240" IsItemClickEnabled="{x:Bind ViewModel.Sessions.CanOpen, Mode=OneWay}" ItemClick="OnHistorySessionClick"
+                                      SelectionMode="None" ItemContainerStyle="{StaticResource PanelItemFlush}"
+                                      ItemsSource="{x:Bind ViewModel.Sessions.Sessions, Mode=OneWay}"
+                                      AutomationProperties.Name="Previous conversations"
+                                      Visibility="{x:Bind ViewModel.Sessions.Sessions.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:SessionListItem">
+                                        <Grid Padding="12,10" ColumnSpacing="12" Background="Transparent"
+                                              ToolTipService.ToolTip="{x:Bind Summary.FirstPrompt}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <FontIcon Glyph="&#xE8BD;" FontSize="16"
+                                                      Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <StackPanel Grid.Column="1" Spacing="3">
+                                                <TextBlock Text="{x:Bind Title}" FontSize="13" FontWeight="SemiBold"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                           Visibility="{x:Bind IsOpening, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
+                                                    <Run Text="{x:Bind TurnsText}" /><Run Text=" · " />
+                                                    <Run Text="{x:Bind UpdatedAt, Converter={StaticResource RelativeTime}}" />
+                                                </TextBlock>
+                                                <TextBlock Text="Loading conversation…" FontSize="11"
+                                                           Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                           Visibility="{x:Bind IsOpening, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                            </StackPanel>
+                                            <ProgressRing Grid.Column="2" Width="16" Height="16" MinWidth="0" MinHeight="0"
+                                                          IsActive="{x:Bind IsOpening, Mode=OneWay}"
+                                                          Visibility="{x:Bind IsOpening, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                            <FontIcon Grid.Column="2" Glyph="&#xE72A;" FontSize="12"
+                                                      Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                      Visibility="{x:Bind IsOpening, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </StackPanel>
                     </StackPanel>
-                    <StackPanel
-                        HorizontalAlignment="Center"
-                        Orientation="Horizontal"
-                        Spacing="8">
-                        <Button Click="OnNewTabMenuItemClick" Tag="terminal">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon FontSize="14" Glyph="&#xE756;" />
-                                <TextBlock Text="Terminal" />
-                            </StackPanel>
-                        </Button>
-                        <Button Click="OnNewTabMenuItemClick" Tag="openfile">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon FontSize="14" Glyph="&#xE8E5;" />
-                                <TextBlock Text="Open file…" />
-                            </StackPanel>
-                        </Button>
-                        <Button Click="OnNewTabMenuItemClick" Tag="newfile">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon FontSize="14" Glyph="&#xE710;" />
-                                <TextBlock Text="New file" />
-                            </StackPanel>
-                        </Button>
-                        <Button Click="OnNewTabMenuItemClick" Tag="search">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon FontSize="14" Glyph="&#xE721;" />
-                                <TextBlock Text="Search" />
-                            </StackPanel>
-                        </Button>
-                    </StackPanel>
-                </StackPanel>
+                </ScrollViewer>
                 </Grid>
             </Border>
         </Grid>
@@ -1878,10 +1967,9 @@
                         </Button>
                     </StackPanel>
 
-                    <Rectangle Style="{StaticResource StatusDivider}" />
-
                     <!--  Language of the file in front: shows what colours it, and lets the user override that  -->
-                    <StackPanel x:Name="LanguageHost" Orientation="Horizontal" VerticalAlignment="Center">
+                    <StackPanel x:Name="LanguageHost" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
+                        <Rectangle Style="{StaticResource StatusDivider}" />
                         <Button
                             x:Name="LanguageButton"
                             Style="{StaticResource StatusButton}"

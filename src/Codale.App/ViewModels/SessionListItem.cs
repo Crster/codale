@@ -21,6 +21,9 @@ public sealed partial class SessionListItem : ObservableObject
 
     public string TurnsText => Summary.Detail ?? (UserTurns == 1 ? "1 turn" : $"{UserTurns} turns");
 
+    [ObservableProperty]
+    public partial bool IsOpening { get; set; }
+
     public DateTimeOffset UpdatedAt => Summary.UpdatedAt;
 
     /// <summary>Open in a chat tab: clicking it switches to that tab.</summary>
