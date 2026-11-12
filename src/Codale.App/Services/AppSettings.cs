@@ -143,7 +143,7 @@ public static class AppSettings
         set => Set("ui.sessionPanelCollapsed", value, FormatFlag);
     }
 
-    /// <summary>Whether Claude sessions predict the next prompt and show it in the composer. Read when a session starts.</summary>
+    /// <summary>Whether agent sessions predict the next prompt and show it in the composer. Read when a session starts.</summary>
     public static bool SuggestNextPrompt
     {
         get => Get("chat.suggestNextPrompt", () => ReadFlag("chat.suggestNextPrompt", true));

@@ -1907,7 +1907,10 @@
             </VisualStateGroup>
         </VisualStateManager.VisualStateGroups>
 
-        <ScrollViewer x:Name="ChatScroller" VerticalScrollBarVisibility="Auto">
+        <ScrollViewer
+            x:Name="ChatScroller"
+            HorizontalContentAlignment="Stretch"
+            VerticalScrollBarVisibility="Auto">
             <ItemsControl
                 x:Name="Transcript"
                 MaxWidth="920"

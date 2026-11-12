@@ -7,6 +7,86 @@ namespace Codale.Agents.Tests;
 
 public sealed class SmartProviderClientTests
 {
+    [Theory]
+    [InlineData("claude", "", "account-flash")]
+    [InlineData("codex", "default", "account-flash")]
+    [InlineData("claude", "Default", "account-flash")]
+    [InlineData("codex", "specific-model", "specific-model")]
+    [InlineData("openai", "", "account-flash")]
+    public void Smart_model_inherits_flash_unless_explicitly_selected(string provider, string selected, string expected)
+    {
+        var profile = new ByokProvider { IsAccount = provider is "claude" or "codex", FlashModel = "account-flash" };
+        var client = new SmartProviderClient(provider, profile, new Dictionary<string, string> { ["commit"] = selected });
+        Assert.Equal(expected, client.ModelFor("commit"));
+        using var identity = JsonDocument.Parse(client.FeatureIdentity("commit"));
+        Assert.Equal(expected, identity.RootElement.GetProperty("Model").GetString());
+        Assert.Equal("account-flash", client.ModelFor("summary"));
+    }
+
+    [Fact]
+    public void Legacy_default_resolves_the_only_detected_account_instead_of_an_empty_home()
+    {
+        var account = new ByokProvider { Id = "detected", CliId = "claude", IsAccount = true, AccountId = "user", Email = "dev@example.test" };
+        var resolved = SmartFeatureSettings.ResolveAccount([account], "claude", "", null);
+        Assert.Same(account, resolved);
+        Assert.Equal("user", new SmartProviderClient("claude", resolved, new Dictionary<string, string>()).AccountId);
+    }
+
+    [Fact]
+    public void Explicit_account_is_not_folded_into_default_even_when_email_matches()
+    {
+        var primary = new ByokProvider { Id = "primary", CliId = "claude", IsAccount = true, AccountId = "", Email = "dev@example.test" };
+        var detected = new ByokProvider { Id = "detected", CliId = "claude", IsAccount = true, AccountId = "user", Email = primary.Email };
+        Assert.Same(detected, SmartFeatureSettings.ResolveAccount([primary, detected], "claude", "detected", primary.Email));
+        Assert.Same(primary, SmartFeatureSettings.ResolveAccount([primary, detected], "claude", "", primary.Email));
+    }
+
+    [Fact]
+    public void Legacy_default_email_selects_matching_account_for_the_correct_cli()
+    {
+        var claude = new ByokProvider { Id = "claude", CliId = "claude", IsAccount = true, AccountId = "user", Email = "dev@example.test" };
+        var codex = new ByokProvider { Id = "codex", CliId = "codex", IsAccount = true, AccountId = "user", Email = claude.Email };
+        var other = new ByokProvider { Id = "other", CliId = "claude", IsAccount = true, AccountId = "other", Email = "other@example.test" };
+        Assert.Same(claude, SmartFeatureSettings.ResolveAccount([codex, other, claude], "claude", "", claude.Email));
+        Assert.Null(SmartFeatureSettings.ResolveAccount([codex, other, claude], "claude", "missing", claude.Email));
+        Assert.Null(SmartFeatureSettings.ResolveAccount([other, claude], "claude", "", null));
+    }
+
+    [Theory]
+    [InlineData("claude", "0123456789abcdef0123456789abcdef")]
+    [InlineData("codex", "fedcba9876543210fedcba9876543210")]
+    [InlineData("claude", "")]
+    [InlineData("codex", "")]
+    public void Cli_requests_preserve_selected_account(string provider, string accountId)
+    {
+        var profile = new ByokProvider { IsAccount = true, CliId = provider, AccountId = accountId };
+        var client = new SmartProviderClient(provider, profile, new Dictionary<string, string>());
+        Assert.Equal(accountId, client.AccountId);
+    }
+
+    [Theory]
+    [InlineData("claude")]
+    [InlineData("codex")]
+    public void Default_cli_requests_use_codale_default_account(string provider)
+    {
+        var client = new SmartProviderClient(provider, null, new Dictionary<string, string>());
+        Assert.Null(client.AccountId);
+    }
+
+    [Theory]
+    [InlineData("claude")]
+    [InlineData("codex")]
+    public void Cli_launch_uses_selected_user_account_and_model(string provider)
+    {
+        var profile = new ByokProvider { IsAccount = true, CliId = provider, AccountId = Codale.Core.Agents.CodaleAccount.UserAccountId };
+        var client = new SmartProviderClient(provider, profile, new Dictionary<string, string>());
+        var start = client.BuildCliStartInfo("agent.exe", ".", "answer.txt", "selected-model", "instructions");
+        var variable = provider == "codex" ? Codale.Core.Agents.CodaleAccount.CodexVariable : Codale.Core.Agents.CodaleAccount.ClaudeVariable;
+        Assert.Equal(Codale.Core.Agents.CodaleAccount.ProfileHome(provider, profile.AccountId), start.Environment[variable]);
+        var args = start.ArgumentList.ToList();
+        Assert.Equal("selected-model", args[args.IndexOf("--model") + 1]);
+    }
+
     [Fact]
     public async Task Features_route_independently_and_off_does_not_send_requests()
     {

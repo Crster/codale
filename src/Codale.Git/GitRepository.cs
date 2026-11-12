@@ -654,7 +654,9 @@ public sealed class GitRepository
 
     /// <summary>Takes a staged change back out of the index, leaving the working tree alone.</summary>
     public Task<GitWriteResult> UnstageAsync(string path, CancellationToken ct = default) =>
-        RunWriteAsync(["restore", "--staged", "--", path], ct);
+        // Path-limited reset also supports an unborn branch, treating its missing
+        // HEAD as an empty index while preserving the working-tree file.
+        RunWriteAsync(["reset", "--", path], ct);
 
     /// <summary>
     /// Throws away every uncommitted change to a path: staged and unstaged edits revert

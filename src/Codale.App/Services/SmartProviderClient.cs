@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Codale.Agents;
+using Codale.Core.Agents;
 
 namespace Codale.App.Services;
 
@@ -25,9 +26,13 @@ public sealed class SmartProviderClient
     }
 
     public string FeatureIdentity(string feature) => JsonSerializer.Serialize(new { _provider, Profile = _profile?.Key,
-        _profile?.BaseUrl, _profile?.AnthropicBaseUrl, Model = _models.GetValueOrDefault(feature, "") is { Length: > 0 } model ? model : _profile?.FlashModel });
+        _profile?.BaseUrl, _profile?.AnthropicBaseUrl, Model = ModelFor(feature) });
+    public string DefaultModel => _profile?.FlashModel.Trim() ?? "";
+    public string ModelFor(string feature) => _models.GetValueOrDefault(feature, "").Trim() is var model
+        && model.Length > 0 && !model.Equals("default", StringComparison.OrdinalIgnoreCase) ? model : DefaultModel;
     public string ConfigurationKey => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
         System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { _provider, _profile, _models }))));
+    public string? AccountId => _provider is "claude" or "codex" && _profile is { IsAccount: true } ? _profile.AccountId : null;
     public bool IsFeatureEnabled(string feature) => _provider != "off" && !_models.GetValueOrDefault(feature, "").Equals("off", StringComparison.OrdinalIgnoreCase);
 
     public string? ConfigurationError => _provider switch
@@ -49,13 +54,12 @@ public sealed class SmartProviderClient
     public async Task<string> CompleteAsync(string feature, string system, string input, int tokens, CancellationToken ct)
     {
         feature = feature switch { "shell-command" => "shell", "assessment" => "assess", "rank" => "ranking", _ => feature };
-        var model = _models.GetValueOrDefault(feature, "");
+        var model = ModelFor(feature);
         if (!IsFeatureEnabled(feature)) throw new InvalidOperationException("This Smart feature is off.");
         if (_provider is "claude" or "codex") return await CliAsync(model, system, input, ct).ConfigureAwait(false);
         var anthropic = _provider == "anthropic";
         var profile = RequireProfile();
-        if (model.Length == 0) model = profile.FlashModel;
-        if (model.Length == 0) throw new InvalidOperationException("Choose a model for this feature or set the profile's default model.");
+        if (model.Length == 0) throw new InvalidOperationException("Choose a model for this feature or set the profile's Flash model.");
         using var request = Request(profile, anthropic ? "messages" : "chat/completions");
         request.Content = anthropic
             ? JsonContent.Create(new { model, system, max_tokens = Math.Max(1024, tokens), messages = new[] { new { role = "user", content = input } } })
@@ -117,17 +121,7 @@ public sealed class SmartProviderClient
         var folder = Path.Combine(Path.GetTempPath(), "codale-smart-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
         var output = Path.Combine(folder, "answer.txt");
-        var start = new ProcessStartInfo(executable) { WorkingDirectory = folder, UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        void Add(params string[] args) { foreach (var arg in args) start.ArgumentList.Add(arg); }
-        if (_provider == "claude")
-        {
-            Add("--print", "--output-format", "text", "--tools", "", "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--no-session-persistence");
-            Add("--system-prompt", system);
-        }
-        else Add("exec", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--output-last-message", output);
-        if (model.Length > 0) Add("--model", model);
-        if (_provider == "codex") Add("-");
+        var start = BuildCliStartInfo(executable, folder, output, model, system);
         try
         {
             using var process = new Process { StartInfo = start };
@@ -145,5 +139,23 @@ public sealed class SmartProviderClient
             return string.IsNullOrWhiteSpace(text) ? throw new InvalidDataException("The CLI returned an empty answer.") : text.Trim();
         }
         finally { try { Directory.Delete(folder, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    }
+
+    internal ProcessStartInfo BuildCliStartInfo(string executable, string folder, string output, string model, string system)
+    {
+        var start = new ProcessStartInfo(executable) { WorkingDirectory = folder, UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        start.Environment[_provider == "codex" ? CodaleAccount.CodexVariable : CodaleAccount.ClaudeVariable] =
+            CodaleAccount.ProfileHome(_provider, AccountId);
+        void Add(params string[] args) { foreach (var arg in args) start.ArgumentList.Add(arg); }
+        if (_provider == "claude")
+        {
+            Add("--print", "--output-format", "text", "--tools", "", "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--no-session-persistence");
+            Add("--system-prompt", system);
+        }
+        else Add("exec", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--output-last-message", output);
+        if (model.Length > 0) Add("--model", model);
+        if (_provider == "codex") Add("-");
+        return start;
     }
 }

@@ -46,6 +46,9 @@ public sealed class CodexAgentSession : IAgentSession
 
     private string? _threadId;
     private string? _currentTurnId;
+    private volatile string? _predictionSourceTurnId;
+    private readonly CancellationTokenSource _predictionLifetime = new();
+    private Task _predictionRequest = Task.CompletedTask;
     private (string Id, string Text)? _proposedPlan;
     private (string Id, string Text, TurnCompleted Completion)? _planReview;
 
@@ -272,6 +275,7 @@ public sealed class CodexAgentSession : IAgentSession
     public async Task SendAsync(UserTurn turn, CancellationToken ct = default)
     {
         var threadId = RequireThread();
+        _predictionSourceTurnId = null;
 
         var input = new List<object>();
 
@@ -807,7 +811,7 @@ public sealed class CodexAgentSession : IAgentSession
     }
 
     /// <summary>Routes our requests' responses; a JSON-RPC error rejects with <see cref="InvalidOperationException"/>.</summary>
-    private void HandleResponse(JsonElement message)
+    internal void HandleResponse(JsonElement message)
     {
         if (message.Int("id") is { } id)
         {
@@ -1004,6 +1008,12 @@ public sealed class CodexAgentSession : IAgentSession
     {
         var parameters = message.Prop("params") ?? message;
 
+        // Predictions belong only to the composer; they are never subagent activity.
+        if (method == "thread/prediction/updated" && parameters.Str("threadId") != _threadId)
+        {
+            return;
+        }
+
         if (ForeignThreadOf(parameters) is { } foreign)
         {
             await ReportSubagentThreadAsync(method, foreign, parameters).ConfigureAwait(false);
@@ -1035,7 +1045,21 @@ public sealed class CodexAgentSession : IAgentSession
                 return;
 
             case "turn/started":
+                _predictionSourceTurnId = null;
                 _currentTurnId = parameters.Prop("turn")?.Str("id") ?? parameters.Str("turnId") ?? _currentTurnId;
+                return;
+
+            case "thread/prediction/updated":
+                if (_options.PromptSuggestions && _predictionSourceTurnId is { } source &&
+                    parameters.Str("threadId") == _threadId && parameters.Str("sourceTurnId") == source)
+                {
+                    _predictionSourceTurnId = null;
+                    if (parameters.Prop("result") is { } result && result.Str("type") == "completed" &&
+                        result.Str("text") is { } text && !string.IsNullOrWhiteSpace(text))
+                    {
+                        await _events.Writer.WriteAsync(new PromptSuggested(text.Trim())).ConfigureAwait(false);
+                    }
+                }
                 return;
 
             case "turn/completed":
@@ -1377,6 +1401,8 @@ public sealed class CodexAgentSession : IAgentSession
     private async Task HandleTurnCompletedAsync(JsonElement parameters)
     {
         var turn = parameters.Prop("turn") ?? parameters;
+        var sourceTurnId = turn.Str("id") ?? parameters.Str("turnId") ?? _currentTurnId;
+        _predictionSourceTurnId = null;
         var status = turn.Str("status") ?? parameters.Str("status") ?? "completed";
         var subtype = status switch
         {
@@ -1405,6 +1431,35 @@ public sealed class CodexAgentSession : IAgentSession
             return;
         }
         await _events.Writer.WriteAsync(completion).ConfigureAwait(false);
+        if (_options.PromptSuggestions && status == "completed" && _threadId is { } threadId &&
+            sourceTurnId is { Length: > 0 })
+        {
+            _predictionSourceTurnId = sourceTurnId;
+            // Never await an RPC response on the read loop: it must keep reading to resolve it.
+            _predictionRequest = RequestPredictionAsync(threadId, sourceTurnId);
+        }
+    }
+
+    private async Task RequestPredictionAsync(string threadId, string sourceTurnId)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_predictionLifetime.Token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(30));
+        try
+        {
+            await SendRequestAsync("thread/prediction/request", request =>
+            {
+                request["threadId"] = threadId;
+                request["sourceTurnId"] = sourceTurnId;
+            }, timeout.Token).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Optional, experimental API: older CLIs and unavailable predictions must not fail chat.
+            if (_predictionSourceTurnId == sourceTurnId)
+            {
+                _predictionSourceTurnId = null;
+            }
+        }
     }
 
     /// <summary>Reads codex usage figures, tolerating snake_case and camelCase field names.</summary>
@@ -1538,6 +1593,9 @@ public sealed class CodexAgentSession : IAgentSession
 
     public async ValueTask DisposeAsync()
     {
+        _predictionSourceTurnId = null;
+        await _predictionLifetime.CancelAsync().ConfigureAwait(false);
+        await _predictionRequest.ConfigureAwait(false);
         if (_process is { } process)
         {
             // Kill the tree: the agent spawns its own shells and MCP servers.
@@ -1552,5 +1610,6 @@ public sealed class CodexAgentSession : IAgentSession
         }
 
         _stdinLock.Dispose();
+        _predictionLifetime.Dispose();
     }
 }

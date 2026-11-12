@@ -2932,6 +2932,34 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
+    private FileNode SelectedFileFolder()
+    {
+        var selected = ViewModel.Files.IsSearching
+            ? (FileFilterResults.SelectedItem as FileSearchHit)?.Node
+            : FileTree.SelectedItem as FileNode;
+        if (selected is null || selected.IsPlaceholder || selected.IsDraft)
+        {
+            return ViewModel.Files.Root;
+        }
+
+        return selected.IsDirectory
+            ? selected
+            : ViewModel.Files.RevealPath(Path.GetDirectoryName(selected.FullPath)!) ?? ViewModel.Files.Root;
+    }
+
+    private void OnFilesNewFileClick(object sender, RoutedEventArgs e) => CreateFromFileToolbar(file: true);
+
+    private void OnFilesNewFolderClick(object sender, RoutedEventArgs e) => CreateFromFileToolbar(file: false);
+
+    private void CreateFromFileToolbar(bool file)
+    {
+        var parent = SelectedFileFolder();
+        ViewModel.Files.SearchText = "";
+        BeginCreate(parent, file);
+    }
+
+    private void OnFilesExploreClick(object sender, RoutedEventArgs e) => ExploreFolder(SelectedFileFolder().FullPath);
+
     private async void OnFilesRefreshClick(object sender, RoutedEventArgs e)
     {
         ViewModel.Files.Reload();

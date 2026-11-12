@@ -86,11 +86,11 @@ public sealed partial class SettingsPanel : UserControl
         }
 
         (PageTitle.Text, PageSubtitle.Text) =
-            TabNavAi.IsChecked == true ? ("AI & providers", "Accounts, agent CLIs, model tiers and the helper model.")
-            : TabNavEditor.IsChecked == true ? ("Editor & syntax", "How code is shown and edited.")
-            : TabNavTerminal.IsChecked == true ? ("Terminal", "Shell, font and scrollback for terminal tabs.")
-            : TabNavGitShortcuts.IsChecked == true ? ("Keyboard shortcuts", "Click a shortcut, then press the new keys.")
-            : ("General", "Appearance, folders and the chat.");
+            TabNavAi.IsChecked == true ? ("Agents & Models", "Accounts, models and Smart features.")
+            : TabNavEditor.IsChecked == true ? ("Code Editor", "How code is shown and edited.")
+            : TabNavTerminal.IsChecked == true ? ("Shell & Terminal", "Shell, font and scrollback for terminal tabs.")
+            : TabNavGitShortcuts.IsChecked == true ? ("Key Bindings", "Click a shortcut, then press the new keys.")
+            : ("Appearance & Chat", "Appearance, folders and the chat.");
     }
 
     private void OnAppSettingsChanged(object? sender, EventArgs e)
@@ -103,14 +103,27 @@ public sealed partial class SettingsPanel : UserControl
     private void OnSmartStatusChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(RefreshSmartStatus);
     private string? _smartRowsKey;
     private readonly Dictionary<string, ComboBox> _smartModelBoxes = [];
+    private readonly HashSet<ComboBox> _loadingSmartModels = [];
 
     private void RefreshSmartFeatureRows()
     {
-        // The same agent profiles the chat's dropdown offers: signed-in accounts and API endpoints.
-        var profiles = AppSettings.ByokProviders.Where(p => !p.IsAccount).ToArray();
-        var rows = CliEndpointViewModel.BuildChoices().Rows;
+        // Use concrete account profiles, as account setup does. Chat aliases can fold a
+        // detected account into a default row that no longer carries its credential home.
+        var profiles = AppSettings.ByokProviders;
+        var rows = new List<ProviderChoice>();
+        foreach (var cli in new[] { "claude", "codex" })
+        {
+            var label = cli == "codex" ? "Codex" : "Claude";
+            var supported = profiles.Where(p => p.Supports(cli)).ToArray();
+            if (!supported.Any(p => p.IsAccount))
+                rows.Add(new("", label + ": Sign-in account", "Sign-in account", cli));
+            foreach (var profile in supported)
+                rows.Add(new(profile.Key, label + ": " + (profile.IsAccount ? profile.Email ?? profile.Name : profile.Name),
+                    profile.IsAccount ? "Sign-in account" : cli == "codex" ? profile.BaseUrl : profile.AnthropicBaseUrl, cli));
+        }
         var key = string.Join("|", SmartFeatureSettings.Groups.Select(g => AppSettings.SmartProviderFor(g.Id) + ":" + AppSettings.SmartApiProfileFor(g.Id)))
-            + "#" + string.Join("|", rows.Select(r => r.CliId + r.Name + r.Label + r.Detail));
+            + "#" + string.Join("|", rows.Select(r => r.CliId + r.Name + r.Label + r.Detail))
+            + "#" + string.Join("|", profiles.Where(p => p.IsAccount).Select(p => p.Key + ":" + p.AccountId));
         if (_smartRowsKey != key)
         {
             _smartRowsKey = key;
@@ -133,12 +146,15 @@ public sealed partial class SettingsPanel : UserControl
                 foreach (var row in rows)
                 {
                     var isAccount = row.Detail == "Sign-in account";
-                    var target = isAccount ? (row.CliId, "") : (row.CliId == "codex" ? "openai" : "anthropic", row.Name);
+                    var target = isAccount ? (row.CliId, row.Name) : (row.CliId == "codex" ? "openai" : "anthropic", row.Name);
                     if (group.Id == "embedding" && target.Item1 != "openai") continue; // embeddings need an OpenAI-compatible endpoint
                     providers.Items.Add(new ComboBoxItem { Content = row.Label, Tag = target });
                 }
+                var selectedProfile = savedProfile;
+                if (provider is "claude" or "codex")
+                    selectedProfile = SmartFeatureSettings.ResolveAccount(profiles, provider, savedProfile, AppSettings.AccountLabel(provider))?.Key ?? savedProfile;
                 var current = providers.Items.OfType<ComboBoxItem>().FirstOrDefault(i =>
-                    i.Tag is (string p, string profile) && p == provider && (provider is "claude" or "codex" or "off" || profile == savedProfile));
+                    i.Tag is (string p, string profile) && p == provider && (provider == "off" || profile == selectedProfile));
                 if (current is null && provider != "off")
                 {
                     current = new ComboBoxItem { Content = char.ToUpperInvariant(provider[0]) + provider[1..] + " (unavailable)", Tag = (provider, savedProfile) };
@@ -151,58 +167,83 @@ public sealed partial class SettingsPanel : UserControl
                     if (_loading || providers.SelectedItem is not ComboBoxItem { Tag: ValueTuple<string, string> selection }) return;
                     var (selected, profile) = selection;
                     AppSettings.SetSmartProvider(group.Id, selected);
-                    if (profile.Length > 0) AppSettings.SetSmartApiProfile(group.Id, profile);
+                    AppSettings.SetSmartApiProfile(group.Id, profile);
                     if (selected != "off" && AppSettings.SmartFeatureModel(group.Id).Equals("off", StringComparison.OrdinalIgnoreCase))
                         AppSettings.SetSmartFeatureModel(group.Id, "default");
                 };
                 Grid.SetColumn(providers, 1);
                 heading.Children.Add(providers);
                 section.Children.Add(heading);
-                var model = new ComboBox { IsEditable = true, PlaceholderText = group.Id == "embedding" ? "Select model" : "Default model",
+                var model = new ComboBox { IsEditable = true, PlaceholderText = group.Id == "embedding" ? "Select model" : "Account Flash model",
                     HorizontalAlignment = HorizontalAlignment.Right, Width = 220, Tag = group.Id, IsEnabled = provider != "off" };
-                if (group.Id != "embedding") model.Items.Add("Default");
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(model, group.Label + " model");
                 model.LostFocus += (_, _) => { if (!_loading && _smartModelBoxes.GetValueOrDefault(group.Id) == model) AppSettings.SetSmartFeatureModel(group.Id, model.Text); };
                 model.TextSubmitted += (_, args) => { if (!_loading) AppSettings.SetSmartFeatureModel(group.Id, args.Text); };
                 model.SelectionChanged += (_, _) => { if (!_loading && model.SelectedItem is string id) AppSettings.SetSmartFeatureModel(group.Id, id); };
-                model.DropDownOpened += async (_, _) => await LoadSmartModelsAsync(model, group.Id, provider);
+                var modelStatus = new TextBlock { Width = 220, HorizontalAlignment = HorizontalAlignment.Right,
+                    TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed,
+                    Style = (Style)SettingsRootGrid.Resources["RowDesc"] };
+                model.Loaded += async (_, _) => await LoadSmartModelsAsync(model, modelStatus, group.Id, provider);
+                model.DropDownOpened += async (_, _) => await LoadSmartModelsAsync(model, modelStatus, group.Id, provider);
                 section.Children.Add(model);
+                section.Children.Add(modelStatus);
                 _smartModelBoxes[group.Id] = model;
                 SmartFeatureRows.Children.Add(section);
             }
         }
         foreach (var (id, box) in _smartModelBoxes)
         {
+            if (id != "embedding")
+            {
+                var flash = SmartExperienceHost.CreateClient(id).DefaultModel;
+                box.PlaceholderText = flash.Length > 0 ? $"Flash model: {flash}" : "Account Flash model";
+            }
             if (box.FocusState == FocusState.Unfocused)
             {
                 var model = AppSettings.SmartFeatureModel(id);
-                box.Text = model.Length == 0 ? id == "embedding" ? "" : "Default" : model;
+                box.Text = model;
             }
         }
     }
 
-    private async Task LoadSmartModelsAsync(ComboBox box, string group, string provider)
+    private async Task LoadSmartModelsAsync(ComboBox box, TextBlock status, string group, string provider)
     {
+        if (provider == "off" || !_loadingSmartModels.Add(box)) return;
+        status.Text = "Loading models…";
+        status.Visibility = Visibility.Visible;
+        var profileKey = AppSettings.SmartApiProfileFor(group);
         try
         {
             var client = SmartExperienceHost.CreateClient(group);
+            var accountId = client.AccountId;
             var ids = provider is "claude" or "codex"
-                ? (await ChatViewModel.FetchCatalogueAsync(provider)).Select(m => m.Id).ToArray()
+                ? (ChatViewModel.KnownCatalogue(provider, accountId) ?? await ChatViewModel.FetchCatalogueAsync(provider, accountId)).Select(m => m.Id).ToArray()
                 : await client.ModelsAsync(CancellationToken.None);
-            if (provider != AppSettings.SmartProviderFor(group) || !_smartModelBoxes.ContainsValue(box)) return;
+            if (provider != AppSettings.SmartProviderFor(group) || profileKey != AppSettings.SmartApiProfileFor(group) || !_smartModelBoxes.ContainsValue(box)) return;
             var current = box.Text;
             var loading = _loading; _loading = true;
             try
             {
                 box.Items.Clear();
-                if (group != "embedding") box.Items.Add("Default");
-                foreach (var id in ids.Distinct()) box.Items.Add(id);
+                foreach (var id in ids.Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Select(id => id.Trim()).Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    box.Items.Add(id);
+                }
                 box.Text = current;
             }
             finally { _loading = loading; }
-            ToolTipService.SetToolTip(box, ids.Length == 0 ? "Enter a model ID." : null);
+            status.Text = ids.Length == 0 ? "No models reported. Check the account sign-in or enter a model ID." : "";
+            status.Visibility = ids.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+            ToolTipService.SetToolTip(box, ids.Length == 0 ? status.Text : null);
         }
-        catch (Exception ex) { ToolTipService.SetToolTip(box, ex.Message); }
+        catch (Exception ex)
+        {
+            status.Text = $"Could not load models: {ex.Message}";
+            status.Visibility = Visibility.Visible;
+            ToolTipService.SetToolTip(box, status.Text);
+        }
+        finally { _loadingSmartModels.Remove(box); }
     }
     private void RefreshSmartStatus()
     {

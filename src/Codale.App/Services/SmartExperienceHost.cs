@@ -9,8 +9,15 @@ public static class SmartExperienceHost
         Path.Combine(McpServerSettings.CodaleDataRoot(), "smart", "history"));
     private static bool _started;
     private static string? _configuration;
-    public static SmartProviderClient CreateClient(string feature) => new(AppSettings.SmartProviderFor(feature), AppSettings.FindByok(AppSettings.SmartApiProfileFor(feature)),
-        SmartFeatureSettings.Features.ToDictionary(f => f.Id, f => AppSettings.SmartFeatureModel(f.Id)));
+    public static SmartProviderClient CreateClient(string feature)
+    {
+        var provider = AppSettings.SmartProviderFor(feature);
+        var key = AppSettings.SmartApiProfileFor(feature);
+        var profile = provider is "claude" or "codex"
+            ? SmartFeatureSettings.ResolveAccount(AppSettings.ByokProviders, provider, key, AppSettings.AccountLabel(provider))
+            : AppSettings.FindByok(key);
+        return new(provider, profile, SmartFeatureSettings.Features.ToDictionary(f => f.Id, f => AppSettings.SmartFeatureModel(f.Id)));
+    }
     public static void Start()
     {
         if (_started) return;

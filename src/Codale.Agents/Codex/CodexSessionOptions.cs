@@ -69,6 +69,9 @@ public sealed record CodexSessionOptions
     /// <summary>Resume an existing conversation (thread) instead of starting a new one.</summary>
     public string? ResumeSessionId { get; init; }
 
+    /// <summary>Request next-prompt predictions after successful turns. Read when the session starts.</summary>
+    public bool PromptSuggestions { get; init; }
+
     /// <summary>
     /// Host-provided MCP servers, passed as <c>-c mcp_servers.*</c> config overrides -
     /// the same rendering the terminal-CLI launcher uses.

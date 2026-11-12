@@ -2140,6 +2140,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     ResumeSessionId = ResumeSessionId,
                     Environment = environment.Count == 0 ? null : environment,
                     CustomProvider = _endpointSettings?.CodexProvider(EndpointName),
+                    PromptSuggestions = AppSettings.SuggestNextPrompt,
                 })
                 : new ClaudeAgentSession(new ClaudeSessionOptions
                 {

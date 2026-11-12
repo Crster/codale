@@ -439,19 +439,14 @@
             </Grid.ColumnDefinitions>
 
             <!--  Left: files, git and the chat history, on the window backdrop. A small
-                  segmented switch heads the panel; the Files actions share its row so the
-                  tree starts right under it.  -->
+                  segmented switch heads the panel, with page actions below the tabs.  -->
             <Grid x:Name="LeftPanel" Padding="8,2,2,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <Grid Margin="0,0,0,6" ColumnSpacing="4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
+                <Grid Margin="0,0,0,6">
                     <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="2">
                         <RadioButton
                             x:Name="FilesTabButton"
@@ -468,7 +463,7 @@
                             Style="{StaticResource ShellSegment}"
                             Tag="Git">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <TextBlock Text="Git" />
+                                <TextBlock Text="Source Control" />
                                 <Border
                                     MinWidth="16"
                                     Height="15"
@@ -494,20 +489,48 @@
                             Style="{StaticResource ShellSegment}"
                             Tag="History" />
                     </StackPanel>
+                </Grid>
 
-                    <!--  Files actions: add a folder, re-read the disk, fold the tree  -->
-                    <StackPanel
+                <Grid Grid.Row="1">
+                <!--  Files  -->
+                <Grid x:Name="FilesPage">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <!--  Project header with explorer actions, below the filter.  -->
+                    <Grid
                         x:Name="FilesActions"
-                        Grid.Column="1"
-                        VerticalAlignment="Center"
-                        Orientation="Horizontal">
-                        <Button
-                            Width="26"
-                            Height="26"
-                            Click="OnFilesAddFolderClick"
-                            Style="{StaticResource ShellIconButton}"
-                            ToolTipService.ToolTip="Add folder to workspace (this session only)">
-                            <FontIcon FontSize="12" Glyph="&#xE8F4;" />
+                        Grid.Row="1"
+                        Margin="4,0,6,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            Margin="0,0,4,0"
+                            FontSize="12"
+                            FontWeight="SemiBold"
+                            Text="{x:Bind ViewModel.Files.Root.Name}"
+                            TextTrimming="CharacterEllipsis"
+                            ToolTipService.ToolTip="{x:Bind ViewModel.Files.ProjectPath}">
+                            <TextBlock.ContextFlyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem Text="Open folder in Explorer" Click="OnFilesExploreClick" />
+                                    <MenuFlyoutItem Text="Add folder to workspace" Click="OnFilesAddFolderClick" />
+                                </MenuFlyout>
+                            </TextBlock.ContextFlyout>
+                        </TextBlock>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <Button Width="26" Height="26" Click="OnFilesNewFileClick"
+                            Style="{StaticResource ShellIconButton}" ToolTipService.ToolTip="New file">
+                            <FontIcon FontSize="12" Glyph="&#xE8A5;" />
+                        </Button>
+                        <Button Width="26" Height="26" Click="OnFilesNewFolderClick"
+                            Style="{StaticResource ShellIconButton}" ToolTipService.ToolTip="New folder">
+                            <FontIcon FontSize="12" Glyph="&#xE8B7;" />
                         </Button>
                         <Button
                             Width="26"
@@ -525,14 +548,19 @@
                             ToolTipService.ToolTip="Collapse all folders">
                             <FontIcon FontSize="12" Glyph="&#xE70E;" />
                         </Button>
-                    </StackPanel>
-                </Grid>
-
-                <Grid Grid.Row="1">
-                <!--  Files  -->
-                <Grid x:Name="FilesPage">
+                        </StackPanel>
+                    </Grid>
+                    <TextBox
+                        Grid.Row="0"
+                        Margin="0,0,6,6"
+                        PlaceholderText="Filter files…"
+                        AutomationProperties.Name="Filter files"
+                        Text="{x:Bind ViewModel.Files.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        KeyDown="OnFileSearchKeyDown" />
                     <TreeView
                         x:Name="FileTree"
+                        Grid.Row="2"
+                        Visibility="{x:Bind ViewModel.Files.IsSearching, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}"
                         Background="Transparent"
                         CanDragItems="False"
                         Expanding="OnTreeExpanding"
@@ -592,6 +620,29 @@
                             </DataTemplate>
                         </TreeView.ItemTemplate>
                     </TreeView>
+                    <ListView
+                        x:Name="FileFilterResults"
+                        Grid.Row="2"
+                        ItemsSource="{x:Bind ViewModel.Files.SearchResults}"
+                        Visibility="{x:Bind ViewModel.Files.IsSearching, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"
+                        IsItemClickEnabled="True"
+                        ItemClick="OnFileSearchHitClick"
+                        RightTapped="OnTreeRightTapped"
+                        SelectionMode="Single"
+                        Background="Transparent">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="vm:FileSearchHit">
+                                <StackPanel Padding="0,2" ToolTipService.ToolTip="{x:Bind FullPath}">
+                                    <TextBlock Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{x:Bind Directory}" FontSize="11"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                    <TextBlock Grid.Row="2" Margin="12,8" Text="No matching files"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Visibility="{x:Bind ViewModel.Files.HasNoResults, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                 </Grid>
 
                 <!--  Git  -->
@@ -666,16 +717,16 @@
                             <RowDefinition x:Name="GitHistoryRow" Height="*" />
                         </Grid.RowDefinitions>
 
-                        <!--  Header: branch switcher on the left, sync actions on the right  -->
-                        <Grid Margin="2,0,2,6" ColumnSpacing="2">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
+                        <!--  Full branch name above a compact explorer-style toolbar.  -->
+                        <Grid Margin="4,0,6,6" RowSpacing="2">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
                         <StackPanel VerticalAlignment="Center">
                             <Button
                                 x:Name="BranchButton"
-                                Padding="6,4"
+                                Padding="0,4"
                                 HorizontalAlignment="Stretch"
                                 HorizontalContentAlignment="Left"
                                 Background="Transparent"
@@ -838,9 +889,10 @@
                                     <FontIcon FontSize="12" Glyph="&#xE81E;" Opacity="0.7" />
                                     <TextBlock
                                         Grid.Column="1"
+                                        FontSize="12"
                                         FontWeight="SemiBold"
                                         Text="{x:Bind ViewModel.Git.BranchName, Mode=OneWay}"
-                                        TextTrimming="CharacterEllipsis" />
+                                        TextWrapping="Wrap" />
                                     <FontIcon
                                         Grid.Column="2"
                                         FontSize="10"
@@ -850,37 +902,42 @@
                             </Button>
                         </StackPanel>
 
-                        <!--  Sync with the remote, re-read  -->
+                        <!--  Changes heading and actions above the commit controls.  -->
+                        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <TextBlock Text="Changes" FontSize="12" FontWeight="SemiBold" />
+                            <TextBlock Text="{x:Bind ViewModel.Git.ChangeCount, Mode=OneWay}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
                         <StackPanel
-                            Grid.Column="1"
+                            Grid.Row="1"
+                            HorizontalAlignment="Right"
                             VerticalAlignment="Center"
                             Orientation="Horizontal"
                             Spacing="0">
                             <Button
-                                Padding="6,3"
-                                Background="Transparent"
-                                BorderBrush="Transparent"
+                                Width="26"
+                                Height="26"
+                                Style="{StaticResource ShellIconButton}"
                                 Command="{x:Bind ViewModel.Git.PushCommand}"
                                 IsEnabled="{x:Bind ViewModel.Git.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
                                 ToolTipService.ToolTip="Push to origin">
-                                <FontIcon FontSize="13" Glyph="&#xE898;" />
+                                <FontIcon FontSize="12" Glyph="&#xE898;" />
                             </Button>
                             <Button
-                                Padding="6,3"
-                                Background="Transparent"
-                                BorderBrush="Transparent"
+                                Width="26"
+                                Height="26"
+                                Style="{StaticResource ShellIconButton}"
                                 Command="{x:Bind ViewModel.Git.PullCommand}"
                                 IsEnabled="{x:Bind ViewModel.Git.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
                                 ToolTipService.ToolTip="Pull (fast-forward)">
-                                <FontIcon FontSize="13" Glyph="&#xE896;" />
+                                <FontIcon FontSize="12" Glyph="&#xE896;" />
                             </Button>
                             <!--  Stash: shelve the working changes, and pop them back later  -->
                             <Button
-                                Padding="6,3"
-                                Background="Transparent"
-                                BorderBrush="Transparent"
+                                Width="26"
+                                Height="26"
+                                Style="{StaticResource ShellIconButton}"
                                 ToolTipService.ToolTip="Stashes">
-                                <FontIcon FontSize="13" Glyph="&#xE7B8;" />
+                                <FontIcon FontSize="12" Glyph="&#xE7B8;" />
                                 <Button.Flyout>
                                     <Flyout
                                         FlyoutPresenterStyle="{StaticResource PickerFlyout}"
@@ -979,13 +1036,13 @@
                                 </Button.Flyout>
                             </Button>
                             <Button
-                                Padding="6,3"
-                                Background="Transparent"
-                                BorderBrush="Transparent"
+                                Width="26"
+                                Height="26"
+                                Style="{StaticResource ShellIconButton}"
                                 Command="{x:Bind ViewModel.Git.RefreshCommand}"
                                 IsEnabled="{x:Bind ViewModel.Git.IsBusy, Mode=OneWay, Converter={StaticResource NotBool}}"
                                 ToolTipService.ToolTip="Refresh">
-                                <FontIcon FontSize="16" Glyph="&#xE72C;" />
+                                <FontIcon FontSize="12" Glyph="&#xE72C;" />
                             </Button>
                         </StackPanel>
                         </Grid>
@@ -1034,10 +1091,11 @@
                                     x:Name="CommitMessageBox"
                                     AcceptsReturn="True"
                                     MaxHeight="130"
-                                    MinHeight="60"
+                                    MinHeight="32"
                                     IsEnabled="{x:Bind ViewModel.Git.IsGeneratingCommitMessage, Mode=OneWay, Converter={StaticResource NotBool}}"
-                                    Padding="10,6,34,6"
-                                    PlaceholderText="Commit message (Ctrl+Space to generate)"
+                                    Padding="8,5"
+                                    FontSize="12"
+                                    PlaceholderText="Message (Ctrl+Enter to commit)"
                                     ToolTipService.ToolTip="Generate from staged changes (Ctrl+Space)"
                                     Text="{x:Bind ViewModel.Git.CommitMessage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                     TextWrapping="Wrap">
@@ -1060,7 +1118,6 @@
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <FontIcon FontSize="12" Glyph="&#xE73E;" />
                                     <TextBlock Text="Commit" />
-                                    <TextBlock Opacity="0.75" Text="{x:Bind ViewModel.Git.StagedSummary, Mode=OneWay}" />
                                 </StackPanel>
                             </Button>
                         </StackPanel>
@@ -1075,7 +1132,7 @@
                                 IsChecked="True"
                                 Style="{StaticResource SectionHeader}">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <TextBlock Text="STAGED" />
+                                    <TextBlock Text="Staged" />
                                     <Border
                                         Padding="6,0"
                                         VerticalAlignment="Center"
@@ -1137,7 +1194,7 @@
                                 FontSize="11"
                                 FontWeight="SemiBold"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Text="CHANGES" />
+                                Text="Unstaged" />
                             <Border
                                 Grid.Column="1"
                                 Padding="6,0"
@@ -1330,8 +1387,7 @@
                                             <TextBlock
                                                 FontSize="12"
                                                 Text="{x:Bind Title, Mode=OneWay}"
-                                                TextTrimming="CharacterEllipsis"
-                                                TextWrapping="NoWrap" />
+                                                TextWrapping="Wrap" />
                                             <TextBlock
                                                 FontSize="10.5"
                                                 Foreground="{ThemeResource TextFillColorTertiaryBrush}"
