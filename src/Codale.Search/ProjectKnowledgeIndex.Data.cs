@@ -37,8 +37,18 @@ public sealed partial class ProjectKnowledgeIndex
     private sealed record RetrievalRecord(string SessionId, long ElapsedMs, int Tokens, IReadOnlyList<string> Refs,
         int ExplorationCalls, int InputTokens, int OutputTokens);
 
-    /// <summary>Chunks seen in a search, by id: a ranking works in ids, and the text is read back only for the winners.</summary>
+    /// <summary>
+    /// Where each chunk id seen lately lives, so a ranking can work in ids and read the text back only for the winners.
+    /// Bounded: past the cap it starts again, and an id that is gone simply yields no chunk (the next search re-finds it).
+    /// </summary>
     private readonly ConcurrentDictionary<long, DbNode> _chunkNodes = new();
+    private const int MaxRememberedChunks = 20_000;
+
+    internal void RememberChunk(long id, DbNode node)
+    {
+        if (_chunkNodes.Count >= MaxRememberedChunks) _chunkNodes.Clear();
+        _chunkNodes[id] = node;
+    }
 
     private readonly object _idGate = new();
     private long _nextId = -1;
@@ -73,7 +83,7 @@ public sealed partial class ProjectKnowledgeIndex
     private SourceChunk? ReadChunk(DbNode node)
     {
         if (node.ReadJson<ChunkRecord>() is not { } record) return null;
-        _chunkNodes[record.Id] = node;
+        RememberChunk(record.Id, node);
         var at = node.Location.Segments; // source, worktree, chunk, path, line.id
         return new SourceChunk(at[1], at[3], record.Hash, record.StartLine, record.Text, record.Id, record.Symbols);
     }

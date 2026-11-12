@@ -4,7 +4,8 @@ namespace Codale.Db;
 
 public sealed partial class CodaleDb
 {
-    private const int CacheLimit = 1024;
+    /// <summary>Only tiny values are kept in memory (settings, flags, ids); anything larger is read from the log.</summary>
+    private const int CacheLimit = 128;
 
     internal string? ReadText(string path)
     {

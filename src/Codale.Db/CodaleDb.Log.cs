@@ -32,8 +32,16 @@ public sealed partial class CodaleDb
         return _log.Append(RecordType.Vector, 0, head, vector).Size;
     }
 
-    private int AppendIndex(string path, string field, string text) =>
-        _log.Append(RecordType.Index, 0, EncodeStrings(path, field, text)).Size;
+    private (int Segment, long Offset, int Size) AppendIndex(string path, string field, string text) =>
+        _log.Append(RecordType.Index, 0, EncodeStrings(path, field, text));
+
+    /// <summary>The words of a document, read back from its record: they are not kept in memory.</summary>
+    private string ReadIndexText(KeywordDoc doc)
+    {
+        var body = new byte[doc.RecordSize - SegmentLog.HeaderSize];
+        _log.Read(doc.Segment, doc.Offset + SegmentLog.HeaderSize, body);
+        return DecodeStrings(body, 3)[2];
+    }
 
     private static byte[] EncodeStrings(params string[] values)
     {
@@ -98,7 +106,7 @@ public sealed partial class CodaleDb
             case RecordType.Index:
             {
                 var parts = DecodeStrings(body, 3);
-                ApplyIndex(parts[0], parts[1], parts[2], size);
+                ApplyIndex(parts[0], parts[1], parts[2], segment, offset, size);
                 break;
             }
             case RecordType.Link:
@@ -134,7 +142,7 @@ public sealed partial class CodaleDb
         _vectorVersion++;
     }
 
-    private void ApplyIndex(string path, string field, string text, int recordSize)
+    private void ApplyIndex(string path, string field, string text, int segment, long offset, int size)
     {
         var node = FindNode(path, create: true)!;
         node.Docs ??= [];
@@ -143,8 +151,8 @@ public sealed partial class CodaleDb
             _dead += old.RecordSize;
             Keywords(field).Kill(old);
         }
-        var doc = new KeywordDoc(node, field, text, ++_documentSequence) { RecordSize = recordSize };
-        Keywords(field).Add(doc);
+        var doc = new KeywordDoc(node, field, ++_documentSequence) { Segment = segment, Offset = offset, RecordSize = size };
+        Keywords(field).Add(doc, text);
         node.Docs[field] = doc;
     }
 

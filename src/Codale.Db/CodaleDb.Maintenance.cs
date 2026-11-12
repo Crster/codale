@@ -72,7 +72,13 @@ public sealed partial class CodaleDb
             if (node.Vector is { } vector)
                 node.Vector = new VectorDoc(vector.Model, vector.Data, AppendVector(path, vector.Model, vector.Data));
             if (node.Docs is not null)
-                foreach (var doc in node.Docs.Values) doc.RecordSize = AppendIndex(path, doc.Field, doc.Text);
+                foreach (var doc in node.Docs.Values)
+                {
+                    var (segment, offset, size) = AppendIndex(path, doc.Field, ReadIndexText(doc));
+                    doc.Segment = segment;
+                    doc.Offset = offset;
+                    doc.RecordSize = size;
+                }
             if (node.Links is not null)
                 foreach (var (rel, target) in node.Links) _log.Append(RecordType.Link, 0, EncodeStrings(path, rel, target));
         }

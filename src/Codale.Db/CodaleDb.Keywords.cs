@@ -25,7 +25,8 @@ public sealed partial class CodaleDb
         _lock.EnterWriteLock();
         try
         {
-            ApplyIndex(path, field, text, AppendIndex(path, field, text));
+            var (segment, offset, size) = AppendIndex(path, field, text);
+            ApplyIndex(path, field, text, segment, offset, size);
             Committed();
         }
         finally { _lock.ExitWriteLock(); }

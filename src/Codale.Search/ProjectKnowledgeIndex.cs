@@ -203,7 +203,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
             var embedder = HashedTextEmbedder.Instance;
             var similar = ChunkRoot(worktree).Query(topic, 40)
                 .Select(hit => (Id: ChunkId(hit.Node), hit.Score, hit.Node)).ToList();
-            foreach (var near in similar) _chunkNodes.TryAdd(near.Id, near.Node);
+            foreach (var near in similar) RememberChunk(near.Id, near.Node);
             if (similar.Count > 0)
             {
                 // Relative cut: keep near-best neighbours only, so unrelated files never ride in on noise.

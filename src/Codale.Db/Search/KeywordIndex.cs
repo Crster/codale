@@ -6,20 +6,21 @@ public readonly record struct KeywordTerm(string Text, bool Prefix = false);
 /// <summary>One node's text in one keyword index (a "field"): the words it holds, as the consumer tokenised them.</summary>
 internal sealed class KeywordDoc
 {
-    public KeywordDoc(TNode node, string field, string text, long sequence)
+    public KeywordDoc(TNode node, string field, long sequence)
     {
         Node = node;
         Field = field;
-        Text = text;
         Sequence = sequence;
     }
 
     public readonly TNode Node;
     public readonly string Field;
-    public readonly string Text;
     public readonly long Sequence;
     public int Length;
     public int Terms;
+    /// <summary>Where the record holding this document's words sits in the log; the words themselves are not kept in memory.</summary>
+    public int Segment;
+    public long Offset;
     public int RecordSize;
     public bool Dead;
 }
@@ -44,11 +45,12 @@ internal sealed class KeywordIndex
 
     public static string[] Split(string text) => text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-    public void Add(KeywordDoc doc)
+    /// <summary>Indexes the words of <paramref name="text"/>; the caller keeps the text where it is stored.</summary>
+    public void Add(KeywordDoc doc, string text)
     {
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         var length = 0;
-        foreach (var token in Split(doc.Text))
+        foreach (var token in Split(text))
         {
             counts[token] = counts.GetValueOrDefault(token) + 1;
             length++;
