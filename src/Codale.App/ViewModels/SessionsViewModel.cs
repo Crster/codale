@@ -135,7 +135,7 @@ public sealed partial class SessionsViewModel : ObservableObject
                 return new TranscriptSummary
                 {
                     SessionId = f.Id,
-                    FilePath = ProjectPaths.FeatureDirectory(_projectPath, f.Id),
+                    FilePath = "",
                     StartedAt = f.CreatedAt,
                     UpdatedAt = f.UpdatedAt,
                     CustomTitle = NativeTitle(readers, mapping, f.Name, f.Description) ?? f.Name,

@@ -79,6 +79,18 @@ public sealed partial class SettingsPanel : UserControl
         SectionEditor.Visibility = TabNavEditor.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SectionTerminal.Visibility = TabNavTerminal.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SectionGitShortcuts.Visibility = TabNavGitShortcuts.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+
+        if (PageTitle is null || PageSubtitle is null)
+        {
+            return;
+        }
+
+        (PageTitle.Text, PageSubtitle.Text) =
+            TabNavAi.IsChecked == true ? ("AI & providers", "Accounts, agent CLIs, model tiers and the helper model.")
+            : TabNavEditor.IsChecked == true ? ("Editor & syntax", "How code is shown and edited.")
+            : TabNavTerminal.IsChecked == true ? ("Terminal", "Shell, font and scrollback for terminal tabs.")
+            : TabNavGitShortcuts.IsChecked == true ? ("Keyboard shortcuts", "Click a shortcut, then press the new keys.")
+            : ("General", "Appearance, folders and the chat.");
     }
 
     private void OnAppSettingsChanged(object? sender, EventArgs e)

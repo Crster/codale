@@ -137,7 +137,7 @@
         <Style x:Key="PanelItem" TargetType="ListViewItem">
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="MinWidth" Value="0" />
-            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="Padding" Value="8,4" />
             <Setter Property="Margin" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="CornerRadius" Value="6" />
@@ -264,13 +264,13 @@
         </Style>
 
         <Style x:Key="MetricLabel" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontSize" Value="11.5" />
             <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
 
         <Style x:Key="MetricValue" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="FontSize" Value="11" />
             <Setter Property="Foreground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
             <Setter Property="HorizontalAlignment" Value="Right" />
             <Setter Property="VerticalAlignment" Value="Center" />
@@ -279,8 +279,8 @@
         </Style>
 
         <Style x:Key="MetricBar" TargetType="ProgressBar">
-            <Setter Property="MinHeight" Value="4" />
-            <Setter Property="CornerRadius" Value="2" />
+            <Setter Property="MinHeight" Value="3" />
+            <Setter Property="CornerRadius" Value="1.5" />
             <Setter Property="Maximum" Value="100" />
         </Style>
 
@@ -306,17 +306,12 @@
         </Style>
     </UserControl.Resources>
 
+    <!--  Flush with the chat, divided from it by one hairline: a side column, not a floating card.  -->
     <Border
-        Margin="0,8,8,8"
         Background="{ThemeResource ShellSidePanelBackgroundBrush}"
-        BorderBrush="{ThemeResource ShellSidePanelStrokeBrush}"
-        BorderThickness="1"
-        CornerRadius="12"
-        Translation="0,0,24">
-        <Border.Shadow>
-            <ThemeShadow />
-        </Border.Shadow>
-        <Grid CornerRadius="12">
+        BorderBrush="{ThemeResource ShellHairlineBrush}"
+        BorderThickness="1,0,0,0">
+        <Grid>
             <views:SessionPanelRail
                 x:Name="Rail"
                 ExpandRequested="OnRailExpandRequested"
@@ -330,7 +325,12 @@
                 </Grid.RowDefinitions>
 
                 <!--  Header: collapse, profile, CLI version  -->
-                <Grid Padding="8,8,8,8" ColumnSpacing="4">
+                <Grid
+                    Height="40"
+                    Padding="6,0,6,0"
+                    BorderBrush="{ThemeResource ShellHairlineBrush}"
+                    BorderThickness="0,0,0,1"
+                    ColumnSpacing="2">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
@@ -338,27 +338,18 @@
                     </Grid.ColumnDefinitions>
 
                     <Button
-                        Width="32"
-                        Height="32"
-                        Padding="0"
-                        VerticalAlignment="Center"
                         AutomationProperties.Name="Collapse session panel"
-                        Background="Transparent"
-                        BorderThickness="0"
                         Click="OnPanelToggleClick"
-                        CornerRadius="6"
+                        Style="{StaticResource ShellIconButton}"
                         ToolTipService.ToolTip="Collapse session panel">
-                        <FontIcon
-                            FontSize="14"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Glyph="&#xE89F;" />
+                        <FontIcon FontSize="13" Glyph="&#xE89F;" />
                     </Button>
 
                     <Button
                         x:Name="ProfileButton"
                         Grid.Column="1"
-                        Height="32"
-                        Padding="8,0"
+                        Height="28"
+                        Padding="6,0"
                         HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Stretch"
                         AutomationProperties.Name="Agent profile"
@@ -381,7 +372,7 @@
                             <TextBlock
                                 Grid.Column="1"
                                 VerticalAlignment="Center"
-                                FontSize="13"
+                                FontSize="12.5"
                                 FontWeight="SemiBold"
                                 Text="{x:Bind Workspace.CliEndpoint.ActiveName, Mode=OneWay}"
                                 TextTrimming="CharacterEllipsis"
@@ -469,7 +460,7 @@
                 </Grid>
 
                 <!--  Body  -->
-                <Grid Grid.Row="1" Margin="8,0,8,8">
+                <Grid Grid.Row="1" Margin="8,6,8,8">
                     <Grid.RowDefinitions>
                         <!--  Session card  -->
                         <RowDefinition Height="Auto" />
@@ -492,87 +483,12 @@
                         </InfoBar>
 
                         <!--  The live session: model, mode, context and usage  -->
-                        <Border
-                            Padding="4"
-                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1"
-                            CornerRadius="10">
+                        <Border Padding="0">
                             <StackPanel Spacing="0">
-                                <StackPanel Visibility="{x:Bind ShowSessionPickers, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                    <Button
-                                        Click="OnModelChipClick"
-                                        IsEnabled="{x:Bind Session.CanChangeMode, Mode=OneWay}"
-                                        Style="{StaticResource PropertyRowButton}"
-                                        ToolTipService.ToolTip="{x:Bind Session.ModelDisplay, Mode=OneWay}">
-                                        <Grid ColumnSpacing="10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <FontIcon
-                                                FontSize="13"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                Glyph="&#xE99A;" />
-                                            <TextBlock Grid.Column="1" Style="{StaticResource MetricLabel}" Text="Model" />
-                                            <TextBlock
-                                                Grid.Column="2"
-                                                HorizontalAlignment="Right"
-                                                VerticalAlignment="Center"
-                                                FontSize="12"
-                                                FontWeight="SemiBold"
-                                                Text="{x:Bind Session.ModelDisplay, Mode=OneWay}"
-                                                TextTrimming="CharacterEllipsis"
-                                                TextWrapping="NoWrap" />
-                                            <FontIcon
-                                                Grid.Column="3"
-                                                FontSize="9"
-                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                Glyph="&#xE76C;" />
-                                        </Grid>
-                                    </Button>
-
-                                    <Button
-                                        Click="OnModeChipClick"
-                                        IsEnabled="{x:Bind Session.CanChangeMode, Mode=OneWay}"
-                                        Style="{StaticResource PropertyRowButton}"
-                                        ToolTipService.ToolTip="How much the agent may do before asking (locked while the agent is working)">
-                                        <Grid ColumnSpacing="10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <FontIcon
-                                                FontSize="13"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                Glyph="{x:Bind Session.ModeGlyph, Mode=OneWay}" />
-                                            <TextBlock Grid.Column="1" Style="{StaticResource MetricLabel}" Text="Mode" />
-                                            <TextBlock
-                                                Grid.Column="2"
-                                                HorizontalAlignment="Right"
-                                                VerticalAlignment="Center"
-                                                FontSize="12"
-                                                FontWeight="SemiBold"
-                                                Text="{x:Bind Session.ModeDisplayText, Mode=OneWay}"
-                                                TextTrimming="CharacterEllipsis"
-                                                TextWrapping="NoWrap" />
-                                            <FontIcon
-                                                Grid.Column="3"
-                                                FontSize="9"
-                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                Glyph="&#xE76C;" />
-                                        </Grid>
-                                    </Button>
-
-                                    <Border Margin="4,4,4,0" Style="{StaticResource SectionDivider}" />
-                                </StackPanel>
+                                <!--  Model and mode are picked in the composer, where the prompt is written.  -->
 
                                 <!--  Meters  -->
-                                <StackPanel Padding="8,8,8,6" Spacing="10">
+                                <StackPanel Padding="6,2,6,4" Spacing="9">
                                     <!--  Context, with compact beside it  -->
                                     <StackPanel Spacing="5">
                                         <Grid ColumnSpacing="8">

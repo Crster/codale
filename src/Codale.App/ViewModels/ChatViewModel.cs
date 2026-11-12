@@ -31,6 +31,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
     private readonly string _projectPath;
+
+    /// <summary>The project this chat works in; relative "@file" mentions resolve under it.</summary>
+    public string ProjectPath => _projectPath;
     private readonly StatusViewModel _status;
 
     private IAgentSession? _session;
@@ -2929,7 +2932,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// a command about to run, a diff being made, a question or a plan are worth seeing
     /// live; a read or a search is not - its row says it all.
     /// </summary>
-    private ToolCallItem CreateToolCall(string toolUseId, string toolName, JsonElement input)
+    private ToolCallItem CreateToolCall(string toolUseId, string toolName, JsonElement input, DateTimeOffset? startedAt = null)
     {
         var plan = ToolCallItem.PlanInput(toolName, input);
         var kind = ToolKinds.Of(toolName);
@@ -2946,7 +2949,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             Files = ToolCallItem.FileInputs(toolName, input),
             Diff = ToolDiffs.FromInput(toolName, input),
             IsExpanded = plan is not null || kind is ToolKind.Shell or ToolKind.Edit or ToolKind.Write or ToolKind.Ask,
-            Timestamp = DateTimeOffset.Now,
+            Timestamp = startedAt ?? DateTimeOffset.Now,
         };
     }
 
@@ -2963,6 +2966,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        AddStep(turn, item);
+    }
+
+    private static void AddStep(TurnActivityItem turn, ToolCallItem item)
+    {
         var steps = turn.Steps;
 
         if (ToolKinds.IsExplore(item.Kind))
@@ -5003,7 +5011,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public void ResetForNewSession()
     {
-        _earlierLoaded = false;
         EndTurn(TurnOutcome.Stopped);
         Items.Clear();
         _toolCalls.Clear();
@@ -5126,29 +5133,20 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>
-    /// Prompts the transcript keeps in full. Older turns have long scrolled out of view; their rows,
-    /// tool calls and rendered markdown are dropped so a long session does not grow without bound.
-    /// A count row stands in for them and holds no reference to what it replaced; Load reads the
-    /// turns back from the history log, which still has every message.
+    /// Prompts whose tool activity the transcript keeps in full. Every turn stays in the history,
+    /// but older turns have long scrolled out of view: their tool calls and activity timelines are
+    /// dropped so a long session does not grow without bound. Prompts and answers remain.
     /// </summary>
     private const int KeptPrompts = 2;
 
-    /// <summary>The reader loaded the earlier turns back: they stay, so the next prompt does not fold them away again.</summary>
-    private bool _earlierLoaded;
-
     /// <summary>
-    /// Folds everything before the <see cref="KeptPrompts"/>th-latest prompt (steers join their
-    /// turn and do not count) into the <see cref="EarlierTurnsItem"/> at the top. Anything still
-    /// waiting on the user - a running call, an approval or plan not yet decided - stays, with
-    /// everything after it.
+    /// Drops the tool calls and activity timelines of every turn before the
+    /// <see cref="KeptPrompts"/>th-latest prompt (steers join their turn and do not count).
+    /// Anything still waiting on the user - a running call, an approval or plan not yet
+    /// decided - stays, with everything after it.
     /// </summary>
     private void TrimTranscript()
     {
-        if (_earlierLoaded)
-        {
-            return;
-        }
-
         var cut = -1;
         var prompts = 0;
         for (var i = Items.Count - 1; i >= 0; i--)
@@ -5160,9 +5158,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             }
         }
 
-        var earlier = Items.Count > 0 ? Items[0] as EarlierTurnsItem : null;
-        var first = earlier is null ? 0 : 1;
-        for (var i = first; i < cut; i++)
+        for (var i = 0; i < cut; i++)
         {
             if (ToolsOf(Items[i]).Any(IsStillLive))
             {
@@ -5171,16 +5167,36 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             }
         }
 
-        if (cut <= first)
+        if (cut <= 0)
         {
             return;
         }
 
         var cutoff = Items[cut].Timestamp;
-        var folded = EarlierTurnsItem.CountTurns(Items.Skip(first).Take(cut - first));
-        for (var i = cut - 1; i >= first; i--)
+        var removed = false;
+        for (var i = cut - 1; i >= 0; i--)
         {
-            Items.RemoveAt(i);
+            // A block the reader loaded back stays; the rest is replaced by a Load row that holds no tool state.
+            if (Items[i] is TurnActivityItem { Loaded: false } or ToolCallItem)
+            {
+                var calls = ToolsOf(Items[i]).ToList();
+                Items.RemoveAt(i);
+                removed = true;
+                if (calls.Count > 0)
+                {
+                    Items.Insert(i, new HiddenActivityItem
+                    {
+                        FirstToolUseId = calls[0].ToolUseId,
+                        Calls = calls.Count,
+                        Timestamp = calls[0].Timestamp,
+                    });
+                }
+            }
+        }
+
+        if (!removed)
+        {
+            return;
         }
 
         // The dropped turns' calls, subagent children included: the lookup is all that still holds them.
@@ -5191,18 +5207,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 _toolCalls.Remove(id);
                 _hiddenCalls.Remove(id);
             }
-        }
-
-        if (earlier is null && folded > 0)
-        {
-            earlier = new EarlierTurnsItem();
-            Items.Insert(0, earlier);
-        }
-
-        if (earlier is not null)
-        {
-            earlier.CanLoad = _featureLog is not null;
-            earlier.Turns += folded;
         }
 
         Reflow();

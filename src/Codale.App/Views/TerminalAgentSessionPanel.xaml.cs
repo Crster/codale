@@ -258,7 +258,10 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         AppSettings.Changed -= OnAppSettingsChanged;
+        SessionPanelRail.FoldChanged -= OnAppSettingsChanged;
         AppSettings.Changed += OnAppSettingsChanged;
+        SessionPanelRail.FoldChanged -= OnAppSettingsChanged;
+        SessionPanelRail.FoldChanged += OnAppSettingsChanged;
         ApplyCollapsed();
 
         if (Session is { } session)
@@ -279,6 +282,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         AppSettings.Changed -= OnAppSettingsChanged;
+        SessionPanelRail.FoldChanged -= OnAppSettingsChanged;
         _timer.Stop();
         _elapsedTimer.Stop();
         StopWatchingHistory();

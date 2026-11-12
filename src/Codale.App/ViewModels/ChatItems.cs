@@ -332,6 +332,9 @@ public sealed partial class TurnActivityItem : ChatItem
     /// <summary>Narration (<see cref="AssistantMessageItem"/>), tool calls, explore groups and the todo row.</summary>
     public ObservableCollection<ChatItem> Steps { get; } = [];
 
+    /// <summary>Read back from the history on request: the transcript keeps it instead of folding it away again.</summary>
+    public bool Loaded { get; init; }
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsRunning))]
     [NotifyPropertyChangedFor(nameof(IsFinished))]

@@ -90,10 +90,6 @@ public static class ProjectPaths
     public static string FeatureDatabasePath(string projectPath) =>
         Path.Combine(KnowledgeDirectory(projectPath), "project-db");
 
-    /// <summary>A feature's log folder: <c>log.jsonl</c> and its archives.</summary>
-    public static string FeatureDirectory(string projectPath, string featureId) =>
-        Path.Combine(KnowledgeDirectory(projectPath), "sessions", featureId);
-
     /// <summary>The common git directory identifies a repository across linked worktrees.</summary>
     public static string RepositoryIdentity(string projectPath)
     {

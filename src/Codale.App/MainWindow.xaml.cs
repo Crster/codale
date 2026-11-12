@@ -56,9 +56,7 @@ public sealed partial class MainWindow : Window
         // editor would otherwise consume Ctrl+letter chords themselves).
         RootGrid.PreviewKeyDown += OnRootPreviewKeyDown;
 
-        // handledEventsToo: the box's inner TextBox handles Esc itself before it bubbles.
-        TitleSearchBox.AddHandler(
-            UIElement.KeyDownEvent, new KeyEventHandler(OnSearchKeyDown), handledEventsToo: true);
+        UpdateSearchShortcutText();
 
         if (request.ProjectPath is { } path)
         {
@@ -110,6 +108,7 @@ public sealed partial class MainWindow : Window
         // there is something to act on.
         LeftPanelButton.Visibility = Visibility.Visible;
         TitleBarExtras.Visibility = Visibility.Visible;
+        TitleBarCenter.Visibility = Visibility.Visible;
 
         // Window.Title alone is not enough when the TitleBar control owns the caption:
         // the taskbar / alt-tab caption follows AppWindow.Title, which Window.Title does
@@ -149,10 +148,29 @@ public sealed partial class MainWindow : Window
 
     /// <summary>The user is typing a search - true when it is scoped to the open file - so the model can get ready.</summary>
 
-    /// <summary>The open file's name while the box is scoped to it (Ctrl+F in an editor); null for the project.</summary>
-    private string? _searchFileScope;
+    /// <summary>The page that answers the search palette's queries; set by the workspace while it is open.</summary>
+    public void SetQuickSearchSource(IQuickSearchSource? source)
+    {
+        QuickSearchHost.Source = source;
+        if (source is null)
+        {
+            QuickSearchHost.Close();
+        }
+    }
 
-    private const string ProjectSearchPlaceholder = "Ask or search the project…";
+    /// <summary>A content search or question for the whole project, raised by the palette's last row.</summary>
+    public void SubmitSearch(string query, bool inFile = false) =>
+        SearchSubmitted?.Invoke(this, new SearchSubmission(query, inFile));
+
+    private void OnSearchLauncherClick(object sender, RoutedEventArgs e) => FocusSearch();
+
+    /// <summary>The launcher shows the chord that opens it, as configured in Settings.</summary>
+    private void UpdateSearchShortcutText()
+    {
+        var chord = KeyboardShortcuts.Get(KeyboardShortcuts.Search);
+        SearchShortcutText.Text = string.IsNullOrWhiteSpace(chord) ? "" : chord;
+        SearchShortcutText.Visibility = string.IsNullOrWhiteSpace(chord) ? Visibility.Collapsed : Visibility.Visible;
+    }
 
     private void OnTitleBarCommandsClick(object sender, RoutedEventArgs e) =>
         CommandsRequested?.Invoke(this, EventArgs.Empty);
@@ -177,7 +195,7 @@ public sealed partial class MainWindow : Window
     private void OnTitleBarLeftPanelClick(object sender, RoutedEventArgs e) =>
         LeftPanelToggled?.Invoke(this, EventArgs.Empty);
 
-    private const double SettingsWidth = 720;
+    private const double SettingsWidth = 880;
 
     private bool _settingsOpen;
 
@@ -323,7 +341,11 @@ public sealed partial class MainWindow : Window
     /// brushes (converters read Application.Resources, so the palette follows the
     /// resolved theme rather than any one window's).
     /// </summary>
-    private void OnAppSettingsChanged(object? sender, EventArgs e) => ApplyTheme();
+    private void OnAppSettingsChanged(object? sender, EventArgs e)
+    {
+        ApplyTheme();
+        UpdateSearchShortcutText();
+    }
 
     private void ApplyTheme()
     {
@@ -356,75 +378,23 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void OnSearchQuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args) =>
-        SearchSubmitted?.Invoke(this, new SearchSubmission(args.QueryText, InFile: _searchFileScope is not null));
-
-    /// <summary>Puts the caret in the title bar search box; the one place a search starts.</summary>
+    /// <summary>Opens the search palette over the whole project.</summary>
     public void FocusSearch() => FocusSearch(fileName: null);
 
-    /// <summary>
-    /// Focuses the box, scoped to one open file when <paramref name="fileName"/> is given.
-    /// The scope shows in the placeholder and icon, and lasts until the box loses focus
-    /// or Esc returns it to the project - so a plain click on the box always means the
-    /// whole project.
-    /// </summary>
+    /// <summary>Opens the search palette, scoped to one open file when <paramref name="fileName"/> is given.</summary>
     public void FocusSearch(string? fileName)
     {
-        SetSearchScope(fileName);
-
-        if (fileName is not null)
-        {
-            // Cleared so the scoped placeholder is visible, not hidden behind the last query.
-            TitleSearchBox.Text = "";
-        }
-
-        TitleSearchBox.Focus(FocusState.Programmatic);
-    }
-
-    public void ClearSearchText() => TitleSearchBox.Text = "";
-
-    private void SetSearchScope(string? fileName)
-    {
-        _searchFileScope = fileName;
-        TitleSearchBox.PlaceholderText = fileName is null
-            ? ProjectSearchPlaceholder
-            : $"Find in {fileName} · Esc for the project";
-        TitleSearchBox.QueryIcon = new SymbolIcon(fileName is null ? Symbol.Find : Symbol.Document);
-    }
-
-    private void OnSearchKeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        if (e.Key == Windows.System.VirtualKey.Escape && _searchFileScope is not null)
-        {
-            e.Handled = true;
-            SetSearchScope(null);
-        }
-    }
-
-    /// <summary>
-    /// Focus moving inside the box (text to the search icon) also raises LostFocus, so
-    /// the check waits until focus has settled and only resets once it has left.
-    /// </summary>
-    private void OnSearchLostFocus(object sender, RoutedEventArgs e)
-    {
-        if (_searchFileScope is null)
+        if (QuickSearchHost.Source is null)
         {
             return;
         }
 
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            var focused = FocusManager.GetFocusedElement(TitleSearchBox.XamlRoot) as DependencyObject;
-            for (var node = focused; node is not null; node = VisualTreeHelper.GetParent(node))
-            {
-                if (ReferenceEquals(node, TitleSearchBox))
-                {
-                    return;
-                }
-            }
+        QuickSearchHost.Open(fileName);
+    }
 
-            SetSearchScope(null);
-        });
+    /// <summary>Kept for callers that cleared the old search box; the palette clears itself.</summary>
+    public void ClearSearchText()
+    {
     }
 
     /// <summary>
@@ -451,6 +421,9 @@ public sealed partial class MainWindow : Window
             AppTitleBar.Subtitle = null;
             LeftPanelButton.Visibility = Visibility.Collapsed;
             TitleBarExtras.Visibility = Visibility.Collapsed;
+            TitleBarCenter.Visibility = Visibility.Collapsed;
+            QuickSearchHost.Close();
+            QuickSearchHost.Source = null;
             RootFrame.Navigate(typeof(ProjectPickerPage));
         }
         catch (Exception)

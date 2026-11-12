@@ -4,19 +4,21 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!--  Slides in over the right edge of the main window as a wide drawer.  -->
+    <!--  Slides in over the right edge of the main window: a sheet with its own
+          navigation on the left and one category at a time on the right.  -->
     <Border
-        Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-        BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+        Background="{ThemeResource ShellCentreBackgroundBrush}"
+        BorderBrush="{ThemeResource ShellHairlineBrush}"
         BorderThickness="1,0,0,0">
-        <Grid x:Name="SettingsRootGrid" RowDefinitions="Auto,Auto,*">
+        <Grid x:Name="SettingsRootGrid" ColumnDefinitions="216,*">
             <Grid.Resources>
                 <Style x:Key="CategoryRadioButton" TargetType="RadioButton">
-                    <Setter Property="FontSize" Value="12" />
-                    <Setter Property="FontWeight" Value="Medium" />
+                    <Setter Property="FontSize" Value="13" />
+                    <Setter Property="FontWeight" Value="Normal" />
                     <Setter Property="CornerRadius" Value="6" />
-                    <Setter Property="Padding" Value="12,6" />
-                    <Setter Property="Margin" Value="0,0,6,0" />
+                    <Setter Property="Padding" Value="12,8" />
+                    <Setter Property="Margin" Value="0,0,0,2" />
+                    <Setter Property="HorizontalAlignment" Value="Stretch" />
                     <Setter Property="MinWidth" Value="0" />
                     <Setter Property="MinHeight" Value="0" />
                     <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -30,18 +32,19 @@
                                         CornerRadius="{TemplateBinding CornerRadius}" />
                                     <Border
                                         x:Name="Underline"
-                                        Height="2"
-                                        Margin="12,0"
-                                        VerticalAlignment="Bottom"
+                                        Width="3"
+                                        Height="16"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Center"
                                         Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                        CornerRadius="1"
+                                        CornerRadius="1.5"
                                         Opacity="0" />
                                     <ContentPresenter
                                         x:Name="ContentPresenter"
                                         Padding="{TemplateBinding Padding}"
                                         Content="{TemplateBinding Content}"
                                         Foreground="{TemplateBinding Foreground}"
-                                        HorizontalContentAlignment="Center"
+                                        HorizontalContentAlignment="Left"
                                         VerticalContentAlignment="Center" />
                                     <VisualStateManager.VisualStateGroups>
                                         <VisualStateGroup x:Name="CommonStates">
@@ -63,6 +66,7 @@
                                             <VisualState x:Name="Checked">
                                                 <VisualState.Setters>
                                                     <Setter Target="Underline.Opacity" Value="1" />
+                                                    <Setter Target="Pill.Background" Value="{ThemeResource ShellSelectedBrush}" />
                                                     <Setter Target="ContentPresenter.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
                                                 </VisualState.Setters>
                                             </VisualState>
@@ -75,20 +79,22 @@
                     </Setter>
                 </Style>
                 <Style x:Key="SectionTitle" TargetType="TextBlock">
-                    <Setter Property="FontSize" Value="14" />
+                    <Setter Property="FontSize" Value="11" />
                     <Setter Property="FontWeight" Value="SemiBold" />
-                    <Setter Property="Margin" Value="2,16,0,8" />
-                    <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                    <Setter Property="CharacterSpacing" Value="40" />
+                    <Setter Property="Margin" Value="4,14,0,-6" />
+                    <Setter Property="Foreground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
                 </Style>
                 <Style x:Key="Card" TargetType="Border">
-                    <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
-                    <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                    <Setter Property="Background" Value="{ThemeResource ShellInputBackgroundBrush}" />
+                    <Setter Property="BorderBrush" Value="{ThemeResource ShellHairlineBrush}" />
                     <Setter Property="BorderThickness" Value="1" />
                     <Setter Property="CornerRadius" Value="8" />
                 </Style>
                 <Style x:Key="SettingRow" TargetType="Grid">
-                    <Setter Property="Padding" Value="16,12" />
+                    <Setter Property="Padding" Value="16,11" />
                     <Setter Property="ColumnSpacing" Value="24" />
+                    <Setter Property="MinHeight" Value="56" />
                 </Style>
                 <Style x:Key="RowTitle" TargetType="TextBlock">
                     <Setter Property="FontSize" Value="13" />
@@ -102,7 +108,8 @@
                 </Style>
                 <Style x:Key="Divider" TargetType="Rectangle">
                     <Setter Property="Height" Value="1" />
-                    <Setter Property="Fill" Value="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                    <Setter Property="Margin" Value="16,0" />
+                    <Setter Property="Fill" Value="{ThemeResource ShellHairlineBrush}" />
                 </Style>
                 <Style x:Key="Hint" TargetType="TextBlock">
                     <Setter Property="FontSize" Value="12" />
@@ -111,50 +118,77 @@
                 </Style>
             </Grid.Resources>
 
-            <!--  Drawer Header  -->
-            <Grid Margin="28,18,16,14" ColumnDefinitions="*,Auto">
-                <StackPanel Spacing="3" VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                        <FontIcon Glyph="&#xE713;" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" />
-                        <TextBlock
-                            FontSize="18"
-                            FontWeight="SemiBold"
-                            Text="Settings" />
-                    </StackPanel>
-                    <TextBlock
-                        Style="{StaticResource Hint}"
-                        Text="Configure AI providers, editor formatting, terminal display, and shortcuts." />
+            <!--  Navigation  -->
+            <Grid
+                Padding="12,18,12,12"
+                Background="{ThemeResource ShellSidePanelBackgroundBrush}"
+                BorderBrush="{ThemeResource ShellHairlineBrush}"
+                BorderThickness="0,0,1,0"
+                RowDefinitions="Auto,*,Auto">
+                <StackPanel Margin="10,0,0,18" Orientation="Horizontal" Spacing="10">
+                    <FontIcon VerticalAlignment="Center" FontSize="15" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE713;" />
+                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="Settings" />
                 </StackPanel>
-                <Button
-                    Grid.Column="1"
-                    Width="32"
-                    Height="32"
-                    Padding="0"
-                    VerticalAlignment="Top"
-                    Background="Transparent"
-                    BorderBrush="Transparent"
-                    Click="OnCloseClick"
-                    ToolTipService.ToolTip="Close (Esc)">
-                    <FontIcon FontSize="12" Glyph="&#xE711;" />
-                </Button>
+                <StackPanel Grid.Row="1">
+                    <RadioButton x:Name="TabNavGeneral" Checked="OnCategoryTabChanged" IsChecked="True" Style="{StaticResource CategoryRadioButton}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <FontIcon FontSize="14" Glyph="&#xE80F;" />
+                            <TextBlock Text="General" />
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton x:Name="TabNavAi" Checked="OnCategoryTabChanged" Style="{StaticResource CategoryRadioButton}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <FontIcon FontSize="14" Glyph="&#xE99A;" />
+                            <TextBlock Text="AI &amp; providers" />
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton x:Name="TabNavEditor" Checked="OnCategoryTabChanged" Style="{StaticResource CategoryRadioButton}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <FontIcon FontSize="14" Glyph="&#xE943;" />
+                            <TextBlock Text="Editor &amp; syntax" />
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton x:Name="TabNavTerminal" Checked="OnCategoryTabChanged" Style="{StaticResource CategoryRadioButton}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <FontIcon FontSize="14" Glyph="&#xE756;" />
+                            <TextBlock Text="Terminal" />
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton x:Name="TabNavGitShortcuts" Checked="OnCategoryTabChanged" Style="{StaticResource CategoryRadioButton}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <FontIcon FontSize="14" Glyph="&#xE765;" />
+                            <TextBlock Text="Keyboard shortcuts" />
+                        </StackPanel>
+                    </RadioButton>
+                </StackPanel>
+                <TextBlock
+                    Grid.Row="2"
+                    Margin="10,0,0,0"
+                    FontSize="11"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    Text="Changes save as you make them." />
             </Grid>
 
-            <!--  Categories Navigation Bar  -->
-            <Border Grid.Row="1" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,1" Background="{ThemeResource SubtleFillColorTransparentBrush}">
-                <ScrollViewer HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Auto" VerticalScrollBarVisibility="Disabled" VerticalScrollMode="Disabled">
-                    <StackPanel Orientation="Horizontal" Padding="24,8,24,8">
-                        <RadioButton x:Name="TabNavGeneral" Content="General" IsChecked="True" Checked="OnCategoryTabChanged" Style="{StaticResource CategoryRadioButton}" />
-                        <RadioButton x:Name="TabNavAi" Content="AI &amp; Providers" Checked="OnCategoryTabChanged" Style="{StaticResource CategoryRadioButton}" />
-                        <RadioButton x:Name="TabNavEditor" Content="Editor &amp; Syntax" Checked="OnCategoryTabChanged" Style="{StaticResource CategoryRadioButton}" />
-                        <RadioButton x:Name="TabNavTerminal" Content="Terminal" Checked="OnCategoryTabChanged" Style="{StaticResource CategoryRadioButton}" />
-                        <RadioButton x:Name="TabNavGitShortcuts" Content="Keyboard Shortcuts" Checked="OnCategoryTabChanged" Style="{StaticResource CategoryRadioButton}" />
+            <!--  The open category: its title, then its settings  -->
+            <Grid Grid.Column="1" RowDefinitions="Auto,*">
+                <Grid Padding="32,22,14,6" ColumnDefinitions="*,Auto">
+                    <StackPanel Spacing="4">
+                        <TextBlock x:Name="PageTitle" FontSize="20" FontWeight="SemiBold" Text="General" />
+                        <TextBlock x:Name="PageSubtitle" Style="{StaticResource Hint}" Text="Appearance, folders and the chat." />
                     </StackPanel>
-                </ScrollViewer>
-            </Border>
+                    <Button
+                        Grid.Column="1"
+                        VerticalAlignment="Top"
+                        Click="OnCloseClick"
+                        Style="{StaticResource ShellIconButton}"
+                        ToolTipService.ToolTip="Close (Esc)">
+                        <FontIcon FontSize="12" Glyph="&#xE711;" />
+                    </Button>
+                </Grid>
 
             <!--  Main Content Area  -->
-            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
-                <Grid Padding="28,16,28,28">
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <Grid MaxWidth="760" Padding="32,4,32,32" HorizontalAlignment="Left">
 
                     <!-- ========================================== -->
                     <!-- 1. GENERAL (Appearance & Chat UI)         -->
@@ -462,6 +496,7 @@
 
                 </Grid>
             </ScrollViewer>
+            </Grid>
         </Grid>
     </Border>
 </UserControl>

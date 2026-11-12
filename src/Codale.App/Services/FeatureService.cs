@@ -4,6 +4,7 @@ using Codale.Core.Helper;
 using Codale.Core.Projects;
 using Codale.Search;
 using Codale.Db;
+using Codale.Workspace;
 
 namespace Codale.App.Services;
 
@@ -104,7 +105,7 @@ public sealed class FeatureService : IDisposable
     }
 
     /// <summary>A feature's log; <paramref name="chatId"/> is the chat its appends are written as (null for a reader).</summary>
-    public FeatureLog LogOf(string id, string? chatId = null) => new(ProjectPaths.FeatureDirectory(_projectPath, id), chatId);
+    public FeatureLog LogOf(string id, string? chatId = null) => new(WorkspaceDb.DirectoryFor(_projectPath), id, chatId);
 
     /// <summary>A prompt was added to a feature's log: its size and what it asked are what the feature is found by.</summary>
     public void RecordProgress(string id, FeatureLog log, string? prompt)

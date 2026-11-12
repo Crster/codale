@@ -3,11 +3,13 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
+using Codale.Workspace;
+
 namespace Codale.Commands;
 
 /// <summary>
 /// Finds a project's run commands in whatever config files happen to be lying around:
-/// Codale's own <c>.codale/commands.json</c> plus the ones the user already keeps for
+/// Codale's own saved commands (in the workspace database) plus the ones the user already keeps for
 /// other tools - Claude's <c>launch.json</c>, VS Code's <c>tasks.json</c> and
 /// <c>launch.json</c>, <c>package.json</c> scripts, and common language ecosystems,
 /// task runners, and framework utilities (.NET, Gradle, Maven, Python, Cargo, Go,
@@ -58,84 +60,37 @@ public static class CommandCatalog
     ];
 
     /// <summary>
-    /// Adds a command to <c>.codale/commands.json</c>, or replaces the entry of the same
-    /// name (case-insensitive), so an agent can register a command and re-register it
-    /// corrected. Other entries and any extra fields in the file are kept; a file that
-    /// cannot be parsed is an error rather than overwritten.
+    /// Where the workspace database of a project lives; tests point it at a temporary folder.
+    /// </summary>
+    public static Func<string, string> WorkspaceDirectory { get; set; } = WorkspaceDb.DirectoryFor;
+
+    /// <summary>
+    /// The project's saved commands, in the workspace database (never in a file inside the workspace). An old
+    /// <c>.codale/commands.json</c> is not read; the editable copy in Codale's data folder is read back
+    /// after the user changed it.
+    /// </summary>
+    public static ConfigStore ConfigOf(string projectRoot)
+    {
+        var config = new ConfigStore(WorkspaceDirectory(projectRoot));
+        config.SyncEdited();
+        return config;
+    }
+
+    /// <summary>
+    /// Adds a command to the project's saved commands, or replaces the entry of the same
+    /// name (case-insensitive), so an agent can register a command and re-register it corrected.
     /// </summary>
     public static ProjectCommand Add(string projectRoot, string name, string command, string? workingDirectory = null)
     {
-        name = name.Trim();
-        command = command.Trim();
-        if (name.Length == 0 || command.Length == 0)
-        {
-            throw new ArgumentException("A name and a command are required.");
-        }
-
-        var path = Path.Combine(projectRoot, ".codale", "commands.json");
-        var entry = new JsonObject { ["name"] = name, ["command"] = command };
-        if (!string.IsNullOrWhiteSpace(workingDirectory))
-        {
-            entry["cwd"] = workingDirectory.Trim();
-        }
-
-        JsonNode? existing = null;
-        if (File.Exists(path))
-        {
-            try
-            {
-                var text = File.ReadAllText(path);
-                existing = string.IsNullOrWhiteSpace(text)
-                    ? null
-                    : JsonNode.Parse(text, documentOptions: Jsonc);
-            }
-            catch (JsonException ex)
-            {
-                throw new InvalidOperationException($"{path} is not valid JSON ({ex.Message}); fix it before adding commands.");
-            }
-        }
-
-        // The canonical wrapper is { "commands": [...] }; a bare array is kept as one.
-        JsonArray list;
-        JsonNode document;
-        switch (existing)
-        {
-            case JsonArray bare:
-                list = bare;
-                document = bare;
-                break;
-            case JsonObject wrapper:
-                list = wrapper["commands"] as JsonArray ?? [];
-                wrapper["commands"] = list;
-                document = wrapper;
-                break;
-            default:
-                list = [];
-                document = new JsonObject { ["commands"] = list };
-                break;
-        }
-
-        var index = list.ToList().FindIndex(n =>
-            n is JsonObject o && string.Equals(NameOf(o), name, StringComparison.OrdinalIgnoreCase));
-        if (index >= 0)
-        {
-            list[index] = entry;
-        }
-        else
-        {
-            list.Add(entry);
-        }
-
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, document.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
-
+        var config = ConfigOf(projectRoot);
+        var saved = config.AddCommand(name, command, workingDirectory);
         return new ProjectCommand
         {
-            Name = name,
-            Command = command,
-            WorkingDirectory = entry["cwd"]?.GetValue<string>(),
+            Name = saved.Name,
+            Command = saved.Command,
+            WorkingDirectory = saved.Cwd,
             Source = CommandSource.Codale,
-            SourcePath = path,
+            SourcePath = config.EditablePath,
         };
     }
 
@@ -144,39 +99,23 @@ public static class CommandCatalog
 
     private static List<ProjectCommand> ReadCodale(string root)
     {
-        var path = Path.Combine(root, ".codale", "commands.json");
-        using var doc = ParseFile(path);
-        if (doc is null)
+        try
         {
+            var config = ConfigOf(root);
+            return config.Commands().Select(saved => new ProjectCommand
+            {
+                Name = saved.Name,
+                Command = saved.Command,
+                WorkingDirectory = saved.Cwd,
+                Source = CommandSource.Codale,
+                SourcePath = config.EditablePath,
+            }).ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The database is busy in another process: the saved commands are missing this once.
             return [];
         }
-
-        // The canonical shape is { "commands": [...] }; a bare array is accepted so a
-        // minimal file can skip the wrapper.
-        var rootElement = doc.RootElement;
-        var entries = rootElement.ValueKind == JsonValueKind.Array
-            ? rootElement.EnumerateArray()
-            : rootElement.Items("commands");
-
-        var commands = new List<ProjectCommand>();
-        foreach (var entry in entries)
-        {
-            if (entry.Str("command", "cmd") is not { Length: > 0 } command)
-            {
-                continue;
-            }
-
-            commands.Add(new ProjectCommand
-            {
-                Name = entry.Str("name", "label") ?? command.Trim(),
-                Command = command,
-                WorkingDirectory = entry.Str("cwd", "workingDirectory"),
-                Source = CommandSource.Codale,
-                SourcePath = path,
-            });
-        }
-
-        return commands;
     }
 
     /// <remarks>

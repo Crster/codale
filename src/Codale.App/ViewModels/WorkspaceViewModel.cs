@@ -494,28 +494,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     }
 
     /// <summary>
-    /// The project's commands file, created from a starter template when missing:
-    /// "edit commands" should land in a file that exists, not an empty editor error.
+    /// The saved commands as an editable file, written fresh from the workspace database (with a starter
+    /// template when there are none). It lives in Codale's data folder, not in the project; the commands
+    /// menu reads it back the next time it opens.
     /// </summary>
-    public string EnsureCommandsFile()
-    {
-        var path = Path.Combine(ProjectPath, ".codale", "commands.json");
+    public string EnsureCommandsFile() => CommandCatalog.ConfigOf(ProjectPath).ExportForEditing();
 
-        if (!File.Exists(path))
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, """
-                {
-                  "commands": [
-                    { "name": "build", "command": "dotnet build" },
-                    { "name": "run", "command": "dotnet run", "cwd": "src/MyApp" }
-                  ]
-                }
-                """);
-        }
-
-        return path;
-    }
+    /// <summary>Where <see cref="EnsureCommandsFile"/> puts the editable copy.</summary>
+    public string CommandsFilePath => CommandCatalog.ConfigOf(ProjectPath).EditablePath;
 
     public GitViewModel Git { get; }
 

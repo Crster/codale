@@ -12,9 +12,17 @@ public sealed class FeatureLogTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(_directory))
+        // The workspace database lets go a moment after its last use.
+        for (var attempt = 0; attempt < 30 && Directory.Exists(_directory); attempt++)
         {
-            Directory.Delete(_directory, recursive: true);
+            try
+            {
+                Directory.Delete(_directory, recursive: true);
+            }
+            catch (IOException)
+            {
+                Thread.Sleep(100);
+            }
         }
     }
 
@@ -23,23 +31,23 @@ public sealed class FeatureLogTests : IDisposable
     [Fact]
     public void Deleting_history_prevents_open_and_late_writers_from_recreating_its_log()
     {
-        var first = new FeatureLog(_directory, "first");
-        var second = new FeatureLog(_directory, "second");
+        var first = new FeatureLog(_directory, "f", "first");
+        var second = new FeatureLog(_directory, "f", "second");
         first.AppendUser("saved request");
 
         first.Delete();
         second.AppendUser("in-flight request");
         first.EndTurn("success");
-        new FeatureLog(_directory, "late").Attach("codex");
+        new FeatureLog(_directory, "f", "late").Attach("codex");
 
-        Assert.False(Directory.Exists(_directory));
+        Assert.Empty(first.ReadTail(10, out _));
         Assert.Empty(second.ReadAllSnapshot().Entries);
     }
 
     [Fact]
     public void Rebuild_snapshot_includes_archives_and_preserves_new_progress_when_compacted()
     {
-        var log = new FeatureLog(_directory, "chat");
+        var log = new FeatureLog(_directory, "f", "chat");
         log.AppendUser("archived request");
         log.EndTurn("success");
         log.Archive();
@@ -56,7 +64,7 @@ public sealed class FeatureLogTests : IDisposable
 
     private FeatureLog Recorded()
     {
-        var log = new FeatureLog(_directory);
+        var log = new FeatureLog(_directory, "f");
         log.Attach("claude");
         log.AppendUser("fix the build");
         log.Append(new ToolCallStarted { ToolUseId = "t1", ToolName = "Edit", Input = Json("{\"file_path\":\"a.cs\"}") });
@@ -80,7 +88,7 @@ public sealed class FeatureLogTests : IDisposable
     [Fact]
     public void Subagent_activity_is_not_recorded()
     {
-        var log = new FeatureLog(_directory);
+        var log = new FeatureLog(_directory, "f");
         log.AppendUser("go");
         log.Append(new AssistantMessageCompleted { MessageId = "m", Model = "m", Text = "sub", ParentToolUseId = "t0" });
         log.Append(new ToolCallStarted { ToolUseId = "t9", ToolName = "Read", ParentToolUseId = "t0" });
@@ -108,7 +116,7 @@ public sealed class FeatureLogTests : IDisposable
     [Fact]
     public void The_latest_task_list_is_found_for_a_reopened_feature()
     {
-        var log = new FeatureLog(_directory);
+        var log = new FeatureLog(_directory, "f");
         log.Append(new ToolCallStarted
         {
             ToolUseId = "todo1",
@@ -131,7 +139,7 @@ public sealed class FeatureLogTests : IDisposable
     [Fact]
     public void The_tail_is_limited_and_says_when_there_is_more()
     {
-        var log = new FeatureLog(_directory);
+        var log = new FeatureLog(_directory, "f");
         for (var i = 0; i < 10; i++)
         {
             log.AppendUser($"message {i}");
@@ -146,12 +154,12 @@ public sealed class FeatureLogTests : IDisposable
     [Fact]
     public void Archiving_starts_a_fresh_log_and_the_tail_reaches_back_into_the_archive()
     {
-        var log = new FeatureLog(_directory);
+        var log = new FeatureLog(_directory, "f");
         log.AppendUser("before");
         log.Archive();
         log.AppendUser("after");
 
-        Assert.True(File.Exists(Path.Combine(_directory, "log.1.jsonl")));
+        Assert.Equal(1, log.Generation);
         Assert.Equal(["before", "after"], log.ReadTail(10, out _).OfType<UserMessageRecorded>().Select(u => u.Text));
         Assert.Equal(1, log.ReadSince(0).Turns);
     }
@@ -159,14 +167,14 @@ public sealed class FeatureLogTests : IDisposable
     [Fact]
     public void Each_record_names_the_chat_that_wrote_it_and_a_chat_can_leave_its_own_out()
     {
-        var a = new FeatureLog(_directory, "chat-a");
-        var b = new FeatureLog(_directory, "chat-b");
+        var a = new FeatureLog(_directory, "f", "chat-a");
+        var b = new FeatureLog(_directory, "f", "chat-b");
         a.AppendUser("add retries");
         b.AppendUser("rename the key");
         b.Append(new AssistantMessageCompleted { MessageId = "m", Model = "m", Text = "renamed" });
         b.EndTurn("success");
 
-        var (all, turns) = new FeatureLog(_directory).ReadSince(0);
+        var (all, turns) = new FeatureLog(_directory, "f").ReadSince(0);
         var others = a.ReadSince(0, excludeChat: "chat-a").Entries;
 
         Assert.Equal(2, turns);
@@ -179,15 +187,15 @@ public sealed class FeatureLogTests : IDisposable
     [Fact]
     public void Archiving_up_to_an_offset_carries_later_lines_into_the_new_log()
     {
-        var log = new FeatureLog(_directory, "a");
+        var log = new FeatureLog(_directory, "f", "a");
         log.AppendUser("summarised");
         var offset = log.Length;
-        new FeatureLog(_directory, "b").AppendUser("written while the summary was made");
+        new FeatureLog(_directory, "f", "b").AppendUser("written while the summary was made");
 
         log.ArchiveUpTo(offset);
 
         Assert.Equal(["written while the summary was made"], log.ReadSince(0).Entries.Select(e => e.Text));
-        Assert.Equal(offset, new FileInfo(Path.Combine(_directory, "log.1.jsonl")).Length);
+        Assert.Equal(1, log.Generation);
         Assert.Equal(
             ["summarised", "written while the summary was made"],
             log.ReadTail(10, out _).OfType<UserMessageRecorded>().Select(u => u.Text));
@@ -196,12 +204,12 @@ public sealed class FeatureLogTests : IDisposable
     [Fact]
     public void A_position_survives_archiving()
     {
-        var log = new FeatureLog(_directory, "a");
+        var log = new FeatureLog(_directory, "f", "a");
         log.AppendUser("old");
         var seen = log.Position;
-        new FeatureLog(_directory, "b").AppendUser("after the position");
+        new FeatureLog(_directory, "f", "b").AppendUser("after the position");
         log.Archive();
-        new FeatureLog(_directory, "b").AppendUser("after the archive");
+        new FeatureLog(_directory, "f", "b").AppendUser("after the archive");
 
         var since = log.ReadSince(seen, excludeChat: "a").Entries.Select(e => e.Text);
 
@@ -211,9 +219,24 @@ public sealed class FeatureLogTests : IDisposable
     [Fact]
     public void An_unwritten_feature_has_an_empty_log()
     {
-        var log = new FeatureLog(_directory);
+        var log = new FeatureLog(_directory, "f");
 
         Assert.Equal(0, log.Length);
         Assert.Empty(log.ReadTail(10, out _));
+    }
+
+    [Fact]
+    public void A_tool_result_and_the_thinking_are_kept_for_showing_the_step_again()
+    {
+        var log = new FeatureLog(_directory, "f");
+        log.AppendUser("list files");
+        log.Append(new ToolCallStarted { ToolUseId = "t1", ToolName = "Bash", Input = Json("{\"command\":\"ls\"}") });
+        log.Append(new ToolCallCompleted { ToolUseId = "t1", ResultText = "a.cs\nb.cs" });
+        log.Append(new AssistantMessageCompleted { MessageId = "m", Model = "m", Text = "two files", Thinking = "look at ls" });
+
+        var events = log.ReadTail(10, out _);
+
+        Assert.Equal("a.cs\nb.cs", events.OfType<ToolCallCompleted>().Single().ResultText);
+        Assert.Equal("look at ls", events.OfType<AssistantMessageCompleted>().Single().Thinking);
     }
 }

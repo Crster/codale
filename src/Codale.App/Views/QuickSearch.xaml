@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+    The global search: a floating palette under the title bar. Typing pulls from the
+    open workspace - files, open tabs, past conversations, project commands and actions -
+    and the last row always offers the project-wide content search / ask.
+-->
+<UserControl
+    x:Class="Codale.App.Views.QuickSearch"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="using:Codale.App.Views"
+    Visibility="Collapsed">
+
+    <UserControl.Resources>
+        <Style x:Key="ResultItem" TargetType="ListViewItem">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="UseSystemFocusVisuals" Value="False" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <!--  Dims the window a touch and closes the palette on a click outside it.  -->
+        <Border Background="#33000000" Tapped="OnBackdropTapped" />
+
+        <Border
+            x:Name="Card"
+            Width="640"
+            MaxWidth="9999"
+            Margin="16,6,16,16"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Top"
+            Background="{ThemeResource ShellPopupBackgroundBrush}"
+            BorderBrush="{ThemeResource ShellPopupStrokeBrush}"
+            BorderThickness="1"
+            CornerRadius="10"
+            Translation="0,0,32">
+            <Border.Shadow>
+                <ThemeShadow />
+            </Border.Shadow>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!--  The query  -->
+                <Grid Padding="14,4,10,4" ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon
+                        VerticalAlignment="Center"
+                        FontSize="14"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Glyph="&#xE721;" />
+                    <Border
+                        x:Name="ScopeChip"
+                        Grid.Column="1"
+                        Padding="8,2"
+                        VerticalAlignment="Center"
+                        Background="{ThemeResource ShellSelectedBrush}"
+                        CornerRadius="5"
+                        Visibility="Collapsed">
+                        <TextBlock
+                            x:Name="ScopeText"
+                            FontSize="11.5"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </Border>
+                    <TextBox
+                        x:Name="QueryBox"
+                        Grid.Column="2"
+                        MinHeight="40"
+                        Padding="0,10,0,10"
+                        VerticalAlignment="Center"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        FontSize="14"
+                        IsSpellCheckEnabled="False"
+                        PlaceholderText="Search files, chats, commands and actions…"
+                        PreviewKeyDown="OnQueryPreviewKeyDown"
+                        TextChanged="OnQueryTextChanged">
+                        <TextBox.Resources>
+                            <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+                            <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                            <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                            <Thickness x:Key="TextControlBorderThemeThickness">0</Thickness>
+                            <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+                        </TextBox.Resources>
+                    </TextBox>
+                    <Border Grid.Column="3" Style="{StaticResource ShellKeycap}">
+                        <TextBlock Style="{StaticResource ShellKeycapText}" Text="Esc" />
+                    </Border>
+                </Grid>
+
+                <Border
+                    Grid.Row="1"
+                    Height="1"
+                    Background="{ThemeResource ShellHairlineBrush}" />
+
+                <!--  Results, grouped by where they come from  -->
+                <ListView
+                    x:Name="ResultList"
+                    Grid.Row="2"
+                    MaxHeight="420"
+                    Padding="6,6,6,6"
+                    IsItemClickEnabled="True"
+                    ItemClick="OnResultClick"
+                    ItemContainerStyle="{StaticResource ResultItem}"
+                    SelectionMode="Single">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="views:QuickSearchItem">
+                            <StackPanel>
+                                <TextBlock
+                                    Margin="10,8,10,4"
+                                    Style="{StaticResource ShellSectionLabel}"
+                                    Text="{x:Bind Group}"
+                                    Visibility="{x:Bind GroupVisibility}" />
+                                <Grid Padding="10,7,10,7" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="18" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon
+                                        VerticalAlignment="Center"
+                                        FontSize="13"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Glyph="{x:Bind Glyph}" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        VerticalAlignment="Center"
+                                        TextTrimming="CharacterEllipsis"
+                                        TextWrapping="NoWrap"><Run FontSize="13" Text="{x:Bind Title}" /><Run FontSize="11.5" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="{x:Bind DetailText}" /></TextBlock>
+                                    <TextBlock
+                                        Grid.Column="2"
+                                        VerticalAlignment="Center"
+                                        FontSize="11"
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                        Text="{x:Bind Hint}" />
+                                </Grid>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+
+                <!--  Footer: the keys  -->
+                <Grid
+                    Grid.Row="3"
+                    Padding="14,7,14,8"
+                    BorderBrush="{ThemeResource ShellHairlineBrush}"
+                    BorderThickness="0,1,0,0">
+                    <StackPanel Orientation="Horizontal" Spacing="14">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Border Style="{StaticResource ShellKeycap}">
+                                <TextBlock Style="{StaticResource ShellKeycapText}" Text="↑↓" />
+                            </Border>
+                            <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="navigate" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Border Style="{StaticResource ShellKeycap}">
+                                <TextBlock Style="{StaticResource ShellKeycapText}" Text="Enter" />
+                            </Border>
+                            <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="open" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </StackPanel>
+                    <TextBlock
+                        x:Name="StatusText"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        FontSize="11"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

@@ -4,6 +4,7 @@
     <ProjectReference Include="..\Codale.Mcp.Common\Codale.Mcp.Common.csproj" />
     <ProjectReference Include="..\Codale.Core\Codale.Core.csproj" />
     <ProjectReference Include="..\Codale.Commands\Codale.Commands.csproj" />
+    <ProjectReference Include="..\Codale.Workspace\Codale.Workspace.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

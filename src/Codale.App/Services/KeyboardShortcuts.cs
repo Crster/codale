@@ -194,12 +194,12 @@ public static class KeyboardShortcuts
     public static IReadOnlyList<ShortcutAction> Actions { get; } =
     [
         new(OpenTerminal, "Open terminal", "A new terminal tab.", "Ctrl+T"),
-        new(FocusShellCommand, "Focus shell command", "The shell command input in the status bar.", "Ctrl+`"),
+        new(FocusShellCommand, "Open terminal (alternate)", "A second chord for a new terminal tab.", "Ctrl+`"),
         new(ToggleLeftPanel, "Hide / show left panel", "The files and git panel.", "Ctrl+B"),
         new(NewFile, "New file", "An untitled editor tab.", "Ctrl+N"),
         new(OpenChat, "Open chat", "Brings up the chat and focuses its prompt.", "Ctrl+I"),
         new(ToggleCommands, "Toggle command menu", "The project commands menu.", "Ctrl+P"),
-        new(Search, "Search", "Focuses the search bar; scoped to the file while an editor is in front.", "Ctrl+F"),
+        new(Search, "Search", "Opens the quick search over files, history and commands; scoped to the file while an editor is in front.", "Ctrl+F"),
         new(OpenBrowser, "Open browser", "The browser the agent's browser tools attach to.", "Ctrl+Shift+B"),
         new(CycleMode, "Cycle chat mode", "Auto, Ask, Planning, Manual, Accept edits, Full.", "Ctrl+."),
         new(ShowGit, "Show git panel", "Opens the left panel on its Git tab.", "Ctrl+G"),

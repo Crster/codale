@@ -39,6 +39,24 @@ public sealed partial class TaskPeekPane : UserControl
 
     public event EventHandler? CloseRequested;
 
+    /// <summary>"Open in tab": the host moves this task's output into a tab of its own.</summary>
+    public event EventHandler<RunningTaskItem>? OpenInTabRequested;
+
+    /// <summary>False where the pane already is the tab, so it does not offer to open itself again.</summary>
+    public bool CanOpenInTab
+    {
+        get => OpenInTabButton.Visibility == Visibility.Visible;
+        set => OpenInTabButton.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnOpenInTabClick(object sender, RoutedEventArgs e)
+    {
+        if (_task is { } task)
+        {
+            OpenInTabRequested?.Invoke(this, task);
+        }
+    }
+
     public RunningTaskItem? Task => _task;
 
     public void Show(RunningTaskItem task, string? cwd, IReadOnlyList<string> extraRoots)

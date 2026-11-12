@@ -77,77 +77,14 @@ public sealed partial class ChatViewModel
         SetFeature(feature);
         if (handoff) CaptureHandoff();
         Title = feature.Name;
-        // The latest turns replay in full; older ones stay on disk behind a "Load" row.
-        _earlierLoaded = false;
-        var events = _featureLog!.ReadTail(int.MaxValue, out _);
-        var firstKept = FirstKeptEvent(events, KeptPrompts);
-        var older = events.Take(firstKept).Count(e => e is UserMessageRecorded);
-        if (older > 0)
+        // The whole conversation replays as prompts and answers; each turn's tool activity waits behind a Load row.
+        foreach (var row in ReplayRows(_featureLog!.ReadTail(int.MaxValue, out _)))
         {
-            Add(new EarlierTurnsItem { Turns = older, CanLoad = true });
+            Add(row);
         }
-        foreach (var e in events.Skip(firstKept))
-        {
-            if (ReplayedRow(e) is { } row) Add(row);
-        }
-        TrimTranscript();
         RestorePendingPlan();
         await ConnectAsync();
         return IsConnected;
-    }
-
-    /// <summary>Where the latest <paramref name="keep"/> prompts begin in a replayed log; 0 when there are no more than that.</summary>
-    private static int FirstKeptEvent(IReadOnlyList<AgentEvent> events, int keep)
-    {
-        var starts = new List<int>();
-        for (var i = 0; i < events.Count; i++)
-        {
-            if (events[i] is UserMessageRecorded) starts.Add(i);
-        }
-
-        return keep <= 0 ? events.Count : starts.Count > keep ? starts[^keep] : 0;
-    }
-
-    /// <summary>The transcript row a logged event replays as, or null for events that are not conversation.</summary>
-    private static ChatItem? ReplayedRow(AgentEvent e)
-    {
-        switch (e)
-        {
-            case UserMessageRecorded user:
-                return new UserMessageItem { Text = user.Text };
-            case AssistantMessageCompleted reply:
-                var item = new AssistantMessageItem();
-                item.Complete(reply.Text);
-                return item;
-            default:
-                return null;
-        }
-    }
-
-    /// <summary>
-    /// Reads the folded turns back from the history log as ordinary rows in front of the latest ones.
-    /// They stay for the rest of the chat: the next prompt does not fold them away again.
-    /// </summary>
-    public void LoadEarlierTurns()
-    {
-        if (Items.Count == 0 || Items[0] is not EarlierTurnsItem || _featureLog is null)
-        {
-            return;
-        }
-
-        var events = _featureLog.ReadTail(int.MaxValue, out _);
-        var shown = Items.Count(i => i is UserMessageItem { IsSteer: false });
-        var firstKept = FirstKeptEvent(events, shown);
-
-        _earlierLoaded = true;
-        Items.RemoveAt(0);
-        var at = 0;
-        foreach (var e in events.Take(firstKept))
-        {
-            if (ReplayedRow(e) is { } row) Items.Insert(at++, row);
-        }
-
-        Reflow();
     }
 
     /// <summary>The feature's summary, or what it was started for while it has none.</summary>

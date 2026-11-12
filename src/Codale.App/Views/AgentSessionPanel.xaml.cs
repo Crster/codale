@@ -194,7 +194,10 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         AppSettings.Changed -= OnAppSettingsChanged;
+        SessionPanelRail.FoldChanged -= OnAppSettingsChanged;
         AppSettings.Changed += OnAppSettingsChanged;
+        SessionPanelRail.FoldChanged -= OnAppSettingsChanged;
+        SessionPanelRail.FoldChanged += OnAppSettingsChanged;
         ApplyCollapsed();
 
         // Unloaded detached everything (a tab switch unloads the panel): listen again and
@@ -233,6 +236,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         AppSettings.Changed -= OnAppSettingsChanged;
+        SessionPanelRail.FoldChanged -= OnAppSettingsChanged;
         _elapsedTimer?.Stop();
         if (_session is not null)
         {
@@ -298,8 +302,14 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     #region Model, Effort and Mode Pickers
 
-    private void OnModelChipClick(object sender, RoutedEventArgs e)
+    private void OnModelChipClick(object sender, RoutedEventArgs e) => ShowModelPicker((FrameworkElement)sender, above: false);
+
+    private void OnModeChipClick(object sender, RoutedEventArgs e) => ShowModePicker((FrameworkElement)sender, above: false);
+
+    /// <summary>The model picker, anchored at <paramref name="anchor"/>: the panel's row, or the composer's chip (opening upward).</summary>
+    public void ShowModelPicker(FrameworkElement anchor, bool above)
     {
+        var sender = anchor;
         if (Session is null)
         {
             return;
@@ -354,11 +364,14 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             });
         }
 
-        flyout.ShowAt((FrameworkElement)sender);
+        Place(flyout, above);
+        flyout.ShowAt(anchor);
     }
 
-    private void OnModeChipClick(object sender, RoutedEventArgs e)
+    /// <summary>The permission mode picker, anchored like <see cref="ShowModelPicker"/>.</summary>
+    public void ShowModePicker(FrameworkElement anchor, bool above)
     {
+        var sender = anchor;
         if (Session is null || !Session.CanChangeMode)
         {
             return;
@@ -389,8 +402,14 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         Add("auto", "\uE945", "Full",
             "Fully automated; never stops to confirm, only for your answers",
             current is "auto" or "dontAsk" or "bypassPermissions");
-        flyout.ShowAt((FrameworkElement)sender);
+        Place(flyout, above);
+        flyout.ShowAt(anchor);
     }
+
+    private static void Place(Flyout flyout, bool above) =>
+        flyout.Placement = above
+            ? Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.TopEdgeAlignedLeft
+            : Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.Bottom;
 
     private static Grid OptionContent(string glyph, string title, string? detail)
     {
@@ -413,7 +432,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     /// <summary>The flyout is as wide as the chip that opened it, with a floor so the notes stay readable.</summary>
     private static double PickerWidth(object chip) =>
-        Math.Max(400, (chip as FrameworkElement)?.ActualWidth ?? 0);
+        Math.Max(360, (chip as FrameworkElement)?.ActualWidth ?? 0);
 
     private Flyout PickerFlyout(UIElement content) => new()
     {

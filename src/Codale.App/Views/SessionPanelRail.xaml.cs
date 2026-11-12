@@ -17,8 +17,8 @@ namespace Codale.App.Views;
 public sealed partial class SessionPanelRail : UserControl, INotifyPropertyChanged
 {
     /// <summary>The whole panel's width when collapsed / expanded (the card's 8px right margin included).</summary>
-    public const double CollapsedWidth = 62;
-    public const double ExpandedWidth = 380;
+    public const double CollapsedWidth = 48;
+    public const double ExpandedWidth = 288;
 
     private ChatViewModel? _session;
     private StatusViewModel? _status;
@@ -118,9 +118,42 @@ public sealed partial class SessionPanelRail : UserControl, INotifyPropertyChang
         set => ModelBlock.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    public static bool IsCollapsed => AppSettings.SessionPanelCollapsed;
+    public static bool IsCollapsed => AppSettings.SessionPanelCollapsed || _foldedForSideColumn;
 
-    public static void Toggle() => AppSettings.SessionPanelCollapsed = !AppSettings.SessionPanelCollapsed;
+    private static bool _foldedForSideColumn;
+
+    /// <summary>Raised when the panels fold or unfold for the side column (not a settings change).</summary>
+    public static event EventHandler? FoldChanged;
+
+    /// <summary>
+    /// While the side column (preview, peek, references) is open the panels fold to the rail,
+    /// so the conversation keeps its width. It is not saved: closing the column unfolds them.
+    /// </summary>
+    public static bool FoldedForSideColumn
+    {
+        get => _foldedForSideColumn;
+        set
+        {
+            if (_foldedForSideColumn != value)
+            {
+                _foldedForSideColumn = value;
+                FoldChanged?.Invoke(null, EventArgs.Empty);
+            }
+        }
+    }
+
+    public static void Toggle()
+    {
+        // Expanding while folded for the side column only lifts the fold.
+        if (_foldedForSideColumn)
+        {
+            FoldedForSideColumn = false;
+            AppSettings.SessionPanelCollapsed = false;
+            return;
+        }
+
+        AppSettings.SessionPanelCollapsed = !AppSettings.SessionPanelCollapsed;
+    }
 
     /// <summary>Shows the rail or the expanded content of <paramref name="panel"/>, and sizes the panel to match.</summary>
     public void Apply(UserControl panel, UIElement expanded)

@@ -18,12 +18,12 @@
         <!--  The CLI's TUI in a rounded card, matching the session panel beside it  -->
         <Border
             x:Name="TerminalCard"
-            Margin="8,8,8,8"
+            Margin="6"
             Padding="10,8,4,8"
             Background="#0C0C0C"
-            BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+            BorderBrush="{ThemeResource ShellHairlineBrush}"
             BorderThickness="1"
-            CornerRadius="12">
+            CornerRadius="8">
             <controls:TerminalView x:Name="Terminal" ContextRequested="OnTerminalContextRequested" />
         </Border>
 

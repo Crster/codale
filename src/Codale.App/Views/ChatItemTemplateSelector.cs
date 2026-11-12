@@ -21,11 +21,11 @@ public sealed partial class ChatItemTemplateSelector : DataTemplateSelector
     public DataTemplate? HandoffBriefTemplate { get; set; }
     public DataTemplate? FeatureJumpTemplate { get; set; }
     public DataTemplate? CompactTemplate { get; set; }
-    public DataTemplate? EarlierTurnsTemplate { get; set; }
+    public DataTemplate? HiddenActivityTemplate { get; set; }
 
     protected override DataTemplate? SelectTemplateCore(object item) => item switch
     {
-        EarlierTurnsItem => EarlierTurnsTemplate,
+        HiddenActivityItem => HiddenActivityTemplate,
         FeatureJumpItem => FeatureJumpTemplate,
         CompactItem => CompactTemplate,
         FeatureBriefingItem => BriefingTemplate,

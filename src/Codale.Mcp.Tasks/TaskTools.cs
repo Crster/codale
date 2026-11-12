@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Codale.Commands;
 using Codale.Core.Serving;
 using Codale.Core.Tasks;
+using Codale.Workspace;
 
 namespace Codale.Mcp.Tasks;
 
@@ -27,6 +28,7 @@ public static class TaskTools
         .. Core(tasks),
         .. ServeTools(tasks, runDirectory ?? projectRoot),
         .. string.IsNullOrWhiteSpace(projectRoot) ? [] : CommandTools(tasks, projectRoot, runDirectory ?? projectRoot),
+        .. string.IsNullOrWhiteSpace(projectRoot) ? [] : WorkspaceTools(projectRoot),
         .. Panel(tasks),
     ];
 
@@ -213,6 +215,123 @@ public static class TaskTools
                     InDirectory(command, runDirectory), command.Name, a.Int("wait_seconds") ?? 3, ct)));
             }),
     ];
+
+    /// <summary>
+    /// The workspace database's memory and secrets. The database is Codale's own, outside the project, and one
+    /// process at a time opens it, so a busy answer is reported rather than waited on forever.
+    /// </summary>
+    private static IReadOnlyList<McpTool> WorkspaceTools(string projectRoot)
+    {
+        var directory = WorkspaceDb.DirectoryFor(projectRoot);
+        var memory = new MemoryStore(directory);
+        var env = new EnvStore(directory);
+
+        static async Task<IReadOnlyList<McpContent>> Guarded(Func<string> work)
+        {
+            try
+            {
+                return await McpTool.Text(work());
+            }
+            catch (Exception e) when (e is ArgumentException or IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                throw new McpToolException(e.Message);
+            }
+        }
+
+        static string Show(MemoryNote note) =>
+            $"[{note.Id}] {note.Title}{(note.Tags.Count > 0 ? $"  ({string.Join(", ", note.Tags)})" : "")}\n{note.Text}";
+
+        return
+        [
+            new McpTool(
+                "memory_save",
+                "Remember something about this workspace for later conversations: a decision and why, a convention, where something lives, " +
+                "how to build or test, a preference the user stated. Keep it short and self-contained. Saving under a title that already exists " +
+                "replaces that note, so correct a stale memory by saving it again. Not for the current task's progress or anything the code already says.",
+                McpTool.Schema(
+                    [
+                        ("title", "string", "A short name that identifies the note, e.g. \"Test command\"."),
+                        ("text", "string", "What to remember, a few sentences at most."),
+                        ("tags", "string", "Optional comma-separated tags, e.g. \"build, ci\"."),
+                    ],
+                    "title",
+                    "text"),
+                (a, _) => Guarded(() =>
+                {
+                    var note = memory.Save(a.RequiredString("title"), a.RequiredString("text"),
+                        a.String("tags")?.Split(',') ?? []);
+                    return $"Remembered as [{note.Id}].";
+                })),
+
+            new McpTool(
+                "memory_search",
+                "Look up what was remembered about this workspace (memory_save). Pass a question or keywords. Check it at the start of a task " +
+                "that depends on project conventions, and before asking the user something they may already have told you.",
+                McpTool.Schema(
+                    [
+                        ("query", "string", "What you want to recall."),
+                        ("limit", "integer", "How many notes at most (default 5)."),
+                    ],
+                    "query"),
+                (a, _) => Guarded(() =>
+                {
+                    var found = memory.Search(a.RequiredString("query"), Math.Clamp(a.Int("limit") ?? 5, 1, 20));
+                    return found.Count == 0 ? "Nothing remembered about that." : string.Join("\n\n", found.Select(Show));
+                })),
+
+            new McpTool(
+                "memory_list",
+                "List every note remembered about this workspace, newest first: id, title and tags, one line each.",
+                McpTool.Schema(),
+                (_, _) => Guarded(() =>
+                {
+                    var all = memory.List();
+                    return all.Count == 0
+                        ? "Nothing remembered yet."
+                        : string.Join('\n', all.Select(n => $"[{n.Id}] {n.Title}{(n.Tags.Count > 0 ? $"  ({string.Join(", ", n.Tags)})" : "")}"));
+                })),
+
+            new McpTool(
+                "memory_forget",
+                "Delete a remembered note that is wrong or no longer true. Use the id memory_list or memory_search shows.",
+                McpTool.Schema([("id", "string", "The note's id.")], "id"),
+                (a, _) => Guarded(() => memory.Forget(a.RequiredString("id")) ? "Forgotten." : "No such note.")),
+
+            new McpTool(
+                "env_list",
+                "List the names of the secrets stored for this workspace (API keys, tokens, connection strings). Never shows values.",
+                McpTool.Schema(),
+                (_, _) => Guarded(() =>
+                {
+                    var names = env.Names();
+                    return names.Count == 0 ? "No secrets stored." : string.Join('\n', names);
+                })),
+
+            new McpTool(
+                "env_get",
+                "Read one stored secret's value, to use in a command or request you are running for the user. The value is sensitive: " +
+                "use it where it is needed, never write it into files, code, commits or messages, and do not repeat it back.",
+                McpTool.Schema([("name", "string", "The secret's name as env_list shows it.")], "name"),
+                (a, _) => Guarded(() => env.Get(a.RequiredString("name")) ?? throw new McpToolException("No secret by that name. env_list shows the names."))),
+
+            new McpTool(
+                "env_set",
+                "Store a secret the user gave you and asked you to keep (name and value). It is encrypted for this Windows account. " +
+                "Do not invent values or store anything the user did not ask you to.",
+                McpTool.Schema(
+                    [
+                        ("name", "string", "Letters, digits and underscores, e.g. STRIPE_API_KEY."),
+                        ("value", "string", "The secret."),
+                    ],
+                    "name",
+                    "value"),
+                (a, _) => Guarded(() =>
+                {
+                    env.Set(a.RequiredString("name"), a.RequiredString("value"));
+                    return $"Stored {a.RequiredString("name")}.";
+                })),
+        ];
+    }
 
     /// <summary>Exact name first (case-insensitive), then a unique substring; anything else names the candidates.</summary>
     private static ProjectCommand Resolve(IReadOnlyList<ProjectCommand> all, string name)

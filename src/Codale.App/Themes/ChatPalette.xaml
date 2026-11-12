@@ -66,8 +66,8 @@
     <SolidColorBrush x:Key="DetailStrokeBrush" Color="#1AFFFFFF" />
     <SolidColorBrush x:Key="CodeSurfaceBrush" Color="#3D000000" />
     <SolidColorBrush x:Key="CodeHeaderSurfaceBrush" Color="#55000000" />
-    <SolidColorBrush x:Key="UserBubbleBrush" Color="#2B6366F1" />
-    <SolidColorBrush x:Key="UserBubbleStrokeBrush" Color="#4D6366F1" />
+    <SolidColorBrush x:Key="UserBubbleBrush" Color="#16FFFFFF" />
+    <SolidColorBrush x:Key="UserBubbleStrokeBrush" Color="#12FFFFFF" />
     <SolidColorBrush x:Key="AssistantCardBrush" Color="#06FFFFFF" />
     <SolidColorBrush x:Key="AssistantCardStrokeBrush" Color="#12FFFFFF" />
     <SolidColorBrush x:Key="StarterCardBrush" Color="#0DFFFFFF" />

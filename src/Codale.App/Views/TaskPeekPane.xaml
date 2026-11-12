@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8" ?>
 <UserControl
     x:Class="Codale.App.Views.TaskPeekPane"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -11,7 +11,11 @@
     <!--  A live, read-only look at one running task, shown beside the chat.  -->
     <!--  The log area uses the terminal's own colours (#0C0C0C / #CCCCCC); the header
           is as tall as the tab strip beside it so the two rows line up.  -->
-    <Grid Background="{ThemeResource SolidBackgroundFillColorBaseBrush}" RowSpacing="0">
+    <Grid
+        Background="{ThemeResource ShellCentreBackgroundBrush}"
+        BorderBrush="{ThemeResource ShellHairlineBrush}"
+        BorderThickness="1,0,0,0"
+        RowSpacing="0">
         <Grid.RowDefinitions>
             <RowDefinition Height="40" />
             <RowDefinition Height="Auto" />
@@ -19,14 +23,14 @@
         </Grid.RowDefinitions>
 
         <Grid
-            Padding="12,0,8,0"
-            Background="{ThemeResource LayerFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1,0,0,1"
-            ColumnSpacing="8">
+            Padding="12,0,6,0"
+            BorderBrush="{ThemeResource ShellHairlineBrush}"
+            BorderThickness="0,0,0,1"
+            ColumnSpacing="6">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
@@ -56,24 +60,32 @@
             <Button
                 x:Name="StopButton"
                 Grid.Column="3"
-                Padding="8,3"
                 Click="OnStopClick"
+                Style="{StaticResource ShellTextButton}"
                 Visibility="Collapsed">
                 <StackPanel Orientation="Horizontal" Spacing="6">
-                    <FontIcon FontSize="10" Glyph="&#xE71A;" />
-                    <TextBlock FontSize="11" Text="Stop" />
+                    <FontIcon FontSize="10" Foreground="{StaticResource StatusFailedBrush}" Glyph="&#xE71A;" />
+                    <TextBlock Text="Stop" />
                 </StackPanel>
             </Button>
             <Button
+                x:Name="OpenInTabButton"
                 Grid.Column="4"
-                Padding="6"
-                Background="Transparent"
-                BorderThickness="0"
+                Click="OnOpenInTabClick"
+                Style="{StaticResource ShellTextButton}"
+                ToolTipService.ToolTip="Open this output in its own tab">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="11" Glyph="&#xE8A7;" />
+                    <TextBlock Text="Open in tab" />
+                </StackPanel>
+            </Button>
+            <Button
+                Grid.Column="5"
                 Click="OnCloseClick"
-                Content="&#xE711;"
-                FontFamily="{StaticResource SymbolThemeFontFamily}"
-                FontSize="11"
-                ToolTipService.ToolTip="Close peek" />
+                Style="{StaticResource ShellIconButton}"
+                ToolTipService.ToolTip="Close">
+                <FontIcon FontSize="11" Glyph="&#xE711;" />
+            </Button>
         </Grid>
 
         <!--  A shell task's facts above its output: the command (wrapped), what it does, and how risky it is.  -->
