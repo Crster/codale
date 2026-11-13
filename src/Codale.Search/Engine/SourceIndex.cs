@@ -9,8 +9,19 @@ public sealed record SourceIndexOptions
     /// <summary>The most paths one scan lists; a repository past this is indexed in part.</summary>
     public int MaxFiles { get; init; } = 60_000;
 
-    /// <summary>Text files larger than this are listed but not indexed - generated data, not source.</summary>
+    /// <summary>
+    /// Text files up to this size are indexed in full (tokens, declarations, the workspace model). Larger ones -
+    /// generated code, logs, data - are indexed for search only (see <see cref="MaxLargeFileBytes"/>).
+    /// </summary>
     public long MaxFileBytes { get; init; } = 1_000_000;
+
+    /// <summary>
+    /// Files between <see cref="MaxFileBytes"/> and this size are still searchable: their tokens are indexed so
+    /// a search finds them, but no declarations are extracted, their text is never retained (it is read from disk
+    /// when a search needs it), and they stay out of the workspace model so generated names do not skew
+    /// completion. Files past this are listed only.
+    /// </summary>
+    public long MaxLargeFileBytes { get; init; } = 32_000_000;
 
     /// <summary>
     /// How much text stays in memory (held as UTF-8, about a byte a char for source); files past it are re-read
@@ -235,7 +246,7 @@ public sealed class SourceIndex : IDisposable
             try
             {
                 info = new FileInfo(full);
-                if (!info.Exists || info.Length > _options.MaxFileBytes)
+                if (!info.Exists || info.Length > _options.MaxLargeFileBytes)
                 {
                     return;
                 }
@@ -254,6 +265,17 @@ public sealed class SourceIndex : IDisposable
 
             if (_binary.TryGetValue(relative, out var binary) && binary == (info.Length, info.LastWriteTimeUtc))
             {
+                return;
+            }
+
+            if (info.Length > _options.MaxFileBytes)
+            {
+                if (LoadLarge(relative, full, info) is { } large)
+                {
+                    files[i] = large;
+                    Interlocked.Increment(ref read);
+                }
+
                 return;
             }
 
@@ -279,10 +301,13 @@ public sealed class SourceIndex : IDisposable
         // Only what changed is folded into the model: each file replaces its own contribution.
         foreach (var file in indexed)
         {
-            _model.Put(file);
+            if (!file.IsLarge)
+            {
+                _model.Put(file);
+            }
         }
 
-        var kept = new HashSet<string>(indexed.Select(f => f.RelativePath), StringComparer.OrdinalIgnoreCase);
+        var kept = new HashSet<string>(indexed.Where(f => !f.IsLarge).Select(f => f.RelativePath), StringComparer.OrdinalIgnoreCase);
         foreach (var gone in _model.Paths().Where(p => !kept.Contains(p)))
         {
             _model.Remove(gone);
@@ -356,6 +381,32 @@ public sealed class SourceIndex : IDisposable
         }
 
         return new SourceFile(relative, full, info.Length, info.LastWriteTimeUtc, keep ? text : null, keys, counts, total, symbols, transitions);
+    }
+
+    /// <summary>
+    /// A file past <see cref="SourceIndexOptions.MaxFileBytes"/>: tokens only, for search. Its tokens are not
+    /// interned into the model's pool (which lives as long as the index), so dropping the file frees them.
+    /// </summary>
+    private SourceFile? LoadLarge(string relative, string full, FileInfo info)
+    {
+        string text;
+        try
+        {
+            text = File.ReadAllText(full);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+
+        if (SourceText.LooksBinary(text))
+        {
+            _binary[relative] = (info.Length, info.LastWriteTimeUtc);
+            return null;
+        }
+
+        var (keys, counts, total) = SourceTokens.Count(text);
+        return new SourceFile(relative, full, info.Length, info.LastWriteTimeUtc, null, keys, counts, total, []) { IsLarge = true };
     }
 
     /// <summary>The workspace listing, .gitignore applied.</summary>
