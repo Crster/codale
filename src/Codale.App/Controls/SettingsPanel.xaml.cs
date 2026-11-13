@@ -202,12 +202,33 @@ public sealed partial class SettingsPanel : UserControl
                 var flash = SmartExperienceHost.CreateClient(id).DefaultModel;
                 box.PlaceholderText = flash.Length > 0 ? $"Flash model: {flash}" : "Account Flash model";
             }
-            if (box.FocusState == FocusState.Unfocused)
-            {
-                var model = AppSettings.SmartFeatureModel(id);
-                box.Text = model;
-            }
+            RestoreSmartModelSelection(id, box);
         }
+    }
+
+    /// <summary>Restores the persisted model after the editable ComboBox template and items have settled.</summary>
+    private void RestoreSmartModelSelection(string id, ComboBox box)
+    {
+        if (box.FocusState != FocusState.Unfocused) return;
+
+        // An editable ComboBox can have its text reset while its model list is populated or its template
+        // is applied. Queue restoration after those changes so the visible editor gets the persisted value.
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (box.FocusState != FocusState.Unfocused || _smartModelBoxes.GetValueOrDefault(id) != box) return;
+
+            var model = AppSettings.SmartFeatureModel(id);
+            var catalogChoice = box.Items.OfType<string>().FirstOrDefault(item =>
+                string.Equals(item, model, StringComparison.OrdinalIgnoreCase));
+            var loading = _loading;
+            _loading = true;
+            try
+            {
+                box.SelectedItem = catalogChoice;
+                box.Text = catalogChoice ?? model;
+            }
+            finally { _loading = loading; }
+        });
     }
 
     private async Task LoadSmartModelsAsync(ComboBox box, TextBlock status, string group, string provider)
@@ -246,7 +267,7 @@ public sealed partial class SettingsPanel : UserControl
             finally { _loading = loading; }
             status.Text = ids.Length == 0 ? "No models reported. Check the provider or enter a model ID." : group switch
             {
-                "completion" => "Choose a FIM model served by a completions endpoint with prefix/suffix support.",
+                "completion" => "OpenRouter uses a code instruct model. Other endpoints require a FIM model with prefix/suffix support.",
                 "embedding" => "Choose a model that returns embedding vectors. Chat models cannot be used here.",
                 _ => "",
             };
@@ -259,7 +280,11 @@ public sealed partial class SettingsPanel : UserControl
             status.Visibility = Visibility.Visible;
             ToolTipService.SetToolTip(box, status.Text);
         }
-        finally { _loadingSmartModels.Remove(box); }
+        finally
+        {
+            _loadingSmartModels.Remove(box);
+            if (box.Tag is string id) RestoreSmartModelSelection(id, box);
+        }
     }
     private void RefreshSmartStatus()
     {

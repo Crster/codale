@@ -40,7 +40,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         References = new SearchViewModel(ProjectPath);
         Diff = new DiffViewModel(ProjectPath);
         DiffViewer = new DiffViewerViewModel(ProjectPath);
-        Sessions = new SessionsViewModel(ProjectPath, Features);
+        Sessions = new SessionsViewModel(Features);
         _endpoints = new CliEndpointSettings();
         _mcp = new McpServerSettings(ProjectPath);
         Health = new WorkspaceHealthViewModel(ProjectPath, Features.Knowledge);

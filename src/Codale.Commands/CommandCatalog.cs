@@ -94,9 +94,6 @@ public static class CommandCatalog
         };
     }
 
-    private static string? NameOf(JsonObject o) =>
-        (o["name"] ?? o["label"]) is JsonValue v && v.TryGetValue<string>(out var s) ? s.Trim() : null;
-
     private static List<ProjectCommand> ReadCodale(string root)
     {
         try

@@ -8,6 +8,22 @@ namespace Codale.Agents.Tests;
 public sealed class SmartProviderClientTests
 {
     [Fact]
+    public async Task OpenRouter_code_models_use_chat_insertion_and_preserve_whitespace()
+    {
+        using var http = new HttpClient(new Handler(async request =>
+        {
+            Assert.Equal("https://openrouter.ai/api/v1/chat/completions", request.RequestUri!.AbsoluteUri);
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            Assert.Equal("qwen/code-instruct", body.RootElement.GetProperty("model").GetString());
+            Assert.Contains("suffix", body.RootElement.GetProperty("messages")[1].GetProperty("content").GetString());
+            return Json("{\"choices\":[{\"message\":{\"content\":\"\\n    return a + b;\"}}]}");
+        }));
+        var profile = Profile(); profile.BaseUrl = "https://openrouter.ai/api/v1";
+        var client = new SmartProviderClient("openai", profile, new Dictionary<string, string> { ["completion"] = "qwen/code-instruct" }, http);
+        Assert.Equal("\n    return a + b;", await client.CompleteAsync("completion", "", "{\"prefix\":\"\",\"suffix\":\"}\"}", 48, default));
+    }
+
+    [Fact]
     public async Task Code_completion_uses_fim_prefix_and_suffix_and_preserves_inserted_whitespace()
     {
         using var http = new HttpClient(new Handler(async request =>

@@ -189,8 +189,12 @@ public sealed partial class CodeEditor
         var (row, x) = Locate(_caret);
         var color = _baseText;
         color.A = (byte)(color.A * 0.45);
-        using var layout = new Microsoft.Graphics.Canvas.Text.CanvasTextLayout(Device, _ghostText, _textFormat, 0f, (float)_lineHeight);
-        layout.Options = Microsoft.Graphics.Canvas.Text.CanvasDrawTextOptions.EnableColorFont;
-        session.DrawTextLayout(layout, (float)(TextLeft + x - _scrollX), RowY(row), color);
+        var lines = _ghostText.Replace("\r\n", "\n").Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            using var layout = new Microsoft.Graphics.Canvas.Text.CanvasTextLayout(Device, lines[i], _textFormat, 0f, (float)_lineHeight);
+            layout.Options = Microsoft.Graphics.Canvas.Text.CanvasDrawTextOptions.EnableColorFont;
+            session.DrawTextLayout(layout, (float)(TextLeft + (i == 0 ? x : 0) - _scrollX), RowY(row + i), color);
+        }
     }
 }

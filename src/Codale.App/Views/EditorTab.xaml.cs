@@ -400,8 +400,7 @@ public sealed partial class EditorTab : UserControl
             return null;
         }
 
-        var line = Codale.Core.Text.FimText.FirstLine(raw, suffix, prefix);
-        return Codale.Core.Text.FimText.LooksLikeProse(line) ? null : line;
+        return raw;
     }
 
     private string _relatedKey = "";

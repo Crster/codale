@@ -17,13 +17,11 @@ namespace Codale.App.ViewModels;
 public sealed partial class SessionsViewModel : ObservableObject
 {
     private readonly FeatureService _features;
-    private readonly string _projectPath;
 
     private readonly SynchronizationContext? _uiContext;
 
-    public SessionsViewModel(string projectPath, FeatureService features)
+    public SessionsViewModel(FeatureService features)
     {
-        _projectPath = projectPath;
         _features = features;
         _uiContext = SynchronizationContext.Current;
         _features.Changed += OnFeaturesChanged;

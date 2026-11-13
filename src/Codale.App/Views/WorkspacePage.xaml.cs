@@ -102,6 +102,8 @@ public sealed partial class WorkspacePage : Page
         // The Settings window writes app-level preferences; this page applies them
         // live to the tabs it owns. All windows share one UI thread.
         AppSettings.Changed += OnAppSettingsChanged;
+        SmartExperienceHost.Status.Changed += OnSmartStatusChanged;
+        RefreshSmartStatus();
 
         // Everything except the CLI: no agent session starts until the user opens a
         // chat tab and asks for one. An exception escaping this async void would kill
@@ -121,6 +123,7 @@ public sealed partial class WorkspacePage : Page
         base.OnNavigatedFrom(e);
 
         AppSettings.Changed -= OnAppSettingsChanged;
+        SmartExperienceHost.Status.Changed -= OnSmartStatusChanged;
         foreach (var entry in _terminalTabs) entry.Tab.CloseHost();
         foreach (var entry in _editorTabs) entry.Tab.CloseHost();
 
@@ -178,6 +181,15 @@ public sealed partial class WorkspacePage : Page
         }
 
         ViewModel?.Git.ApplyPollInterval();
+    }
+
+    private void OnSmartStatusChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(RefreshSmartStatus);
+
+    private void RefreshSmartStatus()
+    {
+        var status = SmartExperienceHost.Status.Snapshot();
+        SmartStatusText.Text = status.Text;
+        SmartStatusHost.Visibility = status.Visible ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>

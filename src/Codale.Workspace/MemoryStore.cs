@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 
 namespace Codale.Workspace;
 
@@ -15,8 +14,6 @@ public sealed record MemoryNote(string Id, string Title, string Text, IReadOnlyL
 public sealed class MemoryStore(string directory)
 {
     private const int MaxText = 8000;
-    private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
-
     /// <exception cref="ArgumentException">There is no text, or no title to name it by.</exception>
     public MemoryNote Save(string title, string text, IEnumerable<string>? tags = null)
     {

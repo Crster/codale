@@ -9,6 +9,7 @@ public static class SmartExperienceHost
         Path.Combine(McpServerSettings.CodaleDataRoot(), "smart", "history"));
     private static bool _started;
     private static string? _configuration;
+    public static SmartStatusTracker Status { get; } = new();
     public static SmartProviderClient CreateClient(string feature)
     {
         var provider = AppSettings.SmartProviderFor(feature);
@@ -22,15 +23,28 @@ public static class SmartExperienceHost
     {
         if (_started) return;
         _started = true;
+        Instance.ActivityUpdated += activity =>
+        {
+            if (activity.State is "completed" or "cancelled" or "error")
+                Status.Finish(activity.Id, activity.State, activity.Error);
+            else Status.Start(activity.Id, activity.Context.Task, activity.StartedAt);
+        };
         AppSettings.Changed += (_, _) => Apply();
         Apply();
     }
     private static void Apply()
     {
         Instance.Thinking = AppSettings.SmartThinking;
-        var router = new SmartFeatureRouter(SmartFeatureSettings.Groups.ToDictionary(g => g.Id, g => CreateClient(g.Id)));
+        var clients = SmartFeatureSettings.Groups.ToDictionary(g => g.Id, g => CreateClient(g.Id));
+        var router = new SmartFeatureRouter(clients);
         if (router.ConfigurationKey == _configuration) return;
         _configuration = router.ConfigurationKey;
+        Status.Configure(SmartFeatureSettings.Groups.Select(g =>
+        {
+            var client = clients[g.Id];
+            var enabled = SmartFeatureSettings.Features.Any(f => SmartFeatureSettings.GroupFor(f.Id) == g.Id && client.IsFeatureEnabled(f.Id));
+            return (g.Id, enabled, enabled ? client.ConfigurationError : null);
+        }));
         _ = Instance.ConfigureRemoteAsync("Smart experience", router.HasGeneration ? router.CompleteAsync : null,
             featureEnabled: router.IsFeatureEnabled);
     }

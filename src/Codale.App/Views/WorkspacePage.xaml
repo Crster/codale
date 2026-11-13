@@ -2295,6 +2295,17 @@
                             </Flyout>
                         </FlyoutBase.AttachedFlyout>
                     </Border>
+                    <StackPanel x:Name="SmartStatusHost" Orientation="Horizontal">
+                        <Rectangle Style="{StaticResource StatusDivider}" />
+                        <Border Style="{StaticResource StatusChip}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE945;" FontSize="11" VerticalAlignment="Center"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="SmartStatusText" FontSize="11.5"
+                                    VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
                 </StackPanel>
             </Grid>
         </Border>

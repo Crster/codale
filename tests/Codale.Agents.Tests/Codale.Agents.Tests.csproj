@@ -27,6 +27,7 @@
     <Compile Include="..\..\src\Codale.App\Services\SmartProviderClient.cs" Link="SmartProviderClient.cs" />
     <Compile Include="..\..\src\Codale.App\Services\SmartFeatureSettings.cs" Link="SmartFeatureSettings.cs" />
     <Compile Include="..\..\src\Codale.App\Services\SmartFeatureRouter.cs" Link="SmartFeatureRouter.cs" />
+    <Compile Include="..\..\src\Codale.App\Services\SmartStatusTracker.cs" Link="SmartStatusTracker.cs" />
     <Compile Include="..\..\src\Codale.App\ViewModels\ToolDiffs.cs" Link="ToolDiffs.cs" />
     <Compile Include="..\..\src\Codale.App\ViewModels\PlanningApproval.cs" Link="PlanningApproval.cs" />
   </ItemGroup>

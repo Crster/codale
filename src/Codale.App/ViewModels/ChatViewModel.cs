@@ -2029,7 +2029,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 if (cli != CliId)
                 {
                     CaptureHandoff();
-                    _needsResumeContext = true;
                     ResumeSessionId = null;
                     CliId = cli;
                     RequestedModel = null;
@@ -2275,7 +2274,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             {
                 ResumeSessionId = null;
                 _deliveredContext.Clear();
-                _needsResumeContext = true;
                 Add(new NoticeItem { Text = "The previous CLI conversation could not be resumed; started a new one.", Severity = NoticeSeverity.Info });
                 await ConnectCoreAsync();
             }
@@ -4331,17 +4329,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        _routedIntent = intent switch
-        {
-            RouteIntent.Plan => Codale.Smart.SmartIntent.Plan,
-            RouteIntent.Ask => Codale.Smart.SmartIntent.Ask,
-            _ => Codale.Smart.SmartIntent.Act,
-        };
-        try
-        {
-            await SendRoutedCoreAsync(text, attachments, intent, preparationToken, preparationDeadline);
-        }
-        finally { _routedIntent = null; }
+        await SendRoutedCoreAsync(text, attachments, intent, preparationToken, preparationDeadline);
     }
 
     private async Task SendRoutedCoreAsync(string text, IReadOnlyList<TurnAttachment> attachments, RouteIntent intent, CancellationToken preparationToken, DateTimeOffset? preparationDeadline)
@@ -4728,7 +4716,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (IsBusy || IsTerminalSession || _connecting) return;
         if (cli == CliId) { await SetEndpointAsync(name); return; }
         CaptureHandoff();
-        _needsResumeContext = true;
         await DisposeSessionAsync();
         IsConnected = false;
         EndTurn(TurnOutcome.Stopped);
@@ -4762,7 +4749,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (accountChanged)
         {
             CaptureHandoff();
-            _needsResumeContext = true;
             await DisposeSessionAsync();
             // The previous account's subscription windows are not this one's.
             _status.ResetCliReadings();

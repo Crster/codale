@@ -86,7 +86,8 @@ public sealed partial class SmartExperience
                 var calls = explore ? SmartConversation.Parse(output) : [];
                 if (calls.Count == 0)
                 {
-                    var value = parse(new SmartConversation("", "", SmartReasoning.Off).FinalVisible(output).Trim());
+                    var value = parse(context.Task == "completion" ? output :
+                        new SmartConversation("", "", SmartReasoning.Off).FinalVisible(output).Trim());
                     if (value is null) throw new InvalidDataException("Smart final answer failed validation.");
                     lock (_gate)
                     {
@@ -113,7 +114,10 @@ public sealed partial class SmartExperience
         }
         catch (OperationCanceledException)
         {
-            activity = activity with { State = "cancelled", Error = "Cancelled or deadline reached." };
+            var cancelled = ct.IsCancellationRequested || _lifetime.IsCancellationRequested ||
+                generation != _generation || (background && _background.IsCancellationRequested);
+            activity = activity with { State = cancelled ? "cancelled" : "error",
+                Error = cancelled ? null : "The AI request timed out. Check the connection and model." };
             if (ct.IsCancellationRequested) throw;
             return null;
         }

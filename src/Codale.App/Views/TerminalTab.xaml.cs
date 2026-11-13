@@ -433,7 +433,9 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
 
     // ------------------------------------------------------------------ input
 
-    private void Submit()
+    private bool _translatingCommand;
+
+    private async void Submit()
     {
         if (_viewModel is not { } viewModel)
         {
@@ -452,6 +454,38 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
         if (text.Trim().Length == 0)
         {
             return;
+        }
+
+        if (_translatingCommand) return;
+        if (AppSettings.SmartFeatureEnabled("shell"))
+        {
+            _translatingCommand = true;
+            Input.IsEnabled = false;
+            try
+            {
+                var cwd = viewModel.State.Cwd;
+                var shell = Codale.Terminal.TerminalSession.ResolveShell(AppSettings.TerminalShell);
+                var translated = await SmartExperienceHost.Instance.ShellCommandAsync(
+                    new(cwd, cwd, "shell"), text, shell);
+                if (translated?.Value is not { Length: > 0 } command)
+                {
+                    Input.PlaceholderText = "Smart could not translate this request. Try again.";
+                    return;
+                }
+                if (!IsLoaded || !ReferenceEquals(_viewModel, viewModel)) return;
+                text = command;
+            }
+            catch (Exception)
+            {
+                Input.PlaceholderText = "Smart could not translate this request. Check Developer Tools settings.";
+                return;
+            }
+            finally
+            {
+                _translatingCommand = false;
+                Input.IsEnabled = true;
+                Input.Focus(FocusState.Programmatic);
+            }
         }
 
         _stickToBottom = true;

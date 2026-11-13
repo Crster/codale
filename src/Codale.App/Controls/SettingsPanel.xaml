@@ -308,7 +308,7 @@
                             </StackPanel>
                         </Border>
 
-                        <TextBlock Style="{StaticResource SectionTitle}" Text="AI Features" />
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="Smart Features" />
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <StackPanel x:Name="SmartFeatureRows" Padding="16" Spacing="16" />

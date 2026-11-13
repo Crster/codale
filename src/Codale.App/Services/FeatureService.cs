@@ -138,10 +138,7 @@ public sealed class FeatureService : IDisposable
             workingSessionId is null ? null : _knowledge.FilesOf(workingSessionId, WorkingSetFiles))).ConfigureAwait(false);
     }
 
-    private bool _smartThinking = AppSettings.SmartThinking;
-    private bool _smartSummaries = AppSettings.SmartSummaries;
     private string? _summaryIdentity;
-    private string? _embeddingIdentity;
     private void UpdateSummaryCache()
     {
         _summaryIdentity = SmartExperienceHost.CreateClient("summary").FeatureIdentity("summary");

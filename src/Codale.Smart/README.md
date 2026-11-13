@@ -16,10 +16,13 @@ CLI providers use the selected account's sign-in. The options are
 profile's Flash model when no feature-specific model is selected.
 Reasoning follows the selected model. Each option remembers its model per provider.
 
-Code Completion requires an explicit fill-in-the-middle (FIM) model. Requests use
+Code Completion requires an explicit code model. OpenRouter instruct models use
+`POST /chat/completions` with the code before and after the cursor and instructions
+to return only the insertion. Other OpenAI-compatible endpoints require a
+fill-in-the-middle (FIM) model. Those requests use
 `POST /completions` with `prompt` (code before the cursor) and `suffix` (code after
 the cursor), and insert the returned `choices[0].text` without trimming whitespace.
-The endpoint must support prefix/suffix infilling; chat-only APIs and CLI accounts
+Those endpoints must support prefix/suffix infilling; CLI accounts
 are not offered for this feature. Model catalogues do not reliably declare FIM or
 embedding capabilities, so select a model whose provider documents the required support.
 
@@ -29,6 +32,13 @@ configuration. Vectors carry the endpoint/model identity so vectors from differe
 models are not mixed. Turning Smart off stops further remote embedding requests.
 Remote summaries and completions can send source code to the selected provider;
 background summaries remain opt-in.
+
+The far right of the status bar always displays the AI sparkle and a compact Smart
+status, without a flyout, tooltip, or popup: Off when unconfigured, Idle when no
+request is running, Suggesting for Developer Tools or Code Completion, Processing
+for Codebase Context or Search Embeddings, and Error for an unresolved failure.
+Only the latest active request determines the status. When it finishes, remaining
+work takes over; old errors do not crowd out active requests.
 
 Remote requests retain validated output parsing, bounded tool exploration, fresh
 file evidence, cancellation, and per-project activity history. CLI generation

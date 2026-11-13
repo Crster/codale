@@ -43,6 +43,7 @@ public sealed partial class SmartExperience : ISmartExperience, IAsyncDisposable
     private static int ReasoningTokens(SmartReasoning reasoning) => reasoning == SmartReasoning.Low ? 512 : 2048;
     private SmartGenerateOptions Options(params string[] stop) => new(Seed: Seed, Stop: stop.Length == 0 ? null : stop);
     public event EventHandler? ActivityChanged;
+    public event Action<SmartActivity>? ActivityUpdated;
     /// <summary>The process-wide model activity, including work owned by another project window.</summary>
     public SmartActivity? CurrentActivity
     {
@@ -94,6 +95,7 @@ public sealed partial class SmartExperience : ISmartExperience, IAsyncDisposable
         }
         if (finished) _history?.Save(activity);
         ActivityChanged?.Invoke(this, EventArgs.Empty);
+        ActivityUpdated?.Invoke(activity);
     }
 
     public async Task<IReadOnlyList<SmartEvidence>> DiscoveriesAsync(SmartRequestContext context, string query, CancellationToken ct = default)
@@ -596,7 +598,7 @@ public sealed partial class SmartExperience : ISmartExperience, IAsyncDisposable
         {
             var result = await RunRemoteAsync<string>(context with { Task = "completion" },
                 "Complete the code at the cursor. Output only inserted code, without fences or explanation. Do not repeat the prefix or suffix.",
-                JsonSerializer.Serialize(new { fileName, prefix, suffix, rejected }), FimTokens, true, ct,
+                JsonSerializer.Serialize(new { fileName, prefix, suffix, rejected }), 1024, true, ct,
                 text => string.IsNullOrEmpty(text) || (rejected?.Contains(text.Trim()) ?? false) ? null : text,
                 false, null, null).ConfigureAwait(false);
             return result?.Value;

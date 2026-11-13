@@ -41,12 +41,8 @@ public sealed partial class ChatViewModel
     private readonly StringBuilder _turnFindings = new();
     private string? _retrievalId;
 
-    /// <summary>The intent Auto routed the prompt being sent to; null outside Auto, where the context stays the plain verified kind.</summary>
-    private Codale.Smart.SmartIntent? _routedIntent;
-
     /// <summary>The prompt Auto already put in the transcript before routing, with the composer attachments to restore if it never goes out.</summary>
     private (UserMessageItem Item, List<ComposerAttachment> Composer)? _preShown;
-    private bool _needsResumeContext;
     private string? _handoffContext;
 
     /// <summary>Only opening a history row resumes it. Prompts never select a different session.</summary>
@@ -63,7 +59,6 @@ public sealed partial class ChatViewModel
         {
             CliId = cliId!;
             ResumeSessionId = null;
-            _needsResumeContext = true;
             OnPropertyChanged(nameof(EndpointName));
         }
         else if (mapping is not null)
@@ -194,7 +189,6 @@ public sealed partial class ChatViewModel
         _turnStartedUtc = null;
         _deliveredContext.Clear();
         _retrievalId = null;
-        _needsResumeContext = false;
     }
 
     private void BindHistoryProvider()
@@ -365,7 +359,6 @@ public sealed partial class ChatViewModel
     private void ContextDelivered(RetrievalResult? result)
     {
         if (result is null) return;
-        _needsResumeContext = false;
         foreach (var key in result.Keys) _deliveredContext.Add(key);
         try
         {

@@ -11,6 +11,19 @@ public sealed class SmartEmbedder : IEmbedder
     {
         if (Model == "off") return [];
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        return _client.EmbedAsync(text, timeout.Token).GetAwaiter().GetResult();
+        var id = Guid.NewGuid().ToString("N");
+        SmartExperienceHost.Status.Start(id, "embedding");
+        try
+        {
+            var vector = _client.EmbedAsync(text, timeout.Token).GetAwaiter().GetResult();
+            SmartExperienceHost.Status.Finish(id, "completed");
+            return vector;
+        }
+        catch (Exception ex)
+        {
+            SmartExperienceHost.Status.Finish(id, "error", ex is OperationCanceledException
+                ? "The embedding request timed out. Check the connection and model." : ex.Message);
+            throw;
+        }
     }
 }

@@ -17,7 +17,7 @@ public static class SmartFeatureSettings
     [
         ("assistance", "Developer Tools", "Commit messages and shell commands"),
         ("context", "Codebase Context", "Background summaries and search"),
-        ("completion", "Code Completion", "Inline suggestions · requires a fill-in-the-middle (FIM) model"),
+        ("completion", "Code Completion", "Inline suggestions · code model via OpenRouter, or a fill-in-the-middle (FIM) endpoint"),
         ("embedding", "Search Embeddings", "Semantic search · requires a vector embedding model · reopen project to apply"),
     ];
 
