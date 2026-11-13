@@ -23,10 +23,71 @@ internal sealed record ComposerPrediction(int Start, int Length, string Replacem
 /// </remarks>
 internal sealed class ComposerPredictor(string projectRoot)
 {
-    private const int MinCompletionPrefix = 2;
     private const int MinCorrectionLength = 3;
+    private const int MinCompletionPrefix = 2;
+    private static readonly TimeSpan ChangedTtl = TimeSpan.FromSeconds(15);
 
-    private const int MinModelPrompt = 12;
+    private Dictionary<string, int> _changedWords = new(StringComparer.OrdinalIgnoreCase);
+    private DateTime _changedAt = DateTime.MinValue;
+
+    /// <summary>Identifiers (with counts) from the files git reports as changed; refreshed at most every few seconds.</summary>
+    private Dictionary<string, int> ChangedWords()
+    {
+        if (DateTime.UtcNow - _changedAt < ChangedTtl)
+        {
+            return _changedWords;
+        }
+
+        _changedAt = DateTime.UtcNow;
+        var words = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var snapshot = new Codale.Git.GitRepository(projectRoot).GetSnapshotAsync().GetAwaiter().GetResult();
+            foreach (var change in snapshot.Changes.Take(40))
+            {
+                var path = Path.Combine(projectRoot, change.Path);
+                var info = new FileInfo(path);
+                if (!info.Exists || info.Length > 200_000)
+                {
+                    continue;
+                }
+
+                foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
+                             File.ReadAllText(path), @"[A-Za-z_][A-Za-z0-9_]{3,}"))
+                {
+                    words[m.Value] = words.GetValueOrDefault(m.Value) + 1;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Not a repository, or a file mid-write: no completions this round.
+        }
+
+        return _changedWords = words;
+    }
+
+    private ComposerPrediction? CompleteFromChanges(PromptWords.Word word)
+    {
+        string? best = null;
+        var bestCount = 0;
+        foreach (var (candidate, count) in ChangedWords())
+        {
+            // One letter left is not worth a keystroke.
+            if (candidate.Length < word.Length + 2 || !candidate.StartsWith(word.Text, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (count > bestCount)
+            {
+                best = candidate;
+                bestCount = count;
+            }
+        }
+
+        return best is null ? null : new ComposerPrediction(word.Start, word.Length, PromptWords.MatchCase(word.Text, best), IsCorrection: false);
+    }
 
     private readonly Lock _gate = new();
     private (string Text, int Caret, Action<ComposerPrediction?> Done)? _pending;
@@ -94,43 +155,7 @@ internal sealed class ComposerPredictor(string projectRoot)
                 continue;
             }
 
-            if (prediction is null && WantsModel(next.Text, next.Caret))
-            {
-                // Nothing in the workspace vocabulary: after a pause, the Auto Complete (or Decision) model continues the prompt.
-                var cancel = new CancellationTokenSource();
-                lock (_gate)
-                {
-                    _model = cancel;
-                }
-
-                _ = ContinueAsync(next.Text, next.Caret, next.Done, cancel);
-                continue;
-            }
-
             next.Done(prediction);
-        }
-    }
-
-    /// <summary>Only a prompt with some substance, at its end, after a finished word.</summary>
-    private static bool WantsModel(string text, int caret) =>
-        caret == text.Length && text.Length > 0 && text[^1] == ' ' && text.Trim().Length >= MinModelPrompt &&
-        SmartInlineCompletion.IsEnabled("compose-completion");
-
-    private async Task ContinueAsync(string text, int caret, Action<ComposerPrediction?> done, CancellationTokenSource cancel)
-    {
-        using (cancel)
-        {
-            var prefix = "A developer's message to an AI coding agent working in this project:\n\n" + text;
-            var continuation = await SmartInlineCompletion.SuggestAsync("compose-completion", projectRoot, prefix, cancel.Token).ConfigureAwait(false);
-            lock (_gate)
-            {
-                // Released before disposal, so a later keystroke never cancels a disposed source.
-                if (ReferenceEquals(_model, cancel)) _model = null;
-                if (cancel.IsCancellationRequested || _pending is not null) return;
-            }
-
-            continuation = continuation?.TrimStart();
-            done(continuation is { Length: > 0 } ? new ComposerPrediction(caret, 0, continuation, IsCorrection: false) : null);
         }
     }
 
@@ -143,12 +168,12 @@ internal sealed class ComposerPredictor(string projectRoot)
         // Typing a word: complete it.
         if (PromptWords.Before(text, caret) is { } word)
         {
-            if (word.Length >= MinCompletionPrefix && Complete(index, model, text, word) is { } completion)
+            // Words from the files changed in git complete first; no model completion.
+            if (word.Length >= MinCompletionPrefix && CompleteFromChanges(word) is { } completion)
             {
                 return completion;
             }
 
-            // Nothing in the workspace starts this way: it may be a typo already.
             return word.Length >= MinCorrectionLength ? Correct(model, word, typing: true) : null;
         }
 
@@ -157,26 +182,6 @@ internal sealed class ComposerPredictor(string projectRoot)
             PromptWords.Before(text, caret - 1) is { Length: >= MinCorrectionLength } finished)
         {
             return Correct(model, finished, typing: false);
-        }
-
-        return null;
-    }
-
-    private static ComposerPrediction? Complete(SourceIndex index, WorkspaceModel model, string text, PromptWords.Word word)
-    {
-        var known = model.Knows(word.Text);
-        var previous = PromptWords.Previous(text, word.Start);
-        foreach (var suggestion in index.Suggest(word.Text, previous))
-        {
-            // One letter left is not worth a keystroke; and once the word is a real one, only a
-            // declared name (a type, a method) is worth offering in its place.
-            if (suggestion.Text.Length < word.Length + 2 || (known && suggestion.Kind is null))
-            {
-                continue;
-            }
-
-            var replacement = suggestion.Kind is null ? PromptWords.MatchCase(word.Text, suggestion.Text) : suggestion.Text;
-            return new ComposerPrediction(word.Start, word.Length, replacement, IsCorrection: false);
         }
 
         return null;
