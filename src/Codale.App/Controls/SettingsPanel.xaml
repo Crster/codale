@@ -468,6 +468,30 @@
                                         <ComboBoxItem Content="100,000 lines" />
                                     </ComboBox>
                                 </Grid>
+                                <Rectangle Style="{StaticResource Divider}" />
+                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock Style="{StaticResource RowTitle}" Text="Command block height" />
+                                        <TextBlock Style="{StaticResource RowDesc}" Text="Lines a command block shows before it scrolls inside (3–200). Drag a block to the right edge to dock it beside the tabs." />
+                                    </StackPanel>
+                                    <NumberBox x:Name="TerminalBlockLinesBox" Grid.Column="1" VerticalAlignment="Center" Width="130" Maximum="200" Minimum="3" SmallChange="1" SpinButtonPlacementMode="Compact" ValueChanged="OnTerminalBlockLinesChanged" />
+                                </Grid>
+                                <Rectangle Style="{StaticResource Divider}" />
+                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock Style="{StaticResource RowTitle}" Text="Command history kept" />
+                                        <TextBlock Style="{StaticResource RowDesc}" Text="Command blocks a terminal keeps; the oldest finished ones beyond this are dropped." />
+                                    </StackPanel>
+                                    <NumberBox x:Name="TerminalBlockHistoryBox" Grid.Column="1" VerticalAlignment="Center" Width="130" Maximum="5000" Minimum="10" SmallChange="10" SpinButtonPlacementMode="Compact" ValueChanged="OnTerminalBlockHistoryChanged" />
+                                </Grid>
+                                <Rectangle Style="{StaticResource Divider}" />
+                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock Style="{StaticResource RowTitle}" Text="Load PowerShell profile" />
+                                        <TextBlock Style="{StaticResource RowDesc}" Text="Each command runs in its own process; loading your profile makes your aliases and functions available, but costs its startup time on every command." />
+                                    </StackPanel>
+                                    <ToggleSwitch x:Name="TerminalLoadProfileToggle" Grid.Column="1" MinWidth="0" Toggled="OnTerminalLoadProfileToggled" />
+                                </Grid>
                             </StackPanel>
                         </Border>
                     </StackPanel>

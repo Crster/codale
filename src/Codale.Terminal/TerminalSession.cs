@@ -156,11 +156,16 @@ public sealed class TerminalSession : IDisposable, IAsyncDisposable
         return null;
     }
 
-    public void Start(string workingDirectory, string? command = null, short columns = 120, short rows = 30)
+    /// <summary>
+    /// Starts <paramref name="command"/> (the default shell when null). With <paramref name="environment"/>
+    /// the process gets exactly those variables - how a command block carries the previous block's.
+    /// </summary>
+    public void Start(string workingDirectory, string? command = null, short columns = 120, short rows = 30,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         command ??= ResolveDefaultShell();
 
-        _pty.Start(command, workingDirectory, columns, rows);
+        _pty.Start(command, workingDirectory, columns, rows, environment);
         _reader = Task.Run(ReadLoopAsync);
         _writer = Task.Run(WriteLoopAsync);
         _watcher = Task.Run(WatchForExitAsync);

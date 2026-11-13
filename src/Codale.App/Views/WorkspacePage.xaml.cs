@@ -419,9 +419,6 @@ public sealed partial class WorkspacePage : Page
         await RunInNewTerminalAsync(command);
     }
 
-    /// <summary>Time a fresh shell gets to print its prompt before a command is typed into it.</summary>
-    private static readonly TimeSpan ShellPromptDelay = TimeSpan.FromMilliseconds(1500);
-
     /// <summary>Starts login with the terminal, keeping its output visible after it exits.</summary>
     public async Task RunAccountSignInAsync(string cliId, string? accountId = null)
     {
@@ -452,13 +449,13 @@ public sealed partial class WorkspacePage : Page
         return RunInNewTerminalAsync(command);
     }
 
-    private async Task RunInNewTerminalAsync(string command)
+    private Task RunInNewTerminalAsync(string command)
     {
+        // A notebook runs the command as its first block straight away: no prompt to wait for.
         var terminal = ViewModel.CreateTerminal();
         AddTerminalTab(terminal);
-
-        await Task.Delay(ShellPromptDelay);
-        await terminal.WriteAsync(command + "\r");
+        terminal.RunCommand(command, record: false);
+        return Task.CompletedTask;
     }
 
     private bool _loginPromptOpen;
@@ -823,7 +820,12 @@ public sealed partial class WorkspacePage : Page
         }
         else
         {
-            tab = new TerminalTab { ViewModel = terminal };
+            var notebook = new TerminalTab { ViewModel = terminal };
+            notebook.BlockPopOutRequested += (_, block) => OpenBlockInNewTab(terminal, block);
+            notebook.BlockDockRequested += (_, request) => DockBlock(terminal, request.Block, request.Dock);
+            notebook.BlockDragStarted += (_, block) => BeginDockDrag(terminal, block);
+            notebook.BlockDragEnded += (_, _) => EndDockDrag();
+            tab = notebook;
         }
 
         tab.LinkActivated += OnTerminalLinkActivated;
@@ -844,6 +846,36 @@ public sealed partial class WorkspacePage : Page
         {
             terminal.Toggle();
         }
+    }
+
+    /// <summary>
+    /// "Maximize in new tab": moves a command block - running or finished - out of its notebook into a
+    /// terminal tab of its own, opened right after the source tab, where it fills the tab and its own
+    /// input cell follows it. The process keeps running through the move.
+    /// </summary>
+    private void OpenBlockInNewTab(TerminalViewModel source, CommandBlockViewModel block)
+    {
+        if (ViewModel is null || !source.Blocks.Contains(block))
+        {
+            return;
+        }
+
+        var sourceEntry = _terminalTabs.FirstOrDefault(t => ReferenceEquals(t.Terminal, source));
+        var group = sourceEntry is null ? null : GroupOf(sourceEntry.Item);
+        var index = sourceEntry is not null && group is not null ? group.TabItems.IndexOf(sourceEntry.Item) + 1 : -1;
+        if (group is not null)
+        {
+            SelectTab(sourceEntry!.Item);
+        }
+
+        UndockBlock(block);
+        source.ReleaseBlock(block);
+        block.Size = BlockSize.Fill;
+
+        var terminal = ViewModel.CreateTerminal();
+        terminal.IsSingleBlock = true;
+        terminal.AdoptBlock(block);
+        AddTerminalTab(terminal, index);
     }
 
     /// <summary>
@@ -921,7 +953,7 @@ public sealed partial class WorkspacePage : Page
 
             // A plain shell that only existed to launch the CLI is not left behind; closed after the
             // key handler that got us here has returned.
-            if (origin is { Terminal.IsCommandTerminal: false })
+            if (origin is { Terminal.IsCommandTerminal: false, Terminal.Blocks.Count: 0 })
             {
                 DispatcherQueue.TryEnqueue(() =>
                 {

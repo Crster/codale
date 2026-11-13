@@ -299,6 +299,27 @@ public static class AppSettings
         set => Set("terminal.scrollback", Math.Clamp(value, 100, 1_000_000), FormatInt);
     }
 
+    /// <summary>Lines a command block shows before it scrolls inside.</summary>
+    public static int TerminalBlockLines
+    {
+        get => Get("terminal.blockLines", () => Math.Clamp(Read("terminal.blockLines", 12, ParseInt), 3, 200));
+        set => Set("terminal.blockLines", Math.Clamp(value, 3, 200), FormatInt);
+    }
+
+    /// <summary>Command blocks kept in a terminal's history; the oldest finished ones beyond this are dropped.</summary>
+    public static int TerminalBlockHistory
+    {
+        get => Get("terminal.blockHistory", () => Math.Clamp(Read("terminal.blockHistory", 200, ParseInt), 10, 5_000));
+        set => Set("terminal.blockHistory", Math.Clamp(value, 10, 5_000), FormatInt);
+    }
+
+    /// <summary>Whether each PowerShell command block loads the user's profile first (slower: it runs every time).</summary>
+    public static bool TerminalLoadProfile
+    {
+        get => Get("terminal.loadProfile", () => ReadFlag("terminal.loadProfile", false));
+        set => Set("terminal.loadProfile", value, FormatFlag);
+    }
+
     private static bool ReadFlag(string name, bool fallback) => Read(name, fallback ? "1" : "0") == "1";
 
     private static bool IsChatMode(string? mode) =>

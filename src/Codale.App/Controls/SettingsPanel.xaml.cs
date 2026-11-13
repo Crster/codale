@@ -314,7 +314,9 @@ public sealed partial class SettingsPanel : UserControl
             <= 50_000 => 2,
             _ => 3,
         };
-
+        TerminalBlockLinesBox.Value = AppSettings.TerminalBlockLines;
+        TerminalBlockHistoryBox.Value = AppSettings.TerminalBlockHistory;
+        TerminalLoadProfileToggle.IsOn = AppSettings.TerminalLoadProfile;
 
         ChatFontSizeBox.Value = AppSettings.ChatFontSize;
         PopulateChatFontFamilies();
@@ -1202,6 +1204,36 @@ public sealed partial class SettingsPanel : UserControl
         }
 
         AppSettings.TerminalFontSize = sender.Value;
+    }
+
+    private void OnTerminalBlockLinesChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_loading || !double.IsFinite(sender.Value))
+        {
+            return;
+        }
+
+        AppSettings.TerminalBlockLines = (int)Math.Round(sender.Value);
+    }
+
+    private void OnTerminalBlockHistoryChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_loading || !double.IsFinite(sender.Value))
+        {
+            return;
+        }
+
+        AppSettings.TerminalBlockHistory = (int)Math.Round(sender.Value);
+    }
+
+    private void OnTerminalLoadProfileToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        AppSettings.TerminalLoadProfile = TerminalLoadProfileToggle.IsOn;
     }
 
     private void OnTerminalScrollbackChanged(object sender, SelectionChangedEventArgs e)

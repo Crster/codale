@@ -1466,6 +1466,9 @@
                         <ColumnDefinition x:Name="CentreTabsColumn" Width="*" MinWidth="240" />
                         <ColumnDefinition x:Name="PeekSplitterColumn" Width="0" />
                         <ColumnDefinition x:Name="PeekColumn" Width="0" />
+                        <!--  Terminal dock: command blocks dragged to the right edge. Zero width until one is docked.  -->
+                        <ColumnDefinition x:Name="DockSplitterColumn" Width="0" />
+                        <ColumnDefinition x:Name="DockColumn" Width="0" />
                     </Grid.ColumnDefinitions>
 
                     <sizers:GridSplitter
@@ -1836,6 +1839,73 @@
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
+
+                    <!--  The terminal dock: a command block dragged to the right edge runs here, beside
+                          whatever tab is in front - the whole height, or the top or bottom half.  -->
+                    <sizers:GridSplitter
+                        x:Name="DockSplitter"
+                        Grid.Column="3"
+                        Width="8"
+                        HorizontalAlignment="Center"
+                        ResizeBehavior="PreviousAndNext"
+                        ResizeDirection="Columns"
+                        Visibility="Collapsed" />
+                    <Grid
+                        x:Name="DockPane"
+                        Grid.Column="4"
+                        Padding="4,8,4,8"
+                        Background="#0C0C0C"
+                        RequestedTheme="Dark"
+                        BorderBrush="{ThemeResource ShellHairlineBrush}"
+                        BorderThickness="1,0,0,0"
+                        Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition x:Name="DockTopRow" Height="*" />
+                            <RowDefinition x:Name="DockSplitterRow" Height="0" />
+                            <RowDefinition x:Name="DockBottomRow" Height="0" />
+                        </Grid.RowDefinitions>
+                        <Border x:Name="DockTopHost" />
+                        <sizers:GridSplitter
+                            x:Name="DockRowSplitter"
+                            Grid.Row="1"
+                            Height="8"
+                            VerticalAlignment="Center"
+                            ResizeBehavior="PreviousAndNext"
+                            ResizeDirection="Rows"
+                            Visibility="Collapsed" />
+                        <Border x:Name="DockBottomHost" Grid.Row="2" />
+                    </Grid>
+
+                    <!--  Shown only while a command block is dragged: where it would dock on the right.  -->
+                    <Grid
+                        x:Name="DockDropTarget"
+                        Grid.ColumnSpan="5"
+                        AllowDrop="True"
+                        Background="Transparent"
+                        Canvas.ZIndex="10"
+                        DragLeave="OnDockDropTargetDragLeave"
+                        DragOver="OnDockDropTargetDragOver"
+                        Drop="OnDockDropTargetDrop"
+                        Visibility="Collapsed">
+                        <Border
+                            x:Name="DockDropHint"
+                            Margin="4"
+                            BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                            BorderThickness="2"
+                            CornerRadius="6"
+                            IsHitTestVisible="False"
+                            Visibility="Collapsed">
+                            <Border.Background>
+                                <SolidColorBrush Opacity="0.18" Color="{ThemeResource SystemAccentColor}" />
+                            </Border.Background>
+                            <TextBlock
+                                x:Name="DockDropCaption"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                        </Border>
+                    </Grid>
                 </Grid>
             </Border>
         </Grid>

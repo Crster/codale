@@ -78,7 +78,14 @@ public sealed partial class TerminalView : UserControl
         B = b,
     };
 
-    private readonly TerminalEmulator _emulator = new();
+    private TerminalEmulator _emulator = new();
+
+    /// <summary>
+    /// False once <see cref="Attach"/> handed this view an emulator someone else feeds (a command
+    /// block's): that owner answers the emulator's DSR/DA replies itself, so the view must not
+    /// forward them as well.
+    /// </summary>
+    private bool _ownsEmulator = true;
 
     private double _charWidth = 8;
     private double _lineHeight = 18;
@@ -127,16 +134,10 @@ public sealed partial class TerminalView : UserControl
         _fontFamily = ResolveFontFamily(AppSettings.TerminalFontFamily);
         _emulator.ScrollbackLimit = AppSettings.TerminalScrollback;
 
-        _emulator.TitleChanged += title => TitleChanged?.Invoke(this, title);
-
         // Every fed chunk repaints - without this, output (including the echo of each
         // keystroke) only showed up on the next caret blink, up to 530ms late.
         // CanvasControl.Invalidate coalesces, so a burst of chunks is one frame.
-        _emulator.Invalidated += OnEmulatorInvalidated;
-
-        // DSR/DA replies go straight back to the shell; they are not user input, so
-        // they must not clear the selection the way WriteToShellAsync does.
-        _emulator.Response += reply => Response?.Invoke(this, reply);
+        HookEmulator(_emulator);
 
         _caretTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
         _caretTimer.Interval = TimeSpan.FromMilliseconds(530);
@@ -187,7 +188,7 @@ public sealed partial class TerminalView : UserControl
         if (_closed) return;
         _closed = true;
         _caretTimer.Stop();
-        _emulator.Invalidated -= OnEmulatorInvalidated;
+        UnhookEmulator(_emulator);
         DisposeTextFormats();
         foreach (var brush in _brushes.Values) brush.Dispose();
         _brushes.Clear();
@@ -229,6 +230,8 @@ public sealed partial class TerminalView : UserControl
         _fontSize = size;
         _fontFamily = family;
         DisposeTextFormats();
+        VisibleBlockLines = -1;
+        UpdateBlockHeight();
         RefitGrid();
     }
 
@@ -249,14 +252,168 @@ public sealed partial class TerminalView : UserControl
     private static string ResolveFontFamily(string requested) =>
         InstalledFonts.Resolve(requested, DefaultFontFamily);
 
+    private void HookEmulator(TerminalEmulator emulator)
+    {
+        emulator.TitleChanged += OnEmulatorTitleChanged;
+        emulator.Invalidated += OnEmulatorInvalidated;
+        emulator.Response += OnEmulatorResponse;
+    }
+
+    private void UnhookEmulator(TerminalEmulator emulator)
+    {
+        emulator.TitleChanged -= OnEmulatorTitleChanged;
+        emulator.Invalidated -= OnEmulatorInvalidated;
+        emulator.Response -= OnEmulatorResponse;
+    }
+
+    private void OnEmulatorTitleChanged(string title) => TitleChanged?.Invoke(this, title);
+
+    /// <summary>
+    /// DSR/DA replies go straight back to the shell; they are not user input, so they must not
+    /// clear the selection the way WriteToShellAsync does. An attached emulator's owner sends them.
+    /// </summary>
+    private void OnEmulatorResponse(string reply)
+    {
+        if (_ownsEmulator)
+        {
+            Response?.Invoke(this, reply);
+        }
+    }
+
+    /// <summary>
+    /// Shows <paramref name="emulator"/> instead of this view's own: a command block keeps its
+    /// output in an emulator of its own, fed whether or not a view is showing it, so a block can be
+    /// scrolled out of the notebook (its view recycled) or moved to another tab and come back intact.
+    /// </summary>
+    public void Attach(TerminalEmulator emulator)
+    {
+        if (ReferenceEquals(emulator, _emulator) || _closed)
+        {
+            return;
+        }
+
+        UnhookEmulator(_emulator);
+        _emulator = emulator;
+        _ownsEmulator = false;
+        HookEmulator(_emulator);
+
+        _trimmedSeen = _emulator.TrimmedLines;
+        _pinned = true;
+        _topLine = 0;
+        _selectionAnchor = _selectionHead = default;
+        _singleCell = false;
+        _selectedSnapshot = null;
+        _hoverLink = null;
+
+        UpdateBlockHeight();
+        RefitGrid();
+        SyncScrollbar();
+        InvalidateAll();
+    }
+
+    /// <summary>The emulator this view draws.</summary>
+    public TerminalEmulator Emulator => _emulator;
+
     private void OnEmulatorInvalidated()
     {
         // Output moves the cursor; keep it solid while things change, like a real
         // terminal, instead of letting it blink out mid-typing.
         ResetCaretBlink();
         ApplyTrim();
+        UpdateBlockHeight();
         SyncScrollbar();
         InvalidateAll();
+    }
+
+    // ------------------------------------------------------------------ block mode
+
+    /// <summary>
+    /// Block mode, for a command block in the notebook terminal: 0 (the default) is a classic
+    /// terminal whose rows fill the control. Above 0 the grid is exactly this many rows and the
+    /// control sizes its own height to the output - a two-line result is two lines tall - up to
+    /// this many lines, scrolling inside beyond that. A full-screen app (alternate screen) always
+    /// gets all of them.
+    /// </summary>
+    public int BlockRows
+    {
+        get => _blockRows;
+        set
+        {
+            value = Math.Max(0, value);
+            if (_blockRows == value)
+            {
+                return;
+            }
+
+            _blockRows = value;
+            if (value == 0)
+            {
+                VisibleBlockLines = 0;
+                ClearValue(HeightProperty);
+            }
+
+            UpdateBlockHeight();
+            RefitGrid();
+        }
+    }
+
+    private int _blockRows;
+
+    /// <summary>
+    /// Whether the cursor is drawn and counts as content. A finished block hides it, so the
+    /// blank line a trailing newline left it on does not show as an extra row.
+    /// </summary>
+    public bool ShowCursor
+    {
+        get => _showCursor;
+        set
+        {
+            if (_showCursor == value)
+            {
+                return;
+            }
+
+            _showCursor = value;
+            UpdateBlockHeight();
+            InvalidateAll();
+        }
+    }
+
+    private bool _showCursor = true;
+
+    /// <summary>Lines of output a block-mode view shows: its content, capped at <see cref="BlockRows"/>.</summary>
+    public int VisibleBlockLines { get; private set; }
+
+    /// <summary>Raised when a block-mode view changed how many lines it shows.</summary>
+    public event EventHandler? BlockHeightChanged;
+
+    /// <summary>The height <paramref name="lines"/> rows take, padding included; 0 for none.</summary>
+    public double HeightForLines(int lines)
+    {
+        EnsureMetrics();
+        return lines <= 0 ? 0 : PadTop + PadBottom + lines * _lineHeight;
+    }
+
+    private void UpdateBlockHeight()
+    {
+        if (_blockRows <= 0 || _closed)
+        {
+            return;
+        }
+
+        var content = _emulator.InAlternate
+            ? _blockRows
+            : (_showCursor ? _emulator.LastContentLine : _emulator.LastTextLine) + 1;
+        var lines = Math.Clamp(content, 0, _blockRows);
+        var height = HeightForLines(lines);
+        if (lines == VisibleBlockLines && Math.Abs(Height - height) < 0.5)
+        {
+            return;
+        }
+
+        VisibleBlockLines = lines;
+        Height = height;
+        BlockHeightChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Invalidates both layers: the grid lives on Canvas, the cursor alone on CaretCanvas.</summary>
@@ -466,7 +623,7 @@ public sealed partial class TerminalView : UserControl
     {
         EnsureMetrics();
         var cols = (int)((Canvas.ActualWidth - PadLeft - PadRight) / _charWidth);
-        var rows = (int)((Canvas.ActualHeight - PadTop - PadBottom) / _lineHeight);
+        var rows = _blockRows > 0 ? _blockRows : (int)((Canvas.ActualHeight - PadTop - PadBottom) / _lineHeight);
         return (Math.Max(1, cols), Math.Max(1, rows));
     }
 
@@ -478,7 +635,8 @@ public sealed partial class TerminalView : UserControl
         if (_closed) return;
         // While the tab is hidden the control reports zero; resizing the shell to
         // nothing would be wrong, so wait for a real size.
-        if (Canvas.ActualWidth < _charWidth || Canvas.ActualHeight < _lineHeight)
+        // A block may be zero lines tall before its first output, so only its width must be real.
+        if (Canvas.ActualWidth < _charWidth || (_blockRows == 0 && Canvas.ActualHeight < _lineHeight))
         {
             return;
         }
@@ -884,7 +1042,20 @@ public sealed partial class TerminalView : UserControl
     {
         var fg = ResolveColor(style.Fg, isForeground: true);
         var bg = ResolveColor(style.Bg, isForeground: false);
-        return (style.Flags & CellFlags.Reverse) != 0 ? bg : fg;
+        if ((style.Flags & CellFlags.Reverse) != 0)
+        {
+            return bg;
+        }
+
+        // Default text on a coloured background (PowerShell's directory highlight) is picked for
+        // contrast with that background, so it stays readable in the light scheme as in the dark.
+        if (style.Fg.IsDefault && !style.Bg.IsDefault)
+        {
+            var luminance = (0.299 * bg.R + 0.587 * bg.G + 0.114 * bg.B) / 255;
+            return luminance > 0.55 ? ColorFrom(0xFF, 0x1E, 0x1E, 0x1E) : ColorFrom(0xFF, 0xF4, 0xF4, 0xF4);
+        }
+
+        return fg;
     }
 
     private static Windows.UI.Color ResolveBackground(CellStyle style)
@@ -897,7 +1068,7 @@ public sealed partial class TerminalView : UserControl
     /// <summary>The cursor, drawn only when its screen row is on the visible part of the buffer.</summary>
     private void DrawCursor(CanvasDrawingSession session, int topLine, int lastLine)
     {
-        if (!_emulator.CursorVisible || !_caretVisible)
+        if (!_emulator.CursorVisible || !_caretVisible || !_showCursor)
         {
             return;
         }
@@ -1028,6 +1199,13 @@ public sealed partial class TerminalView : UserControl
             var cell = PointToCell(e.GetCurrentPoint(Canvas).Position);
             _ = WriteToShellAsync(EncodeMouseReport(button, cell.Col, ViewportRow(cell.Line), pressed: true));
             e.Handled = true;
+            return;
+        }
+
+        // A block that cannot scroll further that way leaves the wheel to the notebook around it.
+        if (_blockRows > 0 && (MaxTopLine == 0 || (delta > 0 && TopLine == 0) || (delta < 0 && TopLine >= MaxTopLine)))
+        {
+            _wheelLines = 0;
             return;
         }
 
