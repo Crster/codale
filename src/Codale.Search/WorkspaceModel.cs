@@ -252,6 +252,125 @@ public sealed class WorkspaceModel
         }
     }
 
+    /// <summary>True when the workspace uses <paramref name="word"/>: as a word in some file, or as a declared name.</summary>
+    public bool Knows(string word)
+    {
+        if (word.Length == 0)
+        {
+            return false;
+        }
+
+        lock (_gate)
+        {
+            return _termFiles.ContainsKey(word.ToLowerInvariant()) || _symbols.ContainsKey(word);
+        }
+    }
+
+    /// <summary>
+    /// The workspace's words spelled closest to <paramref name="word"/>, for a word it does not know:
+    /// fewest edits first (a swap of two letters is one), then the most widely used. One edit is allowed
+    /// up to four letters, two beyond. A declared name keeps its own casing; a plain word is lower case.
+    /// </summary>
+    /// <param name="maxEdits">A tighter limit than the default, e.g. 1 for a word still being typed.</param>
+    public IReadOnlyList<WorkspaceSuggestion> Correct(string word, int max = 3, int maxEdits = 2)
+    {
+        if (word.Length < 3 || word.Length > SourceTokens.MaxLength)
+        {
+            return [];
+        }
+
+        var lower = word.ToLowerInvariant();
+        var limit = Math.Min(maxEdits, word.Length <= 4 ? 1 : 2);
+        var found = new Dictionary<string, (string Text, int Distance, SourceSymbolKind? Kind, int Files)>(StringComparer.OrdinalIgnoreCase);
+
+        lock (_gate)
+        {
+            foreach (var (term, files) in _termFiles)
+            {
+                if (Math.Abs(term.Length - lower.Length) > limit || term.Length < 3)
+                {
+                    continue;
+                }
+
+                var distance = EditDistance(lower, term, limit);
+                if (distance <= limit)
+                {
+                    found[term] = (term, distance, null, files);
+                }
+            }
+
+            foreach (var (name, kinds) in _symbols)
+            {
+                if (Math.Abs(name.Length - lower.Length) > limit)
+                {
+                    continue;
+                }
+
+                var distance = EditDistance(lower, name.ToLowerInvariant(), limit);
+                if (distance <= limit)
+                {
+                    var files = kinds.Values.Sum();
+                    var kind = kinds.MaxBy(k => k.Value).Key;
+                    var known = found.TryGetValue(name, out var term) ? term.Files : 0;
+                    found[name] = (name, distance, kind, Math.Max(files, known));
+                }
+            }
+        }
+
+        return found.Values
+            .Where(c => c.Distance > 0)
+            .OrderBy(c => c.Distance)
+            .ThenByDescending(c => c.Files)
+            .ThenBy(c => c.Text.Length)
+            .Take(max)
+            .Select(c => new WorkspaceSuggestion(c.Text, c.Kind, c.Files))
+            .ToList();
+    }
+
+    /// <summary>Edits from <paramref name="a"/> to <paramref name="b"/> (a swap of neighbours counts once), or more than <paramref name="limit"/> once it is sure to exceed it.</summary>
+    internal static int EditDistance(string a, string b, int limit)
+    {
+        var n = a.Length;
+        var m = b.Length;
+        Span<int> before = stackalloc int[m + 1];
+        Span<int> previous = stackalloc int[m + 1];
+        Span<int> current = stackalloc int[m + 1];
+        for (var j = 0; j <= m; j++)
+        {
+            previous[j] = j;
+        }
+
+        for (var i = 1; i <= n; i++)
+        {
+            current[0] = i;
+            var best = current[0];
+            for (var j = 1; j <= m; j++)
+            {
+                var cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                var value = Math.Min(Math.Min(previous[j] + 1, current[j - 1] + 1), previous[j - 1] + cost);
+                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1])
+                {
+                    value = Math.Min(value, before[j - 2] + 1);
+                }
+
+                current[j] = value;
+                best = Math.Min(best, value);
+            }
+
+            if (best > limit)
+            {
+                return limit + 1;
+            }
+
+            var spare = before;
+            before = previous;
+            previous = current;
+            current = spare;
+        }
+
+        return previous[m];
+    }
+
     /// <summary>Loads the saved model once. A missing, unreadable or other-format file starts empty.</summary>
     public void Load()
     {

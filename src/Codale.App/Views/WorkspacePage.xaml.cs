@@ -150,6 +150,7 @@ public sealed partial class WorkspacePage : Page
                 StopTabAttention(entry);
                 entry.Chat.LoginRequired -= OnChatLoginRequired;
                 entry.Chat.AttentionNeeded -= OnChatAttentionNeeded;
+                entry.Chat.PlanProposed -= OnChatPlanProposed;
                 entry.Chat.PropertyChanged -= OnChatPropertyChanged;
             }
         }
@@ -634,6 +635,7 @@ public sealed partial class WorkspacePage : Page
             tab.RunningTaskPeekRequested += (_, task) => SetPeek(ReferenceEquals(PeekPane.Task, task) && PeekPane.Visibility == Visibility.Visible ? null : task);
             chat.LoginRequired += OnChatLoginRequired;
             chat.AttentionNeeded += OnChatAttentionNeeded;
+            chat.PlanProposed += OnChatPlanProposed;
             chat.PropertyChanged += OnChatPropertyChanged;
 
             var item = new TabViewItem
@@ -1523,6 +1525,15 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
+    /// <summary>A live plan proposal opens beside its chat, when that chat is the one on screen.</summary>
+    private void OnChatPlanProposed(object? sender, SessionArtifact plan)
+    {
+        if (ReferenceEquals(sender, ViewModel.Chat))
+        {
+            ShowArtifactBeside(plan);
+        }
+    }
+
     private void OnChatPlanOpenRequested(object? sender, ToolCallItem call)
     {
         var artifact = ViewModel.Chat.Artifacts.FirstOrDefault(a => a.ToolUseId == call.ToolUseId)
@@ -2084,6 +2095,7 @@ public sealed partial class WorkspacePage : Page
             StopTabAttention(chatEntry);
             chatEntry.Chat.LoginRequired -= OnChatLoginRequired;
             chatEntry.Chat.AttentionNeeded -= OnChatAttentionNeeded;
+            chatEntry.Chat.PlanProposed -= OnChatPlanProposed;
             chatEntry.Chat.PropertyChanged -= OnChatPropertyChanged;
 
             if (ReferenceEquals(_attentionChat, chatEntry.Chat))
@@ -2488,9 +2500,6 @@ public sealed partial class WorkspacePage : Page
         PeekSplitterColumn.Width = GridLength.Auto;
         PeekColumn.Width = new GridLength(1, GridUnitType.Star);
         PeekSplitter.Visibility = Visibility.Visible;
-
-        // The conversation keeps its width: the session panels fold to their rail meanwhile.
-        SessionPanelRail.FoldedForSideColumn = true;
     }
 
     private void CloseSideColumn()
@@ -2499,7 +2508,6 @@ public sealed partial class WorkspacePage : Page
         PeekSplitterColumn.Width = new GridLength(0);
         PeekColumn.Width = new GridLength(0);
         CentreTabsColumn.Width = new GridLength(1, GridUnitType.Star);
-        SessionPanelRail.FoldedForSideColumn = false;
     }
 
     /// <summary>

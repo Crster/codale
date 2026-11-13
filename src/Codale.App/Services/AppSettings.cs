@@ -136,13 +136,6 @@ public static class AppSettings
         set => Set("shell.autoApproveSafe", value, FormatFlag);
     }
 
-    /// <summary>Whether the session panels beside chats and agent terminals show as a narrow rail.</summary>
-    public static bool SessionPanelCollapsed
-    {
-        get => Get("ui.sessionPanelCollapsed", () => ReadFlag("ui.sessionPanelCollapsed", false));
-        set => Set("ui.sessionPanelCollapsed", value, FormatFlag);
-    }
-
     /// <summary>Whether agent sessions predict the next prompt and show it in the composer. Read when a session starts.</summary>
     public static bool SuggestNextPrompt
     {

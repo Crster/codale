@@ -153,6 +153,11 @@ public sealed partial class ChatTab : UserControl
         ComposerBorder.SizeChanged += (_, _) => PlaceSuggestions();
         DraftEditor.LostFocus += (_, _) => DispatcherQueue.TryEnqueue(() =>
         {
+            if (DraftBox.FocusState == FocusState.Unfocused)
+            {
+                HidePrediction();
+            }
+
             // A click on a row keeps focus in the draft (the list never takes it), so
             // losing focus means the user went elsewhere.
             if (DraftBox.FocusState == FocusState.Unfocused)
@@ -224,6 +229,8 @@ public sealed partial class ChatTab : UserControl
             }
 
             _viewModel = value;
+            _predictor = string.IsNullOrEmpty(value.ProjectPath) ? null : new ComposerPredictor(value.ProjectPath);
+            HidePrediction();
             _viewModel.PropertyChanged += OnViewModelPropertyChanged;
             _viewModel.Suggestions.CollectionChanged += OnSuggestionsChanged;
             _viewModel.Attachments.CollectionChanged += OnAttachmentsChanged;
@@ -490,35 +497,23 @@ public sealed partial class ChatTab : UserControl
         }
     }
 
-    /// <summary>The session's entry for a plan card: its annotations live there, shared with the plan tab.</summary>
-    private SessionArtifact? PlanArtifactOf(FrameworkElement element) =>
-        element.DataContext is ToolCallItem { IsPlan: true } call
-            ? ViewModel?.Artifacts.FirstOrDefault(a => a.ToolUseId == call.ToolUseId)
-            : null;
 
-    // A recycled card gets a new item, and a fresh one may render before its plan is
-    // listed, so the plan is looked up again both on load and on every new item.
-    private void OnPlanMarkdownLoaded(object sender, RoutedEventArgs e) => AttachPlanMarkdown((MarkdownView)sender);
-
-    private void OnPlanMarkdownDataContextChanged(FrameworkElement sender, DataContextChangedEventArgs e) => AttachPlanMarkdown((MarkdownView)sender);
-
-    private void AttachPlanMarkdown(MarkdownView markdown)
+    /// <summary>A background task in the tray above the composer: peek at its output.</summary>
+    private void OnTrayTaskClick(object sender, ItemClickEventArgs e)
     {
-        var plan = PlanArtifactOf(markdown);
-        PlanAnnotator.For(markdown).Plan = plan;
-        markdown.SetRevision(plan?.Revision);
+        if (e.ClickedItem is RunningTaskItem task)
+        {
+            RunningTaskPeekRequested?.Invoke(this, task);
+        }
     }
 
-    private void OnPlanBarLoaded(object sender, RoutedEventArgs e) => AttachPlanBar((PlanAnnotationBar)sender);
-
-    private void OnPlanBarDataContextChanged(FrameworkElement sender, DataContextChangedEventArgs e) => AttachPlanBar((PlanAnnotationBar)sender);
-
-    private void AttachPlanBar(PlanAnnotationBar bar) => bar.Plan = PlanArtifactOf(bar);
-
-    /// <summary>The card's annotations go back as a plan-mode revision request, as from the plan tab.</summary>
-    private void OnPlanAnnotationsSend(object? sender, (SessionArtifact Plan, string Message) sent) =>
-        _ = ViewModel?.SendPlanRevisionAsync(sent.Message, sent.Plan);
-
+    private async void OnTrayStopTaskClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: RunningTaskItem task } && ViewModel is { } chat)
+        {
+            await chat.StopTaskAsync(task);
+        }
+    }
 
     /// <summary>A step's row: fold or unfold its body. Once done by hand, the step stays as the reader left it.</summary>
     private void OnToolToggleClick(object sender, RoutedEventArgs e)
@@ -940,6 +935,22 @@ public sealed partial class ChatTab : UserControl
             return;
         }
 
+        // Tab takes the prediction at the caret: the rest of the word, or the spelling fix.
+        if (e.Key is VirtualKey.Tab && !IsSuggestOpen && _prediction is not null && !KeyChord.AnyModifierDown())
+        {
+            e.Handled = true;
+            AcceptPrediction();
+            return;
+        }
+
+        if (e.Key is VirtualKey.Escape && _prediction is { } shown)
+        {
+            e.Handled = true;
+            _dismissedPrediction = DismissKey(shown);
+            HidePrediction();
+            return;
+        }
+
         // Tab (or Right) in an empty composer takes the suggested next prompt.
         if (e.Key is VirtualKey.Tab or VirtualKey.Right && !IsSuggestOpen && ViewModel.AcceptSuggestion())
         {
@@ -1257,9 +1268,166 @@ public sealed partial class ChatTab : UserControl
             return;
         }
 
+        // The draft stays current at once (Enter sends it); the popup waits for the edit to
+        // settle, since one keystroke raises both TextChanged and SelectionChanged.
         ViewModel.Draft = DraftBox.Text;
-        ViewModel.UpdateSuggestions(DraftBox.SelectionStart);
-        ShowSuggestions();
+        if (_suggestionRefreshQueued)
+        {
+            return;
+        }
+
+        _suggestionRefreshQueued = true;
+        if (!DispatcherQueue.TryEnqueue(RunSuggestionRefresh))
+        {
+            RunSuggestionRefresh();
+        }
+    }
+
+    private bool _suggestionRefreshQueued;
+
+    private void RunSuggestionRefresh()
+    {
+        _suggestionRefreshQueued = false;
+        if (_viewModel is null || SuggestPopup is null || _suppressSuggestions)
+        {
+            return;
+        }
+
+        // The / and @ lists open from their buttons only; typing the trigger is just text. Once
+        // open, typing filters the list, and moving off the token closes it.
+        if (_suggestArmed)
+        {
+            var text = DraftBox.Text;
+            if (ComposerCompletion.FindToken(text, Math.Min(DraftBox.SelectionStart, text.Length)) is null)
+            {
+                CloseSuggestions();
+            }
+            else
+            {
+                ViewModel.UpdateSuggestions(DraftBox.SelectionStart);
+                ShowSuggestions();
+            }
+        }
+
+        UpdatePrediction();
+    }
+
+    /// <summary>Set by the / and @ buttons: the suggestion list may show until it is closed.</summary>
+    private bool _suggestArmed;
+
+    private ComposerPredictor? _predictor;
+
+    /// <summary>The prediction on screen, in <see cref="PromptEditor.Text"/> offsets.</summary>
+    private ComposerPrediction? _prediction;
+
+    /// <summary>Esc on a prediction keeps that one away until the word changes.</summary>
+    private string? _dismissedPrediction;
+
+    private static string DismissKey(ComposerPrediction p) => $"{p.Start}:{p.Length}:{p.Replacement}";
+
+    /// <summary>
+    /// Follows the caret: keeps a completion the user is typing along with, then asks the predictor
+    /// (off the UI thread) for the current word. A stale answer is dropped when it lands.
+    /// </summary>
+    private void UpdatePrediction()
+    {
+        if (_predictor is null || !CanPredict(out var text, out var caret))
+        {
+            HidePrediction();
+            return;
+        }
+
+        // Typing the predicted letters: shrink the ghost at once rather than wait for the answer.
+        if (_prediction is { IsCorrection: false } shown &&
+            PromptWords.Before(text, caret) is { } word && word.Start == shown.Start &&
+            word.Length < shown.Replacement.Length &&
+            shown.Replacement.StartsWith(word.Text, StringComparison.OrdinalIgnoreCase))
+        {
+            ShowPrediction(shown with { Length = word.Length });
+        }
+        else if (_prediction is not null)
+        {
+            HidePrediction();
+        }
+
+        var predictor = _predictor;
+        predictor.Request(text, caret, prediction => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!ReferenceEquals(predictor, _predictor) || !CanPredict(out var nowText, out var nowCaret) ||
+                nowText != text || nowCaret != caret)
+            {
+                return;
+            }
+
+            if (prediction is null || DismissKey(prediction) == _dismissedPrediction)
+            {
+                HidePrediction();
+                return;
+            }
+
+            ShowPrediction(prediction);
+        }));
+    }
+
+    /// <summary>A prediction only makes sense with a caret (no selection) at the end of a line, in a focused box, with no list open.</summary>
+    private bool CanPredict(out string text, out int caret)
+    {
+        text = "";
+        caret = 0;
+        if (!DraftBox.IsEnabled || DraftBox.FocusState == FocusState.Unfocused || IsSuggestOpen || DraftBox.SelectionLength != 0)
+        {
+            return false;
+        }
+
+        text = DraftBox.Text;
+        caret = DraftBox.SelectionStart;
+        return caret == text.Length || text[caret] is '\r' or '\n';
+    }
+
+    private void ShowPrediction(ComposerPrediction prediction)
+    {
+        _prediction = prediction;
+        PredictionText.Text = prediction.IsCorrection
+            ? "→ " + prediction.Replacement
+            : prediction.Replacement[prediction.Length..];
+
+        var range = DraftEditor.Document.Selection;
+        range.GetRect(Microsoft.UI.Text.PointOptions.ClientCoordinates, out var rect, out _);
+        var padding = DraftEditor.Padding;
+        var left = rect.X + padding.Left + (prediction.IsCorrection ? 6 : 1);
+        PredictionText.MaxWidth = Math.Max(40, DraftEditor.ActualWidth - left - 48);
+        Canvas.SetLeft(PredictionPanel, left);
+        Canvas.SetTop(PredictionPanel, rect.Y + padding.Top);
+        PredictionPanel.Visibility = Visibility.Visible;
+    }
+
+    private void HidePrediction()
+    {
+        _prediction = null;
+        if (PredictionPanel is not null)
+        {
+            PredictionPanel.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void AcceptPrediction()
+    {
+        if (_prediction is not { } prediction)
+        {
+            return;
+        }
+
+        HidePrediction();
+        var text = DraftBox.Text;
+        if (prediction.End > text.Length)
+        {
+            return;
+        }
+
+        var caret = DraftBox.SelectionStart;
+        var updated = text[..prediction.Start] + prediction.Replacement + text[prediction.End..];
+        var newCaret = caret + prediction.Replacement.Length - prediction.Length;
+        ApplyDraftEdit(new ComposerCompletion.Edit(updated, newCaret));
     }
 
     private void OnSuggestionsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>
@@ -1268,8 +1436,9 @@ public sealed partial class ChatTab : UserControl
     private void ShowSuggestions()
     {
         if (_viewModel is null || SuggestPopup is null) return;
-        if (ViewModel.Suggestions.Count > 0)
+        if (_suggestArmed && ViewModel.Suggestions.Count > 0)
         {
+            HidePrediction();
             SuggestHeader.Text = ViewModel.Suggestions[0].IsCommand ? "Commands" : "Files";
 
             if (!IsSuggestOpen)
@@ -1284,7 +1453,9 @@ public sealed partial class ChatTab : UserControl
         }
         else
         {
-            CloseSuggestions();
+            // Not CloseSuggestions: after the @ button the file list may still be loading, and
+            // it should open once it lands.
+            SuggestPopup.IsOpen = false;
         }
     }
 
@@ -1330,6 +1501,7 @@ public sealed partial class ChatTab : UserControl
 
     private void CloseSuggestions()
     {
+        _suggestArmed = false;
         SuggestPopup.IsOpen = false;
     }
 
@@ -1356,6 +1528,7 @@ public sealed partial class ChatTab : UserControl
             return;
         }
 
+        _suggestArmed = true;
         ApplyDraftEdit(ComposerCompletion.InsertTrigger(
             DraftBox.Text, DraftBox.SelectionStart, DraftBox.SelectionLength, trigger[0]));
     }

@@ -410,6 +410,58 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 SortedTasks.Move(at, i);
             }
         }
+
+        SyncActiveTasks();
+    }
+
+    /// <summary>The todos still open, for the tray above the composer.</summary>
+    public RangeObservableCollection<TodoItem> OpenTodos { get; } = [];
+
+    public bool HasOpenTodos => OpenTodos.Count > 0;
+
+    /// <summary>The background tasks still running, for the tray above the composer (same capture delay as the panel).</summary>
+    public ObservableCollection<RunningTaskItem> ActiveTasks { get; } = [];
+
+    public bool HasActiveTasks => ActiveTasks.Count > 0;
+
+    /// <summary>True while the tray above the composer has anything to show.</summary>
+    public bool HasComposerTray => HasOpenTodos || HasActiveTasks;
+
+    private void SyncActiveTasks()
+    {
+        var wanted = SortedTasks.Where(t => t.IsRunning).ToList();
+        if (wanted.SequenceEqual(ActiveTasks))
+        {
+            return;
+        }
+
+        var had = ActiveTasks.Count > 0;
+        for (var i = ActiveTasks.Count - 1; i >= 0; i--)
+        {
+            if (!wanted.Contains(ActiveTasks[i]))
+            {
+                ActiveTasks.RemoveAt(i);
+            }
+        }
+
+        for (var i = 0; i < wanted.Count; i++)
+        {
+            var at = ActiveTasks.IndexOf(wanted[i]);
+            if (at < 0)
+            {
+                ActiveTasks.Insert(i, wanted[i]);
+            }
+            else if (at != i)
+            {
+                ActiveTasks.Move(at, i);
+            }
+        }
+
+        if (had != ActiveTasks.Count > 0)
+        {
+            OnPropertyChanged(nameof(HasActiveTasks));
+            OnPropertyChanged(nameof(HasComposerTray));
+        }
     }
 
     private readonly Dictionary<string, RunningTaskItem> _tasksByToolUse = [];
@@ -2954,6 +3006,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private ToolCallItem CreateToolCall(string toolUseId, string toolName, JsonElement input, DateTimeOffset? startedAt = null)
     {
         var plan = ToolCallItem.PlanInput(toolName, input);
+
+        // Newer CLIs send ExitPlanMode without the text: the plan is the file this turn wrote.
+        if (plan is null && toolName == "ExitPlanMode" && _turnPlanFile?.Markdown is { Length: > 0 } written)
+        {
+            plan = written;
+        }
+
         var kind = ToolKinds.Of(toolName);
 
         return new ToolCallItem
@@ -2967,7 +3026,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             PlanText = plan,
             Files = ToolCallItem.FileInputs(toolName, input),
             Diff = ToolDiffs.FromInput(toolName, input),
-            IsExpanded = plan is not null || kind is ToolKind.Shell or ToolKind.Edit or ToolKind.Write or ToolKind.Ask,
+            // Output stays folded from the start: opening it while the call runs and folding it
+            // when it lands made fast calls flash. A call that needs an answer reopens itself.
+            IsExpanded = plan is not null || kind is ToolKind.Ask,
             Timestamp = startedAt ?? DateTimeOffset.Now,
         };
     }
@@ -3146,7 +3207,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             PlanReplaced?.Invoke(this, (annotated, plan));
         }
+
+        PlanProposed?.Invoke(this, plan);
     }
+
+    /// <summary>A plan was just proposed live: the workspace shows it beside the chat.</summary>
+    public event EventHandler<SessionArtifact>? PlanProposed;
 
     /// <summary>
     /// The listed plan document (or earlier proposal of it) a proposal came from: the file
@@ -4810,13 +4876,17 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (caret.HasValue) _suggestionCaret = caret.Value;
         var token = ComposerCompletion.FindToken(draft, Math.Min(_suggestionCaret, draft.Length));
         var key = token is { } active ? $"{active.Trigger}:{active.Query}" : "";
-        if (key == _lastSuggestionKey && Suggestions.Count > 0)
+        if (key == _lastSuggestionKey && (Suggestions.Count > 0 || key.Length == 0))
         {
             return;
         }
         _lastSuggestionKey = key;
 
-        Suggestions.Clear();
+        // Clear raises a Reset even on an empty list, and the list control rebuilds on each one.
+        if (Suggestions.Count > 0)
+        {
+            Suggestions.Clear();
+        }
 
         if (token is { Trigger: '/' } command)
         {
@@ -5013,9 +5083,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private void ShowTodos(IReadOnlyList<TodoItem> todos)
     {
         Todos.ReplaceAll(todos);
+        OpenTodos.ReplaceAll(todos.Where(t => !t.IsDone).ToList());
 
         TasksDone = todos.Count(t => t.IsDone);
         TasksTotal = todos.Count;
+        OnPropertyChanged(nameof(HasOpenTodos));
+        OnPropertyChanged(nameof(HasComposerTray));
         OnPropertyChanged(nameof(ActiveTask));
         OnPropertyChanged(nameof(StatusDetail));
 

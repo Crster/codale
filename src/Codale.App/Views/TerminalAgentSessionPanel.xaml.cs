@@ -13,6 +13,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 
 namespace Codale.App.Views;
 
@@ -23,10 +24,17 @@ public sealed partial class UsageMeter : ObservableObject
     public partial string Label { get; set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Tip))]
     public partial string Summary { get; set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PercentText))]
     public partial double Percent { get; set; }
+
+    /// <summary>The rail ring's tooltip, e.g. "Context: 42K / 200K".</summary>
+    public string Tip => $"{char.ToUpperInvariant(Label[0])}{Label[1..].ToLowerInvariant()}: {Summary}";
+
+    public string PercentText => $"{Percent:0}%";
 
     public UsageMeter(string label, string summary, double percent)
     {
@@ -77,12 +85,6 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
     public TerminalAgentSessionPanel()
     {
         InitializeComponent();
-        Rail.Glyph = "";
-        Rail.ShowConnection = false;
-        Rail.CliUpdate = CliUpdate;
-        Rail.Meters = Vitals;
-        Rail.ShowModel = false;
-        ApplyCollapsed();
         _timer = DispatcherQueue.CreateTimer();
         _timer.Interval = ProbeInterval;
         _timer.Tick += (_, _) => OnTick();
@@ -138,7 +140,6 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
             }
 
             _session = value;
-            Rail.Session = value;
             _reader = null;
             StopWatchingHistory();
 
@@ -150,7 +151,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
             Raise(nameof(Session));
             Raise(nameof(CliName));
-            Raise(nameof(IsLiveEmpty));
+            Raise(nameof(CliInitials));
             RefreshVitals();
             _ = CliUpdate.RefreshAsync(Cli);
             _ = RefreshHistoryAsync();
@@ -165,6 +166,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
             _workspace = value;
             EnsureReader();
             Raise(nameof(CliName));
+            Raise(nameof(CliInitials));
         }
     }
 
@@ -183,9 +185,14 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     public string CliName => Session?.TerminalCli?.DisplayName ?? "Agent";
 
-    public bool IsLiveEmpty =>
-        Session is not { } s ||
-        s.Todos.Count == 0 && s.SortedTasks.Count == 0 && s.Artifacts.Count == 0 && s.Status.ChangeCount == 0;
+    /// <summary>The rail's CLI badge: the first letter of each word of the CLI's name ("Claude" → "C").</summary>
+    public string CliInitials => string.Concat(CliName
+        .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+        .Take(2)
+        .Select(word => char.ToUpperInvariant(word[0])));
+
+    /// <summary>How many past conversations the History flyout lists.</summary>
+    public int HistoryCount { get; private set; }
 
     private CliDescriptor Cli => Session?.TerminalCli ?? CliLocator.ActiveCli;
 
@@ -252,18 +259,10 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
     private void RaiseLive()
     {
         Raise(nameof(Session));
-        Raise(nameof(IsLiveEmpty));
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        AppSettings.Changed -= OnAppSettingsChanged;
-        SessionPanelRail.FoldChanged -= OnAppSettingsChanged;
-        AppSettings.Changed += OnAppSettingsChanged;
-        SessionPanelRail.FoldChanged -= OnAppSettingsChanged;
-        SessionPanelRail.FoldChanged += OnAppSettingsChanged;
-        ApplyCollapsed();
-
         if (Session is { } session)
         {
             Detach(session);
@@ -281,8 +280,6 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
-        AppSettings.Changed -= OnAppSettingsChanged;
-        SessionPanelRail.FoldChanged -= OnAppSettingsChanged;
         _timer.Stop();
         _elapsedTimer.Stop();
         StopWatchingHistory();
@@ -486,6 +483,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
                 return;
             }
 
+            CliFlyout.Hide();
             UpdateCliRequested?.Invoke(this, command);
 
             if (cli.Id == "codex")
@@ -506,6 +504,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     private void OnRunningTaskClick(object sender, ItemClickEventArgs e)
     {
+        HideDetails();
         if (e.ClickedItem is RunningTaskItem task)
         {
             TaskPeekRequested?.Invoke(this, task);
@@ -522,6 +521,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     private void OnChangeClick(object sender, ItemClickEventArgs e)
     {
+        HideDetails();
         if (e.ClickedItem is SessionFileChange change)
         {
             FileDiffRequested?.Invoke(this, change.Path);
@@ -530,6 +530,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     private void OnArtifactClick(object sender, ItemClickEventArgs e)
     {
+        HideDetails();
         if (e.ClickedItem is SessionArtifact artifact)
         {
             ArtifactRequested?.Invoke(this, artifact);
@@ -625,7 +626,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
         if (reader is null || !CliResume.IsSupported(cli.Id))
         {
             HistoryList.ItemsSource = null;
-            HistoryCountBadge.Visibility = Visibility.Collapsed;
+            SetHistoryCount(0);
             HistoryHint.Text = $"{cli.DisplayName} has no session id Codale can resume by, so its past conversations are not listed here.";
             return;
         }
@@ -634,8 +635,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
         {
             var rows = await Task.Run(() => reader.ListSessions());
             HistoryList.ItemsSource = rows.Select(r => new TerminalHistoryRow(r, true)).ToList();
-            HistoryCountText.Text = rows.Count.ToString();
-            HistoryCountBadge.Visibility = rows.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+            SetHistoryCount(rows.Count);
             HistoryHint.Text = rows.Count == 0
                 ? $"No {cli.DisplayName} conversations in this project yet."
                 : "Pick a conversation to resume it in a new tab, with its full context.";
@@ -645,8 +645,18 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
         }
     }
 
+    private void SetHistoryCount(int count)
+    {
+        if (HistoryCount != count)
+        {
+            HistoryCount = count;
+            Raise(nameof(HistoryCount));
+        }
+    }
+
     private void OnHistoryClick(object sender, ItemClickEventArgs e)
     {
+        HistoryFlyout.Hide();
         if (e.ClickedItem is TerminalHistoryRow row &&
             Session?.TerminalCli is { } cli &&
             CliResume.Arguments(cli.Id, row.Summary.SessionId) is { } arguments)
@@ -657,15 +667,37 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     #endregion
 
-    // ---- Collapse ---------------------------------------------------------------------------
+    // ---- Detail flyouts --------------------------------------------------------------------
 
-    /// <summary>The header icon collapses the panel to its rail; the rail's icon expands it again.</summary>
-    private void OnPanelToggleClick(object sender, RoutedEventArgs e) => SessionPanelRail.Toggle();
+    private readonly Dictionary<FlyoutBase, (FrameworkElement Anchor, object Content)> _flyoutToolTips = [];
 
-    private void OnRailExpandRequested(object? sender, EventArgs e) => SessionPanelRail.Toggle();
+    /// <summary>Removes a rail button's tooltip while its flyout is open, so it does not cover the flyout.</summary>
+    private void OnDetailFlyoutOpening(object sender, object e)
+    {
+        if (sender is FlyoutBase { Target: { } anchor } flyout && ToolTipService.GetToolTip(anchor) is { } content)
+        {
+            if (content is ToolTip tip)
+            {
+                tip.IsOpen = false;
+            }
 
-    /// <summary>Every session panel follows the one setting, so toggling one updates the others.</summary>
-    private void OnAppSettingsChanged(object? sender, EventArgs e) => ApplyCollapsed();
+            _flyoutToolTips[flyout] = (anchor, content);
+            ToolTipService.SetToolTip(anchor, null);
+        }
+    }
 
-    private void ApplyCollapsed() => Rail.Apply(this, ExpandedView);
+    private void OnDetailFlyoutClosed(object sender, object e)
+    {
+        if (sender is FlyoutBase flyout && _flyoutToolTips.Remove(flyout, out var tooltip))
+        {
+            ToolTipService.SetToolTip(tooltip.Anchor, tooltip.Content);
+        }
+    }
+
+    private void HideDetails()
+    {
+        TasksFlyout.Hide();
+        FilesFlyout.Hide();
+        ArtifactsFlyout.Hide();
+    }
 }

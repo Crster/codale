@@ -1144,6 +1144,9 @@ public sealed partial class ToolCallItem : ChatItem
     /// <summary>True for the plan card: its body is the point of the turn, not scaffolding.</summary>
     public bool IsPlan => PlanText is { Length: > 0 };
 
+    /// <summary>The plan's heading, for the compact row the transcript keeps (the plan itself opens beside the chat).</summary>
+    public string PlanTitle => PlanHeadline(PlanText) is { Length: > 0 } h ? h : "Plan";
+
     /// <summary>Files the call reads or writes; the row renders the first as a clickable target.</summary>
     public IReadOnlyList<ToolFileRef> Files { get; init; } = [];
 
@@ -1314,6 +1317,9 @@ public sealed partial class ToolCallItem : ChatItem
     public bool QuestionCardVisible => Approval?.IsAskUserQuestion == true;
 
     public bool PlanApprovalVisible => Approval?.IsPlan == true;
+
+    /// <summary>The plan's own row: hidden while the approval card is up, which carries the plan's title itself.</summary>
+    public bool PlanRowVisible => IsPlan && !PlanApprovalVisible;
 
     public bool PermissionVisible => Approval?.IsGeneric == true;
 
@@ -1496,6 +1502,7 @@ public sealed partial class ToolCallItem : ChatItem
     [NotifyPropertyChangedFor(nameof(IsAwaitingApproval))]
     [NotifyPropertyChangedFor(nameof(QuestionCardVisible))]
     [NotifyPropertyChangedFor(nameof(PlanApprovalVisible))]
+    [NotifyPropertyChangedFor(nameof(PlanRowVisible))]
     [NotifyPropertyChangedFor(nameof(PermissionVisible))]
     public partial ApprovalRequestItem? Approval { get; set; }
 

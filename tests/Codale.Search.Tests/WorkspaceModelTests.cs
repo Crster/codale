@@ -44,6 +44,37 @@ public sealed class WorkspaceModelTests : IDisposable
         Assert.Equal(1, incremental.FileCount);
     }
 
+    [Theory]
+    [InlineData("compile", "compile", 0)]
+    [InlineData("compiel", "compile", 1)]
+    [InlineData("compil", "compile", 1)]
+    [InlineData("cmopile", "compile", 1)]
+    [InlineData("cmpiel", "compile", 2)]
+    [InlineData("build", "compile", 3)]
+    public void Edit_distance_counts_a_swap_once_and_stops_past_its_limit(string a, string b, int expected)
+    {
+        Assert.Equal(expected, WorkspaceModel.EditDistance(a, b, 2));
+    }
+
+    [Fact]
+    public void A_misspelled_word_is_corrected_to_the_workspace_spelling()
+    {
+        var model = new WorkspaceModel();
+        model.Put(Make("Index.cs", "public class SourceIndex { } // compile the project"));
+        model.Put(Make("use.cs", "var index = new SourceIndex(); // compile it"));
+
+        Assert.True(model.Knows("compile"));
+        Assert.True(model.Knows("SourceIndex"));
+        Assert.False(model.Knows("compiel"));
+        Assert.Equal("compile", model.Correct("compiel")[0].Text);
+
+        var name = model.Correct("SoruceIndex")[0];
+        Assert.Equal("SourceIndex", name.Text);
+        Assert.Equal(SourceSymbolKind.Type, name.Kind);
+
+        Assert.Empty(model.Correct("zebra"));
+    }
+
     [Fact]
     public void Declared_names_rank_above_plain_identifiers_and_carry_their_kind()
     {

@@ -431,8 +431,8 @@
                     </Button.Flyout>
                 </Button>
 
-                <Button Style="{StaticResource CompactAction}" AutomationProperties.Name="Tasks"
-                        ToolTipService.ToolTip="Tasks">
+                <Button Style="{StaticResource CompactAction}" AutomationProperties.Name="Background tasks"
+                        ToolTipService.ToolTip="Background tasks">
                     <StackPanel Spacing="1" VerticalAlignment="Center">
                         <FontIcon Glyph="&#xE945;" FontSize="10"
                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
@@ -455,7 +455,7 @@
                                     IsChecked="True"
                                     Style="{StaticResource SectionHeader}">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <TextBlock Text="Running tasks" />
+                                        <TextBlock Text="Background tasks" />
                                         <Border Background="{StaticResource KindReadTintBrush}" Style="{StaticResource CountChip}">
                                             <TextBlock
                                                 Foreground="{StaticResource StatusRunningBrush}"
@@ -545,8 +545,8 @@
                     </Button.Flyout>
                 </Button>
 
-                <Button Style="{StaticResource CompactAction}" AutomationProperties.Name="Files"
-                        ToolTipService.ToolTip="Files">
+                <Button Style="{StaticResource CompactAction}" AutomationProperties.Name="Session changes"
+                        ToolTipService.ToolTip="Session changes">
                     <StackPanel Spacing="1" VerticalAlignment="Center">
                         <FontIcon Glyph="&#xE70F;" FontSize="10"
                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
@@ -569,7 +569,7 @@
                                     IsChecked="True"
                                     Style="{StaticResource SectionHeader}">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <TextBlock Text="Changes" />
+                                        <TextBlock Text="Session changes" />
                                         <Border
                                             Background="{StaticResource KindEditTintBrush}"
                                             Style="{StaticResource CountChip}"
