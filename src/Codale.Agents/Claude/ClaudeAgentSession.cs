@@ -361,6 +361,14 @@ public sealed class ClaudeAgentSession : IAgentSession
             {
                 payload["updatedInput"] = updated;
             }
+
+            // An accepted shortcut ("allow access to src", "always allow npm test") goes back as
+            // the CLI's own permission update, so it applies beyond this one call. Mode changes
+            // are applied host-side (the session switches mode), so they need no update here.
+            if (decision.AcceptedSuggestion is { Type: not "setMode", Raw: { ValueKind: JsonValueKind.Object } raw })
+            {
+                payload["updatedPermissions"] = new[] { raw };
+            }
         }
         else
         {

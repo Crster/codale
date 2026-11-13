@@ -24,6 +24,33 @@ public sealed class RemoteExperienceTests
     private static SmartRequestContext Context() => new(Environment.CurrentDirectory, Environment.CurrentDirectory, "caller-label");
 
     [Fact]
+    public async Task Completion_preserves_whitespace_through_the_full_remote_pipeline()
+    {
+        await using var smart = Create();
+        await smart.ConfigureRemoteAsync("test", (_, _, _, _, _) => Task.FromResult("\n    return true;  "));
+        Assert.Equal("\n    return true;  ", await smart.FillInMiddleAsync(Context(), "", "}", "a.cs"));
+    }
+
+    [Fact]
+    public async Task Deadline_failure_is_published_as_error_and_a_retry_can_succeed()
+    {
+        await using var smart = Create();
+        var updates = new List<SmartActivity>();
+        smart.ActivityUpdated += updates.Add;
+        await smart.ConfigureRemoteAsync("test", async (_, _, _, _, ct) =>
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            return "unreachable";
+        });
+        Assert.Null(await smart.ClassifyAsync(Context() with { Deadline = DateTimeOffset.UtcNow.AddMilliseconds(100) }, "fix", null));
+        Assert.Equal("error", updates.Last().State);
+        Assert.Contains("timed out", updates.Last().Error);
+        await smart.ConfigureRemoteAsync("test", (_, _, _, _, _) => Task.FromResult("{\"intent\":\"act\"}"));
+        Assert.Equal(SmartIntent.Act, (await smart.ClassifyAsync(Context(), "fix", null))?.Value);
+        Assert.Equal("completed", updates.Last().State);
+    }
+
+    [Fact]
     public async Task Remote_features_select_their_own_models_and_validate_results()
     {
         await using var smart = Create();

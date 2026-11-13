@@ -60,20 +60,14 @@ public sealed partial class WorkspacePage : Page
     /// <summary>The one tab a file click may replace; null once its file is edited.</summary>
     private EditorTabEntry? _previewTab;
 
-    private readonly PointerEventHandler _outsidePointerPressedHandler;
-
     public WorkspacePage()
     {
         InitializeComponent();
         InitializeTabGroups();
-        _outsidePointerPressedHandler = new PointerEventHandler(OnPointerPressedOutsideDrawer);
-        AddHandler(PointerPressedEvent, _outsidePointerPressedHandler, handledEventsToo: true);
         Loaded += (_, _) => MarkdownView.FileLinkClicked += OnMarkdownFileLink;
         Unloaded += (_, _) =>
         {
-            _commandTranslationCts?.Cancel();
             MarkdownView.FileLinkClicked -= OnMarkdownFileLink;
-            RemoveHandler(PointerPressedEvent, _outsidePointerPressedHandler);
         };
     }
 
@@ -91,9 +85,8 @@ public sealed partial class WorkspacePage : Page
         ViewModel = workspace;
         ViewModel.PropertyChanged += OnWorkspacePropertyChanged;
         ViewModel.ChatActivationRequested += OnChatActivationRequested;
+        ViewModel.AgentTerminalOpened += OnAgentTerminalOpened;
         Bindings.Update();
-
-        SetTerminalCwd(ViewModel.WorkingDirectory);
 
         UpdateEmptyState();
 
@@ -103,17 +96,15 @@ public sealed partial class WorkspacePage : Page
             window.McpToolsRequested += OnTitleBarMcpToolsRequested;
             window.LeftPanelToggled += OnTitleBarLeftPanelToggled;
             window.SearchSubmitted += OnTitleBarSearchSubmitted;
+            window.SetQuickSearchSource(this);
             window.ShortcutInvoked += OnShortcutInvoked;
-
-            if (window.Content is UIElement root)
-            {
-                root.AddHandler(PointerPressedEvent, _outsidePointerPressedHandler, handledEventsToo: true);
-            }
         }
 
         // The Settings window writes app-level preferences; this page applies them
         // live to the tabs it owns. All windows share one UI thread.
         AppSettings.Changed += OnAppSettingsChanged;
+        SmartExperienceHost.Status.Changed += OnSmartStatusChanged;
+        RefreshSmartStatus();
 
         // Everything except the CLI: no agent session starts until the user opens a
         // chat tab and asks for one. An exception escaping this async void would kill
@@ -130,11 +121,14 @@ public sealed partial class WorkspacePage : Page
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
-        _commandTranslationCts?.Cancel();
         base.OnNavigatedFrom(e);
-        SmartActivityFlyout.Hide();
 
         AppSettings.Changed -= OnAppSettingsChanged;
+        if (ViewModel is not null)
+        {
+            ViewModel.AgentTerminalOpened -= OnAgentTerminalOpened;
+        }
+        SmartExperienceHost.Status.Changed -= OnSmartStatusChanged;
         foreach (var entry in _terminalTabs) entry.Tab.CloseHost();
         foreach (var entry in _editorTabs) entry.Tab.CloseHost();
 
@@ -144,13 +138,9 @@ public sealed partial class WorkspacePage : Page
             window.McpToolsRequested -= OnTitleBarMcpToolsRequested;
             window.LeftPanelToggled -= OnTitleBarLeftPanelToggled;
             window.SearchSubmitted -= OnTitleBarSearchSubmitted;
+            window.SetQuickSearchSource(null);
             window.ShortcutInvoked -= OnShortcutInvoked;
             window.Activated -= OnWindowActivated;
-
-            if (window.Content is UIElement root)
-            {
-                root.RemoveHandler(PointerPressedEvent, _outsidePointerPressedHandler);
-            }
         }
 
         if (ViewModel is not null)
@@ -168,6 +158,7 @@ public sealed partial class WorkspacePage : Page
                 StopTabAttention(entry);
                 entry.Chat.LoginRequired -= OnChatLoginRequired;
                 entry.Chat.AttentionNeeded -= OnChatAttentionNeeded;
+                entry.Chat.PlanProposed -= OnChatPlanProposed;
                 entry.Chat.PropertyChanged -= OnChatPropertyChanged;
             }
         }
@@ -195,6 +186,15 @@ public sealed partial class WorkspacePage : Page
         }
 
         ViewModel?.Git.ApplyPollInterval();
+    }
+
+    private void OnSmartStatusChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(RefreshSmartStatus);
+
+    private void RefreshSmartStatus()
+    {
+        var status = SmartExperienceHost.Status.Snapshot();
+        SmartStatusText.Text = status.Text;
+        SmartStatusHost.Visibility = status.Visible ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>
@@ -265,18 +265,19 @@ public sealed partial class WorkspacePage : Page
         _editorTabs.FirstOrDefault(t => ReferenceEquals(t.Item, ActiveTabItem))?.Tab;
 
     /// <summary>
-    /// Shows the language colouring the file in front (or "No File", disabled, when the tab in front is not
-    /// a saved file). A language picked by hand is marked so it is not mistaken for detection.
+    /// Shows the language colouring the file in front, hiding the chip and its divider
+    /// when no saved file is active. A language picked by hand is marked as manual.
     /// </summary>
     private void UpdateLanguageButton()
     {
         if (ActiveEditorTab() is not { } tab || !tab.ViewModel.HasFile)
         {
-            LanguageText.Text = "No File";
+            LanguageHost.Visibility = Visibility.Collapsed;
             LanguageButton.IsEnabled = false;
             return;
         }
 
+        LanguageHost.Visibility = Visibility.Visible;
         LanguageButton.IsEnabled = true;
 
         var name = SyntaxService.Catalog.ById(tab.LanguageId)?.Name ?? "Plain Text";
@@ -391,7 +392,7 @@ public sealed partial class WorkspacePage : Page
     private void RefreshCliLabels()
     {
         ClaudeMenuItem.Text = "Chat";
-        ClaudeEmptyLabel.Text = "Chat";
+        ClaudeEmptyLabel.Text = "Start a chat";
     }
 
     /// <summary>
@@ -436,9 +437,6 @@ public sealed partial class WorkspacePage : Page
         await RunInNewTerminalAsync(command);
     }
 
-    /// <summary>Time a fresh shell gets to print its prompt before a command is typed into it.</summary>
-    private static readonly TimeSpan ShellPromptDelay = TimeSpan.FromMilliseconds(1500);
-
     /// <summary>Starts login with the terminal, keeping its output visible after it exits.</summary>
     public async Task RunAccountSignInAsync(string cliId, string? accountId = null)
     {
@@ -469,13 +467,15 @@ public sealed partial class WorkspacePage : Page
         return RunInNewTerminalAsync(command);
     }
 
-    private async Task RunInNewTerminalAsync(string command)
-    {
-        var terminal = ViewModel.CreateTerminal();
-        AddTerminalTab(terminal);
+    /// <summary>The agent ran a command (run_in_terminal, run_command): it gets a tab of its own, without taking the user's focus.</summary>
+    private void OnAgentTerminalOpened(object? sender, TerminalViewModel terminal) =>
+        DispatcherQueue.TryEnqueue(() => AddTerminalTab(terminal, select: false));
 
-        await Task.Delay(ShellPromptDelay);
-        await terminal.WriteAsync(command + "\r");
+    private Task RunInNewTerminalAsync(string command)
+    {
+        // A command tab: the command fills the tab as a plain terminal, started when the tab opens.
+        AddTerminalTab(ViewModel.CreateTerminal(command));
+        return Task.CompletedTask;
     }
 
     private bool _loginPromptOpen;
@@ -649,11 +649,12 @@ public sealed partial class WorkspacePage : Page
             tab.ToolFileRequested += OnChatToolFileRequested;
             tab.PlanOpenRequested += OnChatPlanOpenRequested;
             tab.TaskPeekRequested += OnChatTaskPeekRequested;
-            tab.ArtifactRequested += (_, artifact) => ShowArtifact(artifact);
+            tab.ArtifactRequested += (_, artifact) => ShowArtifactFromChat(artifact);
             tab.UpdateCliRequested += (_, cmd) => _ = UpdateCliAsync(cmd);
             tab.RunningTaskPeekRequested += (_, task) => SetPeek(ReferenceEquals(PeekPane.Task, task) && PeekPane.Visibility == Visibility.Visible ? null : task);
             chat.LoginRequired += OnChatLoginRequired;
             chat.AttentionNeeded += OnChatAttentionNeeded;
+            chat.PlanProposed += OnChatPlanProposed;
             chat.PropertyChanged += OnChatPropertyChanged;
 
             var item = new TabViewItem
@@ -812,7 +813,8 @@ public sealed partial class WorkspacePage : Page
     /// Shows a terminal - shell or command - as a centre tab. Every invocation is
     /// a new session: terminals stack as tabs like in VS Code.
     /// </summary>
-    private void AddTerminalTab(TerminalViewModel terminal, int insertIndex = -1)
+    /// <param name="select">False for a tab the agent opened: it appears without taking the user's focus.</param>
+    private void AddTerminalTab(TerminalViewModel terminal, int insertIndex = -1, bool select = true)
     {
         // An agent CLI typed at this terminal's prompt is launched in its own tab with its own
         // session's MCP servers (see TryOpenCliTab), so nothing is written for it here.
@@ -824,7 +826,7 @@ public sealed partial class WorkspacePage : Page
             // An agent CLI: its TUI in a rounded card beside the session panel.
             var cli = new CliTerminalTab { ViewModel = terminal, Workspace = ViewModel };
             cli.FileDiffRequested += (_, path) => OnChatToolFileRequested(cli, new ToolFileRequestEventArgs(path, isEdit: true));
-            cli.ArtifactRequested += (_, artifact) => ShowArtifact(artifact);
+            cli.ArtifactRequested += (_, artifact) => ShowArtifactFromChat(artifact);
             cli.UpdateCliRequested += (_, cmd) => _ = UpdateCliAsync(cmd);
             cli.TaskPeekRequested += (_, task) => SetPeek(ReferenceEquals(PeekPane.Task, task) && PeekPane.Visibility == Visibility.Visible ? null : task);
             cli.ResumeRequested += (_, resume) =>
@@ -840,7 +842,12 @@ public sealed partial class WorkspacePage : Page
         }
         else
         {
-            tab = new TerminalTab { ViewModel = terminal };
+            var notebook = new TerminalTab { ViewModel = terminal };
+            notebook.BlockPopOutRequested += (_, block) => OpenBlockInNewTab(terminal, block);
+            notebook.BlockDockRequested += (_, request) => DockBlock(terminal, request.Block, request.Dock);
+            notebook.BlockDragStarted += (_, block) => BeginDockDrag(terminal, block);
+            notebook.BlockDragEnded += (_, _) => EndDockDrag();
+            tab = notebook;
         }
 
         tab.LinkActivated += OnTerminalLinkActivated;
@@ -853,7 +860,10 @@ public sealed partial class WorkspacePage : Page
         AddTab(item, insertIndex);
 
         UpdateEmptyState();
-        SelectTab(item);
+        if (select)
+        {
+            SelectTab(item);
+        }
 
         // The shell lives exactly as long as its tab: started when the tab first
         // appears, terminated when the tab is closed.
@@ -861,6 +871,36 @@ public sealed partial class WorkspacePage : Page
         {
             terminal.Toggle();
         }
+    }
+
+    /// <summary>
+    /// "Maximize in new tab": moves a command block - running or finished - out of its notebook into a
+    /// terminal tab of its own, opened right after the source tab, where it fills the tab and its own
+    /// input cell follows it. The process keeps running through the move.
+    /// </summary>
+    private void OpenBlockInNewTab(TerminalViewModel source, CommandBlockViewModel block)
+    {
+        if (ViewModel is null || !source.Blocks.Contains(block))
+        {
+            return;
+        }
+
+        var sourceEntry = _terminalTabs.FirstOrDefault(t => ReferenceEquals(t.Terminal, source));
+        var group = sourceEntry is null ? null : GroupOf(sourceEntry.Item);
+        var index = sourceEntry is not null && group is not null ? group.TabItems.IndexOf(sourceEntry.Item) + 1 : -1;
+        if (group is not null)
+        {
+            SelectTab(sourceEntry!.Item);
+        }
+
+        UndockBlock(block);
+        source.ReleaseBlock(block);
+        block.Size = BlockSize.Fill;
+
+        var terminal = ViewModel.CreateTerminal();
+        terminal.IsSingleBlock = true;
+        terminal.AdoptBlock(block);
+        AddTerminalTab(terminal, index);
     }
 
     /// <summary>
@@ -938,7 +978,7 @@ public sealed partial class WorkspacePage : Page
 
             // A plain shell that only existed to launch the CLI is not left behind; closed after the
             // key handler that got us here has returned.
-            if (origin is { Terminal.IsCommandTerminal: false })
+            if (origin is { Terminal.IsCommandTerminal: false, Terminal.Blocks.Count: 0 })
             {
                 DispatcherQueue.TryEnqueue(() =>
                 {
@@ -1235,6 +1275,28 @@ public sealed partial class WorkspacePage : Page
     /// </summary>
     private async void OnChatToolFileRequested(object? sender, ToolFileRequestEventArgs e)
     {
+        // From a conversation, the file opens beside it rather than over it.
+        if (sender is ChatTab or CliTerminalTab)
+        {
+            try
+            {
+                if (e.IsEdit && (e.Diff is { Hunks.Count: > 0 } || ToRepoRelative(e.Path) is not null))
+                {
+                    await ShowDiffBesideAsync(e.Path, e.Diff);
+                }
+                else
+                {
+                    await OpenFileAtAsync(e.Path, e.Line, e.Column, e.EndLine, e.EndColumn, beside: true);
+                }
+            }
+            catch (Exception)
+            {
+                // async void: an escaping exception would take the process down.
+            }
+
+            return;
+        }
+
         // The call's own change, when the transcript has it: what this one edit did,
         // not everything uncommitted in the file.
         if (e.IsEdit && e.Diff is { Hunks.Count: > 0 } diff)
@@ -1266,6 +1328,13 @@ public sealed partial class WorkspacePage : Page
     {
         if (link.Path is null || !IsAncestorOf(source))
         {
+            return;
+        }
+
+        // A link in the conversation opens beside it.
+        if (IsInChat(source))
+        {
+            await OpenFileAtAsync(link.Path, link.Line, link.Column, link.EndLine, link.EndColumn, source.BasePath, link.LineRanges, beside: true);
             return;
         }
 
@@ -1327,7 +1396,8 @@ public sealed partial class WorkspacePage : Page
         int endLine = 0,
         int endColumn = 0,
         string? basePath = null,
-        IReadOnlyList<Codale.Core.Text.FileLineRange>? lineRanges = null)
+        IReadOnlyList<Codale.Core.Text.FileLineRange>? lineRanges = null,
+        bool beside = false)
     {
         var normalized = path.Replace('/', '\\');
         string resolved;
@@ -1352,7 +1422,7 @@ public sealed partial class WorkspacePage : Page
             return;
         }
 
-        var entry = await ShowFileTabAsync(resolved);
+        var editor = beside ? await ShowFileBesideAsync(resolved) : (await ShowFileTabAsync(resolved)).Tab;
         if (line > 0)
         {
             var end = endLine >= line ? endLine : line;
@@ -1370,7 +1440,7 @@ public sealed partial class WorkspacePage : Page
                 label = "lines " + string.Join(", ", spans.Select(span => span.Start == span.End ? $"{span.Start}" : $"{span.Start}–{span.End}"));
             }
 
-            entry.Tab.ShowHighlights(
+            editor.ShowHighlights(
                 spans,
                 label,
                 reveal: true,
@@ -1449,7 +1519,7 @@ public sealed partial class WorkspacePage : Page
             File.Exists(absolute));
     }
 
-    /// <summary>Clicking an explore, subagent, or start_task entry in the chat opens its peek, as selecting it in the task list does.</summary>
+    /// <summary>Clicking an explore or subagent entry in the chat opens its peek, as selecting it in the task list does.</summary>
     private void OnChatTaskPeekRequested(object? sender, ToolCallItem call)
     {
         if (sender is ChatTab { ViewModel: { } chat })
@@ -1478,11 +1548,32 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
+    /// <summary>A live plan proposal opens beside its chat, when that chat is the one on screen.</summary>
+    private void OnChatPlanProposed(object? sender, SessionArtifact plan)
+    {
+        if (ReferenceEquals(sender, ViewModel.Chat))
+        {
+            ShowArtifactBeside(plan);
+        }
+    }
+
     private void OnChatPlanOpenRequested(object? sender, ToolCallItem call)
     {
         var artifact = ViewModel.Chat.Artifacts.FirstOrDefault(a => a.ToolUseId == call.ToolUseId)
             ?? new SessionArtifact { Kind = SessionArtifactKind.Plan, ToolUseId = call.ToolUseId, Markdown = call.PlanText ?? "" };
-        ShowArtifact(artifact);
+        ShowArtifactFromChat(artifact);
+    }
+
+    /// <summary>An artifact clicked in a conversation: plans and documents open beside it; files keep their own handling.</summary>
+    private void ShowArtifactFromChat(SessionArtifact artifact)
+    {
+        if (artifact.Kind == SessionArtifactKind.File)
+        {
+            ShowArtifact(artifact);
+            return;
+        }
+
+        ShowArtifactBeside(artifact);
     }
 
     private void ShowArtifact(SessionArtifact artifact)
@@ -1798,13 +1889,27 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>Creates an editor tab with its own view model and registers it.</summary>
-    private EditorTabEntry CreateEditorTab(bool isPreview)
+    private EditorTabEntry CreateEditorTab(bool isPreview) => AdoptEditorTab(NewEditorSurface(isPreview), isPreview);
+
+    /// <summary>An editor surface with its own view model, not yet in any tab: the tab strip or the side preview hosts it.</summary>
+    private EditorTab NewEditorSurface(bool isPreview)
     {
         var editor = new EditorViewModel { IsPreview = isPreview };
 
         // A save changes the working tree, so git re-colours the file tree now rather than on the next poll.
         editor.Saved += (_, _) => _ = ViewModel.Git.RefreshAsync();
-        var tab = new EditorTab { ProjectRoot = ViewModel.ProjectPath }.WithViewModel(editor);
+        var tab = new EditorTab { ProjectRoot = ViewModel.ProjectPath, Knowledge = ViewModel.Features.Knowledge }.WithViewModel(editor);
+        tab.FindReferencesRequested += (_, text) =>
+        {
+            ShowReferences(text);
+        };
+        return tab;
+    }
+
+    /// <summary>Puts an editor surface in a tab of its own and registers it: a fresh one, or one moved out of the side preview.</summary>
+    private EditorTabEntry AdoptEditorTab(EditorTab tab, bool isPreview)
+    {
+        tab.ViewModel.IsPreview = isPreview;
         var item = new TabViewItem { IsClosable = true };
         item.Content = tab;
         item.DoubleTapped += OnEditorTabDoubleTapped;
@@ -1813,10 +1918,6 @@ public sealed partial class WorkspacePage : Page
 
         var entry = new EditorTabEntry(item, tab);
         tab.Edited += (_, _) => PromoteEditorTab(entry);
-        tab.FindReferencesRequested += (_, text) =>
-        {
-            ShowReferences(text);
-        };
         tab.LanguageChanged += (_, _) =>
         {
             if (ReferenceEquals(ActiveEditorTab(), tab))
@@ -1966,9 +2067,6 @@ public sealed partial class WorkspacePage : Page
                 running.Add($"Chat: {busyChat.Chat.TabTitle}");
             }
 
-            running.AddRange(busyChat.Chat.RunningTasks
-                .Where(t => t.Hosted is not null && t.IsRunning)
-                .Select(t => $"Task: {t.DisplayTitle}"));
         }
         else if (_terminalTabs.FirstOrDefault(t => ReferenceEquals(t.Item, args.Item)) is { } busyTerminal
             && busyTerminal.Terminal.Activity == TerminalActivity.Busy
@@ -2017,6 +2115,7 @@ public sealed partial class WorkspacePage : Page
             StopTabAttention(chatEntry);
             chatEntry.Chat.LoginRequired -= OnChatLoginRequired;
             chatEntry.Chat.AttentionNeeded -= OnChatAttentionNeeded;
+            chatEntry.Chat.PlanProposed -= OnChatPlanProposed;
             chatEntry.Chat.PropertyChanged -= OnChatPropertyChanged;
 
             if (ReferenceEquals(_attentionChat, chatEntry.Chat))
@@ -2248,7 +2347,7 @@ public sealed partial class WorkspacePage : Page
         }
 
         // The discovered files are editable too; the Codale file is the item above.
-        var codaleFile = Path.Combine(ViewModel.ProjectPath, ".codale", "commands.json");
+        var codaleFile = ViewModel.CommandsFilePath;
         foreach (var path in commands.Select(command => command.SourcePath).OfType<string>().Distinct())
         {
             if (PathsEqual(path, codaleFile))
@@ -2392,7 +2491,7 @@ public sealed partial class WorkspacePage : Page
         {
             PeekPane.Detach();
             PeekPane.Visibility = Visibility.Collapsed;
-            if (ReferencesPane.Visibility != Visibility.Visible)
+            if (ReferencesPane.Visibility != Visibility.Visible && !IsSidePreviewOpen)
             {
                 CloseSideColumn();
             }
@@ -2400,7 +2499,8 @@ public sealed partial class WorkspacePage : Page
             return;
         }
 
-        // The side column holds the peek or the references, never both.
+        // The side column holds one thing at a time: the peek, the references or a preview.
+        YieldSidePreview();
         ReferencesPane.Visibility = Visibility.Collapsed;
         OpenSideColumn();
         PeekPane.Visibility = Visibility.Visible;
@@ -2458,6 +2558,7 @@ public sealed partial class WorkspacePage : Page
             PeekPane.Visibility = Visibility.Collapsed;
         }
 
+        YieldSidePreview();
         OpenSideColumn();
         ReferencesPane.Visibility = Visibility.Visible;
         ReferencesTitle.Text = $"References · {text}";
@@ -2468,7 +2569,10 @@ public sealed partial class WorkspacePage : Page
     {
         _ = ViewModel.References.StopCommand.ExecuteAsync(null);
         ReferencesPane.Visibility = Visibility.Collapsed;
-        CloseSideColumn();
+        if (!IsSidePreviewOpen && PeekPane.Visibility != Visibility.Visible)
+        {
+            CloseSideColumn();
+        }
     }
 
     private void OnPeekCloseRequested(object? sender, EventArgs e) => SetPeek(null);
@@ -2540,7 +2644,7 @@ public sealed partial class WorkspacePage : Page
                 OpenTerminalTab();
                 break;
             case KeyboardShortcuts.FocusShellCommand:
-                FocusStatusBarCommandBox();
+                OpenTerminalTab();
                 break;
             case KeyboardShortcuts.ToggleLeftPanel:
                 ToggleLeftPanel();
@@ -2616,20 +2720,7 @@ public sealed partial class WorkspacePage : Page
             return;
         }
 
-        OpenSearchTab();
-
-        // After the tab switch settles, or the new tab's content takes the focus back.
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => window.FocusSearch());
-    }
-
-    /// <summary>Focuses the status bar shell command input box and selects its text if any.</summary>
-    private void FocusStatusBarCommandBox()
-    {
-        StatusBarCommandBox.Focus(FocusState.Programmatic);
-        if (FindTemplateChild(StatusBarCommandBox, "TextBox") is TextBox inner && !string.IsNullOrEmpty(StatusBarCommandBox.Text))
-        {
-            inner.SelectAll();
-        }
+        window.FocusSearch();
     }
 
     /// <summary>The mode chip's order; the flyout lists them the same way.</summary>
@@ -2664,9 +2755,24 @@ public sealed partial class WorkspacePage : Page
             ToggleLeftPanel();
         }
 
-        if (LeftPanel.Items.OfType<PivotItem>().FirstOrDefault(item => item.Header as string == "Git") is { } git)
+        GitTabButton.IsChecked = true;
+    }
+
+    /// <summary>The left panel's segmented switch: shows one page, and the Files actions only beside Files.</summary>
+    private void OnLeftTabChecked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton { Tag: string page } || FilesPage is null || GitPage is null || HistoryPage is null || FilesActions is null)
         {
-            LeftPanel.SelectedItem = git;
+            return;
+        }
+
+        FilesPage.Visibility = page == "Files" ? Visibility.Visible : Visibility.Collapsed;
+        GitPage.Visibility = page == "Git" ? Visibility.Visible : Visibility.Collapsed;
+        HistoryPage.Visibility = page == "Session" ? Visibility.Visible : Visibility.Collapsed;
+        FilesActions.Visibility = FilesPage.Visibility;
+        if (page == "Session")
+        {
+            RefreshKnowledge();
         }
     }
 
@@ -2692,10 +2798,7 @@ public sealed partial class WorkspacePage : Page
             ToggleLeftPanel();
         }
 
-        if (LeftPanel.Items.OfType<PivotItem>().FirstOrDefault(item => item.Header as string == "Files") is { } filesTab)
-        {
-            LeftPanel.SelectedItem = filesTab;
-        }
+        FilesTabButton.IsChecked = true;
 
         if (ViewModel.Files.IsSearching || !string.IsNullOrEmpty(ViewModel.Files.SearchText))
         {
@@ -2892,6 +2995,34 @@ public sealed partial class WorkspacePage : Page
         {
         }
     }
+
+    private FileNode SelectedFileFolder()
+    {
+        var selected = ViewModel.Files.IsSearching
+            ? (FileFilterResults.SelectedItem as FileSearchHit)?.Node
+            : FileTree.SelectedItem as FileNode;
+        if (selected is null || selected.IsPlaceholder || selected.IsDraft)
+        {
+            return ViewModel.Files.Root;
+        }
+
+        return selected.IsDirectory
+            ? selected
+            : ViewModel.Files.RevealPath(Path.GetDirectoryName(selected.FullPath)!) ?? ViewModel.Files.Root;
+    }
+
+    private void OnFilesNewFileClick(object sender, RoutedEventArgs e) => CreateFromFileToolbar(file: true);
+
+    private void OnFilesNewFolderClick(object sender, RoutedEventArgs e) => CreateFromFileToolbar(file: false);
+
+    private void CreateFromFileToolbar(bool file)
+    {
+        var parent = SelectedFileFolder();
+        ViewModel.Files.SearchText = "";
+        BeginCreate(parent, file);
+    }
+
+    private void OnFilesExploreClick(object sender, RoutedEventArgs e) => ExploreFolder(SelectedFileFolder().FullPath);
 
     private async void OnFilesRefreshClick(object sender, RoutedEventArgs e)
     {
@@ -3882,1016 +4013,6 @@ public sealed partial class WorkspacePage : Page
             }
         }
     }
-
-    #region Status Bar Terminal Input and Slide-up Flyout
-
-    private string _terminalCwd = "";
-    private readonly List<string> _commandHistory = [];
-    private bool _isTerminalDrawerOpen;
-    private Storyboard? _terminalDrawerAnimation;
-    private readonly double _drawerHeight = 280;
-    private CancellationTokenSource? _commandRunCts;
-    private Process? _activeCommandProcess;
-
-    private void SetTerminalCwd(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return;
-        }
-
-        try
-        {
-            _terminalCwd = Path.GetFullPath(path);
-        }
-        catch
-        {
-            _terminalCwd = path;
-        }
-
-        UpdateCwdDisplay();
-    }
-
-    private void UpdateCwdDisplay()
-    {
-        // Keep the bar useful in deeply nested repositories: show the project-relative
-        // path when possible, while retaining the absolute path in the tooltip.
-        var display = _terminalCwd.Replace('\\', '/');
-        var projectRoot = ViewModel?.ProjectPath;
-        if (!string.IsNullOrWhiteSpace(projectRoot))
-        {
-            try
-            {
-                var relative = Path.GetRelativePath(projectRoot, _terminalCwd);
-                if (!Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-                {
-                    display = relative == "." ? Path.GetFileName(projectRoot) : $"{Path.GetFileName(projectRoot)}/{relative.Replace('\\', '/')}";
-                }
-            }
-            catch
-            {
-                // Keep the absolute path if either path cannot be compared.
-            }
-        }
-        if (StatusBarCwdText is not null)
-        {
-            StatusBarCwdText.Text = display;
-        }
-
-        if (StatusBarCwdButton is not null)
-        {
-            ToolTipService.SetToolTip(StatusBarCwdButton, $"Working directory: {_terminalCwd}\nClick to change working directory");
-        }
-
-    }
-
-    private void OnCwdMenuFlyoutOpening(object? sender, object e)
-    {
-        CwdMenuFlyout.Items.Clear();
-
-        var browseItem = new MenuFlyoutItem
-        {
-            Text = "Choose folder…",
-            Icon = new FontIcon { Glyph = "\uED25" },
-        };
-        browseItem.Click += async (_, _) => await PickCustomFolderAsync();
-        CwdMenuFlyout.Items.Add(browseItem);
-
-        CwdMenuFlyout.Items.Add(new MenuFlyoutSeparator());
-
-        if (ViewModel is not null)
-        {
-            var projectRoot = ViewModel.ProjectPath;
-            var projectItem = new MenuFlyoutItem
-            {
-                Text = $"Project: {Path.GetFileName(projectRoot)}",
-                Icon = new FontIcon { Glyph = "\uE80F" },
-            };
-            ToolTipService.SetToolTip(projectItem, projectRoot);
-            projectItem.Click += (_, _) => SetTerminalCwd(projectRoot);
-            CwdMenuFlyout.Items.Add(projectItem);
-
-            if (ViewModel.ActiveEditor?.FilePath is { Length: > 0 } activeFile)
-            {
-                var dir = Path.GetDirectoryName(activeFile);
-                if (!string.IsNullOrEmpty(dir) && !string.Equals(dir, projectRoot, StringComparison.OrdinalIgnoreCase))
-                {
-                    var fileDirItem = new MenuFlyoutItem
-                    {
-                        Text = $"Active file: {Path.GetFileName(dir)}",
-                        Icon = new FontIcon { Glyph = "\uE8A5" },
-                    };
-                    ToolTipService.SetToolTip(fileDirItem, dir);
-                    fileDirItem.Click += (_, _) => SetTerminalCwd(dir);
-                    CwdMenuFlyout.Items.Add(fileDirItem);
-                }
-            }
-
-            var roots = new List<string> { projectRoot };
-            foreach (var extra in ViewModel.ExtraFolders.Folders)
-            {
-                var extraPath = extra;
-                roots.Add(extraPath);
-                CwdMenuFlyout.Items.Add(CwdItem($"Workspace: {Path.GetFileName(extraPath)}", extraPath, "\uE8B7"));
-            }
-
-            // Directories the project's commands declare, other than the roots themselves.
-            var commandDirs = new List<string>();
-            foreach (var command in ViewModel.DiscoverCommands())
-            {
-                if (string.IsNullOrWhiteSpace(command.WorkingDirectory))
-                {
-                    continue;
-                }
-
-                string dir;
-                try
-                {
-                    dir = Path.GetFullPath(Path.Combine(projectRoot, command.WorkingDirectory));
-                }
-                catch (ArgumentException)
-                {
-                    continue;
-                }
-
-                if (Directory.Exists(dir)
-                    && !roots.Contains(dir, StringComparer.OrdinalIgnoreCase)
-                    && !commandDirs.Contains(dir, StringComparer.OrdinalIgnoreCase))
-                {
-                    commandDirs.Add(dir);
-                    CwdMenuFlyout.Items.Add(CwdItem($"Command: {Path.GetRelativePath(projectRoot, dir).Replace('\\', '/')}", dir, ""));
-                }
-            }
-
-            var recent = ViewModel.ExtraFolders.RecentCwds
-                .Where(r => !roots.Contains(r, StringComparer.OrdinalIgnoreCase))
-                .ToList();
-            if (recent.Count > 0)
-            {
-                CwdMenuFlyout.Items.Add(new MenuFlyoutSeparator());
-                foreach (var path in recent)
-                {
-                    CwdMenuFlyout.Items.Add(CwdItem(Path.GetFileName(path.TrimEnd('\\', '/')) is { Length: > 0 } n ? n : path, path, "\uE81C"));
-                }
-            }
-        }
-    }
-
-    private MenuFlyoutItem CwdItem(string text, string path, string glyph)
-    {
-        var item = new MenuFlyoutItem { Text = text, Icon = new FontIcon { Glyph = glyph } };
-        ToolTipService.SetToolTip(item, path);
-        item.Click += (_, _) => SetTerminalCwd(path);
-        return item;
-    }
-
-
-    private async Task PickCustomFolderAsync()
-    {
-        try
-        {
-            var picker = new FolderPicker
-            {
-                SuggestedStartLocation = PickerLocationId.ComputerFolder,
-            };
-            picker.FileTypeFilter.Add("*");
-
-            if (App.Current.MainWindowHandle is { } hwnd)
-            {
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-            }
-
-            if (await picker.PickSingleFolderAsync() is { } folder)
-            {
-                SetTerminalCwd(folder.Path);
-                ViewModel?.ExtraFolders.AddRecentCwd(folder.Path);
-            }
-        }
-        catch (Exception)
-        {
-        }
-    }
-
-    private int _historyCursor = -1;
-
-    private void OnStatusBarCommandBoxKeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        switch (e.Key)
-        {
-            case Windows.System.VirtualKey.Tab
-                when StatusBarCommandBox.Text.Length > 0:
-                e.Handled = true;
-                if (FindTemplateChild(StatusBarCommandBox, "TextBox") is TextBox { SelectionLength: > 0 } inner &&
-                    StatusBarCommandBox.Text == _shellCurrent)
-                {
-                    // A suggestion is showing as a selected remainder: Tab accepts it.
-                    inner.Select(inner.Text.Length, 0);
-                }
-                else
-                {
-                    _ = CycleShellSuggestionAsync();
-                }
-
-                return;
-            case Windows.System.VirtualKey.Space
-                when Microsoft.UI.Input.InputKeyboardSource
-                    .GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control)
-                    .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down):
-                e.Handled = true;
-                _ = CycleShellSuggestionAsync();
-                return;
-            case Windows.System.VirtualKey.Up:
-            case Windows.System.VirtualKey.Down:
-                EnsureCommandHistoryLoaded();
-                if (_commandHistory.Count > 0)
-                {
-                    e.Handled = true;
-                    var step = e.Key == Windows.System.VirtualKey.Up ? 1 : -1;
-                    var next = _historyCursor + step;
-                    if (next < 0)
-                    {
-                        _historyCursor = -1;
-                        SetStatusBarCommandText("");
-                    }
-                    else if (next < _commandHistory.Count)
-                    {
-                        _historyCursor = next;
-                        SetStatusBarCommandText(_commandHistory[_commandHistory.Count - 1 - next]);
-                    }
-                }
-
-                return;
-        }
-
-        if (e.Key == Windows.System.VirtualKey.Escape)
-        {
-            e.Handled = true;
-            if (_isTerminalDrawerOpen)
-            {
-                CloseTerminalDrawer();
-            }
-            else
-            {
-                StatusBarCommandBox.Text = "";
-            }
-        }
-    }
-
-    private void OnStatusBarCommandBoxTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
-    {
-        if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
-        {
-            _historyCursor = -1;
-
-            // The project's earlier commands that start with what is typed, from the local history.
-            sender.ItemsSource = CommandHistory.Suggest(ViewModel.ProjectPath, sender.Text);
-        }
-    }
-
-    private bool _commandHistoryLoaded;
-
-    /// <summary>Loads the project's saved commands into the recall list once, oldest first, ahead of this session's.</summary>
-    private void EnsureCommandHistoryLoaded()
-    {
-        if (_commandHistoryLoaded)
-        {
-            return;
-        }
-
-        _commandHistoryLoaded = true;
-        _commandHistory.InsertRange(0, CommandHistory.Recent(ViewModel.ProjectPath).Reverse());
-    }
-
-    private string _shellTyped = "";
-    private string _shellCurrent = "";
-    private List<string> _shellCandidates = [];
-    private int _shellIndex;
-
-    /// <summary>
-    /// Ctrl+Space in the command box: completes what is typed from the newest matching history entry, then
-    /// older ones. Each press shows the next one as a selected remainder, so typing
-    /// on replaces it. A box that changed since the last suggestion starts over from what is there.
-    /// </summary>
-    private Task CycleShellSuggestionAsync()
-    {
-        EnsureCommandHistoryLoaded();
-        var box = StatusBarCommandBox;
-        var text = box.Text;
-        if (text.Length == 0)
-        {
-            return Task.CompletedTask;
-        }
-
-        if (text != _shellCurrent)
-        {
-            _shellTyped = text;
-            _shellIndex = -1;
-            _shellCandidates = _commandHistory
-                .AsEnumerable().Reverse()
-                .Where(h => h.Length > text.Length && h.StartsWith(text, StringComparison.OrdinalIgnoreCase))
-                .Distinct()
-                .ToList();
-        }
-
-        _shellIndex++;
-        if (_shellIndex < _shellCandidates.Count)
-        {
-            ShowShellSuggestion(box, _shellTyped, _shellCandidates[_shellIndex]);
-            return Task.CompletedTask;
-        }
-
-        _shellIndex = _shellCandidates.Count - 1;
-        return Task.CompletedTask;
-    }
-
-    private void ShowShellSuggestion(AutoSuggestBox box, string typed, string full)
-    {
-        _shellCurrent = full;
-        SetStatusBarCommandText(full);
-        if (FindTemplateChild(box, "TextBox") is TextBox inner)
-        {
-            inner.Select(typed.Length, full.Length - typed.Length);
-        }
-    }
-
-    /// <summary>Replaces the status-bar command box's text, keeping the caret at the end.</summary>
-    private void SetStatusBarCommandText(string text)
-    {
-        StatusBarCommandBox.Text = text;
-        if (FindTemplateChild(StatusBarCommandBox, "TextBox") is TextBox inner)
-        {
-            inner.Select(text.Length, 0);
-        }
-    }
-
-    private async void OnStatusBarCommandBoxQuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
-    {
-        _historyCursor = -1;
-        await ExecuteStatusBarCommandAsync(args.QueryText);
-    }
-
-    protected override void OnKeyDown(KeyRoutedEventArgs e)
-    {
-        base.OnKeyDown(e);
-        if (e.Key == Windows.System.VirtualKey.Escape && _isTerminalDrawerOpen)
-        {
-            e.Handled = true;
-            CloseTerminalDrawer();
-        }
-    }
-
-    private async void OnStatusBarRunButtonClick(object sender, RoutedEventArgs e) =>
-        await ExecuteStatusBarCommandAsync(StatusBarCommandBox.Text);
-
-    private void OnStatusBarToggleOutputClick(object sender, RoutedEventArgs e)
-    {
-        if (_isTerminalDrawerOpen)
-        {
-            CloseTerminalDrawer();
-        }
-        else
-        {
-            OpenTerminalDrawer();
-        }
-    }
-
-    /// <summary>
-    /// Sends a status bar command to a terminal tab when it is an agent CLI launch.
-    /// False to run it in the drawer as usual.
-    /// </summary>
-    private bool TryRunInTab(string command)
-    {
-        if (ViewModel is null)
-        {
-            return false;
-        }
-
-        var shell = Codale.Terminal.TerminalSession.ResolveShell(AppSettings.TerminalShell);
-        var powershell = Path.GetFileName(shell).Contains("pwsh", StringComparison.OrdinalIgnoreCase) ||
-            Path.GetFileName(shell).Contains("powershell", StringComparison.OrdinalIgnoreCase);
-
-        // The CLI detector reads a default shell prompt line, so give it one for this command.
-        return TryOpenCliTab($"{(powershell ? "PS " : "")}{_terminalCwd}> {command}", null);
-    }
-
-    private async Task<bool> ConfirmRiskyCommandAsync(string command, IReadOnlyList<Codale.Core.Shell.ShellFinding> findings)
-    {
-        var assessment = Codale.Core.Shell.ShellCommandAnalyzer.Assess(command, _terminalCwd);
-        var descriptionBlock = AppDialog.Message(assessment.Description);
-        var safetyBlock = new TextBlock
-        {
-            TextWrapping = TextWrapping.Wrap,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Text = $"Safety: {assessment.FormatAssessment()}",
-            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[assessment.Risk switch
-            {
-                Codale.Core.Shell.ShellRisk.Danger => "SystemFillColorCriticalBrush",
-                Codale.Core.Shell.ShellRisk.Caution => "SystemFillColorCautionBrush",
-                _ => "SystemFillColorSuccessBrush",
-            }],
-        };
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Content = AppDialog.Stack(AppDialog.Code(command), descriptionBlock, safetyBlock),
-            PrimaryButtonText = "Run anyway",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close,
-        };
-        AppDialog.Apply(dialog, DialogTone.Danger);
-        SetRiskyCommandHeader(dialog, assessment.Risk);
-
-        return await dialog.ShowAsync() == ContentDialogResult.Primary;
-    }
-
-    /// <summary>Red for a dangerous command, amber for one that only needs care.</summary>
-    private static void SetRiskyCommandHeader(ContentDialog dialog, Codale.Core.Shell.ShellRisk risk)
-    {
-        if (risk == Codale.Core.Shell.ShellRisk.Danger)
-        {
-            AppDialog.SetHeader(dialog, "This command is dangerous", DialogTone.Danger, AppDialog.Glyphs.Terminal);
-        }
-        else
-        {
-            AppDialog.SetHeader(dialog, "Run this command?", DialogTone.Warning, AppDialog.Glyphs.Terminal);
-        }
-    }
-
-    private CancellationTokenSource? _commandTranslationCts;
-
-    private async Task ExecuteStatusBarCommandAsync(string rawCommand)
-    {
-        if (_commandTranslationCts is not null || string.IsNullOrWhiteSpace(rawCommand)) return;
-        var command = rawCommand.Trim();
-        var shell = Codale.Terminal.TerminalSession.ResolveShell(AppSettings.TerminalShell);
-        if (AppSettings.SmartExperience && SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready)
-        {
-            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            _commandTranslationCts = cancellation;
-            var cwd = _terminalCwd;
-            var workspace = ViewModel;
-            var placeholder = StatusBarCommandBox.PlaceholderText;
-            StatusBarCommandBox.IsEnabled = false;
-            StatusBarRunButton.IsEnabled = false;
-            StatusBarRunProgress.Visibility = Visibility.Visible;
-            StatusBarCommandBox.PlaceholderText = $"Translating with {AppSettings.SmartProviderFor("shell")}…";
-            try
-            {
-                var result = await SmartExperienceHost.Instance.ShellCommandAsync(
-                    new(workspace.ProjectPath, cwd, "shell-command", Deadline: DateTimeOffset.UtcNow.AddSeconds(30)),
-                    command, shell, cancellation.Token);
-                if (cancellation.IsCancellationRequested || !IsLoaded || ViewModel != workspace || _terminalCwd != cwd) return;
-                if (result?.Value is not { Length: > 0 } translated)
-                {
-                    OpenTerminalDrawer();
-                    TerminalDrawerCommandText.Text = rawCommand;
-                    TerminalDrawerSpinner.IsActive = false;
-                    TerminalDrawerSpinner.Visibility = Visibility.Collapsed;
-                    TerminalDrawerStatusIcon.Visibility = Visibility.Collapsed;
-                    TerminalDrawerStatusText.Text = "Translation failed";
-                    TerminalDrawerOutputBox.Text = $"{AppSettings.SmartProviderFor("shell")} could not translate this request. Rephrase it and try again.";
-                    return;
-                }
-                command = translated;
-                SetStatusBarCommandText(command);
-            }
-            catch (OperationCanceledException) { return; }
-            finally
-            {
-                _commandTranslationCts = null;
-                StatusBarCommandBox.IsEnabled = true;
-                StatusBarRunButton.IsEnabled = true;
-                if (_activeCommandProcess is null) StatusBarRunProgress.Visibility = Visibility.Collapsed;
-                StatusBarCommandBox.PlaceholderText = placeholder;
-            }
-        }
-        await RunStatusBarCommandAsync(command, shell);
-    }
-
-    private async Task RunStatusBarCommandAsync(string rawCommand, string shell)
-    {
-        var command = rawCommand.Trim();
-        if (string.IsNullOrWhiteSpace(command))
-        {
-            return;
-        }
-
-        // A command the risk rules flag waits for a yes; the text stays in the box if the answer is no.
-        var findings = Codale.Core.Shell.ShellCommandAnalyzer.Analyze(command, _terminalCwd);
-        if (findings.Count > 0 && !await ConfirmRiskyCommandAsync(command, findings))
-        {
-            return;
-        }
-
-        EnsureCommandHistoryLoaded();
-        _commandHistory.Remove(command);
-        _commandHistory.Add(command);
-        CommandHistory.Record(ViewModel.ProjectPath, command, "shell");
-
-        StatusBarCommandBox.Text = "";
-
-        // An agent CLI belongs in a tab of its own, where it stays visible and
-        // its exit is known, rather than in the drawer's one-shot output box.
-        if (TryRunInTab(command))
-        {
-            return;
-        }
-
-        OpenTerminalDrawer();
-
-        TerminalDrawerCommandText.Text = $"$ {command}";
-        TerminalDrawerSpinner.Visibility = Visibility.Visible;
-        TerminalDrawerSpinner.IsActive = true;
-        TerminalDrawerStatusIcon.Visibility = Visibility.Collapsed;
-        TerminalDrawerStatusText.Text = "Running…";
-        TerminalDrawerOutputBox.Text = "";
-
-        if (command.Equals("cls", StringComparison.OrdinalIgnoreCase) ||
-            command.Equals("clear", StringComparison.OrdinalIgnoreCase))
-        {
-            TerminalDrawerSpinner.IsActive = false;
-            TerminalDrawerSpinner.Visibility = Visibility.Collapsed;
-            TerminalDrawerStatusIcon.Glyph = "\uE73E";
-            if (ChatPaletteTheme.TryGetBrush("SystemFillColorSuccessBrush", out var b))
-            {
-                TerminalDrawerStatusIcon.Foreground = b;
-            }
-            TerminalDrawerStatusIcon.Visibility = Visibility.Visible;
-            TerminalDrawerStatusText.Text = "Cleared";
-            TerminalDrawerOutputBox.Text = "";
-            return;
-        }
-
-        if (command.StartsWith("cd ", StringComparison.OrdinalIgnoreCase) ||
-            command.StartsWith("chdir ", StringComparison.OrdinalIgnoreCase) ||
-            command.Equals("cd", StringComparison.OrdinalIgnoreCase))
-        {
-            HandleCdCommand(command);
-            return;
-        }
-
-        _commandRunCts?.Cancel();
-        _commandRunCts?.Dispose();
-        _commandRunCts = new CancellationTokenSource();
-        var ct = _commandRunCts.Token;
-
-        var stopwatch = Stopwatch.StartNew();
-
-        try
-        {
-            var outputBuilder = new StringBuilder();
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = shell,
-                WorkingDirectory = _terminalCwd,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-            };
-
-            var shellName = Path.GetFileName(shell).ToLowerInvariant();
-            if (shellName.Contains("powershell") || shellName.Contains("pwsh"))
-            {
-                startInfo.ArgumentList.Add("-NoProfile");
-                startInfo.ArgumentList.Add("-NonInteractive");
-                startInfo.ArgumentList.Add("-ExecutionPolicy");
-                startInfo.ArgumentList.Add("Bypass");
-                startInfo.ArgumentList.Add("-Command");
-                startInfo.ArgumentList.Add("[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; " + command);
-            }
-            else
-            {
-                startInfo.ArgumentList.Add("/c");
-                startInfo.ArgumentList.Add(command);
-            }
-
-            var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-            _activeCommandProcess = process;
-
-            // Large listings (a recursive directory walk) used to rebuild and re-render the whole
-            // output on every line, which froze and eventually crashed the app. Cap the buffer and
-            // coalesce UI refreshes so at most one is queued at a time.
-            const int MaxOutputChars = 200_000;
-            var truncated = false;
-            var refreshQueued = 0;
-
-            string SnapshotOutput()
-            {
-                lock (outputBuilder)
-                {
-                    return truncated
-                        ? outputBuilder + $"{Environment.NewLine}… output truncated at {MaxOutputChars:N0} characters"
-                        : outputBuilder.ToString();
-                }
-            }
-
-            void AppendOutput(string? line)
-            {
-                if (line is null)
-                {
-                    return;
-                }
-
-                var clean = Codale.Core.Agents.BackgroundTaskDetector.StripAnsi(line);
-                // stdout and stderr callbacks arrive on separate threads; StringBuilder isn't thread-safe.
-                lock (outputBuilder)
-                {
-                    if (outputBuilder.Length >= MaxOutputChars)
-                    {
-                        truncated = true;
-                    }
-                    else
-                    {
-                        outputBuilder.AppendLine(clean);
-                    }
-                }
-
-                if (Interlocked.Exchange(ref refreshQueued, 1) == 0)
-                {
-                    DispatcherQueue.TryEnqueue(() =>
-                    {
-                        Interlocked.Exchange(ref refreshQueued, 0);
-                        TerminalDrawerOutputBox.Text = SnapshotOutput();
-                        TerminalDrawerScrollViewer.ChangeView(null, TerminalDrawerScrollViewer.ScrollableHeight, null);
-                    });
-                }
-            }
-
-            process.OutputDataReceived += (_, args) => AppendOutput(args.Data);
-            process.ErrorDataReceived += (_, args) => AppendOutput(args.Data);
-
-            // Off the UI thread: see ProcessUtil.StartAsync.
-            await Task.Run(process.Start);
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-            SetCommandRunning(true);
-
-            await process.WaitForExitAsync(ct);
-
-            stopwatch.Stop();
-            var elapsed = stopwatch.ElapsedMilliseconds < 1000
-                ? $"{stopwatch.ElapsedMilliseconds}ms"
-                : $"{stopwatch.Elapsed.TotalSeconds:F2}s";
-
-            var exitCode = process.ExitCode;
-            DispatcherQueue.TryEnqueue(() =>
-            {
-                TerminalDrawerSpinner.IsActive = false;
-                TerminalDrawerSpinner.Visibility = Visibility.Collapsed;
-                TerminalDrawerStatusIcon.Visibility = Visibility.Visible;
-
-                if (exitCode == 0)
-                {
-                    TerminalDrawerStatusIcon.Glyph = "\uE73E";
-                    if (ChatPaletteTheme.TryGetBrush("SystemFillColorSuccessBrush", out var sb))
-                    {
-                        TerminalDrawerStatusIcon.Foreground = sb;
-                    }
-                    TerminalDrawerStatusText.Text = $"Exit 0 · {elapsed}";
-                }
-                else
-                {
-                    TerminalDrawerStatusIcon.Glyph = "\uE783";
-                    if (ChatPaletteTheme.TryGetBrush("SystemFillColorCriticalBrush", out var cb))
-                    {
-                        TerminalDrawerStatusIcon.Foreground = cb;
-                    }
-                    TerminalDrawerStatusText.Text = $"Exit {exitCode} · {elapsed}";
-                }
-
-                TerminalDrawerOutputBox.Text = outputBuilder.Length == 0
-                    ? "(Command executed with no output)"
-                    : SnapshotOutput();
-            });
-        }
-        catch (OperationCanceledException)
-        {
-            stopwatch.Stop();
-            TerminalDrawerSpinner.IsActive = false;
-            TerminalDrawerSpinner.Visibility = Visibility.Collapsed;
-            TerminalDrawerStatusIcon.Glyph = "\uE711";
-            if (ChatPaletteTheme.TryGetBrush("SystemFillColorCautionBrush", out var caub))
-            {
-                TerminalDrawerStatusIcon.Foreground = caub;
-            }
-            TerminalDrawerStatusIcon.Visibility = Visibility.Visible;
-            TerminalDrawerStatusText.Text = "Cancelled";
-        }
-        catch (Exception ex)
-        {
-            stopwatch.Stop();
-            TerminalDrawerSpinner.IsActive = false;
-            TerminalDrawerSpinner.Visibility = Visibility.Collapsed;
-            TerminalDrawerStatusIcon.Glyph = "\uE783";
-            if (ChatPaletteTheme.TryGetBrush("SystemFillColorCriticalBrush", out var critb))
-            {
-                TerminalDrawerStatusIcon.Foreground = critb;
-            }
-            TerminalDrawerStatusIcon.Visibility = Visibility.Visible;
-            TerminalDrawerStatusText.Text = "Failed";
-            TerminalDrawerOutputBox.Text = $"Error: {ex.Message}";
-        }
-        finally
-        {
-            _activeCommandProcess?.Dispose();
-            _activeCommandProcess = null;
-            SetCommandRunning(false);
-        }
-    }
-
-    private void HandleCdCommand(string command)
-    {
-        TerminalDrawerSpinner.IsActive = false;
-        TerminalDrawerSpinner.Visibility = Visibility.Collapsed;
-        TerminalDrawerStatusIcon.Visibility = Visibility.Visible;
-
-        var parts = command.Split(' ', 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        var target = parts.Length > 1 ? parts[1].Trim('\"', '\'') : "";
-
-        string targetPath;
-        if (string.IsNullOrEmpty(target) || target == "~")
-        {
-            targetPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        }
-        else if (Path.IsPathRooted(target))
-        {
-            targetPath = target;
-        }
-        else
-        {
-            targetPath = Path.GetFullPath(Path.Combine(_terminalCwd, target));
-        }
-
-        if (Directory.Exists(targetPath))
-        {
-            SetTerminalCwd(targetPath);
-            TerminalDrawerStatusIcon.Glyph = "\uE73E";
-            if (ChatPaletteTheme.TryGetBrush("SystemFillColorSuccessBrush", out var sb))
-            {
-                TerminalDrawerStatusIcon.Foreground = sb;
-            }
-            TerminalDrawerStatusText.Text = "Directory changed";
-            TerminalDrawerOutputBox.Text = $"Current working directory is now:\n{targetPath.Replace('\\', '/')}";
-        }
-        else
-        {
-            TerminalDrawerStatusIcon.Glyph = "\uE783";
-            if (ChatPaletteTheme.TryGetBrush("SystemFillColorCriticalBrush", out var cb))
-            {
-                TerminalDrawerStatusIcon.Foreground = cb;
-            }
-            TerminalDrawerStatusText.Text = "Directory not found";
-            TerminalDrawerOutputBox.Text = $"Cannot find path '{target}' because it does not exist.";
-        }
-    }
-
-    private void OpenTerminalDrawer()
-    {
-        if (_isTerminalDrawerOpen)
-        {
-            return;
-        }
-
-        _isTerminalDrawerOpen = true;
-
-        TerminalOutputDrawer.Visibility = Visibility.Visible;
-        TerminalOutputDrawer.Height = _drawerHeight;
-
-        var slide = new DoubleAnimation
-        {
-            From = _drawerHeight,
-            To = 0,
-            Duration = TimeSpan.FromMilliseconds(240),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-        };
-        Storyboard.SetTarget(slide, TerminalDrawerSlide);
-        Storyboard.SetTargetProperty(slide, "Y");
-
-        var fade = new DoubleAnimation
-        {
-            From = 0,
-            To = 1,
-            Duration = TimeSpan.FromMilliseconds(200),
-        };
-        Storyboard.SetTarget(fade, TerminalOutputDrawer);
-        Storyboard.SetTargetProperty(fade, "Opacity");
-
-        var storyboard = new Storyboard();
-        storyboard.Children.Add(slide);
-        storyboard.Children.Add(fade);
-
-        _terminalDrawerAnimation?.Stop();
-        _terminalDrawerAnimation = storyboard;
-        storyboard.Begin();
-    }
-
-    private void CloseTerminalDrawer()
-    {
-        if (!_isTerminalDrawerOpen)
-        {
-            return;
-        }
-
-        _isTerminalDrawerOpen = false;
-
-        var slide = new DoubleAnimation
-        {
-            From = 0,
-            To = _drawerHeight,
-            Duration = TimeSpan.FromMilliseconds(180),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn },
-        };
-        Storyboard.SetTarget(slide, TerminalDrawerSlide);
-        Storyboard.SetTargetProperty(slide, "Y");
-
-        var fade = new DoubleAnimation
-        {
-            From = 1,
-            To = 0,
-            Duration = TimeSpan.FromMilliseconds(160),
-        };
-        Storyboard.SetTarget(fade, TerminalOutputDrawer);
-        Storyboard.SetTargetProperty(fade, "Opacity");
-
-        var storyboard = new Storyboard();
-        storyboard.Children.Add(slide);
-        storyboard.Children.Add(fade);
-
-        storyboard.Completed += (_, _) =>
-        {
-            if (!_isTerminalDrawerOpen)
-            {
-                TerminalOutputDrawer.Visibility = Visibility.Collapsed;
-            }
-        };
-
-        _terminalDrawerAnimation?.Stop();
-        _terminalDrawerAnimation = storyboard;
-        storyboard.Begin();
-    }
-
-    private void OnPointerPressedOutsideDrawer(object sender, PointerRoutedEventArgs e)
-    {
-        if (!_isTerminalDrawerOpen)
-        {
-            return;
-        }
-
-        if (IsPointerInsideTerminalDrawer(e))
-        {
-            return;
-        }
-
-        CloseTerminalDrawer();
-    }
-
-    private bool IsPointerInsideTerminalDrawer(PointerRoutedEventArgs e)
-    {
-        if (e.OriginalSource is DependencyObject source)
-        {
-            if (IsDescendantOf(source, TerminalOutputDrawer))
-            {
-                return true;
-            }
-
-            if (IsDescendantOf(source, StatusBarToggleOutputButton))
-            {
-                return true;
-            }
-        }
-
-        try
-        {
-            var drawerPoint = e.GetCurrentPoint(TerminalOutputDrawer).Position;
-            if (drawerPoint.X >= 0 && drawerPoint.X <= TerminalOutputDrawer.ActualWidth &&
-                drawerPoint.Y >= 0 && drawerPoint.Y <= TerminalOutputDrawer.ActualHeight)
-            {
-                return true;
-            }
-
-            var togglePoint = e.GetCurrentPoint(StatusBarToggleOutputButton).Position;
-            if (togglePoint.X >= 0 && togglePoint.X <= StatusBarToggleOutputButton.ActualWidth &&
-                togglePoint.Y >= 0 && togglePoint.Y <= StatusBarToggleOutputButton.ActualHeight)
-            {
-                return true;
-            }
-        }
-        catch
-        {
-        }
-
-        return false;
-    }
-
-    private static bool IsDescendantOf(DependencyObject node, DependencyObject root)
-    {
-        for (DependencyObject? current = node; current is not null;)
-        {
-            if (ReferenceEquals(current, root))
-            {
-                return true;
-            }
-
-            try
-            {
-                current = VisualTreeHelper.GetParent(current);
-            }
-            catch
-            {
-                break;
-            }
-        }
-
-        return false;
-    }
-
-    private void OnTerminalDrawerCloseClick(object sender, RoutedEventArgs e) => CloseTerminalDrawer();
-
-    private void OnTerminalDrawerCopyClick(object sender, RoutedEventArgs e)
-    {
-        if (!string.IsNullOrEmpty(TerminalDrawerOutputBox.Text))
-        {
-            CopyText(TerminalDrawerOutputBox.Text);
-        }
-    }
-
-    private void OnTerminalDrawerClearClick(object sender, RoutedEventArgs e)
-    {
-        TerminalDrawerOutputBox.Text = "";
-        TerminalDrawerStatusText.Text = "Cleared";
-    }
-
-    private async void OnTerminalDrawerRerunClick(object sender, RoutedEventArgs e)
-    {
-        var cmd = TerminalDrawerCommandText.Text.TrimStart('$', ' ').Trim();
-        if (!string.IsNullOrEmpty(cmd))
-        {
-            await ExecuteStatusBarCommandAsync(cmd);
-        }
-    }
-
-    private void OnTerminalDrawerStopClick(object sender, RoutedEventArgs e)
-    {
-        _commandTranslationCts?.Cancel();
-        _commandRunCts?.Cancel();
-        try
-        {
-            _activeCommandProcess?.Kill(entireProcessTree: true);
-        }
-        catch (Exception)
-        {
-            // The process already exited or was disposed.
-        }
-    }
-
-    /// <summary>Shows the toggle-button progress bar and the drawer Stop button once a command has run for a moment.</summary>
-    private async void SetCommandRunning(bool running)
-    {
-        if (!running)
-        {
-            StatusBarRunProgress.Visibility = Visibility.Collapsed;
-            TerminalDrawerStopButton.Visibility = Visibility.Collapsed;
-            TerminalDrawerRerunButton.IsEnabled = true;
-            return;
-        }
-
-        TerminalDrawerStopButton.Visibility = Visibility.Visible;
-        TerminalDrawerRerunButton.IsEnabled = false;
-        var process = _activeCommandProcess;
-        await Task.Delay(600);
-        if (ReferenceEquals(process, _activeCommandProcess) && process is not null)
-        {
-            StatusBarRunProgress.Visibility = Visibility.Visible;
-        }
-    }
-
-    private void OnTerminalDrawerOpenTabClick(object sender, RoutedEventArgs e)
-    {
-        var cmd = TerminalDrawerCommandText.Text.TrimStart('$', ' ').Trim();
-        CloseTerminalDrawer();
-        if (!string.IsNullOrEmpty(cmd))
-        {
-            _ = RunInNewTerminalAsync(cmd);
-        }
-        else
-        {
-            AddTerminalTab(new TerminalViewModel(_terminalCwd));
-        }
-    }
-
-    private void OnTerminalDrawerOutputBoxKeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        if (e.Key == Windows.System.VirtualKey.Escape)
-        {
-            e.Handled = true;
-            CloseTerminalDrawer();
-        }
-    }
-
-    #endregion
 
     /// <summary>One open chat tab: its <see cref="TabViewItem"/>, its transcript view and its conversation.</summary>
     private sealed class ChatTabEntry(TabViewItem item, ChatTab tab, ChatViewModel chat)

@@ -23,10 +23,10 @@ public static class CliResume
     /// A history reader that carries session ids for the CLI, or null when none exists for it.
     /// These feed the terminal session panel's own list.
     /// </summary>
-    public static ICliHistoryReader? CreateReader(string? cliId, string projectPath) => cliId?.ToLowerInvariant() switch
+    public static ICliHistoryReader? CreateReader(string? cliId, string projectPath, string? home = null) => cliId?.ToLowerInvariant() switch
     {
-        "claude" => new ClaudeSessionHistoryReader(projectPath),
-        "codex" => new CodexSessionHistoryReader(projectPath),
+        "claude" => new ClaudeSessionHistoryReader(projectPath, home),
+        "codex" => new CodexSessionHistoryReader(projectPath, home),
         _ => null,
     };
 }

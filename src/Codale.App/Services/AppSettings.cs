@@ -136,14 +136,7 @@ public static class AppSettings
         set => Set("shell.autoApproveSafe", value, FormatFlag);
     }
 
-    /// <summary>Whether the session panels beside chats and agent terminals show as a narrow rail.</summary>
-    public static bool SessionPanelCollapsed
-    {
-        get => Get("ui.sessionPanelCollapsed", () => ReadFlag("ui.sessionPanelCollapsed", false));
-        set => Set("ui.sessionPanelCollapsed", value, FormatFlag);
-    }
-
-    /// <summary>Whether Claude sessions predict the next prompt and show it in the composer. Read when a session starts.</summary>
+    /// <summary>Whether agent sessions predict the next prompt and show it in the composer. Read when a session starts.</summary>
     public static bool SuggestNextPrompt
     {
         get => Get("chat.suggestNextPrompt", () => ReadFlag("chat.suggestNextPrompt", true));
@@ -185,36 +178,49 @@ public static class AppSettings
         set => Set("chat.projectKnowledge", value, FormatFlag);
     }
 
-    public static string SmartProviderFor(string feature) =>
-        Get($"ai.smart.groups.{SmartFeatureSettings.GroupFor(feature)}.provider",
-            () => Read($"ai.smart.groups.{SmartFeatureSettings.GroupFor(feature)}.provider", "off")) is var provider
-            && provider is "claude" or "codex" or "openai" or "anthropic" ? provider : "off";
+    private static bool IsSmartProvider(string provider) => SmartFeatureSettings.IsProvider(provider);
 
-    public static void SetSmartProvider(string feature, string provider) =>
-        Set($"ai.smart.groups.{SmartFeatureSettings.GroupFor(feature)}.provider",
-            provider is "claude" or "codex" or "openai" or "anthropic" ? provider : "off", FormatText);
+    /// <summary>The provider a Smart model role runs on: "claude", "codex", "openai", "anthropic" or "off".</summary>
+    public static string SmartProviderFor(string role) =>
+        Get($"ai.smart.groups.{role}.provider", () => Read($"ai.smart.groups.{role}.provider", "off")) is var provider
+            && IsSmartProvider(provider) ? provider : "off";
 
-    public static bool SmartExperience => SmartFeatureSettings.Groups.Any(g => SmartProviderFor(g.Id) != "off");
+    public static void SetSmartProvider(string role, string provider) =>
+        Set($"ai.smart.groups.{role}.provider", IsSmartProvider(provider) ? provider : "off", FormatText);
 
-    public static string SmartFeatureModel(string feature) =>
-        Get($"ai.smart.{SmartProviderFor(feature)}.groups.{SmartFeatureSettings.GroupFor(feature)}.model",
-            () => Read($"ai.smart.{SmartProviderFor(feature)}.groups.{SmartFeatureSettings.GroupFor(feature)}.model", "default")) is var model
+    public static bool SmartExperience => SmartFeatureSettings.Roles.Any(r => SmartRoleEnabled(r.Id));
+
+    /// <summary>The model chosen for a role on its current provider; empty means the profile's Flash model.</summary>
+    public static string SmartRoleModel(string role) =>
+        Get($"ai.smart.{SmartProviderFor(role)}.groups.{role}.model",
+            () => Read($"ai.smart.{SmartProviderFor(role)}.groups.{role}.model", "default")) is var model
             && model.Equals("default", StringComparison.OrdinalIgnoreCase) ? "" : model;
 
-    public static void SetSmartFeatureModel(string feature, string model) =>
-        Set($"ai.smart.{SmartProviderFor(feature)}.groups.{SmartFeatureSettings.GroupFor(feature)}.model",
+    public static void SetSmartRoleModel(string role, string model) =>
+        Set($"ai.smart.{SmartProviderFor(role)}.groups.{role}.model",
             string.IsNullOrWhiteSpace(model) || model.Trim().Equals("default", StringComparison.OrdinalIgnoreCase) ? "default" : model.Trim(), FormatText);
 
-    public static string SmartApiProfileFor(string feature) =>
-        Get($"ai.smart.groups.{SmartFeatureSettings.GroupFor(feature)}.{SmartProviderFor(feature)}.profile",
-            () => Read($"ai.smart.groups.{SmartFeatureSettings.GroupFor(feature)}.{SmartProviderFor(feature)}.profile", ""));
+    public static string SmartApiProfileFor(string role) =>
+        Get($"ai.smart.groups.{role}.{SmartProviderFor(role)}.profile",
+            () => Read($"ai.smart.groups.{role}.{SmartProviderFor(role)}.profile", ""));
 
-    public static void SetSmartApiProfile(string feature, string profile) =>
-        Set($"ai.smart.groups.{SmartFeatureSettings.GroupFor(feature)}.{SmartProviderFor(feature)}.profile", profile, FormatText);
+    public static void SetSmartApiProfile(string role, string profile) =>
+        Set($"ai.smart.groups.{role}.{SmartProviderFor(role)}.profile", profile, FormatText);
 
-    public static bool SmartFeatureEnabled(string feature) => SmartProviderFor(feature) != "off"
-        && !SmartFeatureModel(feature).Equals("off", StringComparison.OrdinalIgnoreCase);
-    public static bool SmartSummaries => SmartFeatureEnabled("context");
+    /// <summary>Whether a role is configured; dedicated roles (Auto Complete, Embedding) also need an endpoint and an explicit model.</summary>
+    public static bool SmartRoleEnabled(string role)
+    {
+        var provider = SmartProviderFor(role);
+        var model = SmartRoleModel(role);
+        return provider != "off" && !model.Equals("off", StringComparison.OrdinalIgnoreCase)
+            && SmartFeatureSettings.SupportsProvider(role, provider)
+            && (!SmartFeatureSettings.RequiresDedicatedModel(role) || model.Length > 0);
+    }
+
+    /// <summary>Whether any role the task can run on is configured.</summary>
+    public static bool SmartFeatureEnabled(string task) => SmartFeatureSettings.RolesFor(task).Any(SmartRoleEnabled)
+        || SmartFeatureSettings.IsDecisionTask(task) && SmartRoleEnabled(SmartFeatureSettings.Decision);
+    public static bool SmartSummaries => SmartFeatureEnabled("summary");
     public static bool SmartThinking => false;
     public static bool SmartCompletions => SmartFeatureEnabled("completion");
     /// <summary>Whether the editor draws the gutter with line numbers.</summary>
@@ -297,6 +303,27 @@ public static class AppSettings
     {
         get => Get("terminal.scrollback", () => Read("terminal.scrollback", 10_000, ParseInt));
         set => Set("terminal.scrollback", Math.Clamp(value, 100, 1_000_000), FormatInt);
+    }
+
+    /// <summary>Lines a command block shows before it scrolls inside; the default matches a 120 × 30 terminal.</summary>
+    public static int TerminalBlockLines
+    {
+        get => Get("terminal.blockLines", () => Math.Clamp(Read("terminal.blockLines", 30, ParseInt), 3, 200));
+        set => Set("terminal.blockLines", Math.Clamp(value, 3, 200), FormatInt);
+    }
+
+    /// <summary>Command blocks kept in a terminal's history; the oldest finished ones beyond this are dropped.</summary>
+    public static int TerminalBlockHistory
+    {
+        get => Get("terminal.blockHistory", () => Math.Clamp(Read("terminal.blockHistory", 200, ParseInt), 10, 5_000));
+        set => Set("terminal.blockHistory", Math.Clamp(value, 10, 5_000), FormatInt);
+    }
+
+    /// <summary>Whether each PowerShell command block loads the user's profile first (slower: it runs every time).</summary>
+    public static bool TerminalLoadProfile
+    {
+        get => Get("terminal.loadProfile", () => ReadFlag("terminal.loadProfile", false));
+        set => Set("terminal.loadProfile", value, FormatFlag);
     }
 
     private static bool ReadFlag(string name, bool fallback) => Read(name, fallback ? "1" : "0") == "1";
@@ -619,7 +646,7 @@ public static class AppSettings
     [
         "editor.lineNumbers", "editor.highlighting", "editor.wordWrap", "chat.suggestNextPrompt",
         "tokens.compressShell", "tokens.digest", "tokens.explore", "tokens.readGuard", "tokens.handoffNudge", "tokens.terse",
-        "tokens.idleCompact", "ai.smartThinking",
+        "tokens.idleCompact",
     ];
 
     private static readonly HashSet<string> NumberKeys =
@@ -645,6 +672,7 @@ public static class AppSettings
                     _uiQueue ??= DispatcherQueue.GetForCurrentThread();
 
                     _values = LoadFile() ?? SeedDefaults();
+                    if (MigrateSmartRoles(_values)) Persist(_values);
                     StartWatching();
                 }
 
@@ -701,6 +729,9 @@ public static class AppSettings
         }
     }
 
+    /// <summary>One-time move from the old Smart groups to model roles (see <see cref="SmartFeatureSettings.MigrateLegacyGroups"/>).</summary>
+    private static bool MigrateSmartRoles(IDictionary<string, string> values) => SmartFeatureSettings.MigrateLegacyGroups(values);
+
     /// <summary>First run: a settings file with every key spelled out, so it shows what can be configured.</summary>
     private static SortedDictionary<string, string> SeedDefaults()
     {
@@ -714,9 +745,9 @@ public static class AppSettings
             ("terminal.fontFamily", "Cascadia Mono"), ("terminal.fontSize", "13"), ("terminal.scrollback", "10000"),
             ("chat.fontSize", "12.5"), ("chat.fontFamily", "Segoe UI"),
             ("chat.defaultMode", " "), ("chat.defaultModel", " "), ("chat.defaultEffort", " "),
-            ("git.pollSeconds", "5"), ("ai.smart.groups.assistance.provider", "off"),
-            ("ai.smart.groups.completion.provider", "off"), ("ai.smart.groups.context.provider", "off"),
-            ("ai.smart.groups.embedding.provider", "off"),
+            ("git.pollSeconds", "5"), ("ai.smart.groups.general.provider", "off"),
+            ("ai.smart.groups.completion.provider", "off"), ("ai.smart.groups.embedding.provider", "off"),
+            ("ai.smart.groups.decision.provider", "off"), (SmartFeatureSettings.MigratedKey, "1"),
         })
         {
             result.TryAdd(key, value);

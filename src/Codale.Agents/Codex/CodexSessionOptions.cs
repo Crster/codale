@@ -69,11 +69,17 @@ public sealed record CodexSessionOptions
     /// <summary>Resume an existing conversation (thread) instead of starting a new one.</summary>
     public string? ResumeSessionId { get; init; }
 
+    /// <summary>Request next-prompt predictions after successful turns. Read when the session starts.</summary>
+    public bool PromptSuggestions { get; init; }
+
     /// <summary>
     /// Host-provided MCP servers, passed as <c>-c mcp_servers.*</c> config overrides -
     /// the same rendering the terminal-CLI launcher uses.
     /// </summary>
     public IReadOnlyList<Codale.Core.Agents.McpServerSpec> McpServers { get; init; } = [];
+
+    /// <summary>Codex feature flags to force on or off (<c>-c features.NAME=true|false</c>), such as its own browser and computer use.</summary>
+    public IReadOnlyDictionary<string, bool>? Features { get; init; }
 
     /// <summary>
     /// Extra environment variables for the CLI process, layered over the inherited
@@ -136,6 +142,12 @@ public sealed record CodexSessionOptions
         {
             args.Add("-c");
             args.Add($"{key}={value}");
+        }
+
+        foreach (var (name, on) in Features ?? new Dictionary<string, bool>())
+        {
+            args.Add("-c");
+            args.Add($"features.{name}={(on ? "true" : "false")}");
         }
 
         args.Add("app-server");

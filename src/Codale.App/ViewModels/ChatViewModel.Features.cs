@@ -41,12 +41,8 @@ public sealed partial class ChatViewModel
     private readonly StringBuilder _turnFindings = new();
     private string? _retrievalId;
 
-    /// <summary>The intent Auto routed the prompt being sent to; null outside Auto, where the context stays the plain verified kind.</summary>
-    private Codale.Smart.SmartIntent? _routedIntent;
-
     /// <summary>The prompt Auto already put in the transcript before routing, with the composer attachments to restore if it never goes out.</summary>
     private (UserMessageItem Item, List<ComposerAttachment> Composer)? _preShown;
-    private bool _needsResumeContext;
     private string? _handoffContext;
 
     /// <summary>Only opening a history row resumes it. Prompts never select a different session.</summary>
@@ -63,7 +59,6 @@ public sealed partial class ChatViewModel
         {
             CliId = cliId!;
             ResumeSessionId = null;
-            _needsResumeContext = true;
             OnPropertyChanged(nameof(EndpointName));
         }
         else if (mapping is not null)
@@ -77,77 +72,17 @@ public sealed partial class ChatViewModel
         SetFeature(feature);
         if (handoff) CaptureHandoff();
         Title = feature.Name;
-        // The latest turns replay in full; older ones stay on disk behind a "Load" row.
-        _earlierLoaded = false;
-        var events = _featureLog!.ReadTail(int.MaxValue, out _);
-        var firstKept = FirstKeptEvent(events, KeptPrompts);
-        var older = events.Take(firstKept).Count(e => e is UserMessageRecorded);
-        if (older > 0)
+        // Read history off-thread so the opening indicator can animate. Tool details stay unloaded.
+        var historyLog = _featureLog!;
+        var events = await Task.Run(() => historyLog.ReadTail(int.MaxValue, out _));
+        foreach (var row in ReplayRows(events))
         {
-            Add(new EarlierTurnsItem { Turns = older, CanLoad = true });
+            Items.Add(row);
         }
-        foreach (var e in events.Skip(firstKept))
-        {
-            if (ReplayedRow(e) is { } row) Add(row);
-        }
-        TrimTranscript();
+        Reflow();
         RestorePendingPlan();
         await ConnectAsync();
         return IsConnected;
-    }
-
-    /// <summary>Where the latest <paramref name="keep"/> prompts begin in a replayed log; 0 when there are no more than that.</summary>
-    private static int FirstKeptEvent(IReadOnlyList<AgentEvent> events, int keep)
-    {
-        var starts = new List<int>();
-        for (var i = 0; i < events.Count; i++)
-        {
-            if (events[i] is UserMessageRecorded) starts.Add(i);
-        }
-
-        return keep <= 0 ? events.Count : starts.Count > keep ? starts[^keep] : 0;
-    }
-
-    /// <summary>The transcript row a logged event replays as, or null for events that are not conversation.</summary>
-    private static ChatItem? ReplayedRow(AgentEvent e)
-    {
-        switch (e)
-        {
-            case UserMessageRecorded user:
-                return new UserMessageItem { Text = user.Text };
-            case AssistantMessageCompleted reply:
-                var item = new AssistantMessageItem();
-                item.Complete(reply.Text);
-                return item;
-            default:
-                return null;
-        }
-    }
-
-    /// <summary>
-    /// Reads the folded turns back from the history log as ordinary rows in front of the latest ones.
-    /// They stay for the rest of the chat: the next prompt does not fold them away again.
-    /// </summary>
-    public void LoadEarlierTurns()
-    {
-        if (Items.Count == 0 || Items[0] is not EarlierTurnsItem || _featureLog is null)
-        {
-            return;
-        }
-
-        var events = _featureLog.ReadTail(int.MaxValue, out _);
-        var shown = Items.Count(i => i is UserMessageItem { IsSteer: false });
-        var firstKept = FirstKeptEvent(events, shown);
-
-        _earlierLoaded = true;
-        Items.RemoveAt(0);
-        var at = 0;
-        foreach (var e in events.Take(firstKept))
-        {
-            if (ReplayedRow(e) is { } row) Items.Insert(at++, row);
-        }
-
-        Reflow();
     }
 
     /// <summary>The feature's summary, or what it was started for while it has none.</summary>
@@ -254,7 +189,6 @@ public sealed partial class ChatViewModel
         _turnStartedUtc = null;
         _deliveredContext.Clear();
         _retrievalId = null;
-        _needsResumeContext = false;
     }
 
     private void BindHistoryProvider()
@@ -275,20 +209,24 @@ public sealed partial class ChatViewModel
         PublishFeatureActivity(false);
     }
 
-    private void RecordUserTurn(string text)
+    private void RecordUserTurn(string text, bool steer = false)
     {
         if (Features is not { } features) return;
         if (FeatureId is null)
         {
-            var title = text.ReplaceLineEndings(" ").Trim();
-            if (title.Length > 90) title = title[..90];
-            SetFeature(features.Create(title.Length > 0 ? title : "Attachments", text));
+            // Even a first prompt with no subject of its own names the history: there is nothing better yet.
+            SetFeature(features.Create(TitleFromPrompt(text) ?? (text.Trim().Length > 0 ? SessionTitles.FromPrompt(text) : "Attachments"), text));
             Title = FeatureName;
+            if (text.Length > 0) NameSessionAsync(FeatureId!, text, FeatureName);
+        }
+        else
+        {
+            RenameSessionFromPrompt(features, FeatureId, text);
         }
         if (_featureLog is not { } log || FeatureId is not { } id) return;
         if (!_attachLogged) { log.Attach(CliId); _attachLogged = true; }
         BindHistoryProvider();
-        log.AppendUser(text);
+        log.AppendUser(text, steer);
         features.RecordProgress(id, log, text);
         _featureRequest = text;
         _turnStartedUtc = DateTime.UtcNow;
@@ -425,7 +363,6 @@ public sealed partial class ChatViewModel
     private void ContextDelivered(RetrievalResult? result)
     {
         if (result is null) return;
-        _needsResumeContext = false;
         foreach (var key in result.Keys) _deliveredContext.Add(key);
         try
         {

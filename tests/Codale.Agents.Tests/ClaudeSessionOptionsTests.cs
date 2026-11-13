@@ -29,4 +29,24 @@ public sealed class ClaudeSessionOptionsTests
 
         Assert.DoesNotContain("--append-system-prompt", args);
     }
+
+    [Theory]
+    [InlineData(true, "--chrome", "--no-chrome")]
+    [InlineData(false, "--no-chrome", "--chrome")]
+    public void The_chrome_choice_rides_as_its_flag(bool chrome, string expected, string absent)
+    {
+        var args = new ClaudeSessionOptions { WorkingDirectory = ".", Chrome = chrome }.BuildArguments();
+
+        Assert.Contains(expected, args);
+        Assert.DoesNotContain(absent, args);
+    }
+
+    [Fact]
+    public void No_chrome_choice_leaves_the_cli_setting_alone()
+    {
+        var args = new ClaudeSessionOptions { WorkingDirectory = "." }.BuildArguments();
+
+        Assert.DoesNotContain("--chrome", args);
+        Assert.DoesNotContain("--no-chrome", args);
+    }
 }

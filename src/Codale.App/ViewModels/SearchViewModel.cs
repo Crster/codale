@@ -1,5 +1,6 @@
 using System.Diagnostics;
 
+using Codale.App.Services;
 using Codale.Core.Helper;
 using Codale.Search;
 
@@ -46,6 +47,20 @@ public sealed class SearchFileItem
     public string FilePath { get; init; } = "";
 
     public string RelativePath { get; init; } = "";
+
+    /// <summary>The file's name, shown first and bold in the result header.</summary>
+    public string FileName => System.IO.Path.GetFileName(RelativePath.Replace('\\', '/').TrimEnd('/')) is { Length: > 0 } name ? name : RelativePath;
+
+    /// <summary>The folder it sits in, shown dimmed after the name; "" at the root.</summary>
+    public string Folder
+    {
+        get
+        {
+            var path = RelativePath.Replace('\\', '/').TrimEnd('/');
+            var slash = path.LastIndexOf('/');
+            return slash > 0 ? path[..slash] : "";
+        }
+    }
 
     /// <summary>"4 matches", or "" for a file found by its name.</summary>
     public string Detail { get; init; } = "";
@@ -140,9 +155,12 @@ public sealed partial class SearchViewModel : ObservableObject
 
     private CancellationTokenSource? _inFlight;
 
+    private readonly string _projectPath;
+
     public SearchViewModel(string projectPath, ProjectKnowledgeIndex? knowledge = null)
     {
         _knowledge = knowledge;
+        _projectPath = projectPath;
 
         // The scan runs in the background from the moment the project opens, so the
         // first search is answered from memory.
@@ -198,7 +216,9 @@ public sealed partial class SearchViewModel : ObservableObject
             // refinement. Explicit references stay exhaustive and use local matches.
             var wantsEditLocation = !keywordOnly && SearchQueryIntent.WantsEditLocation(Query);
             var naturalLanguage = !keywordOnly && SearchQueryIntent.IsNaturalLanguage(Query);
-            ISearchModel? model = null;
+            // Keyword generation and the review pass run on the Decision model, or General when Decision is off.
+            ISearchModel? model = !keywordOnly && AppSettings.SmartFeatureEnabled("keywords")
+                ? new SmartHelperModel(_projectPath, "keywords", TimeSpan.FromSeconds(20)) : null;
 
             Status = "Searching…";
 

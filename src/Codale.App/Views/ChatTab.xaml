@@ -38,6 +38,9 @@
         <views:SelectedStrokeConverter x:Key="SelectedStroke" />
         <views:SelectedFillConverter x:Key="SelectedFill" />
         <views:DotBrushConverter x:Key="DotBrush" />
+        <views:TodoGlyphConverter x:Key="TodoGlyph" />
+        <views:TodoBrushConverter x:Key="TodoBrush" />
+        <views:UsageToBrushConverter x:Key="UsageToBrush" />
 
         <!--  ===== Styles =====  -->
 
@@ -48,7 +51,7 @@
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Padding" Value="0,3,8,3" />
             <Setter Property="Margin" Value="0" />
-            <Setter Property="CornerRadius" Value="13" />
+            <Setter Property="CornerRadius" Value="6" />
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
@@ -57,10 +60,10 @@
 
         <!--  A workspace file a step touched: quiet until hovered, then it reads as the link it is.  -->
         <Style x:Key="ToolFileChip" TargetType="Button">
-            <Setter Property="Background" Value="{StaticResource DetailSurfaceBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource DetailStrokeBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="4,1" />
             <Setter Property="Margin" Value="0" />
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="CornerRadius" Value="6" />
@@ -303,13 +306,9 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <Border
-                                Width="22"
-                                Height="22"
-                                VerticalAlignment="Center"
-                                Background="{x:Bind Kind, Converter={StaticResource ToolKindTint}}"
-                                BorderBrush="{x:Bind Kind, Converter={StaticResource ToolKindBrush}}"
-                                BorderThickness="1"
-                                CornerRadius="11">
+                                Width="18"
+                                Height="18"
+                                VerticalAlignment="Center">
                                 <Grid>
                                     <FontIcon
                                         HorizontalAlignment="Center"
@@ -331,10 +330,9 @@
                             <TextBlock
                                 Grid.Column="1"
                                 VerticalAlignment="Center"
-                                FontFamily="Cascadia Mono, Consolas"
                                 FontSize="{x:Bind S12_5, Mode=OneWay}"
                                 FontWeight="SemiBold"
-                                Foreground="{x:Bind Kind, Converter={StaticResource ToolKindBrush}}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                 Text="{x:Bind Verb, Mode=OneWay}" />
                         </Grid>
                     </Button>
@@ -472,37 +470,43 @@
                             Tag="{x:Bind}" />
                     </StackPanel>
 
-                    <!--  The plan, rendered: in plan mode it is the turn's deliverable.  -->
-                    <!--  Select a passage (or right-click) to annotate it; notes collect under the plan.  -->
-                    <StackPanel Spacing="2" Visibility="{x:Bind IsPlan}">
-                        <Border
-                            Padding="16,10"
-                            Background="{StaticResource DetailSurfaceBrush}"
-                            BorderBrush="{StaticResource AskStrokeBrush}"
-                            BorderThickness="1"
-                            CornerRadius="8">
-                            <StackPanel Spacing="10">
-                                <views:MarkdownView
-                                    BaseFontSize="{x:Bind S12_5, Mode=OneWay}"
-                                    DataContextChanged="OnPlanMarkdownDataContextChanged"
-                                    HostOwnsTextMenu="True"
-                                    Loaded="OnPlanMarkdownLoaded"
-                                    Markdown="{x:Bind PlanText}" />
-                                <views:PlanAnnotationBar
-                                    Padding="0,10,0,0"
-                                    BorderBrush="{StaticResource AskStrokeBrush}"
-                                    BorderThickness="0,1,0,0"
-                                    DataContextChanged="OnPlanBarDataContextChanged"
-                                    Loaded="OnPlanBarLoaded"
-                                    SendRequested="OnPlanAnnotationsSend" />
-                            </StackPanel>
-                        </Border>
-                        <Button
-                            Click="OnOpenPlanClick"
-                            Content="Open plan in a tab"
-                            Style="{StaticResource LinkButton}"
-                            Tag="{x:Bind}" />
-                    </StackPanel>
+                    <!--  The plan itself opens in the side column; the transcript keeps a row that brings it back.  -->
+                    <Button
+                        Padding="10,6"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        Background="{StaticResource DetailSurfaceBrush}"
+                        BorderBrush="{StaticResource AskStrokeBrush}"
+                        BorderThickness="1"
+                        Click="OnOpenPlanClick"
+                        CornerRadius="8"
+                        Tag="{x:Bind}"
+                        ToolTipService.ToolTip="Show the plan beside the chat"
+                        Visibility="{x:Bind PlanRowVisible, Mode=OneWay}">
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon
+                                FontSize="13"
+                                Foreground="{StaticResource KindPlanBrush}"
+                                Glyph="&#xE8FD;" />
+                            <TextBlock
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                FontSize="12.5"
+                                Text="{x:Bind PlanTitle}"
+                                TextTrimming="CharacterEllipsis" />
+                            <TextBlock
+                                Grid.Column="2"
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                Text="Open" />
+                        </Grid>
+                    </Button>
 
                     <!--  AskUserQuestion: the question card. The turn is blocked on it,
                           so it is the loudest thing on screen while it is open.  -->
@@ -631,13 +635,38 @@
                         Tag="{x:Bind Approval, Mode=OneWay}"
                         Visibility="{x:Bind PlanApprovalVisible, Mode=OneWay}">
                         <StackPanel Spacing="10">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
+                            <!--  The plan's title and its Open link sit in the card: one entry per plan.  -->
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
                                 <FontIcon
+                                    VerticalAlignment="Center"
                                     FontSize="{x:Bind S13, Mode=OneWay}"
                                     Foreground="{StaticResource KindPlanBrush}"
                                     Glyph="&#xE8FD;" />
-                                <TextBlock FontFamily="Cascadia Mono, Consolas" FontWeight="SemiBold" Text="Ready to build this plan?" />
-                            </StackPanel>
+                                <StackPanel Grid.Column="1" Spacing="1">
+                                    <TextBlock
+                                        FontWeight="SemiBold"
+                                        Text="{x:Bind PlanTitle}"
+                                        TextTrimming="CharacterEllipsis" />
+                                    <TextBlock
+                                        FontSize="12"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Text="Ready to build this plan?" />
+                                </StackPanel>
+                                <Button
+                                    Grid.Column="2"
+                                    VerticalAlignment="Center"
+                                    Click="OnOpenPlanClick"
+                                    Content="Open"
+                                    Style="{StaticResource LinkButton}"
+                                    Tag="{x:Bind}"
+                                    ToolTipService.ToolTip="Show the plan beside the chat"
+                                    Visibility="{x:Bind IsPlan}" />
+                            </Grid>
                             <TextBox
                                 AcceptsReturn="True"
                                 MinHeight="60"
@@ -729,10 +758,28 @@
                                     TextWrapping="Wrap"
                                     Visibility="{x:Bind Approval.HasRiskNote, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                             </StackPanel>
+                            <!--  Every button here shares one height and text size, accent or not.  -->
                             <StackPanel
                                 Grid.Column="2"
+                                VerticalAlignment="Center"
                                 Orientation="Horizontal"
                                 Spacing="6">
+                                <StackPanel.Resources>
+                                    <Style x:Key="ApprovalQuietButton" BasedOn="{StaticResource QuietButton}" TargetType="Button">
+                                        <Setter Property="Height" Value="30" />
+                                        <Setter Property="Padding" Value="12,0" />
+                                        <Setter Property="FontSize" Value="12.5" />
+                                        <Setter Property="VerticalAlignment" Value="Center" />
+                                        <Setter Property="VerticalContentAlignment" Value="Center" />
+                                    </Style>
+                                    <Style x:Key="ApprovalAccentButton" BasedOn="{StaticResource AccentButtonStyle}" TargetType="Button">
+                                        <Setter Property="Height" Value="30" />
+                                        <Setter Property="Padding" Value="16,0" />
+                                        <Setter Property="FontSize" Value="12.5" />
+                                        <Setter Property="VerticalAlignment" Value="Center" />
+                                        <Setter Property="VerticalContentAlignment" Value="Center" />
+                                    </Style>
+                                </StackPanel.Resources>
                                 <ItemsControl VerticalAlignment="Center" ItemsSource="{x:Bind Approval.Suggestions, Mode=OneWay}">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
@@ -744,29 +791,28 @@
                                             <Button
                                                 Click="OnApprovalSuggestion"
                                                 Content="{x:Bind Label}"
-                                                FontSize="12"
-                                                Style="{StaticResource QuietButton}"
-                                                Tag="{x:Bind}" />
+                                                Style="{StaticResource ApprovalQuietButton}"
+                                                Tag="{x:Bind}"
+                                                ToolTipService.ToolTip="{x:Bind Detail}" />
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
                                 <Button
                                     Click="OnApprovalAllowTurn"
                                     Content="Allow for this turn"
-                                    Style="{StaticResource QuietButton}"
+                                    Style="{StaticResource ApprovalQuietButton}"
                                     Tag="{x:Bind Approval, Mode=OneWay}"
                                     ToolTipService.ToolTip="Allow this and every other confirmation until the turn ends (Shift+Enter)" />
                                 <Button
                                     Click="OnApprovalDeny"
                                     Content="Deny"
-                                    Style="{StaticResource QuietButton}"
+                                    Style="{StaticResource ApprovalQuietButton}"
                                     Tag="{x:Bind Approval, Mode=OneWay}"
                                     ToolTipService.ToolTip="Deny (Esc)" />
                                 <Button
-                                    Padding="16,5"
                                     Click="OnApprovalAllow"
                                     Content="Allow"
-                                    Style="{StaticResource AccentButtonStyle}"
+                                    Style="{StaticResource ApprovalAccentButton}"
                                     Tag="{x:Bind Approval, Mode=OneWay}"
                                     ToolTipService.ToolTip="Allow (Enter)" />
                             </StackPanel>
@@ -1097,10 +1143,74 @@
             </Grid>
         </DataTemplate>
 
+        <!--  A prompt sent while the turn runs: it joins the timeline where it landed,
+              and the agent's work carries on below it.  -->
+        <DataTemplate x:Key="StepSteerTemplate" x:DataType="vm:UserMessageItem">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="22" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Rectangle
+                    Width="1"
+                    Height="12"
+                    VerticalAlignment="Top"
+                    Fill="{StaticResource TimelineRailBrush}" />
+                <Ellipse
+                    Width="6"
+                    Height="6"
+                    Margin="0,13,0,0"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Top"
+                    Fill="{StaticResource KindEditBrush}" />
+                <Rectangle
+                    Width="1"
+                    Margin="0,21,0,0"
+                    Fill="{StaticResource TimelineRailBrush}" />
+                <StackPanel
+                    Grid.Column="1"
+                    MaxWidth="640"
+                    Margin="6,4,0,8"
+                    HorizontalAlignment="Right"
+                    Spacing="3">
+                    <Border
+                        Padding="14,9"
+                        HorizontalAlignment="Right"
+                        Background="{StaticResource UserBubbleBrush}"
+                        BorderBrush="{StaticResource UserBubbleStrokeBrush}"
+                        BorderThickness="1"
+                        CornerRadius="12">
+                        <views:PromptText
+                            Attachments="{x:Bind Attachments}"
+                            FontSize="{x:Bind S13_5, Mode=OneWay}"
+                            Text="{x:Bind Text}" />
+                    </Border>
+                    <StackPanel
+                        Margin="0,0,4,0"
+                        HorizontalAlignment="Right"
+                        Orientation="Horizontal"
+                        Spacing="8">
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind S10_5, Mode=OneWay}"
+                            FontWeight="SemiBold"
+                            Foreground="{StaticResource KindEditBrush}"
+                            Text="Steer" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind S10_5, Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Text="{x:Bind Timestamp, Converter={StaticResource TimestampText}}" />
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
         <views:StepTemplateSelector
             x:Key="StepSelector"
             ExploreTemplate="{StaticResource StepExploreTemplate}"
             NarrationTemplate="{StaticResource StepNarrationTemplate}"
+            SteerTemplate="{StaticResource StepSteerTemplate}"
             TodoTemplate="{StaticResource StepTodoTemplate}"
             ToolTemplate="{StaticResource StepToolTemplate}" />
 
@@ -1111,26 +1221,59 @@
 
         <DataTemplate x:Key="UserTemplate" x:DataType="vm:UserMessageItem">
             <StackPanel
-                MaxWidth="620"
+                MaxWidth="640"
                 Margin="{x:Bind RowMargin, Mode=OneWay}"
                 HorizontalAlignment="Right"
-                Spacing="5">
-                <!-- User message header with You badge, mode tags, timestamp and copy button -->
-                <Grid views:TextBaseline.IsAligned="True" Margin="0,0,2,0" HorizontalAlignment="Right" ColumnSpacing="6">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
+                Spacing="3">
+                <Border
+                    Padding="14,9"
+                    HorizontalAlignment="Right"
+                    Background="{StaticResource UserBubbleBrush}"
+                    BorderBrush="{StaticResource UserBubbleStrokeBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12">
+                    <views:PromptText
+                        Attachments="{x:Bind Attachments}"
+                        FontSize="{x:Bind S13_5, Mode=OneWay}"
+                        Text="{x:Bind Text}" />
+                </Border>
 
+                <!--  Meta: how it was sent (plan / steer / new topic), when, and copy - as plain words.  -->
+                <StackPanel
+                    Margin="0,0,4,0"
+                    HorizontalAlignment="Right"
+                    Orientation="Horizontal"
+                    Spacing="8">
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontSize="{x:Bind S10_5, Mode=OneWay}"
+                        FontWeight="SemiBold"
+                        Foreground="{StaticResource KindSearchBrush}"
+                        Text="New topic"
+                        ToolTipService.ToolTip="New topic detected from the recent conversation"
+                        Visibility="{x:Bind IsNewTopic, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontSize="{x:Bind S10_5, Mode=OneWay}"
+                        FontWeight="SemiBold"
+                        Foreground="{StaticResource KindPlanBrush}"
+                        Text="Plan"
+                        Visibility="{x:Bind SentAsPlan, Converter={StaticResource BoolToVisibility}}" />
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontSize="{x:Bind S10_5, Mode=OneWay}"
+                        FontWeight="SemiBold"
+                        Foreground="{StaticResource KindEditBrush}"
+                        Text="Steer"
+                        Visibility="{x:Bind IsSteer, Converter={StaticResource BoolToVisibility}}" />
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontSize="{x:Bind S10_5, Mode=OneWay}"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Text="{x:Bind Timestamp, Converter={StaticResource TimestampText}}" />
                     <Button
-                        Grid.Column="1"
-                        Width="22"
-                        Height="22"
+                        Width="20"
+                        Height="20"
                         Padding="0"
                         VerticalAlignment="Center"
                         Click="OnCopyUserTextClick"
@@ -1138,137 +1281,9 @@
                         Tag="{x:Bind}"
                         ToolTipService.ToolTip="Copy message"
                         Visibility="{x:Bind HasText, Converter={StaticResource BoolToVisibility}}">
-                        <FontIcon FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE8C8;" />
+                        <FontIcon FontSize="10" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE8C8;" />
                     </Button>
-
-                    <TextBlock
-                        Grid.Column="2"
-                        VerticalAlignment="Center"
-                        FontFamily="Cascadia Mono, Consolas"
-                        FontSize="{x:Bind S10_5, Mode=OneWay}"
-                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                        Text="{x:Bind Timestamp, Converter={StaticResource TimestampText}}" />
-
-                    <Border
-                        Grid.Column="3"
-                        Padding="7,2"
-                        VerticalAlignment="Center"
-                        Background="{StaticResource KindSearchTintBrush}"
-                        BorderBrush="{StaticResource KindSearchBrush}"
-                        BorderThickness="1"
-                        CornerRadius="4"
-                        ToolTipService.ToolTip="New topic detected from the recent conversation"
-                        Visibility="{x:Bind IsNewTopic, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                        <StackPanel Orientation="Horizontal" Spacing="4">
-                            <FontIcon FontSize="9" Foreground="{StaticResource KindSearchBrush}" Glyph="&#xE710;" />
-                            <TextBlock
-                                FontSize="{x:Bind S10, Mode=OneWay}"
-                                FontWeight="Bold"
-                                Foreground="{StaticResource KindSearchBrush}"
-                                Text="NEW" />
-                        </StackPanel>
-                    </Border>
-
-                    <Border
-                        Grid.Column="4"
-                        Padding="7,2"
-                        VerticalAlignment="Center"
-                        Background="{StaticResource KindPlanTintBrush}"
-                        BorderBrush="{StaticResource KindPlanBrush}"
-                        BorderThickness="1"
-                        CornerRadius="4"
-                        Visibility="{x:Bind SentAsPlan, Converter={StaticResource BoolToVisibility}}">
-                        <StackPanel Orientation="Horizontal" Spacing="4">
-                            <FontIcon FontSize="9" Foreground="{StaticResource KindPlanBrush}" Glyph="&#xE8FD;" />
-                            <TextBlock
-                                FontSize="{x:Bind S10, Mode=OneWay}"
-                                FontWeight="Bold"
-                                Foreground="{StaticResource KindPlanBrush}"
-                                Text="PLAN" />
-                        </StackPanel>
-                    </Border>
-
-                    <Border
-                        Grid.Column="5"
-                        Padding="7,2"
-                        VerticalAlignment="Center"
-                        Background="{StaticResource KindEditTintBrush}"
-                        BorderBrush="{StaticResource KindEditBrush}"
-                        BorderThickness="1"
-                        CornerRadius="4"
-                        Visibility="{x:Bind IsSteer, Converter={StaticResource BoolToVisibility}}">
-                        <StackPanel Orientation="Horizontal" Spacing="4">
-                            <FontIcon FontSize="9" Foreground="{StaticResource KindEditBrush}" Glyph="&#xE8AC;" />
-                            <TextBlock
-                                FontSize="{x:Bind S10, Mode=OneWay}"
-                                FontWeight="Bold"
-                                Foreground="{StaticResource KindEditBrush}"
-                                Text="STEER" />
-                        </StackPanel>
-                    </Border>
-
-                    <Border
-                        Grid.Column="6"
-                        Padding="8,2"
-                        VerticalAlignment="Center"
-                        Background="{StaticResource UserBubbleBrush}"
-                        BorderBrush="{StaticResource UserBubbleStrokeBrush}"
-                        BorderThickness="1"
-                        CornerRadius="10">
-                        <StackPanel Orientation="Horizontal" Spacing="4">
-                            <FontIcon FontSize="10" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE77B;" />
-                            <TextBlock
-                                FontSize="{x:Bind S11, Mode=OneWay}"
-                                FontWeight="SemiBold"
-                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                Text="You" />
-                        </StackPanel>
-                    </Border>
-                    <ItemsControl
-                            Grid.Column="0"
-                            VerticalAlignment="Center"
-                        ItemsSource="{x:Bind Attachments}"
-                        Visibility="{x:Bind HasAttachments, Converter={StaticResource BoolToVisibility}}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <StackPanel Orientation="Horizontal" Spacing="6" />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="core:TurnAttachment">
-                                <Border
-                                    Width="22"
-                                    Height="22"
-                                    Background="Transparent"
-                                    CornerRadius="6"
-                                    Tag="{x:Bind}"
-                                    Tapped="OnPreviewAttachment"
-                                    ToolTipService.ToolTip="{x:Bind Name}">
-                                    <FontIcon
-                                        FontSize="11"
-                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                        Glyph="&#xE723;" />
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </Grid>
-
-
-                <Border
-                    Padding="16,11"
-                    HorizontalAlignment="Right"
-                    Background="{StaticResource UserBubbleBrush}"
-                    BorderBrush="{StaticResource UserBubbleStrokeBrush}"
-                    BorderThickness="1"
-                    CornerRadius="16,16,4,16"
-                    Visibility="{x:Bind HasText, Converter={StaticResource BoolToVisibility}}">
-                    <TextBlock
-                        FontSize="{x:Bind S13_5, Mode=OneWay}"
-                        IsTextSelectionEnabled="True"
-                        Text="{x:Bind Text}"
-                        TextWrapping="Wrap" />
-                </Border>
+                </StackPanel>
             </StackPanel>
         </DataTemplate>
 
@@ -1276,100 +1291,63 @@
         <DataTemplate x:Key="ActivityTemplate" x:DataType="vm:TurnActivityItem">
             <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="4">
                 <Button
-                    Padding="0"
+                    Padding="4,3,8,3"
                     Click="OnTurnToggleClick"
                     Style="{StaticResource ToolToggle}"
                     Tag="{x:Bind}"
                     ToolTipService.ToolTip="Show or hide the steps of this turn"
                     Visibility="{x:Bind IsFinished, Mode=OneWay}">
-                    <Border
-                        Padding="10,6,12,6"
-                        Background="{StaticResource DetailSurfaceBrush}"
-                        BorderBrush="{StaticResource DetailStrokeBrush}"
-                        BorderThickness="1"
-                        CornerRadius="10">
-                        <StackPanel Orientation="Horizontal" Spacing="10" views:TextBaseline.IsAligned="True">
-                            <!-- Status disc with outcome -->
-                            <Border
-                                Width="22"
-                                Height="22"
-                                VerticalAlignment="Center"
-                                Background="{x:Bind Outcome, Mode=OneWay, Converter={StaticResource TurnOutcomeTint}}"
-                                CornerRadius="11">
-                                <FontIcon
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    FontSize="{x:Bind S11, Mode=OneWay}"
-                                    Foreground="{x:Bind Outcome, Mode=OneWay, Converter={StaticResource TurnOutcomeBrush}}"
-                                    Glyph="{x:Bind StatusGlyph, Mode=OneWay}" />
-                            </Border>
-                            <TextBlock
-                                VerticalAlignment="Center"
-                                FontSize="{x:Bind S12_5, Mode=OneWay}"
-                                FontWeight="SemiBold"
-                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                                Text="{x:Bind HeaderText, Mode=OneWay}" />
-                            <ItemsControl
-                                VerticalAlignment="Center"
-                                ItemsSource="{x:Bind Pills, Mode=OneWay}">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <StackPanel Orientation="Horizontal" Spacing="6" />
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="vm:ActivityPill">
-                                        <Border
-                                            Height="22"
-                                            Padding="8,0"
-                                            VerticalAlignment="Center"
-                                            Background="{x:Bind Kind, Converter={StaticResource ToolKindTint}}"
-                                            BorderBrush="{x:Bind Kind, Converter={StaticResource ToolKindBrush}}"
-                                            BorderThickness="1"
-                                            CornerRadius="11">
-                                            <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
-                                                <FontIcon
-                                                    FontSize="10"
-                                                    Foreground="{x:Bind Kind, Converter={StaticResource ToolKindBrush}}"
-                                                    Glyph="{x:Bind Kind, Converter={StaticResource ToolKindGlyph}}" />
-                                                <TextBlock
-                                                    VerticalAlignment="Center"
-                                                    FontSize="11"
-                                                    FontWeight="SemiBold">
-                                                    <Run Foreground="{x:Bind Kind, Converter={StaticResource ToolKindBrush}}" Text="{x:Bind Label}" />
-                                                    <Run
-                                                        FontFamily="Cascadia Mono, Consolas"
-                                                        Foreground="{StaticResource DiffAddedForegroundBrush}"
-                                                        Text="{x:Bind AddedText}" />
-                                                    <Run
-                                                        FontFamily="Cascadia Mono, Consolas"
-                                                        Foreground="{StaticResource DiffRemovedForegroundBrush}"
-                                                        Text="{x:Bind RemovedText}" />
-                                                </TextBlock>
-                                            </StackPanel>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                            <Border
-                                Padding="6,2"
-                                VerticalAlignment="Center"
-                                Background="{StaticResource StatusFailedTintBrush}"
-                                CornerRadius="6"
-                                Visibility="{x:Bind HasProblems, Mode=OneWay}">
-                                <TextBlock
-                                    FontSize="{x:Bind S11, Mode=OneWay}"
-                                    FontWeight="SemiBold"
-                                    Foreground="{StaticResource StatusFailedBrush}"
-                                    Text="{x:Bind ProblemText, Mode=OneWay}" />
-                            </Border>
-                            <FontIcon
-                                FontSize="{x:Bind S8, Mode=OneWay}"
-                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                Glyph="{x:Bind IsExpanded, Mode=OneWay, Converter={StaticResource ChevronGlyph}}"
-                                Visibility="{x:Bind HasSteps, Mode=OneWay}" />
-                        </StackPanel>
-                    </Border>
+                    <StackPanel Orientation="Horizontal" Spacing="8" views:TextBaseline.IsAligned="True">
+                        <FontIcon
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind S11, Mode=OneWay}"
+                            Foreground="{x:Bind Outcome, Mode=OneWay, Converter={StaticResource TurnOutcomeBrush}}"
+                            Glyph="{x:Bind StatusGlyph, Mode=OneWay}"
+                            Visibility="{x:Bind Loaded, Converter={StaticResource InverseBoolToVisibility}}" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind S12, Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind HeaderText, Mode=OneWay}" />
+                        <TextBlock VerticalAlignment="Center" FontSize="{x:Bind S11_5, Mode=OneWay}"
+                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                   Visibility="{x:Bind Loaded, Converter={StaticResource BoolToVisibility}}">
+                            <Run Text=" · " /><Run Text="{x:Bind CallsText}" />
+                        </TextBlock>
+                        <ItemsControl
+                            VerticalAlignment="Center"
+                            ItemsSource="{x:Bind Pills, Mode=OneWay}"
+                            Visibility="{x:Bind Loaded, Converter={StaticResource InverseBoolToVisibility}}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="0" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:ActivityPill">
+                                    <TextBlock
+                                        VerticalAlignment="Center"
+                                        FontSize="12"
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}">
+                                        <Run Text=" · " /><Run Text="{x:Bind Label}" /><Run Foreground="{StaticResource DiffAddedForegroundBrush}" Text="{x:Bind AddedText}" /><Run Foreground="{StaticResource DiffRemovedForegroundBrush}" Text="{x:Bind RemovedText}" />
+                                    </TextBlock>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind S11_5, Mode=OneWay}"
+                            FontWeight="SemiBold"
+                            Foreground="{StaticResource StatusFailedBrush}"
+                            Text="{x:Bind ProblemText, Mode=OneWay}"
+                            Visibility="{x:Bind HasProblems, Mode=OneWay}" />
+                        <FontIcon
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind S8, Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Glyph="{x:Bind IsExpanded, Mode=OneWay, Converter={StaticResource ChevronGlyph}}"
+                            Visibility="{x:Bind HasSteps, Mode=OneWay}" />
+                    </StackPanel>
                 </Button>
                 <ItemsControl
                     ItemTemplateSelector="{StaticResource StepSelector}"
@@ -1380,98 +1358,55 @@
 
         <!--  The answer: clean assistant card with header, timestamp, thinking pill and copy button.  -->
         <DataTemplate x:Key="AssistantTemplate" x:DataType="vm:AssistantMessageItem">
-            <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="6">
-                <!-- Assistant Header -->
-                <Grid views:TextBaseline.IsAligned="True" Margin="2,0,0,0" HorizontalAlignment="Left" ColumnSpacing="6">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-
-                    <!-- Agent badge, mirrors the user's "You" badge -->
-                    <Border
-                        Padding="8,2"
-                        VerticalAlignment="Center"
-                        Background="{StaticResource UserBubbleBrush}"
-                        BorderBrush="{StaticResource UserBubbleStrokeBrush}"
-                        BorderThickness="1"
-                        CornerRadius="10">
-                        <StackPanel Orientation="Horizontal" Spacing="4">
-                            <FontIcon FontSize="10" Foreground="#F5A94A" Glyph="&#xE99A;" />
-                            <TextBlock
-                                FontSize="{x:Bind S11, Mode=OneWay}"
-                                FontWeight="SemiBold"
-                                Foreground="#F5A94A"
-                                Text="Codale" />
-                        </StackPanel>
-                    </Border>
-
-                    <!-- Timestamp -->
+            <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="4">
+                <!--  Thinking was recorded: one quiet line, not a badge.  -->
+                <StackPanel
+                    Orientation="Horizontal"
+                    Spacing="6"
+                    Visibility="{x:Bind HasThinking, Mode=OneWay}">
+                    <FontIcon
+                        FontSize="{x:Bind S11, Mode=OneWay}"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Glyph="&#xEA80;" />
                     <TextBlock
-                        Grid.Column="1"
+                        FontSize="{x:Bind S11_5, Mode=OneWay}"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Text="Thought it through" />
+                </StackPanel>
+
+                <StackPanel Spacing="6">
+                    <views:MarkdownView BaseFontSize="{x:Bind S13_5, Mode=OneWay}" Markdown="{x:Bind Text, Mode=OneWay}" />
+                    <Border
+                        Width="7"
+                        Height="15"
+                        HorizontalAlignment="Left"
+                        Background="{ThemeResource AccentFillColorDefaultBrush}"
+                        CornerRadius="2"
+                        Visibility="{x:Bind IsStreaming, Mode=OneWay}"
+                        views:Pulse.IsActive="{Binding IsStreaming, Mode=OneWay}" />
+                </StackPanel>
+
+                <StackPanel
+                    Orientation="Horizontal"
+                    Spacing="6"
+                    Visibility="{x:Bind IsStreaming, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
+                    <TextBlock
                         VerticalAlignment="Center"
-                        FontFamily="Cascadia Mono, Consolas"
                         FontSize="{x:Bind S10_5, Mode=OneWay}"
                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                         Text="{x:Bind Timestamp, Converter={StaticResource TimestampText}}" />
-
-                    <!-- Copy Response Button -->
                     <Button
-                        Grid.Column="2"
-                        Width="22"
-                        Height="22"
+                        Width="20"
+                        Height="20"
                         Padding="0"
                         VerticalAlignment="Center"
                         Click="OnCopyAssistantTextClick"
                         Style="{StaticResource LinkButton}"
                         Tag="{x:Bind}"
                         ToolTipService.ToolTip="Copy response">
-                        <FontIcon FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE8C8;" />
+                        <FontIcon FontSize="10" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE8C8;" />
                     </Button>
-                </Grid>
-
-                <!-- Thinking Chip (if thinking was recorded) -->
-                <Border
-                    Padding="10,5"
-                    HorizontalAlignment="Left"
-                    Background="{StaticResource KindAskTintBrush}"
-                    BorderBrush="{StaticResource AskStrokeBrush}"
-                    BorderThickness="1"
-                    CornerRadius="8"
-                    Visibility="{x:Bind HasThinking, Mode=OneWay}">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon
-                            FontSize="{x:Bind S11_5, Mode=OneWay}"
-                            Foreground="{StaticResource KindAskBrush}"
-                            Glyph="&#xEA80;" />
-                        <TextBlock
-                            FontSize="{x:Bind S11_5, Mode=OneWay}"
-                            FontWeight="SemiBold"
-                            Foreground="{StaticResource KindAskBrush}"
-                            Text="Thought Process" />
-                    </StackPanel>
-                </Border>
-
-                <!-- Assistant Response Body Container -->
-                <Border
-                    Padding="0,4"
-                    Background="Transparent"
-                    BorderThickness="0">
-                    <StackPanel Spacing="6">
-                        <views:MarkdownView BaseFontSize="{x:Bind S13_5, Mode=OneWay}" Markdown="{x:Bind Text, Mode=OneWay}" />
-                        
-                        <!-- Streaming Cursor -->
-                        <Border
-                            Width="8"
-                            Height="16"
-                            HorizontalAlignment="Left"
-                            Background="{ThemeResource AccentFillColorDefaultBrush}"
-                            CornerRadius="2"
-                            Visibility="{x:Bind IsStreaming, Mode=OneWay}"
-                            views:Pulse.IsActive="{Binding IsStreaming, Mode=OneWay}" />
-                    </StackPanel>
-                </Border>
+                </StackPanel>
             </StackPanel>
         </DataTemplate>
 
@@ -1485,25 +1420,23 @@
                 IsTabStop="False" />
         </DataTemplate>
 
-        <!--  Every turn older than the latest two, folded out of memory: a count and the way to read them back.  -->
-        <DataTemplate x:Key="EarlierTurnsTemplate" x:DataType="vm:EarlierTurnsItem">
-            <StackPanel
-                Margin="{x:Bind RowMargin, Mode=OneWay}"
-                Orientation="Horizontal"
-                Spacing="8">
-                <TextBlock
-                    VerticalAlignment="Center"
-                    FontSize="{x:Bind S12, Mode=OneWay}"
-                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                    Text="{x:Bind Title, Mode=OneWay}" />
-                <HyperlinkButton
-                    Padding="0"
-                    VerticalAlignment="Center"
-                    Click="OnLoadEarlierClick"
-                    Content="Load"
-                    FontSize="{x:Bind S12, Mode=OneWay}"
-                    ToolTipService.ToolTip="Restore the earlier turns from this chat's history"
-                    Visibility="{x:Bind CanLoad, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+        <!-- A finished turn summary; tool rows are read only when the reader expands it. -->
+        <DataTemplate x:Key="HiddenActivityTemplate" x:DataType="vm:HiddenActivityItem">
+            <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="4">
+                <Button Padding="4,3,8,3" Click="OnExpandActivityClick"
+                        Style="{StaticResource ToolToggle}" Tag="{x:Bind}"
+                        ToolTipService.ToolTip="Show or hide the steps of this turn">
+                    <StackPanel Orientation="Horizontal" Spacing="8" views:TextBaseline.IsAligned="True">
+                        <TextBlock Text="{x:Bind Summary}" FontSize="{x:Bind S12, Mode=OneWay}" VerticalAlignment="Center"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock VerticalAlignment="Center" FontSize="{x:Bind S11_5, Mode=OneWay}"
+                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}">
+                            <Run Text=" · " /><Run Text="{x:Bind Title}" />
+                        </TextBlock>
+                        <FontIcon Glyph="&#xE76C;" FontSize="{x:Bind S8, Mode=OneWay}" VerticalAlignment="Center"
+                                  Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    </StackPanel>
+                </Button>
             </StackPanel>
         </DataTemplate>
 
@@ -1558,7 +1491,7 @@
                             FontSize="{x:Bind S12, Mode=OneWay}"
                             FontWeight="SemiBold"
                             Foreground="{StaticResource KindAskBrush}"
-                            Text="Switch history?" />
+                            Text="The agent needs your input" />
                     </StackPanel>
                     <TextBlock
                         FontSize="{x:Bind S14, Mode=OneWay}"
@@ -1754,6 +1687,13 @@
                         Content="{x:Bind ActionText}"
                         FontSize="{x:Bind S12, Mode=OneWay}"
                         Visibility="{x:Bind HasAction, Converter={StaticResource BoolToVisibility}}" />
+                    <HyperlinkButton
+                        Padding="6,2"
+                        VerticalAlignment="Center"
+                        Click="OnComposerNoticeSecondaryAction"
+                        Content="{x:Bind SecondaryActionText}"
+                        FontSize="{x:Bind S12, Mode=OneWay}"
+                        Visibility="{x:Bind HasSecondaryAction, Converter={StaticResource BoolToVisibility}}" />
                     <Button
                         Width="24"
                         Height="24"
@@ -1941,8 +1881,8 @@
             ActivityTemplate="{StaticResource ActivityTemplate}"
             AssistantTemplate="{StaticResource AssistantTemplate}"
             BriefingTemplate="{StaticResource BriefingTemplate}"
-            EarlierTurnsTemplate="{StaticResource EarlierTurnsTemplate}"
             CompactTemplate="{StaticResource CompactTemplate}"
+            HiddenActivityTemplate="{StaticResource HiddenActivityTemplate}"
             FeatureJumpTemplate="{StaticResource FeatureJumpTemplate}"
             HandoffBriefTemplate="{StaticResource HandoffBriefTemplate}"
             NoticeTemplate="{StaticResource NoticeTemplate}"
@@ -2020,6 +1960,53 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!--  The prompt box: a RichEditBox so attachments, mentions and links sit in the
+              text as pills (see PromptEditor). Same look as ComposerTextBox.  -->
+        <Style x:Key="ComposerRichEditBox" TargetType="RichEditBox">
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="4,10" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RichEditBox">
+                        <Grid x:Name="RootGrid">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootGrid.Opacity" Value="0.45" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ScrollViewer
+                                x:Name="ContentElement"
+                                Margin="{TemplateBinding Padding}"
+                                AutomationProperties.AccessibilityView="Raw"
+                                HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                                HorizontalScrollMode="{TemplateBinding ScrollViewer.HorizontalScrollMode}"
+                                IsTabStop="False"
+                                VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}"
+                                VerticalScrollMode="{TemplateBinding ScrollViewer.VerticalScrollMode}"
+                                ZoomMode="Disabled" />
+                            <TextBlock
+                                x:Name="PlaceholderTextContentPresenter"
+                                Margin="{TemplateBinding Padding}"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                IsHitTestVisible="False"
+                                Text="{TemplateBinding PlaceholderText}"
+                                TextAlignment="{TemplateBinding TextAlignment}"
+                                TextWrapping="{TemplateBinding TextWrapping}" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </UserControl.Resources>
 
     <Grid>
@@ -2046,10 +2033,18 @@
             </VisualStateGroup>
         </VisualStateManager.VisualStateGroups>
 
-        <ScrollViewer x:Name="ChatScroller" VerticalScrollBarVisibility="Auto">
+        <ScrollViewer
+            x:Name="ChatScroller"
+            HorizontalScrollMode="Disabled"
+            HorizontalScrollBarVisibility="Disabled"
+            HorizontalContentAlignment="Stretch"
+            VerticalScrollBarVisibility="Auto">
             <ItemsControl
                 x:Name="Transcript"
-                Padding="12,12,16,16"
+                Width="{Binding ViewportWidth, ElementName=ChatScroller}"
+                HorizontalAlignment="Center"
+                MaxWidth="920"
+                Padding="12,16,16,16"
                 ItemTemplateSelector="{StaticResource ChatTemplateSelector}"
                 ItemsSource="{x:Bind ViewModel.Items}" />
         </ScrollViewer>
@@ -2242,6 +2237,7 @@
         <!-- Keep the action-required notice beside the composer. Working progress is in the turn. -->
         <Border
             Grid.Row="1"
+            MaxWidth="920"
             Margin="0,6,0,0"
             Padding="1,0,16,0"
             Visibility="{x:Bind ViewModel.ShowStatusLine, Mode=OneWay}">
@@ -2310,7 +2306,7 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="2" Margin="0,8,0,0">
+        <Grid Grid.Row="2" MaxWidth="920" Margin="0,8,0,0">
             <!--  The / and @ suggestions. A Popup rather than a Flyout: a flyout takes
                   focus and light-dismisses on the next keystroke, so the list closed
                   (or swallowed Enter) the moment it opened. This one never takes focus;
@@ -2403,13 +2399,151 @@
                         IsTabStop="False" />
                 </Border>
 
+                <!--  What is still going on: open todos and running background tasks,
+                      pinned above the composer so they never scroll away.  -->
+                <Border
+                    Margin="0,0,0,6"
+                    Padding="10,8"
+                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Visibility="{x:Bind ViewModel.HasComposerTray, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel Spacing="8">
+                        <StackPanel Spacing="4" Visibility="{x:Bind ViewModel.HasOpenTodos, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock
+                                    FontSize="11.5"
+                                    FontWeight="SemiBold"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="Todos" />
+                                <TextBlock FontSize="11.5" Foreground="{ThemeResource TextFillColorTertiaryBrush}">
+                                    <Run Text="{x:Bind ViewModel.TasksDone, Mode=OneWay}" /><Run Text="/" /><Run Text="{x:Bind ViewModel.TasksTotal, Mode=OneWay}" />
+                                </TextBlock>
+                            </StackPanel>
+                            <ScrollViewer
+                                MaxHeight="150"
+                                HorizontalScrollBarVisibility="Disabled"
+                                HorizontalScrollMode="Disabled"
+                                VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{x:Bind ViewModel.OpenTodos, Mode=OneWay}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Spacing="4" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="core:TodoItem">
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <FontIcon
+                                                    Margin="0,2,0,0"
+                                                    VerticalAlignment="Top"
+                                                    FontSize="12"
+                                                    Foreground="{x:Bind Status, Converter={StaticResource TodoBrush}}"
+                                                    Glyph="{x:Bind Status, Converter={StaticResource TodoGlyph}}" />
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    FontSize="12.5"
+                                                    Text="{x:Bind Content}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </StackPanel>
+
+                        <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.HasActiveTasks, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock
+                                FontSize="11.5"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="Background tasks" />
+                            <ListView
+                                MaxHeight="150"
+                                IsItemClickEnabled="True"
+                                ItemClick="OnTrayTaskClick"
+                                ItemsSource="{x:Bind ViewModel.ActiveTasks, Mode=OneWay}"
+                                SelectionMode="None">
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="MinHeight" Value="26" />
+                                        <Setter Property="Padding" Value="4,2" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:RunningTaskItem">
+                                        <Grid ColumnSpacing="8" ToolTipService.ToolTip="{x:Bind TitleTip}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <FontIcon
+                                                VerticalAlignment="Center"
+                                                FontSize="12"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Glyph="{x:Bind KindGlyph}" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                VerticalAlignment="Center"
+                                                FontSize="12.5"
+                                                Text="{x:Bind DisplayTitle, Mode=OneWay}"
+                                                TextTrimming="CharacterEllipsis"
+                                                TextWrapping="NoWrap" />
+                                            <StackPanel
+                                                Grid.Column="2"
+                                                VerticalAlignment="Center"
+                                                Orientation="Horizontal"
+                                                Spacing="5">
+                                                <Ellipse
+                                                    Width="6"
+                                                    Height="6"
+                                                    VerticalAlignment="Center"
+                                                    Fill="{StaticResource StatusRunningBrush}"
+                                                    views:Pulse.IsActive="{x:Bind IsRunning, Mode=OneWay}" />
+                                                <TextBlock
+                                                    FontFamily="Cascadia Mono, Consolas"
+                                                    FontSize="10.5"
+                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                    Text="{x:Bind Elapsed, Mode=OneWay}" />
+                                            </StackPanel>
+                                            <Button
+                                                Grid.Column="3"
+                                                Width="22"
+                                                Height="22"
+                                                Padding="0"
+                                                VerticalAlignment="Center"
+                                                Background="Transparent"
+                                                BorderThickness="0"
+                                                Click="OnTrayStopTaskClick"
+                                                CornerRadius="5"
+                                                Tag="{x:Bind}"
+                                                ToolTipService.ToolTip="Stop this task"
+                                                Visibility="{x:Bind CanStop, Mode=OneWay}">
+                                                <FontIcon FontSize="9" Glyph="&#xE71A;" />
+                                            </Button>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
                 <Border
                 x:Name="ComposerBorder"
-                Padding="12,8,8,8"
-                Background="{ThemeResource LayerFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                Padding="12,8,8,6"
+                Background="{ThemeResource ShellInputBackgroundBrush}"
+                BorderBrush="{ThemeResource ShellInputStrokeBrush}"
                 BorderThickness="1"
-                CornerRadius="12"
+                CornerRadius="10"
                 Tapped="OnComposerTapped">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -2418,81 +2552,23 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <ItemsControl
-                        ItemsSource="{x:Bind ViewModel.Attachments}"
-                        Visibility="{x:Bind ViewModel.HasAttachments, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <StackPanel
-                                    Margin="0,2,0,6"
-                                    Orientation="Horizontal"
-                                    Spacing="6" />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="vm:ComposerAttachment">
-                                <Border
-                                    Padding="4,4,2,4"
-                                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                    BorderThickness="1"
-                                    CornerRadius="8"
-                                    Tag="{x:Bind}"
-                                    Tapped="OnPreviewAttachment"
-                                    ToolTipService.ToolTip="Preview">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <Border CornerRadius="4" Visibility="{x:Bind IsImage, Converter={StaticResource BoolToVisibility}}">
-                                            <Image
-                                                Width="32"
-                                                Height="32"
-                                                Source="{x:Bind Path, Converter={StaticResource PathToImage}}"
-                                                Stretch="UniformToFill" />
-                                        </Border>
-                                        <FontIcon
-                                            Margin="4,0,0,0"
-                                            FontSize="14"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            Glyph="{x:Bind Kind, Converter={StaticResource AttachmentGlyph}}"
-                                            Visibility="{x:Bind IsDocument, Converter={StaticResource BoolToVisibility}}" />
-                                        <TextBlock
-                                            MaxWidth="150"
-                                            VerticalAlignment="Center"
-                                            FontSize="12"
-                                            Text="{x:Bind Name}"
-                                            TextTrimming="CharacterEllipsis" />
-                                        <Button
-                                            Width="22"
-                                            Height="22"
-                                            VerticalAlignment="Center"
-                                            Click="OnRemoveAttachment"
-                                            Style="{StaticResource ComposerIconButton}"
-                                            Tag="{x:Bind}"
-                                            ToolTipService.ToolTip="Remove">
-                                            <FontIcon FontSize="9" Glyph="&#xE711;" />
-                                        </Button>
-                                    </StackPanel>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
 
-                    <TextBox
-                        x:Name="DraftBox"
+                    <views:PillRichEditBox
+                        x:Name="DraftEditor"
                         Grid.Row="1"
                         MinHeight="44"
                         MaxHeight="220"
                         AcceptsReturn="True"
                         GotFocus="OnDraftFocusChanged"
                         IsEnabled="{x:Bind ViewModel.IsConnected, Mode=OneWay}"
+                        IsSpellCheckEnabled="False"
+                        IsTextPredictionEnabled="False"
                         KeyDown="OnDraftKeyDown"
                         LostFocus="OnDraftFocusChanged"
                         Paste="OnDraftPaste"
                         PlaceholderText="{x:Bind ViewModel.ComposerPlaceholder, Mode=OneWay}"
                         ScrollViewer.VerticalScrollBarVisibility="Auto"
-                        Style="{StaticResource ComposerTextBox}"
-                        Text="{x:Bind ViewModel.Draft, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                        TextChanged="OnDraftTextChanged"
-                        SelectionChanged="OnDraftSelectionChanged"
+                        Style="{StaticResource ComposerRichEditBox}"
                         TextWrapping="Wrap">
                         <!--  Accelerators, not KeyDown: a multiline TextBox handles Enter
                               before the KeyDown event reaches user handlers, so Enter-to-
@@ -2501,7 +2577,7 @@
                               and falls through to the normal newline. Paste goes through
                               the Paste event, so Ctrl+V, Shift+Insert and the context
                               menu all take the same path.  -->
-                        <TextBox.KeyboardAccelerators>
+                        <views:PillRichEditBox.KeyboardAccelerators>
                             <KeyboardAccelerator Key="Enter" Invoked="OnEnterAccelerator" />
                             <KeyboardAccelerator
                                 Key="Enter"
@@ -2519,8 +2595,38 @@
                                 Key="Z"
                                 Invoked="OnRedoAccelerator"
                                 Modifiers="Control,Shift" />
-                        </TextBox.KeyboardAccelerators>
-                    </TextBox>
+                        </views:PillRichEditBox.KeyboardAccelerators>
+                    </views:PillRichEditBox>
+
+                    <!--  The prediction at the caret, drawn over the box: the rest of the word being
+                          typed, or a spelling fix for the word just written. Tab takes it.  -->
+                    <Canvas
+                        x:Name="PredictionLayer"
+                        Grid.Row="1"
+                        IsHitTestVisible="False">
+                        <StackPanel
+                            x:Name="PredictionPanel"
+                            Orientation="Horizontal"
+                            Spacing="6"
+                            Visibility="Collapsed">
+                            <TextBlock
+                                x:Name="PredictionText"
+                                FontSize="14"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                TextTrimming="CharacterEllipsis"
+                                TextWrapping="NoWrap" />
+                            <Border
+                                Padding="5,0,5,1"
+                                VerticalAlignment="Center"
+                                Background="{StaticResource PillBackgroundBrush}"
+                                CornerRadius="4">
+                                <TextBlock
+                                    FontSize="10"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    Text="Tab" />
+                            </Border>
+                        </StackPanel>
+                    </Canvas>
 
                     <!--  Cue for the suggested next prompt shown as the placeholder above.  -->
                     <Border
@@ -2552,6 +2658,7 @@
                         </Grid.ColumnDefinitions>
 
                         <Button
+                            ToolTipService.Placement="Top"
                             Click="OnAttachClick"
                             IsEnabled="{x:Bind ViewModel.IsConnected, Mode=OneWay}"
                             Style="{StaticResource ComposerIconButton}"
@@ -2583,16 +2690,51 @@
                                 Text="@" />
                         </Button>
 
-                        <TextBlock
+                        <!--  The session's controls live where the prompt is written: model, mode, context.  -->
+                        <StackPanel
                             Grid.Column="3"
-                            Margin="8,0"
+                            Margin="6,0,8,0"
                             HorizontalAlignment="Right"
                             VerticalAlignment="Center"
-                            FontSize="11"
-                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="Enter send · Shift+Enter newline · Ctrl+Enter plan"
-                            TextTrimming="CharacterEllipsis"
-                            />
+                            Orientation="Horizontal"
+                            Spacing="2">
+                            <Button
+                                x:Name="ComposerModelButton"
+                                Click="OnComposerModelClick"
+                                IsEnabled="{x:Bind ViewModel.CanChangeMode, Mode=OneWay}"
+                                Style="{StaticResource ShellTextButton}"
+                                ToolTipService.ToolTip="Model">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon FontSize="11" Glyph="&#xE99A;" />
+                                    <TextBlock
+                                        MaxWidth="140"
+                                        Text="{x:Bind ViewModel.ModelDisplay, Mode=OneWay}"
+                                        TextTrimming="CharacterEllipsis" />
+                                    <FontIcon FontSize="8" Glyph="&#xE70D;" Opacity="0.7" />
+                                </StackPanel>
+                            </Button>
+                            <Button
+                                x:Name="ComposerModeButton"
+                                Click="OnComposerModeClick"
+                                IsEnabled="{x:Bind ViewModel.CanChangeMode, Mode=OneWay}"
+                                Style="{StaticResource ShellTextButton}"
+                                ToolTipService.ToolTip="How much the agent may do before asking">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon FontSize="11" Glyph="{x:Bind ViewModel.ModeGlyph, Mode=OneWay}" />
+                                    <TextBlock Text="{x:Bind ViewModel.ModeDisplayText, Mode=OneWay}" />
+                                    <FontIcon FontSize="8" Glyph="&#xE70D;" Opacity="0.7" />
+                                </StackPanel>
+                            </Button>
+                            <!--  Context used, as a quiet figure; the panel has the detail.  -->
+                            <TextBlock
+                                Margin="6,0,2,0"
+                                VerticalAlignment="Center"
+                                FontSize="11.5"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                ToolTipService.ToolTip="{x:Bind ViewModel.Status.ContextSummary, Mode=OneWay}">
+                                <Run Text="{x:Bind ViewModel.Status.ContextPercentText, Mode=OneWay}" /><Run Text=" context" />
+                            </TextBlock>
+                        </StackPanel>
 
 
                         <StackPanel

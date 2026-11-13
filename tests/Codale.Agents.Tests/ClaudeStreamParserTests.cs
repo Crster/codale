@@ -308,13 +308,28 @@ public sealed class ClaudeStreamParserTests
         var info = Assert.IsType<CliInformation>(Assert.Single(parser.Parse(
             """{"type":"system","subtype":"api_retry","attempt":2,"max_retries":10,"retry_delay_ms":4000,"error_status":529}""")));
 
-        Assert.Equal("API error 529: retry 2 of 10 in 4s.", info.Text);
+        Assert.Equal("The API is overloaded (529): retry 2 of 10 in 4s.", info.Text);
         Assert.True(info.IsWarning);
+        Assert.True(info.IsRetry);
 
         var bare = Assert.IsType<CliInformation>(Assert.Single(parser.Parse(
             """{"type":"system","subtype":"api_retry"}""")));
-        Assert.Equal("API error: retrying.", bare.Text);
+        Assert.Equal("The API request failed: retrying.", bare.Text);
+
+        // The CLI's error category is never shown raw: "unknown" was printed as "unknown: retry 1 of 10".
+        var unknown = Assert.IsType<CliInformation>(Assert.Single(parser.Parse(
+            """{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,"retry_delay_ms":1000,"error":"unknown"}""")));
+        Assert.Equal("The API request failed: retry 1 of 10 in 1s.", unknown.Text);
     }
+
+    [Theory]
+    [InlineData(null, "rate_limit", "Rate limited")]
+    [InlineData(429, "rate_limit", "Rate limited (429)")]
+    [InlineData(500, null, "The API had a server error (500)")]
+    [InlineData(400, null, "API error 400")]
+    [InlineData(null, "something_new", "The API request failed")]
+    public void Retry_cause_is_put_in_words(int? status, string? category, string expected) =>
+        Assert.Equal(expected, ClaudeStreamParser.RetryCause(status, category));
 
     [Theory]
     [InlineData("tool_progress")]

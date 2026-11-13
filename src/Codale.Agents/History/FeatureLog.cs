@@ -4,6 +4,7 @@ using System.Text.Json;
 using Codale.Agents.Claude;
 using Codale.Core.Agents;
 using Codale.Core.Helper;
+using Codale.Workspace;
 
 namespace Codale.Agents.History;
 
@@ -12,44 +13,35 @@ public readonly record struct LogPosition(int Generation, long Offset);
 
 /// <summary>
 /// One feature's running record: what the user asked and what the agent answered and did, from
-/// every session and either CLI that worked on it. Append-only JSONL (<c>log.jsonl</c>), rotated
-/// to <c>log.N.jsonl</c> once the summary has absorbed it. Nothing here is loaded into a chat on
-/// open: the summary seeds new sessions, and the full log is read only on request, a tail at a time.
+/// every session and either CLI that worked on it. Append-only, kept in the workspace database
+/// (<see cref="HistoryStore"/>) and rotated into numbered archives once the summary has absorbed it.
+/// Nothing here is loaded into a chat on open: the summary seeds new sessions, and the full log is
+/// read only on request, a tail at a time.
 /// </summary>
 /// <remarks>
 /// Several chats can work on one feature at once, so every record carries the chat that wrote it
 /// (<paramref name="chatId"/>) and each of its turns ends with a <c>turnEnd</c> record: a reader can
 /// then tell the conversations apart, and finished work from work still under way. Appends and
-/// archiving share one lock per log, so a summary rotating the log never loses a line written meanwhile.
+/// archiving share one lock, so a summary rotating the log never loses a line written meanwhile.
 /// </remarks>
-public sealed class FeatureLog(string directory, string? chatId = null)
+public sealed class FeatureLog(string workspaceDirectory, string featureId, string? chatId = null)
 {
     private static readonly JsonSerializerOptions ChangeJson = new() { PropertyNameCaseInsensitive = true };
 
-    /// <summary>One gate per log folder, whichever chat or background job holds a <see cref="FeatureLog"/> on it.</summary>
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, LogState> States = new(StringComparer.OrdinalIgnoreCase);
-
-    private sealed class LogState
-    {
-        public object Gate { get; } = new();
-        public bool Deleted { get; set; }
-    }
+    /// <summary>One gate for every log: a position is read as a pair of values that must not change between them.</summary>
+    private static readonly object Gate = new();
 
     private readonly HashSet<string> _tools = new(StringComparer.Ordinal);
-
-    private LogState State => States.GetOrAdd(Path.GetFullPath(directory), _ => new LogState());
-    private object Gate => State.Gate;
-
-    private string LogPath => Path.Combine(directory, "log.jsonl");
+    private readonly HistoryStore _store = new(workspaceDirectory);
 
     /// <summary>The chat this instance writes as; null for a reader.</summary>
     public string? ChatId => chatId;
 
     /// <summary>Bytes in the current log.</summary>
-    public long Length => File.Exists(LogPath) ? new FileInfo(LogPath).Length : 0;
+    public long Length => _store.Length(featureId);
 
     /// <summary>How many times the log has been archived: an offset into it means something only within one generation.</summary>
-    public int Generation => Directory.Exists(directory) ? Directory.EnumerateFiles(directory, "log.*.jsonl").Count() : 0;
+    public int Generation => _store.Generation(featureId);
 
     /// <summary>Where the log ends now, as a position <see cref="ReadSince(LogPosition, string?)"/> can resume from.</summary>
     public LogPosition Position
@@ -88,7 +80,7 @@ public sealed class FeatureLog(string directory, string? chatId = null)
         var turns = 0;
         for (var g = position.Generation + 1; g <= generation; g++)
         {
-            var (part, partTurns) = Read(Path.Combine(directory, $"log.{g}.jsonl"), g == position.Generation + 1 ? position.Offset : 0, excludeChat);
+            var (part, partTurns) = Read($"arc.{g}", g == position.Generation + 1 ? position.Offset : 0, excludeChat);
             entries.AddRange(part);
             turns += partTurns;
         }
@@ -101,7 +93,18 @@ public sealed class FeatureLog(string directory, string? chatId = null)
     /// <summary>Notes that a session of <paramref name="cli"/> took up the feature.</summary>
     public void Attach(string cli) => Append(new { type = "session", cli, at = DateTimeOffset.Now });
 
-    public void AppendUser(string text) => Append(new { type = "user", text, at = DateTimeOffset.Now });
+    /// <summary>Notes a prompt; a <paramref name="steer"/> joined the running turn instead of starting one.</summary>
+    public void AppendUser(string text, bool steer = false)
+    {
+        if (steer)
+        {
+            Append(new { type = "user", text, steer, at = DateTimeOffset.Now });
+        }
+        else
+        {
+            Append(new { type = "user", text, at = DateTimeOffset.Now });
+        }
+    }
 
     /// <summary>Notes the project context a prompt was enriched with; replayed as its own row, never as conversation.</summary>
     public void AppendContext(string summary, string details) => Append(new { type = "context", summary, details, at = DateTimeOffset.Now });
@@ -115,7 +118,7 @@ public sealed class FeatureLog(string directory, string? chatId = null)
         switch (e)
         {
             case AssistantMessageCompleted { ParentToolUseId: null, Text.Length: > 0 } reply:
-                Append(new { type = "assistant", id = reply.MessageId, model = reply.Model, text = reply.Text, at = DateTimeOffset.Now });
+                Append(new { type = "assistant", id = reply.MessageId, model = reply.Model, text = reply.Text, thinking = reply.Thinking, at = DateTimeOffset.Now });
                 break;
 
             case ToolCallStarted { ParentToolUseId: null } started:
@@ -131,7 +134,7 @@ public sealed class FeatureLog(string directory, string? chatId = null)
                 break;
 
             case ToolCallCompleted done when _tools.Contains(done.ToolUseId):
-                Append(new { type = "toolDone", id = done.ToolUseId, error = done.IsError, change = done.FileChange, changes = done.FileChanges, at = DateTimeOffset.Now });
+                Append(new { type = "toolDone", id = done.ToolUseId, error = done.IsError, result = CapResult(done.ResultText), change = done.FileChange, changes = done.FileChanges, at = DateTimeOffset.Now });
                 break;
         }
     }
@@ -142,14 +145,14 @@ public sealed class FeatureLog(string directory, string? chatId = null)
     /// one chat's own records out (a chat catching up on the others).
     /// </summary>
     public (IReadOnlyList<HandoffEntry> Entries, int Turns) ReadSince(long offset, string? excludeChat = null) =>
-        Read(LogPath, offset, excludeChat);
+        Read(HistoryStore.Current, offset, excludeChat);
 
-    private static (IReadOnlyList<HandoffEntry> Entries, int Turns) Read(string path, long offset, string? excludeChat)
+    private (IReadOnlyList<HandoffEntry> Entries, int Turns) Read(string generation, long offset, string? excludeChat)
     {
         var entries = new List<HandoffEntry>();
         var turns = 0;
 
-        foreach (var record in ReadRecords(path, offset))
+        foreach (var record in ReadRecords(generation, offset))
         {
             var chat = record.Str("chat");
             if (excludeChat is not null && chat == excludeChat)
@@ -279,67 +282,16 @@ public sealed class FeatureLog(string directory, string? chatId = null)
     {
         lock (Gate)
         {
-            if (!File.Exists(LogPath))
-            {
-                return;
-            }
-
-            byte[] tail;
-            using (var stream = new FileStream(LogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-            {
-                var start = Math.Min(offset, stream.Length);
-                tail = new byte[stream.Length - start];
-                stream.Seek(start, SeekOrigin.Begin);
-                stream.ReadExactly(tail);
-            }
-
-            var next = Directory.EnumerateFiles(directory, "log.*.jsonl")
-                .Select(f => int.TryParse(Path.GetFileNameWithoutExtension(f).Split('.').ElementAtOrDefault(1), out var n) ? n : 0)
-                .DefaultIfEmpty(0)
-                .Max() + 1;
-
-            var archive = Path.Combine(directory, $"log.{next}.jsonl");
-            File.Move(LogPath, archive);
-            if (tail.Length > 0)
-            {
-                File.WriteAllBytes(LogPath, tail);
-
-                // The archive keeps only what the summary read: the carried lines live in the new log alone.
-                using var trim = new FileStream(archive, FileMode.Open, FileAccess.Write, FileShare.Read);
-                trim.SetLength(trim.Length - tail.Length);
-            }
-
+            _store.ArchiveUpTo(featureId, offset);
             _tools.Clear();
         }
     }
 
-    /// <summary>Removes the feature's whole log folder.</summary>
-    public void Delete()
-    {
-        lock (Gate)
-        {
-            if (Directory.Exists(directory))
-            {
-                Directory.Delete(directory, recursive: true);
-            }
-
-            // Open chats may still hold writers while their UI handles the deletion notification.
-            State.Deleted = true;
-        }
-    }
+    /// <summary>Removes the feature's whole log; late writers of it do nothing.</summary>
+    public void Delete() => _store.Delete(featureId);
 
     /// <summary>Archives oldest first, then the current log.</summary>
-    private IEnumerable<string> Files()
-    {
-        if (!Directory.Exists(directory))
-        {
-            return [];
-        }
-
-        var archives = Directory.EnumerateFiles(directory, "log.*.jsonl")
-            .OrderBy(f => int.TryParse(Path.GetFileNameWithoutExtension(f).Split('.').ElementAtOrDefault(1), out var n) ? n : 0);
-        return File.Exists(LogPath) ? archives.Append(LogPath) : archives;
-    }
+    private IEnumerable<string> Files() => _store.Generations(featureId);
 
     private void Append<T>(T record)
     {
@@ -347,22 +299,16 @@ public sealed class FeatureLog(string directory, string? chatId = null)
             ? WithChat(node)
             : JsonSerializer.Serialize(record);
 
-        // A summary rotating the log, or another window's append, holds the file for a moment:
+        // A summary rotating the log, or another window's append, holds the database for a moment:
         // one retry rides that out. Past it, history is a convenience - a full disk or a locked
-        // file must never take the chat down.
+        // database must never take the chat down.
         for (var attempt = 0; attempt < 2; attempt++)
         {
             try
             {
                 lock (Gate)
                 {
-                    if (State.Deleted)
-                    {
-                        return;
-                    }
-
-                    Directory.CreateDirectory(directory);
-                    File.AppendAllText(LogPath, line + Environment.NewLine);
+                    _store.Append(featureId, line);
                 }
 
                 return;
@@ -387,6 +333,12 @@ public sealed class FeatureLog(string directory, string? chatId = null)
         return node.ToJsonString();
     }
 
+    /// <summary>Most of a tool's output is never read twice: the history keeps the first part, enough to show the step again.</summary>
+    private const int MaxResultChars = 20_000;
+
+    private static string? CapResult(string? text) =>
+        text is { Length: > MaxResultChars } ? text[..MaxResultChars] + Environment.NewLine + "... (output cut)" : text;
+
     private static string DescribeTool(JsonElement record)
     {
         var name = record.Str("name") ?? "tool";
@@ -406,13 +358,15 @@ public sealed class FeatureLog(string directory, string? chatId = null)
 
     private static AgentEvent? Translate(JsonElement record) => record.Str("type") switch
     {
-        "user" when record.Str("text") is { Length: > 0 } text => new UserMessageRecorded(text),
+        "user" when record.Str("text") is { Length: > 0 } text => new UserMessageRecorded(text) { IsSteer = record.Bool("steer") },
         "context" when record.Str("summary") is { Length: > 0 } summary => new ContextEnrichmentRecorded(summary, record.Str("details") ?? ""),
         "assistant" => new AssistantMessageCompleted
         {
             MessageId = record.Str("id") ?? "",
             Model = record.Str("model") ?? "unknown",
             Text = record.Str("text") ?? "",
+            Thinking = record.Str("thinking"),
+            HasThinking = record.Str("thinking") is { Length: > 0 },
         },
         "tool" => new ToolCallStarted
         {
@@ -424,6 +378,7 @@ public sealed class FeatureLog(string directory, string? chatId = null)
         {
             ToolUseId = record.Str("id") ?? "",
             IsError = record.Bool("error"),
+            ResultText = record.Str("result"),
             FileChange = record.Prop("change") is { ValueKind: JsonValueKind.Object } change
                 ? change.Deserialize<FileChange>(ChangeJson)
                 : null,
@@ -434,52 +389,33 @@ public sealed class FeatureLog(string directory, string? chatId = null)
         _ => null,
     };
 
-    /// <summary>The records of a file from a byte offset (which is always a line start); unreadable lines are skipped.</summary>
-    private static IEnumerable<JsonElement> ReadRecords(string path, long offset)
+    /// <summary>The records of a generation from a byte offset (always a record start); unreadable ones are skipped.</summary>
+    private IEnumerable<JsonElement> ReadRecords(string generation, long offset)
     {
-        if (!File.Exists(path))
-        {
-            yield break;
-        }
-
-        FileStream stream;
+        IReadOnlyList<string> lines;
         try
         {
-            stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            lines = _store.Lines(featureId, generation, offset);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             yield break;
         }
 
-        using (stream)
+        foreach (var line in lines)
         {
-            if (offset > 0)
+            JsonElement record;
+            try
             {
-                stream.Seek(Math.Min(offset, stream.Length), SeekOrigin.Begin);
+                using var doc = JsonDocument.Parse(line);
+                record = doc.RootElement.Clone();
+            }
+            catch (JsonException)
+            {
+                continue;
             }
 
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            while (reader.ReadLine() is { } line)
-            {
-                if (string.IsNullOrWhiteSpace(line))
-                {
-                    continue;
-                }
-
-                JsonElement record;
-                try
-                {
-                    using var doc = JsonDocument.Parse(line);
-                    record = doc.RootElement.Clone();
-                }
-                catch (JsonException)
-                {
-                    continue;
-                }
-
-                yield return record;
-            }
+            yield return record;
         }
     }
 }

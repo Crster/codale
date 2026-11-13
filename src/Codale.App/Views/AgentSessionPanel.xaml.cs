@@ -10,33 +10,24 @@ using Codale.Core.Agents;
 
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
-
-using Windows.ApplicationModel.DataTransfer;
+using Microsoft.UI.Xaml.Controls.Primitives;
 
 namespace Codale.App.Views;
 
 /// <summary>
 /// The session panel for a specific chat or agent CLI terminal session.
-/// Shows session status, controls, active todos, running tasks, session file changes,
-/// artifacts, and past history.
+/// A compact rail for account usage and session details, with flyouts for todos, tasks, files and artifacts.
 /// </summary>
 public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChanged
 {
     private ChatViewModel? _session;
     private WorkspaceViewModel? _workspace;
-    private bool _historyLayoutQueued;
     private int _todoCountSeen;
 
     public AgentSessionPanel()
     {
         InitializeComponent();
-        Rail.Glyph = "";
-        Rail.ShowConnection = true;
-        Rail.CliUpdate = CliUpdate;
-        Rail.UseStatusMeters();
-        Rail.ShowModel = false;
-        ApplyCollapsed();
+        Width = 65;
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
     }
@@ -60,8 +51,6 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             }
 
             _session = value;
-            Rail.Session = value;
-            Rail.ShowModel = ShowSessionPickers;
             _todoCountSeen = 0;
 
             if (_session is not null)
@@ -72,7 +61,6 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
             NotifySessionProperties();
             _ = CliUpdate.RefreshAsync(PanelCli);
-            UpdateHistoryLayout();
         }
     }
 
@@ -100,8 +88,48 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             }
 
             NotifySessionProperties();
-            UpdateHistoryLayout();
         }
+    }
+
+    // Context, model and permission mode stay in the composer. Only account usage lives here.
+    public bool HasUsage => Session?.Status is { } s && (s.HasFiveHour || s.HasLongWindowOnly || s.HasTokenUsage);
+    public double UsagePercent => Session?.Status is not { } s ? 0 :
+        s.HasFiveHour ? s.FiveHourPercent : s.HasLongWindowOnly ? s.SevenDayPercent : s.TokenUsagePercent;
+    public string UsageSummary => Session?.Status is not { } s ? "" :
+        s.HasFiveHour ? s.FiveHourSummary : s.HasLongWindowOnly ? s.SevenDaySummary : s.TokenUsageSummary;
+    public string UsagePercentText => $"{UsagePercent:0}%";
+
+    private void OnStatusPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        foreach (var property in new[] { nameof(HasUsage), nameof(UsagePercent), nameof(UsageSummary), nameof(UsagePercentText) })
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
+    }
+
+    private readonly Dictionary<FlyoutBase, (FrameworkElement Anchor, object Content)> _flyoutToolTips = [];
+
+    private void OnDetailFlyoutOpening(object sender, object e)
+    {
+        // Remove the delayed tooltip while its flyout is open, then restore it on close.
+        if (sender is FlyoutBase { Target: { } anchor } flyout && ToolTipService.GetToolTip(anchor) is { } content)
+        {
+            if (content is ToolTip tip) tip.IsOpen = false;
+            _flyoutToolTips[flyout] = (anchor, content);
+            ToolTipService.SetToolTip(anchor, null);
+        }
+    }
+
+    private void OnDetailFlyoutClosed(object sender, object e)
+    {
+        if (sender is FlyoutBase flyout && _flyoutToolTips.Remove(flyout, out var tooltip))
+            ToolTipService.SetToolTip(tooltip.Anchor, tooltip.Content);
+    }
+
+    private void HideDetails()
+    {
+        TodosFlyout.Hide();
+        TasksFlyout.Hide();
+        FilesFlyout.Hide();
+        ArtifactsFlyout.Hide();
     }
 
     public CliUpdateViewModel CliUpdate { get; } = new();
@@ -127,6 +155,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     private void NotifySessionProperties()
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Session)));
+        OnStatusPropertyChanged(this, new PropertyChangedEventArgs(null));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EndpointLabel)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowSessionPickers)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(WorkingDirectory)));
@@ -145,10 +174,6 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             _ = CliUpdate.RefreshAsync(PanelCli);
         }
 
-        if (e.PropertyName == nameof(ChatViewModel.HasConversation))
-        {
-            QueueHistoryLayout();
-        }
     }
 
     private void OnWorkspacePropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -176,6 +201,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     private void Attach(ChatViewModel session)
     {
         session.PropertyChanged += OnSessionPropertyChanged;
+        session.Status.PropertyChanged += OnStatusPropertyChanged;
         session.Todos.CollectionChanged += OnSessionCollectionChanged;
         session.RunningTasks.CollectionChanged += OnSessionCollectionChanged;
         session.SortedTasks.CollectionChanged += OnSortedTasksChanged;
@@ -185,6 +211,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     private void Detach(ChatViewModel session)
     {
         session.PropertyChanged -= OnSessionPropertyChanged;
+        session.Status.PropertyChanged -= OnStatusPropertyChanged;
         session.Todos.CollectionChanged -= OnSessionCollectionChanged;
         session.RunningTasks.CollectionChanged -= OnSessionCollectionChanged;
         session.SortedTasks.CollectionChanged -= OnSortedTasksChanged;
@@ -193,9 +220,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        AppSettings.Changed -= OnAppSettingsChanged;
-        AppSettings.Changed += OnAppSettingsChanged;
-        ApplyCollapsed();
+        Width = 65;
 
         // Unloaded detached everything (a tab switch unloads the panel): listen again and
         // catch up on what changed meanwhile, or the live sections stay as they were.
@@ -219,7 +244,6 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         _elapsedTimer.Tick += OnElapsedTick;
         _elapsedTimer.Start();
         _ = CliUpdate.RefreshAsync(PanelCli);
-        UpdateHistoryLayout();
     }
 
     private void OnElapsedTick(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args)
@@ -232,7 +256,6 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
-        AppSettings.Changed -= OnAppSettingsChanged;
         _elapsedTimer?.Stop();
         if (_session is not null)
         {
@@ -256,6 +279,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
                 return;
             }
 
+            ProfileFlyout.Hide();
             UpdateCliRequested?.Invoke(this, command);
 
             if (cli.Id == "codex")
@@ -279,27 +303,12 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         }
     }
 
-    private async void OnCompactContextClick(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            if (Session is { } session)
-            {
-                await session.CompactAsync();
-            }
-        }
-        catch (Exception)
-        {
-        }
-    }
-
-    private void OnReturnToLiveClick(object sender, RoutedEventArgs e) =>
-        Workspace?.ReturnToLiveSession();
-
     #region Model, Effort and Mode Pickers
 
-    private void OnModelChipClick(object sender, RoutedEventArgs e)
+    /// <summary>The model picker, anchored at <paramref name="anchor"/>: the composer's chip (opening upward).</summary>
+    public void ShowModelPicker(FrameworkElement anchor, bool above)
     {
+        var sender = anchor;
         if (Session is null)
         {
             return;
@@ -354,11 +363,14 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             });
         }
 
-        flyout.ShowAt((FrameworkElement)sender);
+        Place(flyout, above);
+        flyout.ShowAt(anchor);
     }
 
-    private void OnModeChipClick(object sender, RoutedEventArgs e)
+    /// <summary>The permission mode picker, anchored like <see cref="ShowModelPicker"/>.</summary>
+    public void ShowModePicker(FrameworkElement anchor, bool above)
     {
+        var sender = anchor;
         if (Session is null || !Session.CanChangeMode)
         {
             return;
@@ -389,8 +401,14 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         Add("auto", "\uE945", "Full",
             "Fully automated; never stops to confirm, only for your answers",
             current is "auto" or "dontAsk" or "bypassPermissions");
-        flyout.ShowAt((FrameworkElement)sender);
+        Place(flyout, above);
+        flyout.ShowAt(anchor);
     }
+
+    private static void Place(Flyout flyout, bool above) =>
+        flyout.Placement = above
+            ? Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.TopEdgeAlignedLeft
+            : Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.Bottom;
 
     private static Grid OptionContent(string glyph, string title, string? detail)
     {
@@ -413,7 +431,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     /// <summary>The flyout is as wide as the chip that opened it, with a floor so the notes stay readable.</summary>
     private static double PickerWidth(object chip) =>
-        Math.Max(400, (chip as FrameworkElement)?.ActualWidth ?? 0);
+        Math.Max(360, (chip as FrameworkElement)?.ActualWidth ?? 0);
 
     private Flyout PickerFlyout(UIElement content) => new()
     {
@@ -445,6 +463,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void OnRunningTaskClick(object sender, ItemClickEventArgs e)
     {
+        HideDetails();
         if (e.ClickedItem is RunningTaskItem task)
         {
             TaskPeekRequested?.Invoke(this, task);
@@ -461,6 +480,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void OnSessionChangeClick(object sender, ItemClickEventArgs e)
     {
+        HideDetails();
         if (e.ClickedItem is SessionFileChange change)
         {
             FileDiffRequested?.Invoke(this, change.Path);
@@ -469,6 +489,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void OnArtifactClick(object sender, ItemClickEventArgs e)
     {
+        HideDetails();
         if (e.ClickedItem is SessionArtifact artifact)
         {
             ArtifactRequested?.Invoke(this, artifact);
@@ -480,12 +501,9 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         {
             OpenTodosOnFirstGoals();
 
-            // ObservableCollection does not raise PropertyChanged for Count, but the
-            // section headers bind to Session.*.Count; refresh those nested paths.
+            // Refresh nested collection bindings when the session details change.
             NotifySessionProperties();
 
-            // A task or todo arriving opens the live sections even before the chat counts as a conversation.
-            UpdateHistoryLayout();
         });
 
     private void OpenTodosOnFirstGoals()
@@ -500,45 +518,4 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     #endregion
 
-    #region History
-
-    private void QueueHistoryLayout()
-    {
-        if (_historyLayoutQueued)
-        {
-            return;
-        }
-
-        _historyLayoutQueued = true;
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateHistoryLayout);
-    }
-
-    private void UpdateHistoryLayout()
-    {
-        _historyLayoutQueued = false;
-
-        if (Workspace is null || Session is null)
-        {
-            return;
-        }
-
-        var live = Session.HasConversation || Session.IsTerminalSession || Session.SortedTasks.Count > 0 || Session.Todos.Count > 0;
-
-        LiveRow.Height = live ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
-        LiveHost.Visibility = live ? Visibility.Visible : Visibility.Collapsed;
-    }
-
-    #endregion
-
-    // ---- Collapse ---------------------------------------------------------------------------
-
-    /// <summary>The header icon collapses the panel to its rail; the rail's icon expands it again.</summary>
-    private void OnPanelToggleClick(object sender, RoutedEventArgs e) => SessionPanelRail.Toggle();
-
-    private void OnRailExpandRequested(object? sender, EventArgs e) => SessionPanelRail.Toggle();
-
-    /// <summary>Every session panel follows the one setting, so toggling one updates the others.</summary>
-    private void OnAppSettingsChanged(object? sender, EventArgs e) => ApplyCollapsed();
-
-    private void ApplyCollapsed() => Rail.Apply(this, ExpandedView);
 }

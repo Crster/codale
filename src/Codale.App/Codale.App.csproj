@@ -135,12 +135,15 @@
     <ProjectReference Include="..\Codale.Search\Codale.Search.csproj" />
     <ProjectReference Include="..\Codale.Smart\Codale.Smart.csproj" />
     <ProjectReference Include="..\Codale.Db\Codale.Db.csproj" />
+    <ProjectReference Include="..\Codale.Editor\Codale.Editor.csproj" />
+    <ProjectReference Include="..\Codale.Workspace\Codale.Workspace.csproj" />
   </ItemGroup>
 
 
   <ItemGroup>
     <!-- The text Codale's MCP servers send as their instructions. -->
     <Compile Include="..\Codale.Mcp.Common\McpInstructions.cs" Link="Services\McpInstructions.cs" />
+    <Compile Include="..\Codale.Mcp.Common\CodaleServers.cs" Link="Services\CodaleServers.cs" />
   </ItemGroup>
 
   <!--

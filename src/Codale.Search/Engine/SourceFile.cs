@@ -84,6 +84,12 @@ public sealed class SourceFile
     /// <summary>Identifiers (and their camelCase/snake_case parts) in the file: its length for ranking.</summary>
     public int TokenCount { get; }
 
+    /// <summary>
+    /// A file past the full-index size: searchable by its tokens, but with no declarations, no retained text and
+    /// no place in the workspace model.
+    /// </summary>
+    public bool IsLarge { get; init; }
+
     /// <summary>True when the text is held in memory; false past the index's budget, when it is read from disk.</summary>
     public bool IsRetained => _utf8 is not null;
 

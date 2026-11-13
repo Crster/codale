@@ -15,6 +15,8 @@ namespace Codale.Search;
 /// </remarks>
 public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
 {
+    /// <summary>The cosine a trained embedding model's neighbour needs without lexical support.</summary>
+    private const float ModelMatchSimilarity = 0.3f;
     // UTF-8 bytes are a conservative upper bound on byte-tokenizer tokens, including the briefing envelope.
     public const int MaxContextBytes = 3600;
     private const int MapBudget = 700;
@@ -56,6 +58,10 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
     private const int MaxWorkingSet = 8;
     private const double WorkingSetBoost = 0.06;
     private const double WorkingSetDecay = 0.75;
+    private const int RefreshCooldownMs = 3_000;
+    /// <summary>A scan this old is rebuilt even if the watcher saw nothing, in case it dropped events.</summary>
+    private const int MaxTrustedWatcherMs = 30_000;
+    private readonly ConcurrentDictionary<string, long> _lastRefresh = new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
     private int _indexing;
     public bool IsIndexing => Volatile.Read(ref _indexing) > 0;
@@ -68,9 +74,19 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
         {
             if (_disposed) return Task.CompletedTask;
             if (_refreshes.TryGetValue(worktree, out var running) && !running.IsCompleted) return running;
+            // Every search, ghost-text lookup and chat turn asks for a refresh; one that just finished is still current,
+            // and the file watcher marks the scan stale on a real change. Rescanning on each ask is CPU spent for nothing.
+            if (_lastRefresh.TryGetValue(worktree, out var finished) && Environment.TickCount64 - finished < RefreshCooldownMs
+                && SourceIndex.For(worktree).IsUpToDate
+                && _revisions.TryGetValue(worktree, out var knownRevision) && knownRevision == Revision(worktree))
+                return Task.CompletedTask;
             return _refreshes[worktree] = Task.Run(async () =>
             {
                 Interlocked.Increment(ref _indexing);
+                // Indexing is background work: it yields to the UI and to the agents the user is waiting on.
+                var thread = Thread.CurrentThread;
+                var priority = thread.Priority;
+                try { thread.Priority = ThreadPriority.BelowNormal; } catch (Exception) { }
                 try
                 {
                     IndexingChanged?.Invoke();
@@ -79,7 +95,10 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
                     // HEAD changes and lost watcher events must not leave a branch's snapshot reusable forever.
                     var revision = Revision(worktree);
                     var watched = _revisions.TryGetValue(worktree, out var previousRevision);
-                    index.Invalidate(!watched || previousRevision != revision);
+                    var stale = !watched || previousRevision != revision
+                        || Environment.TickCount64 - _lastRefresh.GetValueOrDefault(worktree) > MaxTrustedWatcherMs;
+                    // Otherwise the index's own watcher has already marked it stale if anything changed.
+                    if (stale) index.Invalidate(true);
                     _revisions[worktree] = revision;
                     var snapshot = await index.GetSnapshotAsync().ConfigureAwait(false);
                     var reChunk = SourceChunkVersion(worktree) != FileChunker.Version;
@@ -130,6 +149,8 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
                 }
                 finally
                 {
+                    try { thread.Priority = priority; } catch (Exception) { }
+                    _lastRefresh[worktree] = Environment.TickCount64;
                     Interlocked.Decrement(ref _indexing);
                     IndexingChanged?.Invoke();
                 }
@@ -201,7 +222,6 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
         {
             // Embed the topic, not the phrasing: "where does ... located" must not pull in prose that says "located".
             var topic = string.Join(' ', terms);
-            var embedder = HashedTextEmbedder.Instance;
             var similar = ChunkRoot(worktree).Query(topic, 40)
                 .Select(hit => (Id: ChunkId(hit.Node), hit.Score, hit.Node)).ToList();
             foreach (var near in similar) RememberChunk(near.Id, near.Node);
@@ -210,7 +230,8 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
                 // Relative cut: keep near-best neighbours only, so unrelated files never ride in on noise.
                 // Relative similarity alone always supplies neighbours, even for an absent topic.
                 // Lexical evidence can support weaker matches; otherwise require confidence.
-                var minimum = embedder.MatchSimilarity;
+                // Hashed n-gram scores run lower than a trained model's; each needs its own confidence bar.
+                var minimum = db.EmbeddingModel == HashedTextEmbedder.Instance.Model ? HashedTextEmbedder.Instance.MatchSimilarity : ModelMatchSimilarity;
                 var floor = similar.Count > 0 ? Math.Max(0.08f, similar[0].Score * 0.5f) : 1f;
                 // N-grams add fragments and inflections beside the exact-token ranking, at lower weight.
                 Fuse(similar.Where(v => v.Score >= floor && (lexicalIds.Contains(v.Id) || v.Score >= minimum)).Select(v => v.Id), 0.6);
@@ -293,7 +314,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
             .Select(s => chunks[s.Key]).Where(c =>
             {
                 if (!fresh.TryGetValue(c.Path, out var valid))
-                    fresh[c.Path] = valid = ReadSource(worktree, c.Path) is { } content && Hash(content) == c.Hash;
+                    fresh[c.Path] = valid = SourceMatches(worktree, c.Path, c.Hash);
                 return valid;
             }).GroupBy(c => c.Path, StringComparer.OrdinalIgnoreCase).Take(Math.Max(0, maxFiles))
             .SelectMany(g => g.Take(Math.Max(0, maxChunksPerFile))).ToList();
@@ -588,6 +609,28 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
     public static bool Eligible(string path) => !SensitivePaths.IsSensitive(path) && !CodeDiscovery.IsNoisePath(path) &&
         !CodeDiscovery.IsNoisePath(Path.DirectorySeparatorChar + path) &&
         !new[] { ".db", ".sqlite", ".sqlite3", ".db-wal", ".db-shm" }.Any(ext => path.EndsWith(ext, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Files already confirmed to hash to a chunk's hash, by size and write time: a lookup per keystroke must not re-read them.</summary>
+    private readonly ConcurrentDictionary<string, (long Length, long Written, string Hash)> _confirmed = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>True when the file on disk still hashes to <paramref name="hash"/>; reads it only if its size or write time changed.</summary>
+    private bool SourceMatches(string worktree, string relative, string hash)
+    {
+        FileInfo? info = null;
+        try
+        {
+            if (!Path.IsPathRooted(relative)) info = new FileInfo(Path.Combine(worktree, relative));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { }
+        var key = worktree + "|" + relative;
+        if (info is { Exists: true } && _confirmed.TryGetValue(key, out var known) &&
+            known.Length == info.Length && known.Written == info.LastWriteTimeUtc.Ticks && known.Hash == hash)
+            return true;
+        var matches = ReadSource(worktree, relative) is { } content && Hash(content) == hash;
+        if (matches && info is { Exists: true }) _confirmed[key] = (info.Length, info.LastWriteTimeUtc.Ticks, hash);
+        else _confirmed.TryRemove(key, out _);
+        return matches;
+    }
 
     public static string? ReadSource(string root, string relative)
     {

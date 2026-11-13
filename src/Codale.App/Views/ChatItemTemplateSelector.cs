@@ -21,11 +21,11 @@ public sealed partial class ChatItemTemplateSelector : DataTemplateSelector
     public DataTemplate? HandoffBriefTemplate { get; set; }
     public DataTemplate? FeatureJumpTemplate { get; set; }
     public DataTemplate? CompactTemplate { get; set; }
-    public DataTemplate? EarlierTurnsTemplate { get; set; }
+    public DataTemplate? HiddenActivityTemplate { get; set; }
 
     protected override DataTemplate? SelectTemplateCore(object item) => item switch
     {
-        EarlierTurnsItem => EarlierTurnsTemplate,
+        HiddenActivityItem => HiddenActivityTemplate,
         FeatureJumpItem => FeatureJumpTemplate,
         CompactItem => CompactTemplate,
         FeatureBriefingItem => BriefingTemplate,
@@ -52,9 +52,11 @@ public sealed partial class StepTemplateSelector : DataTemplateSelector
     public DataTemplate? ToolTemplate { get; set; }
     public DataTemplate? ExploreTemplate { get; set; }
     public DataTemplate? TodoTemplate { get; set; }
+    public DataTemplate? SteerTemplate { get; set; }
 
     protected override DataTemplate? SelectTemplateCore(object item) => item switch
     {
+        UserMessageItem => SteerTemplate,
         AssistantMessageItem => NarrationTemplate,
         ToolCallItem => ToolTemplate,
         ExploreGroupStep => ExploreTemplate,

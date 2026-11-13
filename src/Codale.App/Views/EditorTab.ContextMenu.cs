@@ -36,6 +36,9 @@ public sealed partial class EditorTab
 
     public string? ProjectRoot { get; set; }
 
+    /// <summary>The project's knowledge index: related code for ghost text completions.</summary>
+    public Codale.Search.ProjectKnowledgeIndex? Knowledge { get; set; }
+
     private static MenuFlyoutItem Item(string text, Action click, string? accelerator = null, string? glyph = null)
     {
         var item = new MenuFlyoutItem { Text = text, KeyboardAcceleratorTextOverride = accelerator ?? string.Empty };

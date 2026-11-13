@@ -29,8 +29,8 @@ public sealed record ApprovalPlan(ApprovalVerdict Verdict, string Reason = "")
 /// <item><b>Ask, Plan</b> - read-only: reads, web lookups and read-only shell run; no writes, no
 /// unknown shell (denied).</item>
 /// <item><b>Interactive</b> - reads and read-only shell run; every write asks.</item>
-/// <item><b>Auto</b> - everything runs except writes, deletes, dangerous and unknown shell,
-/// edits outside the project, and high-risk MCP tools, which ask.</item>
+/// <item><b>Auto</b> - everything runs except dangerous shell (which reaches outside the project or
+/// can lose data), edits outside the project, and high-risk MCP tools, which ask.</item>
 /// <item><b>Full</b> - not governed here: everything is approved.</item>
 /// </list>
 /// </summary>
@@ -132,7 +132,9 @@ public static class ApprovalPolicy
             return ApprovalPlan.Deny(ReadOnlyReason(mode, "shell command", classification));
         }
 
-        return mode == AutomaticMode && classification.Class == ShellClass.Build ? ApprovalPlan.Allow : ApprovalPlan.Ask;
+        // Auto mode only stops for Danger: Safe and Caution commands (builds, project writes and deletes,
+        // programs the database does not know) run without a card.
+        return mode == AutomaticMode && classification.Class != ShellClass.Danger ? ApprovalPlan.Allow : ApprovalPlan.Ask;
     }
 
     private static string ReadOnlyReason(string mode, string what, ShellClassification? why = null)

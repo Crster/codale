@@ -11,14 +11,14 @@ namespace Codale.Agents.History;
 /// The file name is the session id that <c>claude --resume</c> takes. Rows are for resuming, so
 /// nothing is replayed here.
 /// </summary>
-public sealed class ClaudeSessionHistoryReader(string projectPath) : ICliHistoryReader
+public sealed class ClaudeSessionHistoryReader(string projectPath, string? home = null) : ICliHistoryReader
 {
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string Path, long Length, DateTime Written), TranscriptSummary?> Cache = new();
 
     // A CLI run in the terminal keeps the default account (see CodaleAccount), not Codale's own,
     // so its transcripts live under ~/.claude (or wherever the user pointed CLAUDE_CONFIG_DIR).
     private readonly string _directory = Path.Combine(
-        CodaleAccount.UserClaudeHome,
+        home ?? CodaleAccount.UserClaudeHome,
         "projects",
         ProjectPaths.ClaudeHistoryFolderName(projectPath));
 

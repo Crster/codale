@@ -8,12 +8,24 @@ namespace Codale.Commands.Tests;
 public sealed class CommandCatalogTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("codale-commands-").FullName;
+    private readonly string _data = Directory.CreateTempSubdirectory("codale-commands-data-").FullName;
+
+    public CommandCatalogTests() => CommandCatalog.WorkspaceDirectory = _ => Path.Combine(_data, "workspace-db");
 
     public void Dispose()
     {
         try
         {
             Directory.Delete(_root, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+
+        // The workspace database lets go a moment after its last use; a leftover temp folder is harmless.
+        try
+        {
+            Directory.Delete(_data, recursive: true);
         }
         catch (IOException)
         {
@@ -28,42 +40,33 @@ public sealed class CommandCatalogTests : IDisposable
     }
 
     [Fact]
-    public void Codale_commands_json_reads_name_command_and_cwd()
+    public void Saved_commands_read_name_command_and_cwd()
     {
-        WriteFile(@".codale\commands.json", """
-            {
-              "commands": [
-                { "name": "dev server", "command": "npm run dev", "cwd": "web" },
-                { "command": "dotnet build" }
-              ]
-            }
-            """);
+        CommandCatalog.Add(_root, "dev server", "npm run dev", "web");
+        CommandCatalog.Add(_root, "build", "dotnet build");
 
         var commands = CommandCatalog.Discover(_root);
 
         Assert.Equal(2, commands.Count);
-
         Assert.Equal("dev server", commands[0].Name);
         Assert.Equal("npm run dev", commands[0].Command);
         Assert.Equal("web", commands[0].WorkingDirectory);
         Assert.Equal(CommandSource.Codale, commands[0].Source);
-        Assert.EndsWith(Path.Combine(".codale", "commands.json"), commands[0].SourcePath);
-
-        // A missing name falls back to the command itself rather than dropping the entry.
-        Assert.Equal("dotnet build", commands[1].Name);
+        Assert.EndsWith("commands.json", commands[0].SourcePath);
         Assert.Null(commands[1].WorkingDirectory);
     }
 
     [Fact]
-    public void Codale_commands_json_accepts_a_bare_root_array()
+    public void The_edited_copy_replaces_the_saved_commands_and_accepts_a_bare_root_array()
     {
-        WriteFile(@".codale\commands.json", """[ { "name": "build", "command": "dotnet build" } ]""");
+        var path = CommandCatalog.ConfigOf(_root).ExportForEditing();
+        File.WriteAllText(path, """[ { "name": "build", "command": "dotnet build" }, { "command": "dotnet test" } ]""");
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(1));
 
         var commands = CommandCatalog.Discover(_root);
 
-        var command = Assert.Single(commands);
-        Assert.Equal("build", command.Name);
-        Assert.Equal(CommandSource.Codale, command.Source);
+        Assert.Equal(["build", "dotnet test"], commands.Select(c => c.Name));
+        Assert.All(commands, c => Assert.Equal(CommandSource.Codale, c.Source));
     }
 
     [Fact]
@@ -305,7 +308,6 @@ public sealed class CommandCatalogTests : IDisposable
     [Fact]
     public void Malformed_files_are_skipped_without_throwing()
     {
-        WriteFile(@".codale\commands.json", "{ not json ");
         WriteFile(@".claude\launch.json", "]]]");
         WriteFile(@".vscode\tasks.json", "null");
         WriteFile("package.json", "3");
@@ -316,7 +318,7 @@ public sealed class CommandCatalogTests : IDisposable
     [Fact]
     public void Sources_are_ordered_codale_claude_tasks_launch_npm()
     {
-        WriteFile(@".codale\commands.json", """{ "commands": [ { "name": "c", "command": "c" } ] }""");
+        CommandCatalog.Add(_root, "c", "c");
         WriteFile(@".claude\launch.json", """[ { "name": "l", "command": "l" } ]""");
         WriteFile(@".vscode\tasks.json", """{ "tasks": [ { "label": "t", "command": "t" } ] }""");
         WriteFile(@".vscode\launch.json", """{ "configurations": [ { "name": "d", "program": "d" } ] }""");
@@ -529,5 +531,24 @@ public sealed class CommandCatalogTests : IDisposable
         Assert.Contains(commands, c => c.Source == CommandSource.Prisma && c.Name == "migrate dev" && c.Command == "npx prisma migrate dev");
         Assert.Contains(commands, c => c.Source == CommandSource.Prisma && c.Name == "studio" && c.Command == "npx prisma studio");
         Assert.Contains(commands, c => c.Source == CommandSource.ShellScript && c.Name == "dev.ps1" && c.Command == @"powershell -ExecutionPolicy Bypass -File .\dev.ps1");
+    }
+
+    [Fact]
+    public void Added_commands_are_saved_in_the_workspace_database_not_in_the_project()
+    {
+        CommandCatalog.Add(_root, "dev", "npm run dev", "web");
+        CommandCatalog.Add(_root, "DEV", "npm run dev -- --host");
+
+        var saved = Assert.Single(CommandCatalog.Discover(_root));
+        Assert.Equal("npm run dev -- --host", saved.Command);
+        Assert.Empty(Directory.GetFileSystemEntries(_root));
+    }
+
+    [Fact]
+    public void An_old_codale_file_in_the_project_is_ignored()
+    {
+        WriteFile(@".codale\commands.json", """{ "commands": [ { "name": "old", "command": "make old" } ] }""");
+
+        Assert.Empty(CommandCatalog.Discover(_root));
     }
 }

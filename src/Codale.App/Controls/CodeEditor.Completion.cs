@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 
 using Codale.Core.Syntax;
+using Codale.Editor;
 using Codale.Search;
 
 using Microsoft.UI.Xaml;
@@ -35,7 +36,8 @@ public sealed partial class CodeEditor
         Property,
     }
 
-    private sealed record CompletionItem(string Text, CompletionKind Kind, int Score);
+    /// <param name="Rank">Position in the project model's own ranking (learned order, declared names first); -1 for local words.</param>
+    private sealed record CompletionItem(string Text, CompletionKind Kind, int Score, int Rank = -1);
 
     private const int MaxCompletionItems = 50;
 
@@ -150,8 +152,13 @@ public sealed partial class CodeEditor
             });
         };
         ScrollChanged += (_, _) => CloseCompletion();
-        Canvas.PointerPressed += (_, _) => CloseCompletion();
     }
+
+    private TextBuffer _doc => _model.Buffer;
+
+    private DocumentPosition _caret => _model.Primary.Caret;
+
+    private static bool IsWordChar(char c) => TextUnits.IsWordChar(c);
 
     // ------------------------------------------------------------------ candidates
 
@@ -219,7 +226,7 @@ public sealed partial class CodeEditor
             return;
         }
 
-        var big = _doc.LineCount * 40 > LargeDocumentChars;
+        var big = _doc.CharCount > LargeDocumentChars;
         if (big && (DateTime.UtcNow - _docWordsBuiltUtc).TotalMilliseconds < 1500 && _docWords.Count > 0)
         {
             return;
@@ -231,7 +238,8 @@ public sealed partial class CodeEditor
         _docTags.Clear();
         _docAttrs.Clear();
 
-        var text = _doc.GetText();
+        // A large file is scanned around the caret only; the words in use nearby are the ones worth offering.
+        var text = big ? WindowText(_caret.Line, 4000) : _doc.GetText();
         if (IsMarkup)
         {
             foreach (Match m in TagRegex().Matches(text))
@@ -350,19 +358,10 @@ public sealed partial class CodeEditor
         }
 
         // Nothing to suggest inside a comment or a string.
-        EnsureTokens(_caret.Line);
-        if (_caret.Line < _lineCache.Count && _caret.Col > 0)
+        if (_caret.Col > 0 && _highlighter.Get(_caret.Line).KindAt(_caret.Col - 1) is CodeTokenKind.Comment or CodeTokenKind.String)
         {
-            var probe = TextDocument.ExpandedColFromRaw(line, _caret.Col - 1);
-            foreach (var token in _lineCache[_caret.Line].Tokens)
-            {
-                if (token.Kind is CodeTokenKind.Comment or CodeTokenKind.String
-                    && probe >= token.Start && probe < token.Start + token.Length)
-                {
-                    CloseCompletion();
-                    return;
-                }
-            }
+            CloseCompletion();
+            return;
         }
 
         var afterDot = start > 0 && line[start - 1] == '.';
@@ -370,7 +369,7 @@ public sealed partial class CodeEditor
 
         var found = new Dictionary<string, CompletionItem>(StringComparer.Ordinal);
 
-        void Offer(string text, CompletionKind kind)
+        void Offer(string text, CompletionKind kind, int rank = -1)
         {
             if (text == prefix && prefix.Length > 0 && !found.ContainsKey(text) && kind is CompletionKind.Variable or CompletionKind.Function)
             {
@@ -387,7 +386,7 @@ public sealed partial class CodeEditor
                 return;
             }
 
-            found[text] = new CompletionItem(text, kind, score);
+            found[text] = new CompletionItem(text, kind, score, rank);
         }
 
         if (markup && MarkupContext(line, start) is { } place)
@@ -465,9 +464,10 @@ public sealed partial class CodeEditor
         // Then the whole project's index: declared names first, then the identifiers it uses.
         if (prefix.Length > 0 && WorkspaceSuggest?.Invoke(prefix, PreviousWord(line, start)) is { } workspace)
         {
+            var rank = 0;
             foreach (var suggestion in workspace)
             {
-                Offer(suggestion.Text, WorkspaceKind(suggestion.Kind));
+                Offer(suggestion.Text, WorkspaceKind(suggestion.Kind), rank++);
             }
         }
 
@@ -511,6 +511,9 @@ public sealed partial class CodeEditor
         var prefix = _doc.GetLine(_caret.Line)[start.._caret.Col];
         var items = found.Values
             .OrderBy(i => i.Score)
+            // Among equal matches the project model's order stands (what the code learned to write here); local words by length.
+            .ThenBy(i => i.Rank < 0 ? 0 : 1)
+            .ThenBy(i => i.Rank < 0 ? 0 : i.Rank)
             .ThenBy(i => i.Text.Length)
             .ThenBy(i => i.Text, StringComparer.OrdinalIgnoreCase)
             .Take(MaxCompletionItems)
@@ -545,7 +548,7 @@ public sealed partial class CodeEditor
         var below = anchor.Y + _lineHeight + 2;
         CompletionPopup.XamlRoot = XamlRoot;
         CompletionPopup.HorizontalOffset = Math.Max(0, anchor.X);
-        CompletionPopup.VerticalOffset = below + height > Canvas.ActualHeight && anchor.Y - height - 2 > 0
+        CompletionPopup.VerticalOffset = below + height > ViewportHeight && anchor.Y - height - 2 > 0
             ? anchor.Y - height - 2
             : below;
         CompletionPopup.IsOpen = true;
@@ -627,11 +630,8 @@ public sealed partial class CodeEditor
         var text = _completionItems[index].Text;
         CloseCompletion();
 
-        BeginUndoStep(canCoalesce: false);
         var from = new DocumentPosition(_completionLine, Math.Min(_completionStartCol, _caret.Col));
-        _caret = Edit(from, _caret, text);
-        _anchor = _caret;
-        AfterEdit();
+        _model.ReplaceRange(from, _caret, text);
     }
 
     private void OnCompletionItemClick(object sender, ItemClickEventArgs e)
@@ -687,5 +687,13 @@ public sealed partial class CodeEditor
         {
             CloseCompletion();
         }
+    }
+
+    /// <summary>The text of the lines within <paramref name="radius"/> of a line, joined with line feeds.</summary>
+    private string WindowText(int line, int radius)
+    {
+        var first = Math.Max(0, line - radius);
+        var last = Math.Min(_doc.LineCount - 1, line + radius);
+        return string.Join('\n', _doc.Lines.Skip(first).Take(last - first + 1));
     }
 }

@@ -39,6 +39,24 @@ public sealed partial class TaskPeekPane : UserControl
 
     public event EventHandler? CloseRequested;
 
+    /// <summary>"Open in tab": the host moves this task's output into a tab of its own.</summary>
+    public event EventHandler<RunningTaskItem>? OpenInTabRequested;
+
+    /// <summary>False where the pane already is the tab, so it does not offer to open itself again.</summary>
+    public bool CanOpenInTab
+    {
+        get => OpenInTabButton.Visibility == Visibility.Visible;
+        set => OpenInTabButton.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnOpenInTabClick(object sender, RoutedEventArgs e)
+    {
+        if (_task is { } task)
+        {
+            OpenInTabRequested?.Invoke(this, task);
+        }
+    }
+
     public RunningTaskItem? Task => _task;
 
     public void Show(RunningTaskItem task, string? cwd, IReadOnlyList<string> extraRoots)
@@ -63,14 +81,6 @@ public sealed partial class TaskPeekPane : UserControl
             Transcript.Changed += OnTranscriptChanged;
         }
 
-        if (task.Hosted is { } hosted)
-        {
-            // Rebuild from the process's own buffer so the pane never depends on the 250 ms copy having run.
-            var (text, next) = hosted.Read(0);
-            task.Output = "";
-            task.AppendOutput(text);
-            task.HostOffset = next;
-        }
 
         Refresh(stickToEnd: true);
         StartTailing();
@@ -350,7 +360,7 @@ public sealed partial class TaskPeekPane : UserControl
         }
 
         var waiting = _task.IsShell && _task.Output.Length == 0 && _task.IsRunning
-            ? _task.OutputPath is null && _task.Hosted is null && _task.RuntimeId is null ? " · no output file reported" : " · waiting for output"
+            ? _task.OutputPath is null && _task.RuntimeId is null ? " · no output file reported" : " · waiting for output"
             : "";
         var termination = !_task.IsShell ? ""
             : _task.IsStopping ? " · stopping…"

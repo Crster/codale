@@ -25,6 +25,9 @@ internal sealed class SmartTools(TimeSpan? commandTimeout = null)
         Schema("run_shell", "Execute a noninteractive shell command. Default cwd is the active worktree. Commands may change files. Maximum 60 seconds and bounded output.",
             new { command = new { type = "string" }, cwd = new { type = "string" } }, ["command"])
     };
+    /// <summary>Unattended (background) work only reads: it is prompted by file contents nobody reviewed, so it never gets run_shell.</summary>
+    internal static readonly object[] ReadOnlyDefinitions = Definitions[..3];
+    internal static object[] For(bool background) => background ? ReadOnlyDefinitions : Definitions;
     public static readonly string Schemas = "<tools>\n" + string.Join("\n", Definitions.Select(s => JsonSerializer.Serialize(s))) + "\n</tools>";
     internal static readonly object[] ContextDefinitions =
     [
@@ -37,10 +40,11 @@ internal sealed class SmartTools(TimeSpan? commandTimeout = null)
     public static string Resolve(SmartRequestContext context, string? path) =>
         Path.GetFullPath(string.IsNullOrWhiteSpace(path) ? "." : path, context.WorkingDirectory);
 
-    public async Task<SmartToolOutcome> ExecuteAsync(SmartRequestContext context, SmartToolCall call, CancellationToken ct, Action<string>? progress = null)
+    public async Task<SmartToolOutcome> ExecuteAsync(SmartRequestContext context, SmartToolCall call, CancellationToken ct, Action<string>? progress = null, bool readOnly = false)
     {
         try
         {
+            if (readOnly && call.Name == "run_shell") throw new InvalidDataException("Unknown tool: run_shell");
             var allowed = call.Name switch
             {
                 "list_directory" => new[] { "path" },

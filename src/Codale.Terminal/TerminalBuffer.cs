@@ -143,6 +143,31 @@ public sealed class TerminalBuffer
         return Math.Clamp(_cursorRow, 0, _rows - 1);
     }
 
+    /// <summary>
+    /// The 0-based screen row of the last cell holding text or visible styling, ignoring the cursor;
+    /// -1 when the screen is blank. A finished command block sizes itself to this, so the empty
+    /// line its trailing newline left the cursor on does not add a blank row.
+    /// </summary>
+    public int GetLastTextRow()
+    {
+        for (var row = _rows - 1; row >= 0; row--)
+        {
+            var line = _grid[row];
+            for (var col = 0; col < line.Length; col++)
+            {
+                ref readonly var cell = ref line[col];
+                if (cell.Code is not ' ' and not '\0' ||
+                    cell.Style.Bg != TerminalColor.Default ||
+                    (cell.Style.Flags & (CellFlags.Underline | CellFlags.Reverse)) != 0)
+                {
+                    return row;
+                }
+            }
+        }
+
+        return -1;
+    }
+
 
     // ------------------------------------------------------------------ cursor and style
 

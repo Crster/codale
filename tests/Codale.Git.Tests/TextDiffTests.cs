@@ -94,4 +94,37 @@ public sealed class TextDiffTests
         Assert.Equal(4, lines[1].OldNumber);
         Assert.Equal(4, lines[2].NewNumber);
     }
+
+    [Fact]
+    public void Two_separate_insertions_are_reported_at_their_own_lines()
+    {
+        // Lines repeat around both insertions, which is where reading the wrong trace row in
+        // the backtrack used to pin both additions to the second spot.
+        var before = "<a>\n p1\n p2\n db\n w\n</a>\n<b>\n t1\n t2\n db\n w\n</b>";
+        var after = "<a>\n p1\n p2\n db\n NEW1\n w\n</a>\n<b>\n t1\n t2\n db\n NEW2\n w\n</b>";
+        var diff = TextDiff.Compute("x", before, after, numbered: true, context: 0);
+        var lines = diff.Hunks.SelectMany(h => h.Lines).ToList();
+        Assert.Equal([5, 12], lines.Where(l => l.Kind == DiffLineKind.Added).Select(l => l.NewNumber ?? -1));
+        Assert.DoesNotContain(lines, l => l.Kind == DiffLineKind.Removed);
+    }
+
+    [Fact]
+    public void Random_edits_round_trip_through_the_script()
+    {
+        var random = new Random(7);
+        for (var round = 0; round < 300; round++)
+        {
+            var a = Enumerable.Range(0, random.Next(0, 30)).Select(_ => ((char)('a' + random.Next(4))).ToString()).ToList();
+            var b = a.Where(_ => random.Next(5) > 0).ToList();
+            for (var i = 0; i < 4; i++)
+            {
+                b.Insert(random.Next(b.Count + 1), ((char)('a' + random.Next(4))).ToString());
+            }
+
+            var diff = TextDiff.Compute("x", string.Join("\n", a), string.Join("\n", b), numbered: true, context: 100_000);
+            var lines = diff.Hunks.SelectMany(h => h.Lines).ToList();
+            Assert.Equal(b, lines.Where(l => l.Kind != DiffLineKind.Removed).Select(l => l.Text));
+            Assert.Equal(a, lines.Where(l => l.Kind != DiffLineKind.Added).Select(l => l.Text));
+        }
+    }
 }

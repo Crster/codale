@@ -122,6 +122,24 @@ public sealed class TerminalEmulator
         : ScrollbackCount + _buffer.GetLastContentRow();
 
 
+    /// <summary>
+    /// The absolute line index of the last line with text, ignoring the cursor; -1 when the whole
+    /// buffer is blank. Scrollback lines all count as text (they were pushed off a full screen).
+    /// </summary>
+    public int LastTextLine
+    {
+        get
+        {
+            var row = _buffer.GetLastTextRow();
+            if (InAlternate)
+            {
+                return row;
+            }
+
+            return row >= 0 ? ScrollbackCount + row : ScrollbackCount - 1;
+        }
+    }
+
     public int ScrollbackLimit
     {
         get => _buffer.ScrollbackLimit;

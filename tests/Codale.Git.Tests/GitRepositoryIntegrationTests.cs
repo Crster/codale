@@ -93,6 +93,27 @@ public sealed class GitRepositoryIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task Unstage_before_first_commit_preserves_working_files_and_other_staged_entries()
+    {
+        Git(_root, "init -b main");
+        var path = Path.Combine(_root, "new file.txt");
+        await File.WriteAllTextAsync(path, "staged contents");
+        await File.WriteAllTextAsync(Path.Combine(_root, "keep.txt"), "keep staged");
+        var repo = new GitRepository(_root);
+        Assert.True((await repo.StageAllAsync()).Success);
+        await File.WriteAllTextAsync(path, "working contents");
+
+        var result = await repo.UnstageAsync("new file.txt");
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal("working contents", await File.ReadAllTextAsync(path));
+        var snapshot = await repo.GetSnapshotAsync();
+        Assert.Contains(snapshot.Changes, c => c.Path == "new file.txt" && !c.IsStaged);
+        Assert.Contains(snapshot.Changes, c => c.Path == "keep.txt" && c.IsStaged);
+        Assert.Empty(snapshot.Log);
+    }
+
+    [Fact]
     public async Task Stage_commit_and_checkout_round_trip()
     {
         Git(_root, "init -b main");

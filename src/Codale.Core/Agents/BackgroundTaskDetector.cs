@@ -42,8 +42,8 @@ public static partial class BackgroundTaskDetector
     /// <summary>The refusal the model reads when it tries to background a shell itself.</summary>
     public const string BackgroundBlockedMessage =
         "Background shells are disabled in Codale. To run a dev server, watcher or any long-running command, " +
-        "call the codale-tasks start_task tool (mcp__codale-tasks__start_task) instead, then read_task to check output and stop_task to end it. " +
-        "Codale shows the task and its live output to the user. Short commands can still run normally in the foreground.";
+        "call the codale-terminal run_in_terminal tool (mcp__codale-terminal__run_in_terminal) instead, then read_terminal to check output and stop_terminal to end it. " +
+        "Codale opens it in a terminal tab the user can watch. Short commands can still run normally in the foreground.";
 
     /// <summary>The shell id a <c>BashOutput</c>/<c>KillShell</c> call addresses, if any.</summary>
     public static string? ShellIdOf(JsonElement input)

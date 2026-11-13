@@ -28,6 +28,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
     public RangeObservableCollection<ProviderChoice> Choices { get; } = [];
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AvatarInitials))]
     public partial ProviderChoice? Selected { get; set; }
 
     /// <summary>The chat in front, whose provider the picker shows and changes; null before one is attached.</summary>
@@ -75,6 +76,27 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
 
     /// <summary>The chat's provider name, or "" for Default.</summary>
     public string ActiveName => Selected?.Label ?? "Choose profile";
+
+    /// <summary>The account name or email initials; CLI profiles do not expose a profile photo.</summary>
+    public string AvatarInitials
+    {
+        get
+        {
+            var label = Selected?.Label ?? "";
+            var separator = label.IndexOf(':');
+            var identity = (separator >= 0 ? label[(separator + 1)..] : label).Trim();
+            if (identity.Length == 0 || identity.Equals("Sign-in account", StringComparison.OrdinalIgnoreCase))
+                identity = Selected?.CliId ?? "Agent";
+            var at = identity.IndexOf('@');
+            if (at >= 0) identity = identity[..at];
+            var words = identity.Split([' ', '.', '_', '-', '+'], StringSplitOptions.RemoveEmptyEntries)
+                .Select(word => new string(word.Where(char.IsLetterOrDigit).ToArray()))
+                .Where(word => word.Length > 0).ToArray();
+            if (words.Length == 0) return "A";
+            return (words.Length > 1 ? $"{words[0][0]}{words[^1][0]}" : words[0][..Math.Min(2, words[0].Length)])
+                .ToUpperInvariant();
+        }
+    }
 
     /// <summary>Where Claude goes with the current choice, in words.</summary>
     public string RouteText => !CanSwitch

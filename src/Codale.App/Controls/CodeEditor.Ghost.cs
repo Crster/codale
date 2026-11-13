@@ -1,5 +1,7 @@
 using System.Text;
 
+using Codale.Editor;
+
 using Microsoft.UI.Xaml;
 
 namespace Codale.App.Controls;
@@ -31,7 +33,7 @@ public sealed partial class CodeEditor
     /// <summary>Whether ghost text is asked for after a pause in typing (Ctrl+Space always asks).</summary>
     public bool AutomaticInlineCompletions { get; set; } = true;
 
-    private bool GhostVisible => _ghostText.Length > 0 && _ghostAt == _caret && _anchor == _caret;
+    private bool GhostVisible => _ghostText.Length > 0 && !_model.HasMultipleSelections && _ghostAt == _caret && _model.Primary.IsEmpty;
 
     private void ClearGhost()
     {
@@ -41,7 +43,7 @@ public sealed partial class CodeEditor
         if (_ghostText.Length > 0)
         {
             _ghostText = "";
-            CaretCanvas.Invalidate();
+            Invalidate();
         }
     }
 
@@ -55,17 +57,14 @@ public sealed partial class CodeEditor
 
         var text = _ghostText;
         ClearGhost();
-        BeginUndoStep(canCoalesce: false);
-        _caret = Edit(_caret, _caret, text);
-        _anchor = _caret;
-        AfterEdit();
+        _model.ReplaceRange(_caret, _caret, text);
         return true;
     }
 
     /// <summary>After a typed character: ask once typing pauses, when the caret ends the code on its line.</summary>
     private void ScheduleGhost()
     {
-        if (InlineCompleter is null || !AutomaticInlineCompletions || HasSelection)
+        if (InlineCompleter is null || !AutomaticInlineCompletions || HasSelection || _model.HasMultipleSelections)
         {
             return;
         }
@@ -99,7 +98,7 @@ public sealed partial class CodeEditor
     {
         _ghostTimer?.Stop();
         _ghostCts?.Cancel();
-        if (InlineCompleter is not { } complete || _anchor != _caret)
+        if (InlineCompleter is not { } complete || !_model.Primary.IsEmpty || _model.HasMultipleSelections)
         {
             return;
         }
@@ -133,14 +132,14 @@ public sealed partial class CodeEditor
         try
         {
             var text = await complete(prefix, suffix, _ghostSeen.ToList(), cts.Token);
-            if (string.IsNullOrEmpty(text) || cts.IsCancellationRequested || _caret != at || _anchor != at)
+            if (string.IsNullOrEmpty(text) || cts.IsCancellationRequested || _caret != at || !_model.Primary.IsEmpty)
             {
                 return;
             }
 
             _ghostText = text;
             _ghostAt = at;
-            CaretCanvas.Invalidate();
+            Invalidate();
         }
         catch (OperationCanceledException)
         {
@@ -179,16 +178,23 @@ public sealed partial class CodeEditor
         return builder.ToString();
     }
 
-    /// <summary>Draws the proposal after the caret on the caret layer, in the base text colour at low opacity.</summary>
-    private void DrawGhost(Microsoft.Graphics.Canvas.CanvasDrawingSession session, double x, double y)
+    /// <summary>Draws the proposal after the caret, in the base text colour at low opacity.</summary>
+    private void DrawGhost(Microsoft.Graphics.Canvas.CanvasDrawingSession session)
     {
         if (!GhostVisible || _textFormat is null)
         {
             return;
         }
 
+        var (row, x) = Locate(_caret);
         var color = _baseText;
         color.A = (byte)(color.A * 0.45);
-        session.DrawText(_ghostText, (float)x, (float)y, color, _textFormat);
+        var lines = _ghostText.Replace("\r\n", "\n").Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            using var layout = new Microsoft.Graphics.Canvas.Text.CanvasTextLayout(Device, lines[i], _textFormat, 0f, (float)_lineHeight);
+            layout.Options = Microsoft.Graphics.Canvas.Text.CanvasDrawTextOptions.EnableColorFont;
+            session.DrawTextLayout(layout, (float)(TextLeft + (i == 0 ? x : 0) - _scrollX), RowY(row + i), color);
+        }
     }
 }

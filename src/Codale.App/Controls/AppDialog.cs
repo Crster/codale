@@ -84,7 +84,7 @@ public static class AppDialog
         var badge = new Border
         {
             Style = Resource<Style>($"DialogBadge{key}Style"),
-            Child = new FontIcon { Glyph = glyph ?? DefaultGlyph(tone), Style = Resource<Style>($"DialogGlyph{key}Style") },
+            Child = Icon(glyph ?? DefaultGlyph(tone), Resource<Style>($"DialogGlyph{key}Style"), 15),
         };
         var text = new TextBlock { Text = title, Style = Resource<Style>("DialogTitleTextStyle") };
         Grid.SetColumn(text, 1);
@@ -98,6 +98,31 @@ public static class AppDialog
         // The template's title host is left-aligned and sized to its content; long titles must wrap.
         header.MaxWidth = 500;
         dialog.Title = header;
+    }
+
+    /// <summary>
+    /// A dialog icon: a font glyph, or the drawn <see cref="SparkleIcon"/> for <see cref="Glyphs.Sparkle"/>.
+    /// The sparkle takes its colour from an empty glyph with the same style, so it follows the
+    /// dialog's own theme rather than the app's.
+    /// </summary>
+    private static FrameworkElement Icon(string glyph, Style style, double sparkleSize)
+    {
+        var icon = new FontIcon { Glyph = glyph, Style = style };
+        if (glyph != Glyphs.Sparkle)
+        {
+            return icon;
+        }
+
+        icon.Glyph = "";
+        var sparkle = new SparkleIcon
+        {
+            Width = sparkleSize,
+            Height = sparkleSize,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        sparkle.SetBinding(Control.ForegroundProperty, new Microsoft.UI.Xaml.Data.Binding { Source = icon, Path = new PropertyPath(nameof(FontIcon.Foreground)) });
+        return new Grid { Children = { icon, sparkle } };
     }
 
     /// <summary>Body text in the dialog palette; selectable so error details can be copied.</summary>
@@ -128,7 +153,7 @@ public static class AppDialog
             {
                 Orientation = Orientation.Horizontal,
                 Spacing = 8,
-                Children = { new FontIcon { Glyph = glyph, Style = Resource<Style>("DialogListGlyphStyle") }, label },
+                Children = { Icon(glyph, Resource<Style>("DialogListGlyphStyle"), 12), label },
             });
         }
 

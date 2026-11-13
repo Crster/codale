@@ -355,6 +355,24 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
         return timer;
     }
 
+    /// <summary>
+    /// The files whose name or path match <paramref name="query"/>, best first, read from disk
+    /// (every folder, not only the ones the tree has opened). For the global search palette.
+    /// </summary>
+    public async Task<IReadOnlyList<(string Path, string Directory)>> FindFilesAsync(string query, int max, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return [];
+        }
+
+        var roots = SearchRoots;
+        var map = _lastMap;
+        var mapRoot = _lastMapRoot;
+        var found = await Task.Run(() => SearchDisk(roots, query, map, mapRoot, ct), ct).ConfigureAwait(true);
+        return found.Count > max ? found.GetRange(0, max) : found;
+    }
+
     private IReadOnlyList<string> SearchRoots =>
     [
         ProjectPath,

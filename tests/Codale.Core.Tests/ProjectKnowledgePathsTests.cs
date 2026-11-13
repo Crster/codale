@@ -20,7 +20,6 @@ public sealed class ProjectKnowledgePathsTests
             File.WriteAllText(Path.Combine(linked, "commondir"), "../..");
             Assert.Equal(ProjectPaths.FeatureDatabasePath(main), ProjectPaths.FeatureDatabasePath(other));
             Assert.Equal(ProjectPaths.FeatureDatabasePath(main), ProjectPaths.FeatureDatabasePath(Path.Combine(main, "src")));
-            Assert.Equal(ProjectPaths.FeatureDirectory(main, "session"), ProjectPaths.FeatureDirectory(other, "session"));
             Assert.NotEqual(ProjectPaths.FeatureDatabasePath(main), ProjectPaths.FeatureDatabasePath(root));
         }
         finally { Directory.Delete(root, true); }

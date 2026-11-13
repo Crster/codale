@@ -81,6 +81,26 @@ public sealed class TerminalSession : IDisposable, IAsyncDisposable
         return Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe";
     }
 
+    /// <summary>The shells a notebook block can run under that are installed here: (Settings id, label, path).</summary>
+    public static IReadOnlyList<(string Id, string Label, string Path)> InstalledShells()
+    {
+        var shells = new List<(string, string, string)>();
+        foreach (var (id, label, exe) in new[]
+                 {
+                     ("pwsh", "PowerShell 7", "pwsh.exe"),
+                     ("powershell", "Windows PowerShell", "powershell.exe"),
+                     ("cmd", "Command Prompt", "cmd.exe"),
+                 })
+        {
+            if (ResolveOnPath(exe) is { } path)
+            {
+                shells.Add((id, label, path));
+            }
+        }
+
+        return shells;
+    }
+
     /// <summary>
     /// Resolves the shell the user picked in Settings. "auto" and a named shell that
     /// is not installed both fall back to the automatic probe, so a terminal always
@@ -156,11 +176,16 @@ public sealed class TerminalSession : IDisposable, IAsyncDisposable
         return null;
     }
 
-    public void Start(string workingDirectory, string? command = null, short columns = 120, short rows = 30)
+    /// <summary>
+    /// Starts <paramref name="command"/> (the default shell when null). With <paramref name="environment"/>
+    /// the process gets exactly those variables - how a command block carries the previous block's.
+    /// </summary>
+    public void Start(string workingDirectory, string? command = null, short columns = 120, short rows = 30,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         command ??= ResolveDefaultShell();
 
-        _pty.Start(command, workingDirectory, columns, rows);
+        _pty.Start(command, workingDirectory, columns, rows, environment);
         _reader = Task.Run(ReadLoopAsync);
         _writer = Task.Run(WriteLoopAsync);
         _watcher = Task.Run(WatchForExitAsync);

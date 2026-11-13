@@ -77,7 +77,17 @@ public static class KeywordHighlight
         {
             text.SetValue(WatchedProperty, true);
             text.RegisterPropertyChangedCallback(TextBlock.TextProperty, (s, _) => Apply((TextBlock)s));
-            text.Loaded += (_, _) => Apply(text);
+            text.Loaded += (_, _) =>
+            {
+                // The row band spans the card, which can resize while the code itself does not.
+                if (text.Parent is Grid host && host.Children.OfType<Canvas>().FirstOrDefault() is { Tag: null } canvas)
+                {
+                    canvas.Tag = true;
+                    canvas.SizeChanged += (_, _) => DrawBackground(text);
+                }
+
+                Apply(text);
+            };
             text.SizeChanged += (_, _) => DrawBackground(text);
             text.ActualThemeChanged += (_, _) => Apply(text);
         }
@@ -103,32 +113,39 @@ public static class KeywordHighlight
         text.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => DrawBackground(text));
     }
 
-    // Background shapes are siblings below the text, so syntax foregrounds stay intact.
+    // Background shapes are siblings below the text, so syntax foregrounds stay intact. The
+    // canvas spans the whole row (gutter included); shapes are placed in its coordinates.
     private static void DrawBackground(TextBlock text)
     {
         if (text.Parent is not Grid host || host.Children.OfType<Canvas>().FirstOrDefault() is not { } canvas)
             return;
         canvas.Children.Clear();
+        var wanted = (GetLines(text) ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(value => int.TryParse(value, out var line) ? line : -1).ToHashSet();
+        EmphasizeGutter(host, text, wanted);
         var content = text.Text;
-        if (string.IsNullOrEmpty(content) || text.ActualWidth <= 0 || text.ActualHeight <= 0)
+        if (string.IsNullOrEmpty(content) || text.ActualWidth <= 0 || text.ActualHeight <= 0 || canvas.ActualWidth <= 0)
             return;
-        canvas.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, text.ActualWidth, text.ActualHeight) };
+        canvas.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, canvas.ActualWidth, canvas.ActualHeight) };
+        var offset = text.TransformToVisual(canvas).TransformPoint(new Windows.Foundation.Point(0, 0));
         var light = text.ActualTheme == ElementTheme.Light;
         var matchBrush = new SolidColorBrush(SearchHighlightStyle.Match(light));
         var rowBrush = new SolidColorBrush(SearchHighlightStyle.Row(light));
-        var wanted = (GetLines(text) ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
-            .Select(value => int.TryParse(value, out var line) ? line : -1).ToHashSet();
+        var edgeBrush = new SolidColorBrush(SearchHighlightStyle.RowEdge(light));
         var start = 0;
         var lineNo = 0;
-        while (start < content.Length)
+        while (start <= content.Length)
         {
             var end = content.IndexOf('\n', start);
             if (end < 0) end = content.Length;
             if (wanted.Contains(lineNo))
             {
                 var rect = CharacterRect(start);
-                Add(rect.X, rect.Bottom - 1, Math.Max(0, text.ActualWidth - rect.X), 1, rowBrush);
+                var top = offset.Y + rect.Y;
+                Place(0, top, canvas.ActualWidth, rect.Height, rowBrush);
+                Place(0, top, SearchHighlightStyle.RowEdgeWidth, rect.Height, edgeBrush);
             }
+            if (end == content.Length) break;
             start = end + 1;
             lineNo++;
         }
@@ -146,7 +163,7 @@ public static class KeywordHighlight
                     Array.Fill(claimed, true, index, term.Length);
                     var first = CharacterRect(index);
                     var last = CharacterRect(index + term.Length, LogicalDirection.Backward);
-                    Add(first.X, first.Y, Math.Max(0, last.Right - first.X), first.Height, matchBrush);
+                    Place(offset.X + first.X, offset.Y + first.Y, Math.Max(0, last.Right - first.X), first.Height, matchBrush, radius: 2);
                 }
                 index += term.Length;
             }
@@ -160,13 +177,38 @@ public static class KeywordHighlight
                 .GetCharacterRect(direction) ?? default;
         }
 
-        void Add(double x, double y, double width, double height, Brush brush)
+        void Place(double x, double y, double width, double height, Brush brush, double radius = 0)
         {
-            var mark = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = width, Height = height, Fill = brush };
+            var mark = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = width, Height = height, Fill = brush, RadiusX = radius, RadiusY = radius };
             Canvas.SetLeft(mark, x);
             Canvas.SetTop(mark, y);
             canvas.Children.Add(mark);
         }
+    }
+
+    /// <summary>The gutter's numbers for matched rows in the code's full-contrast colour; the rest stay dimmed.</summary>
+    private static void EmphasizeGutter(Grid host, TextBlock code, HashSet<int> lines)
+    {
+        if (host.Children.OfType<Border>().FirstOrDefault()?.Child is not TextBlock gutter)
+            return;
+        gutter.TextHighlighters.Clear();
+        var content = gutter.Text;
+        if (string.IsNullOrEmpty(content) || lines.Count == 0)
+            return;
+        var highlighter = new TextHighlighter { Foreground = code.Foreground, Background = Transparent };
+        var start = 0;
+        var lineNo = 0;
+        while (start < content.Length)
+        {
+            var end = content.IndexOf('\n', start);
+            if (end < 0) end = content.Length;
+            if (lines.Contains(lineNo) && end > start)
+                highlighter.Ranges.Add(new TextRange { StartIndex = start, Length = end - start });
+            start = end + 1;
+            lineNo++;
+        }
+        if (highlighter.Ranges.Count > 0)
+            gutter.TextHighlighters.Add(highlighter);
     }
 
     /// <summary>One foreground-only highlighter per token colour, from the same tokenizer the editor uses.</summary>

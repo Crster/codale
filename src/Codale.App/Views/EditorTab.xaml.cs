@@ -38,6 +38,11 @@ public sealed partial class EditorTab : UserControl
     private int _preZoomCursorLine;
     private int _preZoomCursorCol;
 
+    private int _wordCountSequence;
+
+    /// <summary>Above this many characters the change bars refresh on load and save only, not while typing.</summary>
+    private const int LiveDiffMaxChars = 4_000_000;
+
     /// <summary>True while LoadText runs: programmatic text changes are neither dirty nor a word-count event.</summary>
     private bool _loadingText;
 
@@ -53,11 +58,21 @@ public sealed partial class EditorTab : UserControl
         _wordCountTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
         _wordCountTimer.Interval = TimeSpan.FromMilliseconds(300);
         _wordCountTimer.IsRepeating = false;
-        _wordCountTimer.Tick += (_, _) =>
+        _wordCountTimer.Tick += async (_, _) =>
         {
-            if (ViewModel is not null)
+            if (ViewModel is null)
             {
-                ViewModel.SetWordCount(EditorViewModel.CountWords(FileEditor.GetText()));
+                return;
+            }
+
+            // The text is an immutable snapshot, so counting can run off the UI thread; a newer
+            // count started meanwhile wins.
+            var sequence = ++_wordCountSequence;
+            var text = FileEditor.GetText();
+            var count = await Task.Run(() => EditorViewModel.CountWords(text));
+            if (sequence == _wordCountSequence && ViewModel is not null)
+            {
+                ViewModel.SetWordCount(count);
             }
         };
 
@@ -79,6 +94,8 @@ public sealed partial class EditorTab : UserControl
         };
         saveAccelerator.Invoked += OnSaveAcceleratorInvoked;
         KeyboardAccelerators.Add(saveAccelerator);
+        // WinUI otherwise pops an automatic "Ctrl+S" tooltip whenever the pointer rests on the tab.
+        KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
 
         // Find (Ctrl+F by default) is a window shortcut: the workspace scopes the title bar box to this file.
         AddAccelerator(Windows.System.VirtualKey.F3, Windows.System.VirtualKeyModifiers.None, args =>
@@ -369,7 +386,8 @@ public sealed partial class EditorTab : UserControl
         try
         {
             var snapshot = root is null ? null : SourceIndex.For(root).Current;
-            header = CompletionContext.Build(snapshot, root ?? "", path, FileEditor.LanguageId, nearby);
+            var related = root is null ? null : await RelatedCodeAsync(root, nearby, ct);
+            header = CompletionContext.Build(snapshot, root ?? "", path, FileEditor.LanguageId, nearby, related);
         }
         catch (Exception)
         {
@@ -379,13 +397,67 @@ public sealed partial class EditorTab : UserControl
         var name = path is null ? null : root is null ? Path.GetFileName(path) : Path.GetRelativePath(root, path);
         var directory = root ?? (path is null ? Environment.CurrentDirectory : Path.GetDirectoryName(path)!);
         var raw = await smart.FillInMiddleAsync(new(directory, directory, "completion"), header + prefix, suffix, name, rejected, ct);
-        if (raw is null)
+        if (raw is null || IsChatReply(raw))
         {
             return null;
         }
 
-        var line = Codale.Core.Text.FimText.FirstLine(raw, suffix, prefix);
-        return Codale.Core.Text.FimText.LooksLikeProse(line) ? null : line;
+        // The caret already sits after an indent or a space: the model's own leading whitespace would double it.
+        if (prefix.Length > 0 && prefix[^1] is ' ' or '\t')
+        {
+            raw = raw.TrimStart(' ', '\t');
+        }
+
+        return raw.Trim().Length == 0 ? null : raw;
+    }
+
+    /// <summary>An instruct model that answered instead of inserting ("Sure, here is…", a fenced block). Comments and strings in code are fine.</summary>
+    private static bool IsChatReply(string raw)
+    {
+        var first = raw.Replace("\r\n", "\n").TrimStart('\n', ' ', '\t').Split('\n')[0];
+        return raw.Contains("```", StringComparison.Ordinal) || raw.Contains("<think>", StringComparison.Ordinal) ||
+            System.Text.RegularExpressions.Regex.IsMatch(first, @"^(Sure|Certainly|Here('s| is)|It looks like|I('ll| will| can)|Let me)\b",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+
+    private string _relatedKey = "";
+    private IReadOnlyList<(string Path, string Text)> _relatedCode = [];
+
+    /// <summary>
+    /// Chunks of the project's knowledge index related to the identifiers just before the caret. The lookup is
+    /// repeated only when those identifiers change, so typing within a word costs nothing.
+    /// </summary>
+    private async Task<IReadOnlyList<(string Path, string Text)>?> RelatedCodeAsync(string root, string nearby, CancellationToken ct)
+    {
+        if (Knowledge is not { } knowledge)
+        {
+            return null;
+        }
+
+        var words = System.Text.RegularExpressions.Regex.Matches(nearby, @"[A-Za-z_][A-Za-z0-9_]{3,}")
+            .Select(m => m.Value).Reverse().Distinct(StringComparer.Ordinal).Take(6).ToList();
+        if (words.Count == 0)
+        {
+            return null;
+        }
+
+        var key = string.Join(' ', words);
+        if (key == _relatedKey)
+        {
+            return _relatedCode;
+        }
+
+        try
+        {
+            var chunks = await knowledge.SearchAsync(root, key, "", maxFiles: 4, maxChunksPerFile: 1, ct);
+            _relatedCode = chunks.Select(c => (c.Path, c.Text)).ToList();
+            _relatedKey = key;
+            return _relatedCode;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -758,7 +830,7 @@ public sealed partial class EditorTab : UserControl
             Edited?.Invoke(this, EventArgs.Empty);
         }
 
-        if (!_loadingText)
+        if (!_loadingText && _headText is { Length: < LiveDiffMaxChars })
         {
             ScheduleDiffRefresh();
         }

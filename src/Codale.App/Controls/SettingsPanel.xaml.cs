@@ -79,6 +79,18 @@ public sealed partial class SettingsPanel : UserControl
         SectionEditor.Visibility = TabNavEditor.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SectionTerminal.Visibility = TabNavTerminal.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SectionGitShortcuts.Visibility = TabNavGitShortcuts.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+
+        if (PageTitle is null || PageSubtitle is null)
+        {
+            return;
+        }
+
+        (PageTitle.Text, PageSubtitle.Text) =
+            TabNavAi.IsChecked == true ? ("AI Providers", "Accounts, models and Smart features.")
+            : TabNavEditor.IsChecked == true ? ("Editor", "How code is shown and edited.")
+            : TabNavTerminal.IsChecked == true ? ("Terminal", "Shell, font and scrollback for terminal tabs.")
+            : TabNavGitShortcuts.IsChecked == true ? ("Keyboard Shortcuts", "Click a shortcut, then press the new keys.")
+            : ("General", "Appearance, folders and the chat.");
     }
 
     private void OnAppSettingsChanged(object? sender, EventArgs e)
@@ -91,106 +103,206 @@ public sealed partial class SettingsPanel : UserControl
     private void OnSmartStatusChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(RefreshSmartStatus);
     private string? _smartRowsKey;
     private readonly Dictionary<string, ComboBox> _smartModelBoxes = [];
+    private readonly HashSet<ComboBox> _loadingSmartModels = [];
 
     private void RefreshSmartFeatureRows()
     {
-        // The same agent profiles the chat's dropdown offers: signed-in accounts and API endpoints.
-        var profiles = AppSettings.ByokProviders.Where(p => !p.IsAccount).ToArray();
-        var rows = CliEndpointViewModel.BuildChoices().Rows;
-        var key = string.Join("|", SmartFeatureSettings.Groups.Select(g => AppSettings.SmartProviderFor(g.Id) + ":" + AppSettings.SmartApiProfileFor(g.Id)))
-            + "#" + string.Join("|", rows.Select(r => r.CliId + r.Name + r.Label + r.Detail));
+        // Use concrete account profiles, as account setup does. Chat aliases can fold a
+        // detected account into a default row that no longer carries its credential home.
+        var profiles = AppSettings.ByokProviders;
+        var rows = new List<ProviderChoice>();
+        foreach (var cli in new[] { "claude", "codex" })
+        {
+            var label = cli == "codex" ? "Codex" : "Claude";
+            var supported = profiles.Where(p => p.Supports(cli)).ToArray();
+            if (!supported.Any(p => p.IsAccount))
+                rows.Add(new("", label + ": Sign-in account", "Sign-in account", cli));
+            foreach (var profile in supported)
+                rows.Add(new(profile.Key, label + ": " + (profile.IsAccount ? profile.Email ?? profile.Name : profile.Name),
+                    profile.IsAccount ? "Sign-in account" : cli == "codex" ? profile.BaseUrl : profile.AnthropicBaseUrl, cli));
+        }
+        var key = string.Join("|", SmartFeatureSettings.Roles.Select(r => AppSettings.SmartProviderFor(r.Id) + ":" + AppSettings.SmartApiProfileFor(r.Id)))
+            + "#" + string.Join("|", rows.Select(r => r.CliId + r.Name + r.Label + r.Detail))
+            + "#" + string.Join("|", profiles.Where(p => p.IsAccount).Select(p => p.Key + ":" + p.AccountId));
         if (_smartRowsKey != key)
         {
             _smartRowsKey = key;
             _smartModelBoxes.Clear();
             SmartFeatureRows.Children.Clear();
-            foreach (var group in SmartFeatureSettings.Groups)
+            var first = true;
+            foreach (var role in SmartFeatureSettings.Roles)
             {
-                var provider = AppSettings.SmartProviderFor(group.Id);
-                var section = new StackPanel { Spacing = 8 };
-                var heading = new Grid { ColumnSpacing = 16 };
-                heading.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                heading.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
-                var label = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-                label.Children.Add(new TextBlock { Text = group.Label, Style = (Style)SettingsRootGrid.Resources["RowTitle"] });
-                label.Children.Add(new TextBlock { Text = group.Description, TextWrapping = TextWrapping.Wrap, Style = (Style)SettingsRootGrid.Resources["RowDesc"] });
-                heading.Children.Add(label);
-                var providers = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
-                providers.Items.Add(new ComboBoxItem { Content = "Off", Tag = ("off", "") });
-                var savedProfile = AppSettings.SmartApiProfileFor(group.Id);
-                foreach (var row in rows)
-                {
-                    var isAccount = row.Detail == "Sign-in account";
-                    var target = isAccount ? (row.CliId, "") : (row.CliId == "codex" ? "openai" : "anthropic", row.Name);
-                    if (group.Id == "embedding" && target.Item1 != "openai") continue; // embeddings need an OpenAI-compatible endpoint
-                    providers.Items.Add(new ComboBoxItem { Content = row.Label, Tag = target });
-                }
-                var current = providers.Items.OfType<ComboBoxItem>().FirstOrDefault(i =>
-                    i.Tag is (string p, string profile) && p == provider && (provider is "claude" or "codex" or "off" || profile == savedProfile));
-                if (current is null && provider != "off")
-                {
-                    current = new ComboBoxItem { Content = char.ToUpperInvariant(provider[0]) + provider[1..] + " (unavailable)", Tag = (provider, savedProfile) };
-                    providers.Items.Add(current); // keep a saved choice visible even if its profile is gone
-                }
-                providers.SelectedItem = current ?? providers.Items[0];
-                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(providers, group.Label + " provider");
-                providers.SelectionChanged += (_, _) =>
-                {
-                    if (_loading || providers.SelectedItem is not ComboBoxItem { Tag: ValueTuple<string, string> selection }) return;
-                    var (selected, profile) = selection;
-                    AppSettings.SetSmartProvider(group.Id, selected);
-                    if (profile.Length > 0) AppSettings.SetSmartApiProfile(group.Id, profile);
-                    if (selected != "off" && AppSettings.SmartFeatureModel(group.Id).Equals("off", StringComparison.OrdinalIgnoreCase))
-                        AppSettings.SetSmartFeatureModel(group.Id, "default");
-                };
-                Grid.SetColumn(providers, 1);
-                heading.Children.Add(providers);
-                section.Children.Add(heading);
-                var model = new ComboBox { IsEditable = true, PlaceholderText = group.Id == "embedding" ? "Select model" : "Default model",
-                    HorizontalAlignment = HorizontalAlignment.Right, Width = 220, Tag = group.Id, IsEnabled = provider != "off" };
-                if (group.Id != "embedding") model.Items.Add("Default");
-                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(model, group.Label + " model");
-                model.LostFocus += (_, _) => { if (!_loading && _smartModelBoxes.GetValueOrDefault(group.Id) == model) AppSettings.SetSmartFeatureModel(group.Id, model.Text); };
-                model.TextSubmitted += (_, args) => { if (!_loading) AppSettings.SetSmartFeatureModel(group.Id, args.Text); };
-                model.SelectionChanged += (_, _) => { if (!_loading && model.SelectedItem is string id) AppSettings.SetSmartFeatureModel(group.Id, id); };
-                model.DropDownOpened += async (_, _) => await LoadSmartModelsAsync(model, group.Id, provider);
-                section.Children.Add(model);
-                _smartModelBoxes[group.Id] = model;
-                SmartFeatureRows.Children.Add(section);
+                SmartFeatureRows.Children.Add(BuildSmartRoleRow(role, rows, profiles, first));
+                first = false;
             }
         }
         foreach (var (id, box) in _smartModelBoxes)
         {
-            if (box.FocusState == FocusState.Unfocused)
+            if (!SmartFeatureSettings.RequiresDedicatedModel(id))
             {
-                var model = AppSettings.SmartFeatureModel(id);
-                box.Text = model.Length == 0 ? id == "embedding" ? "" : "Default" : model;
+                var flash = SmartExperienceHost.CreateClient(id).DefaultModel;
+                box.PlaceholderText = flash.Length > 0 ? $"Flash: {flash}" : "Flash model";
             }
+            RestoreSmartModelSelection(id, box);
         }
     }
 
-    private async Task LoadSmartModelsAsync(ComboBox box, string group, string provider)
+    /// <summary>One block per model role: name on the left, profile above model on the right.</summary>
+    private Grid BuildSmartRoleRow((string Id, string Label, string Description, string Placeholder) role,
+        IReadOnlyList<ProviderChoice> rows, IReadOnlyList<ByokProvider> profiles, bool first)
     {
+        var provider = AppSettings.SmartProviderFor(role.Id);
+        var row = new Grid
+        {
+            ColumnSpacing = 8, RowSpacing = 4, Padding = new Thickness(16, 10, 16, 10),
+            BorderThickness = new Thickness(0, first ? 0 : 1, 0, 0),
+            BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"],
+        };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(180) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(180) });
+        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var label = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+        label.Children.Add(new TextBlock { Text = role.Label, Style = (Style)SettingsRootGrid.Resources["RowTitle"] });
+        label.Children.Add(new TextBlock { Text = role.Description, Style = (Style)SettingsRootGrid.Resources["RowDesc"] });
+        row.Children.Add(label);
+        Grid.SetRowSpan(label, 2);
+
+        var providers = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Center };
+        providers.Items.Add(new ComboBoxItem { Content = "Off", Tag = ("off", "") });
+        var savedProfile = AppSettings.SmartApiProfileFor(role.Id);
+        foreach (var choice in rows)
+        {
+            var isAccount = choice.Detail == "Sign-in account";
+            var target = isAccount ? (choice.CliId, choice.Name) : (choice.CliId == "codex" ? "openai" : "anthropic", choice.Name);
+            if (!SmartFeatureSettings.SupportsProvider(role.Id, target.Item1)) continue;
+            providers.Items.Add(new ComboBoxItem { Content = choice.Label, Tag = target });
+        }
+        var selectedProfile = savedProfile;
+        if (provider is "claude" or "codex")
+            selectedProfile = SmartFeatureSettings.ResolveAccount(profiles, provider, savedProfile, AppSettings.AccountLabel(provider))?.Key ?? savedProfile;
+        var current = providers.Items.OfType<ComboBoxItem>().FirstOrDefault(i =>
+            i.Tag is (string p, string profile) && p == provider && (provider == "off" || profile == selectedProfile));
+        if (current is null && provider != "off")
+        {
+            current = new ComboBoxItem { Content = char.ToUpperInvariant(provider[0]) + provider[1..] +
+                (SmartFeatureSettings.SupportsProvider(role.Id, provider) ? " (unavailable)" : " (needs API endpoint)"),
+                Tag = (provider, savedProfile), IsEnabled = false };
+            providers.Items.Add(current); // keep a saved choice visible even if its profile is gone
+        }
+        providers.SelectedItem = current ?? providers.Items[0];
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(providers, role.Label + " provider");
+        providers.SelectionChanged += (_, _) =>
+        {
+            if (_loading || providers.SelectedItem is not ComboBoxItem { Tag: ValueTuple<string, string> selection }) return;
+            var (selected, profile) = selection;
+            AppSettings.SetSmartProvider(role.Id, selected);
+            AppSettings.SetSmartApiProfile(role.Id, profile);
+            if (selected != "off" && AppSettings.SmartRoleModel(role.Id).Equals("off", StringComparison.OrdinalIgnoreCase))
+                AppSettings.SetSmartRoleModel(role.Id, "default");
+        };
+        Grid.SetRow(providers, 0);
+        Grid.SetColumn(providers, 1);
+        Grid.SetColumnSpan(providers, 2);
+        row.Children.Add(providers);
+
+        var active = provider != "off" && SmartFeatureSettings.SupportsProvider(role.Id, provider);
+        var model = new ComboBox { IsEditable = true, PlaceholderText = role.Placeholder, HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Center, Tag = role.Id, Visibility = active ? Visibility.Visible : Visibility.Collapsed };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(model, role.Label + " model");
+        model.LostFocus += (_, _) => { if (!_loading && _smartModelBoxes.GetValueOrDefault(role.Id) == model) AppSettings.SetSmartRoleModel(role.Id, model.Text); };
+        model.TextSubmitted += (_, args) => { if (!_loading) AppSettings.SetSmartRoleModel(role.Id, args.Text); };
+        model.SelectionChanged += (_, _) => { if (!_loading && model.SelectedItem is string id) AppSettings.SetSmartRoleModel(role.Id, id); };
+        // Only problems are spelled out; a working row stays one line.
+        var modelStatus = new TextBlock { Visibility = Visibility.Collapsed, Style = (Style)SettingsRootGrid.Resources["RowDesc"] };
+        Grid.SetRow(modelStatus, 2); Grid.SetColumn(modelStatus, 1); Grid.SetColumnSpan(modelStatus, 2);
+        if (active)
+        {
+            model.Loaded += async (_, _) => await LoadSmartModelsAsync(model, modelStatus, role.Id, provider);
+            model.DropDownOpened += async (_, _) => await LoadSmartModelsAsync(model, modelStatus, role.Id, provider);
+            _smartModelBoxes[role.Id] = model;
+        }
+        Grid.SetRow(model, 1); Grid.SetColumn(model, 1); Grid.SetColumnSpan(model, 2);
+        row.Children.Add(model);
+        row.Children.Add(modelStatus);
+        return row;
+    }
+
+    /// <summary>Restores the persisted model after the editable ComboBox template and items have settled.</summary>
+    private void RestoreSmartModelSelection(string id, ComboBox box)
+    {
+        if (box.FocusState != FocusState.Unfocused) return;
+
+        // An editable ComboBox can have its text reset while its model list is populated or its template
+        // is applied. Queue restoration after those changes so the visible editor gets the persisted value.
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (box.FocusState != FocusState.Unfocused || _smartModelBoxes.GetValueOrDefault(id) != box) return;
+
+            var model = AppSettings.SmartRoleModel(id);
+            var catalogChoice = box.Items.OfType<string>().FirstOrDefault(item =>
+                string.Equals(item, model, StringComparison.OrdinalIgnoreCase));
+            var loading = _loading;
+            _loading = true;
+            try
+            {
+                box.SelectedItem = catalogChoice;
+                box.Text = catalogChoice ?? model;
+            }
+            finally { _loading = loading; }
+        });
+    }
+
+    private async Task LoadSmartModelsAsync(ComboBox box, TextBlock status, string role, string provider)
+    {
+        if (provider == "off" || !SmartFeatureSettings.SupportsProvider(role, provider)) return;
+        if (!_loadingSmartModels.Add(box)) return;
+        var profileKey = AppSettings.SmartApiProfileFor(role);
         try
         {
-            var client = SmartExperienceHost.CreateClient(group);
+            var client = SmartExperienceHost.CreateClient(role);
+            var accountId = client.AccountId;
             var ids = provider is "claude" or "codex"
-                ? (await ChatViewModel.FetchCatalogueAsync(provider)).Select(m => m.Id).ToArray()
+                ? (ChatViewModel.KnownCatalogue(provider, accountId) ?? await ChatViewModel.FetchCatalogueAsync(provider, accountId)).Select(m => m.Id).ToArray()
                 : await client.ModelsAsync(CancellationToken.None);
-            if (provider != AppSettings.SmartProviderFor(group) || !_smartModelBoxes.ContainsValue(box)) return;
+            if (provider != AppSettings.SmartProviderFor(role) || profileKey != AppSettings.SmartApiProfileFor(role) || !_smartModelBoxes.ContainsValue(box)) return;
             var current = box.Text;
             var loading = _loading; _loading = true;
             try
             {
                 box.Items.Clear();
-                if (group != "embedding") box.Items.Add("Default");
-                foreach (var id in ids.Distinct()) box.Items.Add(id);
+                foreach (var id in ids.Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Select(id => id.Trim()).Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    box.Items.Add(id);
+                }
+                // Providers often omit embedding-only models from /models. Keep the configured
+                // value selectable and visible even when the endpoint catalogue does not list it.
+                var configured = AppSettings.SmartRoleModel(role);
+                if (!string.IsNullOrWhiteSpace(configured) && !box.Items.OfType<string>()
+                    .Any(id => string.Equals(id, configured, StringComparison.OrdinalIgnoreCase)))
+                    box.Items.Add(configured);
                 box.Text = current;
             }
             finally { _loading = loading; }
-            ToolTipService.SetToolTip(box, ids.Length == 0 ? "Enter a model ID." : null);
+            status.Text = ids.Length == 0 ? "No models reported. Enter a model ID." : "";
+            status.Visibility = status.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            ToolTipService.SetToolTip(box, ids.Length == 0 ? status.Text : null);
         }
-        catch (Exception ex) { ToolTipService.SetToolTip(box, ex.Message); }
+        catch (Exception ex)
+        {
+            status.Text = $"Could not load models: {ex.Message}";
+            status.Visibility = Visibility.Visible;
+            ToolTipService.SetToolTip(box, status.Text);
+        }
+        finally
+        {
+            _loadingSmartModels.Remove(box);
+            if (box.Tag is string id) RestoreSmartModelSelection(id, box);
+        }
     }
     private void RefreshSmartStatus()
     {
@@ -245,7 +357,9 @@ public sealed partial class SettingsPanel : UserControl
             <= 50_000 => 2,
             _ => 3,
         };
-
+        TerminalBlockLinesBox.Value = AppSettings.TerminalBlockLines;
+        TerminalBlockHistoryBox.Value = AppSettings.TerminalBlockHistory;
+        TerminalLoadProfileToggle.IsOn = AppSettings.TerminalLoadProfile;
 
         ChatFontSizeBox.Value = AppSettings.ChatFontSize;
         PopulateChatFontFamilies();
@@ -1133,6 +1247,36 @@ public sealed partial class SettingsPanel : UserControl
         }
 
         AppSettings.TerminalFontSize = sender.Value;
+    }
+
+    private void OnTerminalBlockLinesChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_loading || !double.IsFinite(sender.Value))
+        {
+            return;
+        }
+
+        AppSettings.TerminalBlockLines = (int)Math.Round(sender.Value);
+    }
+
+    private void OnTerminalBlockHistoryChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_loading || !double.IsFinite(sender.Value))
+        {
+            return;
+        }
+
+        AppSettings.TerminalBlockHistory = (int)Math.Round(sender.Value);
+    }
+
+    private void OnTerminalLoadProfileToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        AppSettings.TerminalLoadProfile = TerminalLoadProfileToggle.IsOn;
     }
 
     private void OnTerminalScrollbackChanged(object sender, SelectionChangedEventArgs e)

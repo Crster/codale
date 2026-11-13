@@ -207,9 +207,9 @@ public sealed class ClaudeStreamParser
                 var retry = attempt is { } n
                     ? maxRetries is { } max ? $"retry {n} of {max}" : $"retry {n}"
                     : "retrying";
-                var cause = errorStatus is { } statusCode ? $"API error {statusCode}" : root.Str("error") ?? "API error";
+                var cause = RetryCause(errorStatus, root.Str("error"));
                 var wait = delayMs is { } ms and > 0 ? $" in {Math.Max(1, (int)Math.Round(ms / 1000.0))}s" : "";
-                yield return new CliInformation($"{cause}: {retry}{wait}.") { IsWarning = true };
+                yield return new CliInformation($"{cause}: {retry}{wait}.") { IsWarning = true, IsRetry = true };
                 break;
 
             case "commands_changed":
@@ -469,6 +469,16 @@ public sealed class ClaudeStreamParser
                     Type = t,
                     Mode = s.Str("mode"),
                     Destination = s.Str("destination"),
+                    Behavior = s.Str("behavior"),
+                    Directories = s.Items("directories")
+                        .Where(d => d.ValueKind == JsonValueKind.String)
+                        .Select(d => d.GetString()!)
+                        .ToList(),
+                    Rules = s.Items("rules")
+                        .Select(r => (Tool: r.Str("toolName") ?? "", Content: r.Str("ruleContent")))
+                        .Where(r => r.Tool.Length > 0)
+                        .ToList(),
+                    Raw = s.Clone(),
                 });
             }
         }
@@ -603,4 +613,36 @@ public sealed class ClaudeStreamParser
     private static JsonElement CloneInput(JsonElement? input) => input is { } element ? element.Clone() : default;
 
     private static string Truncate(string s, int max = 2000) => TextClip.Truncate(s, max);
+
+    /// <summary>
+    /// What went wrong before an API retry, in words. The CLI's <c>error</c> is a category
+    /// ("unknown", "rate_limit", ...), not a message, so it is never shown raw.
+    /// </summary>
+    public static string RetryCause(int? status, string? category)
+    {
+        var known = (category ?? "").Trim().ToLowerInvariant() switch
+        {
+            "rate_limit" or "rate_limit_error" => "Rate limited",
+            "overloaded" or "overloaded_error" => "The API is overloaded",
+            "server_error" or "api_error" => "The API had a server error",
+            "authentication_failed" or "authentication_error" => "Sign-in failed",
+            "billing_error" => "Billing problem",
+            "invalid_request" or "invalid_request_error" => "The API rejected the request",
+            "timeout" or "request_timeout" => "The request timed out",
+            "connection_error" or "network_error" => "Connection problem",
+            _ => null,
+        };
+
+        return (known, status) switch
+        {
+            ({ } words, { } code) => $"{words} ({code})",
+            ({ } words, null) => words,
+            (null, 429) => "Rate limited (429)",
+            (null, 529) => "The API is overloaded (529)",
+            (null, { } code) when code >= 500 => $"The API had a server error ({code})",
+            (null, { } code) => $"API error {code}",
+            // "unknown" or missing: the request failed without an HTTP answer, usually the network.
+            _ => "The API request failed",
+        };
+    }
 }

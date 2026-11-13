@@ -98,7 +98,12 @@ internal sealed partial class ConPty : IDisposable
         }
     }
 
-    public void Start(string command, string workingDirectory, short columns, short rows)
+    /// <summary>
+    /// Starts <paramref name="command"/> in a new pseudoconsole. With <paramref name="environment"/>
+    /// the child gets exactly those variables instead of inheriting this process's.
+    /// </summary>
+    public void Start(string command, string workingDirectory, short columns, short rows,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         // Two pipes: one each direction. The child gets the far ends.
         if (!CreatePipe(out _childInputRead, out _inputWrite, IntPtr.Zero, 0) ||
@@ -137,17 +142,29 @@ internal sealed partial class ConPty : IDisposable
             throw new Win32Exception(Marshal.GetLastWin32Error(), "UpdateProcThreadAttribute failed.");
         }
 
-        var created = CreateProcessW(
-            null,
-            new string(command),
-            IntPtr.Zero,
-            IntPtr.Zero,
-            false,
-            EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
-            IntPtr.Zero,
-            workingDirectory,
-            ref startup,
-            out _process);
+        var environmentBlock = environment is null ? IntPtr.Zero : Marshal.StringToHGlobalUni(BuildEnvironmentBlock(environment));
+        bool created;
+        try
+        {
+            created = CreateProcessW(
+                null,
+                new string(command),
+                IntPtr.Zero,
+                IntPtr.Zero,
+                false,
+                EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
+                environmentBlock,
+                workingDirectory,
+                ref startup,
+                out _process);
+        }
+        finally
+        {
+            if (environmentBlock != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(environmentBlock);
+            }
+        }
 
         if (!created)
         {
@@ -165,6 +182,33 @@ internal sealed partial class ConPty : IDisposable
         // reads already use their own 8K buffer, so FileStream's would only add a copy.
         Input = new FileStream(_inputWrite!, FileAccess.Write, bufferSize: 0);
         Output = new FileStream(_outputRead!, FileAccess.Read, bufferSize: 0);
+    }
+
+    /// <summary>
+    /// The Unicode environment block CreateProcess takes: "NAME=value\0" entries sorted
+    /// case-insensitively (Windows requires the order), ended by one more NUL. The string marshaller
+    /// adds the final terminator, so the text carries every entry's own NUL plus one.
+    /// </summary>
+    internal static string BuildEnvironmentBlock(IReadOnlyDictionary<string, string> environment)
+    {
+        var block = new System.Text.StringBuilder();
+        foreach (var (name, value) in environment.OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            // A name with '=' past its first character, or a NUL anywhere, would corrupt the block.
+            if (name.Length == 0 || name.IndexOf('=', 1) >= 0 || name.Contains('\0') || value.Contains('\0'))
+            {
+                continue;
+            }
+
+            block.Append(name).Append('=').Append(value).Append('\0');
+        }
+
+        if (block.Length == 0)
+        {
+            block.Append('\0');
+        }
+
+        return block.ToString();
     }
 
     public void Resize(short columns, short rows)

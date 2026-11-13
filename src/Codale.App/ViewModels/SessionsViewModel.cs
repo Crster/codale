@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 
 using Codale.Agents.History;
+using Codale.Core.Agents;
 using Codale.App.Services;
 using Codale.Core.Features;
 using Codale.Core.Projects;
@@ -16,13 +17,11 @@ namespace Codale.App.ViewModels;
 public sealed partial class SessionsViewModel : ObservableObject
 {
     private readonly FeatureService _features;
-    private readonly string _projectPath;
 
     private readonly SynchronizationContext? _uiContext;
 
-    public SessionsViewModel(string projectPath, FeatureService features)
+    public SessionsViewModel(FeatureService features)
     {
-        _projectPath = projectPath;
         _features = features;
         _uiContext = SynchronizationContext.Current;
         _features.Changed += OnFeaturesChanged;
@@ -83,6 +82,35 @@ public sealed partial class SessionsViewModel : ObservableObject
     /// <summary>Raised when the user picks a row: a feature to work on, or a terminal CLI's conversation to read.</summary>
     public event EventHandler<TranscriptSummary>? SessionOpened;
 
+    private string? _openingSessionId;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanOpen))]
+    [NotifyCanExecuteChangedFor(nameof(OpenCommand))]
+    public partial bool IsOpening { get; private set; }
+
+    [ObservableProperty]
+    public partial string OpenError { get; set; } = "";
+
+    public bool CanOpen => !IsOpening;
+
+    public bool TryBeginOpening(string sessionId)
+    {
+        if (IsOpening) return false;
+        _openingSessionId = sessionId;
+        OpenError = "";
+        IsOpening = true;
+        foreach (var item in Sessions) item.IsOpening = item.SessionId == sessionId;
+        return true;
+    }
+
+    public void EndOpening()
+    {
+        _openingSessionId = null;
+        foreach (var item in Sessions) item.IsOpening = false;
+        IsOpening = false;
+    }
+
     private bool _refreshing;
     private bool _refreshQueued;
 
@@ -123,69 +151,26 @@ public sealed partial class SessionsViewModel : ObservableObject
         }
     }
 
-    private List<TranscriptSummary> ReadRows()
-    {
-        var readers = new Dictionary<(string, string), Dictionary<string, TranscriptSummary>>();
-
-        return _features.List()
-            .Select(f =>
-            {
-                var mapping = _features.ProviderSession(f.Id);
-                var provider = mapping?.Provider;
-                return new TranscriptSummary
-                {
-                    SessionId = f.Id,
-                    FilePath = ProjectPaths.FeatureDirectory(_projectPath, f.Id),
-                    StartedAt = f.CreatedAt,
-                    UpdatedAt = f.UpdatedAt,
-                    CustomTitle = NativeTitle(readers, mapping, f.Name, f.Description) ?? f.Name,
-                    FirstPrompt = f.Description,
-                    Detail = provider is not null ? provider == "codex" ? "Codex" : provider == "claude" ? "Claude" : provider : "Session",
-                };
-            })
-            .ToList();
-    }
-
     /// <summary>
-    /// The title the CLI stored for a feature's session, but only while the feature still carries the
-    /// name cut from its prompt: a name the user or the router chose is kept.
+    /// One row per history. Its title is Codale's own name for it, which follows the latest prompt
+    /// (see ChatViewModel.RenameSessionFromPrompt); the CLIs' stored session titles are not used.
     /// </summary>
-    private static string? NativeTitle(
-        Dictionary<(string, string), Dictionary<string, TranscriptSummary>> readers, ProviderSession? mapping, string name, string description)
-    {
-        if (mapping is null || string.IsNullOrWhiteSpace(mapping.ProviderSessionId))
+    private List<TranscriptSummary> ReadRows() => _features.List()
+        .Select(f =>
         {
-            return null;
-        }
-
-        var stem = name.TrimEnd('…', '.', ' ');
-        if (stem.Length == 0 || !description.Contains(stem, StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        var key = (mapping.Provider, mapping.Worktree);
-        if (!readers.TryGetValue(key, out var byId))
-        {
-            byId = [];
-            try
+            var provider = _features.ProviderSession(f.Id)?.Provider;
+            return new TranscriptSummary
             {
-                foreach (var s in CliResume.CreateReader(mapping.Provider, mapping.Worktree)?.ListSessions() ?? [])
-                {
-                    byId[s.SessionId] = s;
-                }
-            }
-            catch (IOException)
-            {
-            }
-
-            readers[key] = byId;
-        }
-
-        return byId.TryGetValue(mapping.ProviderSessionId, out var hit) && !string.IsNullOrWhiteSpace(hit.CustomTitle)
-            ? hit.CustomTitle
-            : null;
-    }
+                SessionId = f.Id,
+                FilePath = "",
+                StartedAt = f.CreatedAt,
+                UpdatedAt = f.UpdatedAt,
+                CustomTitle = f.Name,
+                FirstPrompt = f.Description,
+                Detail = provider is not null ? provider == "codex" ? "Codex" : provider == "claude" ? "Claude" : provider : "Session",
+            };
+        })
+        .ToList();
 
     /// <summary>Renames a feature.</summary>
     public async Task RetitleAsync(SessionListItem item, string title)
@@ -230,6 +215,7 @@ public sealed partial class SessionsViewModel : ObservableObject
 
             var fresh = new SessionListItem { Summary = summary };
             fresh.ApplyOpenState(_open);
+            fresh.IsOpening = fresh.SessionId == _openingSessionId;
 
             if (item is not null)
             {
@@ -247,10 +233,10 @@ public sealed partial class SessionsViewModel : ObservableObject
         SyncOpenSessions();
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanOpen))]
     private void Open(SessionListItem? item)
     {
-        if (item is not null)
+        if (item is not null && CanOpen)
         {
             SessionOpened?.Invoke(this, item.Summary);
         }

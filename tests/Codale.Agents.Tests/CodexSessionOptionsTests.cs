@@ -19,6 +19,29 @@ public sealed class CodexSessionOptionsTests
     }
 
     [Fact]
+    public void Feature_switches_become_config_overrides_before_the_subcommand()
+    {
+        var args = new CodexSessionOptions
+        {
+            WorkingDirectory = ".",
+            Features = new Dictionary<string, bool> { ["browser_use"] = false, ["computer_use"] = true },
+        }.BuildArguments().ToList();
+
+        var tail = string.Join(' ', args);
+        Assert.Contains("-c features.browser_use=false", tail);
+        Assert.Contains("-c features.computer_use=true", tail);
+        Assert.Equal("app-server", args[^1]);
+    }
+
+    [Fact]
+    public void No_feature_switches_leave_codex_features_alone()
+    {
+        var tail = string.Join(' ', new CodexSessionOptions { WorkingDirectory = "." }.BuildArguments());
+
+        Assert.DoesNotContain("features.", tail);
+    }
+
+    [Fact]
     public void Codex_defaults_to_no_sandbox()
     {
         var tail = string.Join(' ', new CodexSessionOptions { WorkingDirectory = "." }.BuildArguments());

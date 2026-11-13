@@ -34,7 +34,11 @@ public sealed record SessionInitialized : AgentEvent
 /// A user turn read back from a stored transcript. The live stream never needs this
 /// (the UI already knows what it sent), but replaying history does.
 /// </summary>
-public sealed record UserMessageRecorded(string Text) : AgentEvent;
+public sealed record UserMessageRecorded(string Text) : AgentEvent
+{
+    /// <summary>Sent while a turn ran: it joined that turn rather than starting one of its own.</summary>
+    public bool IsSteer { get; init; }
+}
 
 /// <summary>
 /// Codale enriched a prompt with retrieved project context, read back from a session's log:
@@ -175,6 +179,9 @@ public sealed record CliStatusChanged(string Status) : AgentEvent;
 public sealed record CliInformation(string Text) : AgentEvent
 {
     public bool IsWarning { get; init; }
+
+    /// <summary>An API retry in progress: stale as soon as the model answers, so the host clears it then.</summary>
+    public bool IsRetry { get; init; }
 }
 
 /// <summary>The set of slash commands changed (skills and commands finished loading or were edited).</summary>

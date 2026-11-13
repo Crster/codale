@@ -4,6 +4,7 @@ using Codale.Core.Helper;
 using Codale.Core.Projects;
 using Codale.Search;
 using Codale.Db;
+using Codale.Workspace;
 
 namespace Codale.App.Services;
 
@@ -53,11 +54,11 @@ public sealed class FeatureService : IDisposable
     {
         try
         {
-            return new CodaleDb(ProjectPaths.FeatureDatabasePath(projectPath), new() { Embedder = new SmartEmbedder() });
+            return new CodaleDb(ProjectPaths.FeatureDatabasePath(projectPath), new() { Embedder = SmartEmbedder.Shared });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException)
         {
-            return new CodaleDb(Path.Combine(Path.GetTempPath(), "codale-features-" + Guid.NewGuid().ToString("N")), new() { Embedder = new SmartEmbedder() });
+            return new CodaleDb(Path.Combine(Path.GetTempPath(), "codale-features-" + Guid.NewGuid().ToString("N")), new() { Embedder = SmartEmbedder.Shared });
         }
     }
 
@@ -104,7 +105,7 @@ public sealed class FeatureService : IDisposable
     }
 
     /// <summary>A feature's log; <paramref name="chatId"/> is the chat its appends are written as (null for a reader).</summary>
-    public FeatureLog LogOf(string id, string? chatId = null) => new(ProjectPaths.FeatureDirectory(_projectPath, id), chatId);
+    public FeatureLog LogOf(string id, string? chatId = null) => new(WorkspaceDb.DirectoryFor(_projectPath), id, chatId);
 
     /// <summary>A prompt was added to a feature's log: its size and what it asked are what the feature is found by.</summary>
     public void RecordProgress(string id, FeatureLog log, string? prompt)
@@ -128,7 +129,7 @@ public sealed class FeatureService : IDisposable
     public async Task<RetrievalResult> RetrieveAsync(string worktree, string prompt, string recent, IReadOnlySet<string> delivered, string? currentSessionId,
         string? workingSessionId = null, CancellationToken preparationToken = default, DateTimeOffset? preparationDeadline = null, string? chatId = null, Codale.Smart.SmartIntent? intent = null, bool allowSmartReview = true)
     {
-        if (AppSettings.SmartExperience && allowSmartReview)
+        if (AppSettings.SmartFeatureEnabled("context") && allowSmartReview)
         {
             return await _knowledge.RetrieveSmartAsync(worktree, prompt, recent, delivered, currentSessionId,
                 workingSessionId is null ? null : _knowledge.FilesOf(workingSessionId, WorkingSetFiles), preparationToken, preparationDeadline, chatId, intent).ConfigureAwait(false);
@@ -137,20 +138,17 @@ public sealed class FeatureService : IDisposable
             workingSessionId is null ? null : _knowledge.FilesOf(workingSessionId, WorkingSetFiles))).ConfigureAwait(false);
     }
 
-    private bool _smartThinking = AppSettings.SmartThinking;
-    private bool _smartSummaries = AppSettings.SmartSummaries;
     private string? _summaryIdentity;
-    private string? _embeddingIdentity;
+    private static string SummaryIdentity() => SmartExperienceHost.CreateRouter().ClientFor("summary")?.FeatureIdentity ?? "off";
     private void UpdateSummaryCache()
     {
-        _summaryIdentity = SmartExperienceHost.CreateClient("summary").FeatureIdentity("summary");
+        _summaryIdentity = SummaryIdentity();
         _knowledge.Summaries = new Codale.Smart.SummaryCache(Path.Combine(ProjectPaths.KnowledgeDirectory(_projectPath), "smart-summaries"), _summaryIdentity);
     }
 
     private void OnAppSettingsChanged(object? sender, EventArgs e)
     {
-        var client = SmartExperienceHost.CreateClient("summary");
-        if (_summaryIdentity != client.FeatureIdentity("summary")) UpdateSummaryCache();
+        if (_summaryIdentity != SummaryIdentity()) UpdateSummaryCache();
     }
 
     private const int WorkingSetFiles = 8;

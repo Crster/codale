@@ -7,7 +7,7 @@ namespace Codale.Mcp.Tasks;
 
 /// <summary>
 /// Claude Code <c>PreToolUse</c> hook: refuses a shell call that asks to run in the
-/// background and points the model at <c>start_task</c>. A hook runs before permission
+/// background and points the model at <c>run_in_terminal</c>. A hook runs before permission
 /// checks, so it holds in every permission mode - unlike an approval prompt, which
 /// auto and bypass modes never show.
 /// </summary>

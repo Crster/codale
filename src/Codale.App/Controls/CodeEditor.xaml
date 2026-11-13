@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <!--
-  Codale's own code editor control. The drawing happens in Win2D on the CanvasControl;
-  scrolling is a ScrollModel (plain offsets) and the bars are OverlayScrollBars, so
-  pointer input reaches the canvas everywhere except on the bars themselves.
+  Codale's code editor. Everything the editor shows - text, selections, highlights, carets,
+  gutter, diff bars and both scrollbars - is drawn into one swap chain in one pass per frame,
+  so nothing can ever scroll a frame behind anything else. The engine (text, selections,
+  commands, undo, syntax colouring) lives in Codale.Editor; this control renders and routes input.
 -->
 <UserControl
     x:Class="Codale.App.Controls.CodeEditor"
@@ -12,32 +13,21 @@
     IsTabStop="True"
     UseSystemFocusVisuals="False">
 
-    <Grid x:Name="RootGrid">
-        <canvas:CanvasControl
-            x:Name="Canvas"
-            CreateResources="OnCreateResources"
-            Draw="OnCanvasDraw"
-            PointerPressed="OnPointerPressed"
-            PointerMoved="OnPointerMoved"
-            PointerEntered="OnPointerEntered"
-            PointerExited="OnPointerExited"
-            PointerReleased="OnPointerReleased"
-            PointerWheelChanged="OnPointerWheelChanged"
-            SizeChanged="OnCanvasSizeChanged" />
+    <Grid
+        x:Name="RootGrid"
+        Background="Transparent"
+        PointerCaptureLost="OnPointerCaptureLost"
+        PointerEntered="OnPointerEntered"
+        PointerExited="OnPointerExited"
+        PointerMoved="OnPointerMoved"
+        PointerPressed="OnPointerPressed"
+        PointerReleased="OnPointerReleased"
+        PointerWheelChanged="OnPointerWheelChanged"
+        SizeChanged="OnSurfaceSizeChanged">
 
-        <!--
-            The caret lives on its own layer so the 530ms blink toggles a ~2px draw
-            instead of re-running the full viewport paint twice a second while idle.
-        -->
-        <canvas:CanvasControl
-            x:Name="CaretCanvas"
-            IsHitTestVisible="False"
-            CreateResources="OnCaretCreateResources"
-            Draw="OnCaretCanvasDraw" />
+        <canvas:CanvasSwapChainPanel x:Name="Surface" IsHitTestVisible="False" />
 
-        <!-- The scrollbars (OverlayScrollBar) are added to this grid in code, above the canvases. -->
-
-        <!-- Suggestions while typing; never takes focus, the editor keeps the keyboard. -->
+        <!--  Suggestions while typing; never takes focus, the editor keeps the keyboard.  -->
         <Popup x:Name="CompletionPopup" IsLightDismissEnabled="False">
             <Border
                 MinWidth="240"
@@ -51,8 +41,8 @@
                     MaxHeight="220"
                     IsItemClickEnabled="True"
                     IsTabStop="False"
-                    SelectionMode="Single"
-                    ItemClick="OnCompletionItemClick">
+                    ItemClick="OnCompletionItemClick"
+                    SelectionMode="Single">
                     <ListView.ItemContainerStyle>
                         <Style TargetType="ListViewItem">
                             <Setter Property="MinHeight" Value="24" />

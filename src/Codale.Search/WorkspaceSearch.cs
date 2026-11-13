@@ -49,8 +49,8 @@ public sealed record SearchHit
 /// </summary>
 public sealed class WorkspaceSearch
 {
-    /// <summary>Files larger than this are not searched: they are generated or data, not source.</summary>
-    private const long MaxFileBytes = 5_000_000;
+    /// <summary>Files larger than this are not searched; matches per file are capped below, so a big generated file still cannot flood the results.</summary>
+    private const long MaxFileBytes = 32_000_000;
 
     /// <summary>Matches reported per file, so one huge generated file cannot fill the results.</summary>
     private const int MaxMatchesPerFile = 50;

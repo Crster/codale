@@ -9,13 +9,13 @@ namespace Codale.Agents.History;
 /// <c>~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl</c>, whose first record names the
 /// working directory and the id that <c>codex resume</c> takes.
 /// </summary>
-public sealed class CodexSessionHistoryReader(string projectPath) : ICliHistoryReader
+public sealed class CodexSessionHistoryReader(string projectPath, string? home = null) : ICliHistoryReader
 {
     private const int MaxFiles = 120;
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string Path, long Length, DateTime Written), TranscriptSummary?> Cache = new();
 
-    private readonly string _root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "sessions");
+    private readonly string _root = Path.Combine(home ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex"), "sessions");
 
     public string CliId => "codex";
 
