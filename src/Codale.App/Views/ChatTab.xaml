@@ -1410,7 +1410,7 @@
                             FontSize="{x:Bind S12, Mode=OneWay}"
                             FontWeight="SemiBold"
                             Foreground="{StaticResource KindAskBrush}"
-                            Text="Switch history?" />
+                            Text="The agent needs your input" />
                     </StackPanel>
                     <TextBlock
                         FontSize="{x:Bind S14, Mode=OneWay}"
@@ -1606,6 +1606,13 @@
                         Content="{x:Bind ActionText}"
                         FontSize="{x:Bind S12, Mode=OneWay}"
                         Visibility="{x:Bind HasAction, Converter={StaticResource BoolToVisibility}}" />
+                    <HyperlinkButton
+                        Padding="6,2"
+                        VerticalAlignment="Center"
+                        Click="OnComposerNoticeSecondaryAction"
+                        Content="{x:Bind SecondaryActionText}"
+                        FontSize="{x:Bind S12, Mode=OneWay}"
+                        Visibility="{x:Bind HasSecondaryAction, Converter={StaticResource BoolToVisibility}}" />
                     <Button
                         Width="24"
                         Height="24"

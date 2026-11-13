@@ -5,11 +5,9 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-using Codale.Core.Serving;
-
 namespace Codale.Core.Tasks;
 
-/// <summary>What the agent sees of one task.</summary>
+/// <summary>What the agent sees of one terminal tab: its command, state and output.</summary>
 public sealed record TaskSnapshot(
     string Id,
     string Name,
@@ -22,51 +20,29 @@ public sealed record TaskSnapshot(
 public sealed class TaskServiceException(string message) : Exception(message);
 
 /// <summary>
-/// The operations the agent's <c>codale-tasks</c> tools perform. The app implements it
-/// over <see cref="HostedTaskManager"/>; the MCP exe reaches it over a named pipe.
+/// What the tools of Codale's workspace servers (codale-terminal, codale-command, codale-panel) ask the app
+/// for: the terminal tabs. The app implements it over its terminals; the MCP exe reaches it over a named pipe.
 /// </summary>
 public interface ITaskService
 {
-    /// <summary>Starts a command, waits up to <paramref name="waitSeconds"/> (or until it exits) and returns what it printed.</summary>
-    Task<TaskSnapshot> StartAsync(string command, string? name, int waitSeconds, CancellationToken ct);
-
-    /// <summary>Output since an offset (or the last <paramref name="tailChars"/> characters) and the current state.</summary>
-    Task<TaskSnapshot> ReadAsync(string id, long? since, int? tailChars, CancellationToken ct);
-
-    Task<IReadOnlyList<TaskSnapshot>> ListAsync(CancellationToken ct);
-
-    Task<TaskSnapshot> StopAsync(string id, CancellationToken ct);
-
-    /// <summary>The terminal tabs the user has open (command runs and plain shells).</summary>
+    /// <summary>The terminal tabs open in the workspace, the user's and the agent's.</summary>
     Task<IReadOnlyList<TaskSnapshot>> ListTerminalsAsync(CancellationToken ct);
 
-    /// <summary>What a terminal tab printed, read-only; the same offset scheme as <see cref="ReadAsync"/>.</summary>
+    /// <summary>What a terminal tab printed since an offset (or its last <paramref name="tailChars"/> characters), with its state.</summary>
     Task<TaskSnapshot> ReadTerminalAsync(string id, long? since, int? tailChars, CancellationToken ct);
 
-    /// <summary>Serves a folder on localhost (or returns the server already serving it).</summary>
-    Task<ServedFolder> ServeFolderAsync(string folder, int? port, bool spa, CancellationToken ct);
+    /// <summary>Runs a command in a new terminal tab, waits up to <paramref name="waitSeconds"/> (or until it ends) and returns what it printed.</summary>
+    Task<TaskSnapshot> RunInTerminalAsync(string command, string? name, int waitSeconds, CancellationToken ct);
 
-    Task<IReadOnlyList<ServedFolder>> ListServedAsync(CancellationToken ct);
-
-    /// <summary>Stops a served folder by id, folder path or URL.</summary>
-    Task<ServedFolder> StopServingAsync(string id, CancellationToken ct);
+    /// <summary>Interrupts the command of a terminal tab the agent opened; the tab stays, with its output.</summary>
+    Task<TaskSnapshot> StopTerminalAsync(string id, CancellationToken ct);
 }
 
-/// <summary><see cref="ITaskService"/> straight over the manager that owns the processes.</summary>
-public sealed class LocalTaskService(
-    HostedTaskManager manager, ITerminalSource? terminals = null, FolderServerHost? servers = null) : ITaskService
+/// <summary><see cref="ITaskService"/> straight over the workspace's terminals.</summary>
+public sealed class LocalTaskService(ITerminalSource? terminals = null) : ITaskService
 {
-    private FolderServerHost Servers =>
-        servers ?? throw new TaskServiceException("Folder serving is not available here.");
-
-    public Task<ServedFolder> ServeFolderAsync(string folder, int? port, bool spa, CancellationToken ct) =>
-        Task.FromResult(Servers.Serve(folder, port, spa, startedBy: "agent"));
-
-    public Task<IReadOnlyList<ServedFolder>> ListServedAsync(CancellationToken ct) =>
-        Task.FromResult(servers?.List() ?? []);
-
-    public Task<ServedFolder> StopServingAsync(string id, CancellationToken ct) =>
-        Task.FromResult(Servers.Stop(id));
+    private ITerminalSource Terminals =>
+        terminals ?? throw new TaskServiceException("Terminals are not available here.");
 
     public Task<IReadOnlyList<TaskSnapshot>> ListTerminalsAsync(CancellationToken ct) =>
         Task.FromResult(terminals?.List() ?? []);
@@ -75,62 +51,19 @@ public sealed class LocalTaskService(
         Task.FromResult(terminals?.Read(id, since, tailChars ?? 8000)
             ?? throw new TaskServiceException($"No terminal '{id}'. Use list_terminals to see the open ones."));
 
-    /// <summary>Terminal tab ids; everything else is a headless task of the manager.</summary>
-    private static bool IsTerminalId(string id) => id.StartsWith("term-", StringComparison.Ordinal);
+    public async Task<TaskSnapshot> RunInTerminalAsync(string command, string? name, int waitSeconds, CancellationToken ct) =>
+        await Terminals.StartAsync(command, name, Math.Clamp(waitSeconds, 0, 60), ct).ConfigureAwait(false)
+            ?? throw new TaskServiceException("No terminal could be opened: the Codale window is not available.");
 
-    public async Task<TaskSnapshot> StartAsync(string command, string? name, int waitSeconds, CancellationToken ct)
-    {
-        // Agent tasks run via HostedTaskManager in the background so they appear
-        // in the session panel's task list where the user can peek and stop them,
-        // without opening a separate terminal tab.
-        var task = manager.Start(command, name);
-
-        // Early output (a port number, a compile error) is what the agent needs next.
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(Math.Clamp(waitSeconds, 0, 60));
-        while (task.State == HostedTaskState.Running && DateTime.UtcNow < deadline)
-        {
-            await Task.Delay(100, ct).ConfigureAwait(false);
-        }
-
-        return Snapshot(task, since: null, tailChars: 8000);
-    }
-
-    public Task<TaskSnapshot> ReadAsync(string id, long? since, int? tailChars, CancellationToken ct) =>
-        IsTerminalId(id)
-            ? ReadTerminalAsync(id, since, tailChars, ct)
-            : Task.FromResult(Snapshot(Find(id), since, tailChars ?? 8000));
-
-    public Task<IReadOnlyList<TaskSnapshot>> ListAsync(CancellationToken ct) =>
-        Task.FromResult<IReadOnlyList<TaskSnapshot>>(
-            [.. manager.List().Select(t => Snapshot(t, null, 0))]);
-
-    public async Task<TaskSnapshot> StopAsync(string id, CancellationToken ct)
-    {
-        if (IsTerminalId(id))
-        {
-            return (terminals is null ? null : await terminals.StopAsync(id, ct).ConfigureAwait(false))
-                ?? throw new TaskServiceException($"No task '{id}'. Use list_tasks to see the running ones.");
-        }
-
-        var task = Find(id);
-        task.Stop();
-        return Snapshot(task, null, 2000);
-    }
-
-    private HostedTask Find(string id) =>
-        manager.Get(id) ?? throw new TaskServiceException($"No task '{id}'. Use list_tasks to see the running ones.");
-
-    private static TaskSnapshot Snapshot(HostedTask task, long? since, int tailChars)
-    {
-        var (text, next) = tailChars == 0 ? ("", task.Read().NextOffset) : task.Read(since, tailChars);
-        return new TaskSnapshot(task.Id, task.Name, task.Command, task.State.ToString().ToLowerInvariant(), task.ExitCode, text, next);
-    }
+    public async Task<TaskSnapshot> StopTerminalAsync(string id, CancellationToken ct) =>
+        await Terminals.StopAsync(id, ct).ConfigureAwait(false)
+            ?? throw new TaskServiceException($"No terminal '{id}' that you opened. You can only stop terminals opened with run_in_terminal or run_command.");
 }
 
 /// <summary>
 /// Serves an <see cref="ITaskService"/> on a per-session named pipe. The pipe is
 /// current-user only and every request must carry the session's secret, so nothing else
-/// on the machine can start or read the session's tasks.
+/// on the machine can run commands in or read the session's terminals.
 /// </summary>
 public sealed class TaskPipeServer : IDisposable
 {
@@ -248,32 +181,17 @@ public sealed class TaskPipeServer : IDisposable
             var ct = _cts.Token;
             switch (request["op"]?.GetValue<string>())
             {
-                case "start":
-                    return Ok(await _service.StartAsync(
+                case "run":
+                    return Ok(await _service.RunInTerminalAsync(
                         request["command"]?.GetValue<string>() ?? throw new TaskServiceException("command is required."),
                         request["name"]?.GetValue<string>(),
                         request["waitSeconds"]?.GetValue<int>() ?? 3,
                         ct).ConfigureAwait(false));
 
-                case "read":
-                    return Ok(await _service.ReadAsync(
-                        request["id"]?.GetValue<string>() ?? throw new TaskServiceException("id is required."),
-                        request["since"]?.GetValue<long>(),
-                        request["tailChars"]?.GetValue<int>(),
-                        ct).ConfigureAwait(false));
-
                 case "stop":
-                    return Ok(await _service.StopAsync(
+                    return Ok(await _service.StopTerminalAsync(
                         request["id"]?.GetValue<string>() ?? throw new TaskServiceException("id is required."),
                         ct).ConfigureAwait(false));
-
-                case "list":
-                    var all = await _service.ListAsync(ct).ConfigureAwait(false);
-                    return new JsonObject
-                    {
-                        ["ok"] = true,
-                        ["tasks"] = new JsonArray([.. all.Select(t => (JsonNode)Json(t))]),
-                    };
 
                 case "terminals":
                     var open = await _service.ListTerminalsAsync(ct).ConfigureAwait(false);
@@ -288,26 +206,6 @@ public sealed class TaskPipeServer : IDisposable
                         request["id"]?.GetValue<string>() ?? throw new TaskServiceException("id is required."),
                         request["since"]?.GetValue<long>(),
                         request["tailChars"]?.GetValue<int>(),
-                        ct).ConfigureAwait(false));
-
-                case "serve":
-                    return Ok(await _service.ServeFolderAsync(
-                        request["folder"]?.GetValue<string>() ?? throw new TaskServiceException("folder is required."),
-                        request["port"]?.GetValue<int>(),
-                        request["spa"]?.GetValue<bool>() ?? false,
-                        ct).ConfigureAwait(false));
-
-                case "served":
-                    var served = await _service.ListServedAsync(ct).ConfigureAwait(false);
-                    return new JsonObject
-                    {
-                        ["ok"] = true,
-                        ["served"] = new JsonArray([.. served.Select(s => (JsonNode)Json(s))]),
-                    };
-
-                case "unserve":
-                    return Ok(await _service.StopServingAsync(
-                        request["id"]?.GetValue<string>() ?? throw new TaskServiceException("id is required."),
                         ct).ConfigureAwait(false));
 
                 case "panel":
@@ -357,23 +255,6 @@ public sealed class TaskPipeServer : IDisposable
         return o;
     }
 
-    internal static JsonObject Json(ServedFolder s) => new()
-    {
-        ["id"] = s.Id,
-        ["folder"] = s.Folder,
-        ["url"] = s.Url,
-        ["port"] = s.Port,
-        ["startedBy"] = s.StartedBy,
-        ["startedAt"] = s.StartedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
-    };
-
-    private static JsonObject Ok(ServedFolder s)
-    {
-        var o = Json(s);
-        o["ok"] = true;
-        return o;
-    }
-
     public void Dispose() => _cts.Cancel();
 }
 
@@ -405,20 +286,11 @@ public sealed class TaskPipeClient(string pipeName, string token) : ITaskService
         }
     }
 
-    public Task<TaskSnapshot> StartAsync(string command, string? name, int waitSeconds, CancellationToken ct) =>
-        CallOneAsync(new JsonObject { ["op"] = "start", ["command"] = command, ["name"] = name, ["waitSeconds"] = waitSeconds }, ct);
+    public Task<TaskSnapshot> RunInTerminalAsync(string command, string? name, int waitSeconds, CancellationToken ct) =>
+        CallOneAsync(new JsonObject { ["op"] = "run", ["command"] = command, ["name"] = name, ["waitSeconds"] = waitSeconds }, ct);
 
-    public Task<TaskSnapshot> ReadAsync(string id, long? since, int? tailChars, CancellationToken ct) =>
-        CallOneAsync(new JsonObject { ["op"] = "read", ["id"] = id, ["since"] = since, ["tailChars"] = tailChars }, ct);
-
-    public Task<TaskSnapshot> StopAsync(string id, CancellationToken ct) =>
+    public Task<TaskSnapshot> StopTerminalAsync(string id, CancellationToken ct) =>
         CallOneAsync(new JsonObject { ["op"] = "stop", ["id"] = id }, ct);
-
-    public async Task<IReadOnlyList<TaskSnapshot>> ListAsync(CancellationToken ct)
-    {
-        var response = await CallAsync(new JsonObject { ["op"] = "list" }, ct).ConfigureAwait(false);
-        return [.. response["tasks"]!.AsArray().Select(n => Parse(n!.AsObject()))];
-    }
 
     public async Task<IReadOnlyList<TaskSnapshot>> ListTerminalsAsync(CancellationToken ct)
     {
@@ -429,26 +301,6 @@ public sealed class TaskPipeClient(string pipeName, string token) : ITaskService
     public Task<TaskSnapshot> ReadTerminalAsync(string id, long? since, int? tailChars, CancellationToken ct) =>
         CallOneAsync(new JsonObject { ["op"] = "terminal", ["id"] = id, ["since"] = since, ["tailChars"] = tailChars }, ct);
 
-    public async Task<ServedFolder> ServeFolderAsync(string folder, int? port, bool spa, CancellationToken ct) =>
-        ParseServed(await CallAsync(new JsonObject { ["op"] = "serve", ["folder"] = folder, ["port"] = port, ["spa"] = spa }, ct).ConfigureAwait(false));
-
-    public async Task<IReadOnlyList<ServedFolder>> ListServedAsync(CancellationToken ct)
-    {
-        var response = await CallAsync(new JsonObject { ["op"] = "served" }, ct).ConfigureAwait(false);
-        return [.. response["served"]!.AsArray().Select(n => ParseServed(n!.AsObject()))];
-    }
-
-    public async Task<ServedFolder> StopServingAsync(string id, CancellationToken ct) =>
-        ParseServed(await CallAsync(new JsonObject { ["op"] = "unserve", ["id"] = id }, ct).ConfigureAwait(false));
-
-    private static ServedFolder ParseServed(JsonObject o) => new(
-        o["id"]!.GetValue<string>(),
-        o["folder"]!.GetValue<string>(),
-        o["url"]!.GetValue<string>(),
-        o["port"]!.GetValue<int>(),
-        o["startedBy"]?.GetValue<string>() ?? "",
-        DateTimeOffset.TryParse(o["startedAt"]?.GetValue<string>(), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var at) ? at : default);
-
     private async Task<TaskSnapshot> CallOneAsync(JsonObject request, CancellationToken ct) =>
         Parse(await CallAsync(request, ct).ConfigureAwait(false));
 
@@ -456,8 +308,8 @@ public sealed class TaskPipeClient(string pipeName, string token) : ITaskService
         CallAsync(request, ct, timeout: null, exclusive: true);
 
     /// <param name="exclusive">
-    /// Task calls take turns. A long model call runs on its own connection instead, so it
-    /// never holds a read_task up for a minute.
+    /// Terminal calls take turns. A long model call runs on its own connection instead, so it
+    /// never holds a read_terminal up for a minute.
     /// </param>
     private async Task<JsonObject> CallAsync(JsonObject request, CancellationToken ct, TimeSpan? timeout, bool exclusive)
     {
@@ -488,7 +340,7 @@ public sealed class TaskPipeClient(string pipeName, string token) : ITaskService
             }
             catch (TimeoutException)
             {
-                throw new TaskServiceException("Codale is not reachable (its task host is gone). Is the chat still open?");
+                throw new TaskServiceException("Codale is not reachable (its terminal host is gone). Is the chat still open?");
             }
 
             using var reader = new StreamReader(pipe, new UTF8Encoding(false));

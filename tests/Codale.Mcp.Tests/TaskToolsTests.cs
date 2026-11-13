@@ -1,6 +1,5 @@
 using System.Text.Json;
 
-using Codale.Core.Serving;
 using Codale.Core.Tasks;
 using Codale.Mcp.Tasks;
 
@@ -13,77 +12,68 @@ public sealed class TaskToolsTests
         public string? LastCommand;
         public int LastWait;
 
-        public Task<TaskSnapshot> StartAsync(string command, string? name, int waitSeconds, CancellationToken ct)
+        public Task<TaskSnapshot> RunInTerminalAsync(string command, string? name, int waitSeconds, CancellationToken ct)
         {
             LastCommand = command;
             LastWait = waitSeconds;
-            return Task.FromResult(new TaskSnapshot("t1", name ?? command, command, "running", null, "ready on :5173\n", 15));
+            return Task.FromResult(new TaskSnapshot("term-1", name ?? command, command, "running", null, "ready on :5173\n", 15));
         }
-
-        public Task<TaskSnapshot> ReadAsync(string id, long? since, int? tailChars, CancellationToken ct) =>
-            id == "t1"
-                ? Task.FromResult(new TaskSnapshot("t1", "dev", "npm run dev", "exited", 1, "", 15))
-                : throw new TaskServiceException($"No task '{id}'.");
-
-        public Task<IReadOnlyList<TaskSnapshot>> ListAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<TaskSnapshot>>([]);
-
-        public Task<TaskSnapshot> StopAsync(string id, CancellationToken ct) =>
-            Task.FromResult(new TaskSnapshot(id, "dev", "npm run dev", "stopped", null, "", 15));
 
         public Task<IReadOnlyList<TaskSnapshot>> ListTerminalsAsync(CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<TaskSnapshot>>([new TaskSnapshot("term-1", "build", "npm run build", "exited", 1, "", 0)]);
+            Task.FromResult<IReadOnlyList<TaskSnapshot>>([new TaskSnapshot("term-2", "build", "npm run build", "exited", 1, "", 0)]);
 
         public Task<TaskSnapshot> ReadTerminalAsync(string id, long? since, int? tailChars, CancellationToken ct) =>
-            Task.FromResult(new TaskSnapshot(id, "build", "npm run build", "exited", 1, "error TS2322\n", 13));
+            id == "term-2"
+                ? Task.FromResult(new TaskSnapshot(id, "build", "npm run build", "exited", 1, "error TS2322\n", 13))
+                : throw new TaskServiceException($"No terminal '{id}'.");
 
-        public string? LastServedFolder;
-        public bool LastSpa;
+        public Task<TaskSnapshot> StopTerminalAsync(string id, CancellationToken ct) =>
+            id == "term-1"
+                ? Task.FromResult(new TaskSnapshot(id, "dev", "npm run dev", "idle", null, "", 15))
+                : throw new TaskServiceException($"No terminal '{id}' that you opened.");
+    }
 
-        public Task<ServedFolder> ServeFolderAsync(string folder, int? port, bool spa, CancellationToken ct)
+    [Theory]
+    [InlineData("codale-panel", new[] { "todos_set", "artifact_add" })]
+    [InlineData("codale-command", new[] { "list_commands", "add_command", "run_command" })]
+    [InlineData("codale-terminal", new[] { "list_terminals", "read_terminal", "run_in_terminal", "stop_terminal" })]
+    [InlineData("codale-memory", new[] { "memory_save", "memory_search", "memory_list", "memory_forget" })]
+    [InlineData("codale-secret", new[] { "env_list", "env_get", "env_set" })]
+    public void Each_server_has_exactly_its_own_tools(string server, string[] expected)
+    {
+        var root = Directory.CreateTempSubdirectory("codale-servers-").FullName;
+        try
         {
-            LastServedFolder = folder;
-            LastSpa = spa;
-            return Task.FromResult(new ServedFolder("s1", folder, $"http://localhost:{port ?? 5500}/", port ?? 5500, "agent", DateTimeOffset.Now));
+            var names = TaskTools.Create(new FakeTasks(), root, server: server).Select(t => t.Name).Order().ToArray();
+            Assert.Equal(expected.Order().ToArray(), names);
         }
-
-        public Task<IReadOnlyList<ServedFolder>> ListServedAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<ServedFolder>>([]);
-
-        public Task<ServedFolder> StopServingAsync(string id, CancellationToken ct) =>
-            id == "s1"
-                ? Task.FromResult(new ServedFolder("s1", @"C:\site", "http://localhost:5500/", 5500, "agent", DateTimeOffset.Now))
-                : throw new TaskServiceException($"No served folder '{id}'.");
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]
-    public async Task Serve_folder_resolves_a_relative_path_against_the_project()
+    public void Every_tool_belongs_to_a_server_and_none_is_a_task_or_serves_folders()
     {
-        var root = Path.Combine(Path.GetTempPath(), "codale-proj");
-        var fake = new FakeTasks();
-        var result = await Call(Server(fake, root), "serve_folder", """{"path":"dist","spa":true}""");
-
-        Assert.Equal(Path.Combine(root, "dist"), fake.LastServedFolder);
-        Assert.True(fake.LastSpa);
-        Assert.Contains("http://localhost:5500/", Text(result));
-        Assert.Contains("id s1", Text(result));
-    }
-
-    [Fact]
-    public async Task Serve_folder_without_a_project_needs_an_absolute_path()
-    {
-        var result = await Call(Server(new FakeTasks()), "serve_folder", """{"path":"dist"}""");
-        Assert.True(result.GetProperty("isError").GetBoolean());
-    }
-
-    [Fact]
-    public async Task Stop_serving_reports_an_unknown_id_as_a_tool_error()
-    {
-        var server = Server(new FakeTasks());
-        Assert.Contains("no longer serves", Text(await Call(server, "stop_serving", """{"id":"s1"}""")));
-        Assert.True((await Call(server, "stop_serving", """{"id":"s9"}""")).GetProperty("isError").GetBoolean());
+        var root = Directory.CreateTempSubdirectory("codale-servers-").FullName;
+        try
+        {
+            var all = TaskTools.Create(new FakeTasks(), root).Select(t => t.Name).ToList();
+            Assert.All(all, name => Assert.NotNull(CodaleServers.Of(name)));
+            Assert.DoesNotContain("serve_folder", all);
+            Assert.DoesNotContain("stop_serving", all);
+            Assert.DoesNotContain("list_served", all);
+            Assert.DoesNotContain(all, name => name.EndsWith("_task", StringComparison.Ordinal) || name == "list_tasks");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     private static McpServer Server(FakeTasks fake, string? projectRoot = null) =>
-        new("codale-tasks", "1.0", TaskTools.Create(fake, projectRoot));
+        new("codale-test", "1.0", TaskTools.Create(fake, projectRoot));
 
     private static string Text(JsonElement result) => result.GetProperty("content")[0].GetProperty("text").GetString()!;
 
@@ -95,33 +85,39 @@ public sealed class TaskToolsTests
     }
 
     [Fact]
-    public async Task Start_passes_the_command_and_reports_output()
+    public async Task Run_in_terminal_passes_the_command_and_reports_output()
     {
         var fake = new FakeTasks();
-        var result = await Call(Server(fake), "start_task", """{"command":"npm run dev","wait_seconds":5}""");
+        var text = Text(await Call(Server(fake), "run_in_terminal", """{"command":"npm run dev","wait_seconds":5}"""));
 
         Assert.Equal("npm run dev", fake.LastCommand);
         Assert.Equal(5, fake.LastWait);
-        var text = result.GetProperty("content")[0].GetProperty("text").GetString()!;
-        Assert.Contains("task t1", text);
+        Assert.Contains("terminal term-1", text);
         Assert.Contains("ready on :5173", text);
         Assert.Contains("next_offset: 15", text);
     }
 
     [Fact]
-    public async Task Missing_task_is_a_tool_error_not_a_crash()
+    public async Task Missing_terminal_is_a_tool_error_not_a_crash()
     {
-        var result = await Call(Server(new FakeTasks()), "read_task", """{"id":"zzz"}""");
+        var result = await Call(Server(new FakeTasks()), "read_terminal", """{"id":"zzz"}""");
 
         Assert.True(result.GetProperty("isError").GetBoolean());
-        Assert.Contains("No task 'zzz'", result.GetProperty("content")[0].GetProperty("text").GetString());
+        Assert.Contains("No terminal 'zzz'", Text(result));
     }
 
     [Fact]
     public async Task Exit_code_is_reported()
     {
-        var result = await Call(Server(new FakeTasks()), "read_task", """{"id":"t1"}""");
-        Assert.Contains("exit code 1", result.GetProperty("content")[0].GetProperty("text").GetString());
+        Assert.Contains("exit code 1", Text(await Call(Server(new FakeTasks()), "read_terminal", """{"id":"term-2"}""")));
+    }
+
+    [Fact]
+    public async Task Only_a_terminal_the_agent_opened_can_be_stopped()
+    {
+        var server = Server(new FakeTasks());
+        Assert.Contains("terminal term-1", Text(await Call(server, "stop_terminal", """{"id":"term-1"}""")));
+        Assert.True((await Call(server, "stop_terminal", """{"id":"term-2"}""")).GetProperty("isError").GetBoolean());
     }
 
     [Fact]
@@ -131,7 +127,7 @@ public sealed class TaskToolsTests
         var names = JsonDocument.Parse(reply!.ToJsonString()).RootElement.GetProperty("result").GetProperty("tools")
             .EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToList();
 
-        Assert.Contains("start_task", names);
+        Assert.Contains("run_in_terminal", names);
         Assert.DoesNotContain("add_command", names);
     }
 
@@ -156,7 +152,7 @@ public sealed class TaskToolsTests
 
             var run = await Call(server, "run_command", """{"name":"dev"}""");
             Assert.Equal("npm start", fake.LastCommand);
-            Assert.Contains("task t1", Text(run));
+            Assert.Contains("terminal term-1", Text(run));
         }
         finally
         {
@@ -200,7 +196,7 @@ public sealed class TaskToolsTests
             var decision = JsonDocument.Parse(output).RootElement.GetProperty("hookSpecificOutput");
             Assert.Equal("PreToolUse", decision.GetProperty("hookEventName").GetString());
             Assert.Equal("deny", decision.GetProperty("permissionDecision").GetString());
-            Assert.Contains("start_task", decision.GetProperty("permissionDecisionReason").GetString());
+            Assert.Contains("run_in_terminal", decision.GetProperty("permissionDecisionReason").GetString());
         }
     }
 }

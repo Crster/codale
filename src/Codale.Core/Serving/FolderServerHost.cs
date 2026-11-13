@@ -97,7 +97,7 @@ public sealed class FolderServerHost : IDisposable
                 || s.Info.Folder.Equals(Path.TrimEndingDirectorySeparator(idOrFolder), StringComparison.OrdinalIgnoreCase));
             if (index < 0)
             {
-                throw new TaskServiceException($"No served folder '{idOrFolder}'. Use list_served to see them.");
+                throw new TaskServiceException($"No served folder '{idOrFolder}'. The Agent tools menu lists them.");
             }
 
             info = _servers[index].Info;

@@ -214,10 +214,14 @@ public sealed partial class ChatViewModel
         if (Features is not { } features) return;
         if (FeatureId is null)
         {
-            var title = text.ReplaceLineEndings(" ").Trim();
-            if (title.Length > 90) title = title[..90];
-            SetFeature(features.Create(title.Length > 0 ? title : "Attachments", text));
+            // Even a first prompt with no subject of its own names the history: there is nothing better yet.
+            SetFeature(features.Create(TitleFromPrompt(text) ?? (text.Trim().Length > 0 ? SessionTitles.FromPrompt(text) : "Attachments"), text));
             Title = FeatureName;
+            if (text.Length > 0) NameSessionAsync(FeatureId!, text, FeatureName);
+        }
+        else
+        {
+            RenameSessionFromPrompt(features, FeatureId, text);
         }
         if (_featureLog is not { } log || FeatureId is not { } id) return;
         if (!_attachLogged) { log.Attach(CliId); _attachLogged = true; }

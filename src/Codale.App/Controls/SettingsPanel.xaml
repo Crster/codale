@@ -311,7 +311,7 @@
                         <TextBlock Style="{StaticResource SectionTitle}" Text="Smart Features" />
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
-                                <StackPanel x:Name="SmartFeatureRows" Padding="16" Spacing="16" />
+                                <StackPanel x:Name="SmartFeatureRows" />
                                 <Border x:Name="SmartExperienceStatusPanel" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="16,12" Visibility="Collapsed">
                                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
                                         <TextBlock x:Name="SmartExperienceStatus" Style="{StaticResource RowDesc}" VerticalAlignment="Center" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
@@ -472,7 +472,7 @@
                                 <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
                                     <StackPanel VerticalAlignment="Center" Spacing="2">
                                         <TextBlock Style="{StaticResource RowTitle}" Text="Command block height" />
-                                        <TextBlock Style="{StaticResource RowDesc}" Text="Lines a command block shows before it scrolls inside (3–200). Drag a block to the right edge to dock it beside the tabs." />
+                                        <TextBlock Style="{StaticResource RowDesc}" Text="Lines a command block shows before it scrolls inside (default 30, range 3–200). Drag a block to the right edge to dock it beside the tabs." />
                                     </StackPanel>
                                     <NumberBox x:Name="TerminalBlockLinesBox" Grid.Column="1" VerticalAlignment="Center" Width="130" Maximum="200" Minimum="3" SmallChange="1" SpinButtonPlacementMode="Compact" ValueChanged="OnTerminalBlockLinesChanged" />
                                 </Grid>

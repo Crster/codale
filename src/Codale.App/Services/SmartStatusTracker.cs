@@ -1,10 +1,10 @@
 namespace Codale.App.Services;
 
-/// <summary>Request outcomes, independent of service availability and model loading.</summary>
+/// <summary>Request outcomes per model role, independent of service availability and model loading.</summary>
 public sealed class SmartStatusTracker
 {
     private readonly object _gate = new();
-    private readonly Dictionary<string, (string Group, long Generation, long Order)> _active = [];
+    private readonly Dictionary<string, (string Role, string Task, long Generation, long Order)> _active = [];
     private long _order;
     private readonly Dictionary<string, string?> _errors = [];
     private readonly HashSet<string> _enabled = [];
@@ -12,29 +12,32 @@ public sealed class SmartStatusTracker
     private DateTimeOffset _configuredAt;
     public event EventHandler? Changed;
 
-    public void Configure(IEnumerable<(string Group, bool Enabled, string? Error)> features)
+    public void Configure(IEnumerable<(string Role, bool Enabled, string? Error)> roles)
     {
         lock (_gate)
         {
             _generation++;
             _configuredAt = DateTimeOffset.UtcNow;
             _active.Clear(); _errors.Clear(); _enabled.Clear();
-            foreach (var feature in features)
+            foreach (var role in roles)
             {
-                if (feature.Enabled) _enabled.Add(feature.Group);
-                if (feature.Error is not null) _errors[feature.Group] = feature.Error;
+                if (role.Enabled) _enabled.Add(role.Role);
+                if (role.Error is not null) _errors[role.Role] = role.Error;
             }
         }
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
-    public void Start(string id, string feature, DateTimeOffset? startedAt = null)
+    public void Start(string id, string task, DateTimeOffset? startedAt = null)
     {
         lock (_gate)
         {
-            var group = SmartFeatureSettings.GroupFor(feature);
-            if (startedAt < _configuredAt || !_enabled.Contains(group) || _active.ContainsKey(id)) return;
-            _active[id] = (group, _generation, ++_order);
+            // A "decide" request is the Decision model's; everything else runs on the first configured role that can write it.
+            var role = task == SmartFeatureSettings.DecideTask
+                ? _enabled.Contains(SmartFeatureSettings.Decision) ? SmartFeatureSettings.Decision : null
+                : SmartFeatureSettings.RolesFor(task).FirstOrDefault(_enabled.Contains);
+            if (role is null || startedAt < _configuredAt || _active.ContainsKey(id)) return;
+            _active[id] = (role, SmartFeatureSettings.Normalize(task), _generation, ++_order);
         }
         Changed?.Invoke(this, EventArgs.Empty);
     }
@@ -44,33 +47,33 @@ public sealed class SmartStatusTracker
         lock (_gate)
         {
             if (!_active.Remove(id, out var run) || run.Generation != _generation) return;
-            if (outcome == "error") _errors[run.Group] = error ?? "The AI request failed.";
-            else if (outcome == "completed") _errors.Remove(run.Group);
+            if (outcome == "error") _errors[run.Role] = error ?? "The AI request failed.";
+            else if (outcome == "completed") _errors.Remove(run.Role);
         }
         Changed?.Invoke(this, EventArgs.Empty);
     }
+
+    private static string Working(string task) => SmartFeatureSettings.IsBackgroundTask(task) ? "Processing" : "Suggesting";
 
     public (string Text, string Detail, bool Visible) Snapshot()
     {
         lock (_gate)
         {
-            var entries = SmartFeatureSettings.Groups.Where(g => _enabled.Contains(g.Id) || _errors.ContainsKey(g.Id))
-                .Select(g =>
+            var entries = SmartFeatureSettings.Roles.Where(r => _enabled.Contains(r.Id) || _errors.ContainsKey(r.Id))
+                .Select(r =>
                 {
-                    var active = _active.Values.Any(a => a.Group == g.Id);
-                    var state = active ? (g.Id is "context" or "embedding" ? "Processing" : "Suggesting")
-                        : _errors.ContainsKey(g.Id) ? "Error" : "Idle";
-                    return (g.Label, State: state, Error: _errors.GetValueOrDefault(g.Id));
+                    var newest = _active.Values.Where(a => a.Role == r.Id).OrderByDescending(a => a.Order).FirstOrDefault();
+                    var state = newest.Role is not null ? Working(newest.Task)
+                        : _errors.ContainsKey(r.Id) ? "Error" : "Idle";
+                    return (r.Label, State: state, Error: _errors.GetValueOrDefault(r.Id));
                 }).ToArray();
             // The newest request owns the indicator; completing it reveals any remaining work.
             // Old errors must not crowd out the feature currently being used.
-            var currentGroup = _active.Values.OrderByDescending(a => a.Order).FirstOrDefault().Group;
-            currentGroup ??= _errors.Keys.LastOrDefault();
-            var current = entries.FirstOrDefault(e => e.Label ==
-                SmartFeatureSettings.Groups.FirstOrDefault(g => g.Id == currentGroup).Label);
-            var visible = currentGroup is not null;
-            var text = visible
-                ? $"Smart: {current.State}"
+            var newestRun = _active.Values.OrderByDescending(a => a.Order).FirstOrDefault();
+            var state = newestRun.Role is not null ? Working(newestRun.Task)
+                : _errors.Count > 0 ? "Error" : null;
+            var text = state is not null
+                ? $"Smart: {state}"
                 : entries.Length == 0 ? "Smart: Off" : "Smart: Idle";
             return (text, entries.Length == 0 ? "AI is not configured."
                 : string.Join("\n", entries.Select(e => $"{e.Label}: {e.State}" + (e.Error is null ? "" : $" — {e.Error}"))),

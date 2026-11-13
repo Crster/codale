@@ -78,6 +78,9 @@ public sealed record ClaudeSessionOptions
     /// </summary>
     public IReadOnlyList<Codale.Core.Agents.McpServerSpec> McpServers { get; init; } = [];
 
+    /// <summary>Claude in Chrome: true passes <c>--chrome</c>, false <c>--no-chrome</c>, null leaves the CLI's own setting.</summary>
+    public bool? Chrome { get; init; }
+
     /// <summary>
     /// Command line of a <c>PreToolUse</c> hook that refuses shell calls asking to run in
     /// the background (registered through <c>--settings</c>). Null registers no hook.
@@ -168,6 +171,11 @@ public sealed record ClaudeSessionOptions
         {
             args.Add("--mcp-config");
             args.Add(mcpConfig);
+        }
+
+        if (Chrome is { } chrome)
+        {
+            args.Add(chrome ? "--chrome" : "--no-chrome");
         }
 
         var hooks = new Codale.Core.Agents.ClaudeHookSettings { ShellGuardCommand = BackgroundShellGuardCommand };

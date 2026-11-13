@@ -18,13 +18,13 @@ public sealed record TodoItem
 }
 
 /// <summary>
-/// Reads the input of Codale's own <c>todos_set</c> tool (codale-tasks MCP server):
+/// Reads the input of Codale's own <c>todos_set</c> tool (codale-panel MCP server):
 /// <c>{ "todos": [ { "content": "...", "status": "pending|in_progress|completed" } ] }</c>,
 /// always the whole list. The schema is ours, so there is exactly one shape to read.
 /// </summary>
 public static class TodoParser
 {
-    /// <summary>The tool's bare name; the CLI adds an MCP prefix (<c>mcp__codale-tasks__</c>).</summary>
+    /// <summary>The tool's bare name; the CLI adds an MCP prefix (<c>mcp__codale-panel__</c>).</summary>
     public const string ToolName = "todos_set";
 
     /// <summary>The artifact tool's bare name.</summary>
@@ -34,7 +34,7 @@ public static class TodoParser
 
     public static bool IsArtifactTool(string toolName) => IsCodaleTool(toolName, ArtifactToolName);
 
-    /// <summary>The CLI's prefix always names the codale-tasks server; another server's tool of the same name is not ours.</summary>
+    /// <summary>The CLI's prefix always names a codale-* server; another server's tool of the same name is not ours.</summary>
     private static bool IsCodaleTool(string toolName, string bareName) =>
         toolName == bareName ||
         (toolName.EndsWith(bareName, StringComparison.Ordinal) && toolName.Contains("codale", StringComparison.OrdinalIgnoreCase));

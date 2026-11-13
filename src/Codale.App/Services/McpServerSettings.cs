@@ -8,19 +8,30 @@ namespace Codale.App.Services;
 /// Which of Codale's built-in MCP servers a project's agents get: a browser the agent
 /// can drive to test and verify what it built, and desktop control (screenshots, mouse,
 /// keyboard) for everything a browser cannot reach, and an Android phone (adb) to build and
-/// test mobile apps on. The browser is a global preference that defaults on; desktop and
-/// phone control act on real hardware, so they are per project and default off. Like <see cref="CliEndpointSettings"/> the values are re-read on every
-/// access, so a toggle applies to the next session start.
+/// test mobile apps on. Each is Block, CLI Default (the CLI's own equivalent) or Allow (Codale's
+/// server). The browser is a global preference that defaults to Allow; desktop and phone control
+/// act on real hardware, so they are per project and default to Block. Like <see cref="CliEndpointSettings"/>
+/// the values are re-read on every access, so a change applies to the next session start.
 /// </summary>
 public sealed class McpServerSettings
 {
-    public const string BrowserName = "codale-browser";
-    public const string ComputerName = "codale-computer";
-    public const string PhoneName = "codale-phone";
+    // Named for what they do, so an agent reading its tool list knows each server's purpose.
+    public const string BrowserName = "browser-use";
+    public const string ComputerName = "computer-use";
+    public const string PhoneName = "phone-use";
+
+    /// <summary>Server names Codale owns in a CLI's config (stale ones are dropped on rewrite), besides <c>codale-*</c>.</summary>
+    private static readonly HashSet<string> OwnedNames = new(StringComparer.Ordinal) { BrowserName, ComputerName, PhoneName };
 
     private const string BrowserKey = "mcp.browser.enabled";
     private const string ComputerKey = "mcp.computer.enabled";
     private const string PhoneKey = "mcp.phone.enabled";
+
+    /// <summary>The Claude CLI's own browser server (Claude in Chrome), switched by <c>--chrome</c> / <c>--no-chrome</c>.</summary>
+    public const string ClaudeChromeServer = "claude-in-chrome";
+
+    /// <summary>The Claude CLI's own desktop-control server, when the user has one.</summary>
+    public const string ClaudeComputerServer = "computer-use";
 
     private readonly string _projectPath;
     private readonly string _baseDirectory;
@@ -31,50 +42,131 @@ public sealed class McpServerSettings
         _baseDirectory = baseDirectory ?? AppContext.BaseDirectory;
     }
 
-    /// <summary>On unless the user turned it off.</summary>
-    public bool BrowserEnabled
+    /// <summary>Allow unless the user changed it; a global preference.</summary>
+    public AgentToolMode BrowserMode
     {
         get
         {
             using var db = AppDb.Open();
-            return db.Setting(BrowserKey).Read() != "0";
+            return ParseMode(db.Setting(BrowserKey).Read(), AgentToolMode.Allow);
         }
         set
         {
             using var db = AppDb.Open();
-            db.Setting(BrowserKey).Write(value ? "1" : "0");
+            db.Setting(BrowserKey).Write(FormatMode(value));
         }
     }
 
-    /// <summary>Off unless the user turned it on for this project.</summary>
-    public bool ComputerEnabled
+    /// <summary>Block unless the user changed it for this project: it acts on the real desktop.</summary>
+    public AgentToolMode ComputerMode
     {
         get
         {
             using var db = AppDb.Open();
-            return db.Project(_projectPath).Open("ui").Open(ComputerKey).Read() == "1";
+            return ParseMode(db.Project(_projectPath).Open("ui").Open(ComputerKey).Read(), AgentToolMode.Block);
         }
         set
         {
             using var db = AppDb.Open();
-            db.Project(_projectPath).Open("ui").Open(ComputerKey).Write(value ? "1" : "0");
+            db.Project(_projectPath).Open("ui").Open(ComputerKey).Write(FormatMode(value));
         }
     }
 
-    /// <summary>Off unless the user turned it on for this project: it acts on a real attached device.</summary>
-    public bool PhoneEnabled
+    /// <summary>Block unless the user changed it for this project: it acts on a real attached device.</summary>
+    public AgentToolMode PhoneMode
     {
         get
         {
             using var db = AppDb.Open();
-            return db.Project(_projectPath).Open("ui").Open(PhoneKey).Read() == "1";
+            return ParseMode(db.Project(_projectPath).Open("ui").Open(PhoneKey).Read(), AgentToolMode.Block);
         }
         set
         {
             using var db = AppDb.Open();
-            db.Project(_projectPath).Open("ui").Open(PhoneKey).Write(value ? "1" : "0");
+            db.Project(_projectPath).Open("ui").Open(PhoneKey).Write(FormatMode(value));
         }
     }
+
+    /// <summary>Stored values; "1" and "0" are what the old on/off toggles wrote.</summary>
+    internal static AgentToolMode ParseMode(string? stored, AgentToolMode fallback) => stored switch
+    {
+        "allow" or "1" => AgentToolMode.Allow,
+        "cli" => AgentToolMode.CliDefault,
+        "block" or "0" => AgentToolMode.Block,
+        _ => fallback,
+    };
+
+    internal static string FormatMode(AgentToolMode mode) => mode switch
+    {
+        AgentToolMode.Allow => "allow",
+        AgentToolMode.CliDefault => "cli",
+        _ => "block",
+    };
+
+    /// <summary>
+    /// The CLI's own browser: on for CLI Default, off for Block, and off for Allow so the agent has one
+    /// browser - Codale's. Null leaves the CLI's own setting alone (Allow without Codale's server).
+    /// </summary>
+    public bool? NativeBrowser() => Native(BrowserMode, BrowserAvailable);
+
+    /// <summary>The CLI's own desktop control, by the same rule as <see cref="NativeBrowser"/>.</summary>
+    public bool? NativeComputer() => Native(ComputerMode, ComputerAvailable);
+
+    private static bool? Native(AgentToolMode mode, bool codaleAvailable) => mode switch
+    {
+        AgentToolMode.CliDefault => true,
+        AgentToolMode.Allow when !codaleAvailable => null,
+        _ => false,
+    };
+
+    /// <summary>Claude in Chrome: <c>--chrome</c> / <c>--no-chrome</c>.</summary>
+    public bool? ClaudeChrome() => NativeBrowser();
+
+    /// <summary>Codex's feature flags behind its own browser.</summary>
+    private static readonly string[] CodexBrowserFeatures = ["browser_use", "browser_use_external", "in_app_browser"];
+
+    /// <summary>Codex's feature flag behind its own desktop control.</summary>
+    private const string CodexComputerFeature = "computer_use";
+
+    /// <summary>Codex feature flags (<c>-c features.NAME=bool</c>) that carry the Browser Use and Computer Use choices.</summary>
+    public IReadOnlyDictionary<string, bool> CodexFeatures()
+    {
+        var features = new Dictionary<string, bool>(StringComparer.Ordinal);
+        if (NativeBrowser() is { } browser)
+        {
+            foreach (var name in CodexBrowserFeatures)
+            {
+                features[name] = browser;
+            }
+        }
+
+        if (NativeComputer() is { } computer)
+        {
+            features[CodexComputerFeature] = computer;
+        }
+
+        return features;
+    }
+
+    /// <summary>The Claude CLI's own tools a Block setting takes away (comma-separated), or null.</summary>
+    public string? ClaudeDisallowedTools()
+    {
+        var blocked = new List<string>();
+        if (BrowserMode == AgentToolMode.Block)
+        {
+            blocked.Add($"mcp__{ClaudeChromeServer}");
+        }
+
+        if (ComputerMode == AgentToolMode.Block)
+        {
+            blocked.Add($"mcp__{ClaudeComputerServer}");
+        }
+
+        return blocked.Count == 0 ? null : string.Join(',', blocked);
+    }
+
+    /// <summary>The three modes in one string, so a session can tell when they changed since it started.</summary>
+    public string ModesKey() => $"{FormatMode(BrowserMode)}|{FormatMode(ComputerMode)}|{FormatMode(PhoneMode)}";
 
     public bool PhoneAvailable => File.Exists(ExePath("Codale.Mcp.Phone"));
 
@@ -82,30 +174,36 @@ public sealed class McpServerSettings
 
     public bool ComputerAvailable => File.Exists(ExePath("Codale.Mcp.Computer"));
 
-    public const string TasksName = "codale-tasks";
-
     /// <summary>
-    /// Long-running commands are run by Codale itself, so the tasks server ships with
-    /// the app and is not a user preference: without it the agent's own background
+    /// Long-running commands are run by Codale itself, so the workspace servers ship with
+    /// the app and are not a user preference: without them the agent's own background
     /// shells stay allowed, because blocking them would leave no way to run a dev server.
     /// </summary>
     public bool TasksAvailable => File.Exists(ExePath("Codale.Mcp.Tasks"));
 
-    /// <summary>The tasks server, wired to this chat's pipe; the exe finds the app through its environment.</summary>
+    /// <summary>
+    /// Codale's workspace servers (<see cref="CodaleServers"/>: panel, command, terminal, memory, secret), each
+    /// the same exe started with <c>--server NAME</c> and wired to this chat's pipe. Empty when the exe did not ship.
+    /// </summary>
     /// <param name="runDirectory">Where the chat's tasks run; the command list itself is always the project's.</param>
     /// <param name="pushToPanel">For an agent CLI in a terminal, whose tool stream the app cannot read: todos_set and artifact_add are sent over the pipe.</param>
-    public McpServerSpec? TasksSpec(string pipeName, string token, string? runDirectory = null, bool pushToPanel = false) => !TasksAvailable
-        ? null
-        : new McpServerSpec
+    public IReadOnlyList<McpServerSpec> TaskServerSpecs(string pipeName, string token, string? runDirectory = null, bool pushToPanel = false)
+    {
+        if (!TasksAvailable)
         {
-            Name = TasksName,
-            Command = RunnablePath("Codale.Mcp.Tasks"),
+            return [];
+        }
 
-            // Codale's own server (task list, artifacts, background tasks): no approval prompt for it.
+        var command = RunnablePath("Codale.Mcp.Tasks");
+        return [.. CodaleServers.All.Select(name => new McpServerSpec
+        {
+            Name = name,
+            Command = command,
+            Args = ["--server", name],
+
+            // Codale's own servers: no approval prompt, except for the tools that run commands or save them.
             AutoApprove = true,
-
-            // Starting processes and saving commands reach beyond the sandbox, so these still ask.
-            AskTools = ["start_task", "run_command", "add_command"],
+            AskTools = CodaleServers.AskTools(name),
             Env = new Dictionary<string, string>
             {
                 ["CODALE_TASKS_PIPE"] = pipeName,
@@ -114,7 +212,8 @@ public sealed class McpServerSettings
                 ["CODALE_RUN_DIR"] = runDirectory ?? _projectPath,
                 ["CODALE_PANEL_PUSH"] = pushToPanel ? "1" : "0",
             },
-        };
+        })];
+    }
 
     /// <summary>The CLI's own task-list tools, switched off when todos_set is available so the panel has one source.</summary>
     public const string NativeTodoTools = "TodoWrite,TaskCreate,TaskUpdate,TaskList,TaskGet";
@@ -134,32 +233,32 @@ public sealed class McpServerSettings
     /// </remarks>
     public const string TasksDirective =
         "Background shells are refused here (run_in_background, &, Start-Job, nohup). For a dev server, watcher or any command " +
-        "that keeps running, call mcp__codale-tasks__start_task (read_task follows its output, stop_task ends it); quick commands run normally. " +
-        "Saved project commands: list_commands, add_command (saves only), run_command (runs one by name as a task). " +
-        "When the user's own terminal output matters, list_terminals then read_terminal (read-only). " +
-        "To view static files in a browser, serve_folder hosts them on http://localhost:PORT/ until stop_serving; do not start_task an http server for that. " +
-        "MANDATORY when a request needs tools: your FIRST action is mcp__codale-tasks__todos_set with the whole list (2-6 short steps, one in_progress), " +
+        "that keeps running, call mcp__codale-terminal__run_in_terminal: it opens a terminal tab the user watches (read_terminal follows its output, " +
+        "stop_terminal ends it); quick commands run normally. Saved project commands: mcp__codale-command__list_commands, add_command (saves only), " +
+        "run_command (runs one by name in a terminal tab). The user's own terminals: list_terminals then read_terminal (read-only). " +
+        "Workspace notes: codale-memory; stored secrets: codale-secret. " +
+        "MANDATORY when a request needs tools: your FIRST action is mcp__codale-panel__todos_set with the whole list (2-6 short steps, one in_progress), " +
         "called again as each step starts and when the last finishes. TodoWrite, TaskCreate and TaskUpdate are off; do not look for them. " +
-        "Deliverables that are not project source (report, document, image, data) go to mcp__codale-tasks__artifact_add (a path or markdown). " +
-        "If these tools are not loaded, load them with one ToolSearch (select:mcp__codale-tasks__todos_set,mcp__codale-tasks__artifact_add).";
+        "Deliverables that are not project source (report, document, image, data) go to mcp__codale-panel__artifact_add (a path or markdown). " +
+        "If these tools are not loaded, load them with one ToolSearch (select:mcp__codale-panel__todos_set,mcp__codale-panel__artifact_add).";
 
     /// <summary>The directive for a CLI with no ToolSearch (Codex): tool names vary by client, and a missing checklist tool must never block the work.</summary>
     public const string TasksDirectiveGeneric =
         "Background shells are refused here (run_in_background, &, Start-Job, nohup). For a dev server, watcher or any command " +
-        "that keeps running, call the codale-tasks start_task tool (read_task follows its output, stop_task ends it); quick commands run normally. " +
-        "Saved project commands: list_commands, add_command (saves only), run_command (runs one by name as a task). " +
-        "When the user's own terminal output matters, list_terminals then read_terminal (read-only). " +
-        "To view static files in a browser, serve_folder hosts them on http://localhost:PORT/ until stop_serving. " +
-        "When a request needs tools, report the step list with the codale-tasks todos_set tool (2-6 short steps, one in_progress) as each step starts and when the last finishes. " +
+        "that keeps running, call the codale-terminal run_in_terminal tool: it opens a terminal tab the user watches (read_terminal follows its output, " +
+        "stop_terminal ends it); quick commands run normally. Saved project commands: the codale-command list_commands, add_command (saves only) and " +
+        "run_command (runs one by name in a terminal tab) tools. The user's own terminals: list_terminals then read_terminal (read-only). " +
+        "Workspace notes: codale-memory; stored secrets: codale-secret. " +
+        "When a request needs tools, report the step list with the codale-panel todos_set tool (2-6 short steps, one in_progress) as each step starts and when the last finishes. " +
         "If todos_set is not available, skip it and do the work anyway: never stop or refuse because a checklist tool is missing. " +
-        "Deliverables that are not project source go to the codale-tasks artifact_add tool when available.";
+        "Deliverables that are not project source go to the codale-panel artifact_add tool when available.";
 
     /// <summary>The servers to attach to a session started now; a server whose exe did not ship is left out.</summary>
     public IReadOnlyList<McpServerSpec> Servers()
     {
         var servers = new List<McpServerSpec>();
 
-        if (BrowserEnabled && BrowserAvailable)
+        if (BrowserMode == AgentToolMode.Allow && BrowserAvailable)
         {
             servers.Add(new McpServerSpec
             {
@@ -175,7 +274,7 @@ public sealed class McpServerSettings
             });
         }
 
-        if (ComputerEnabled && ComputerAvailable)
+        if (ComputerMode == AgentToolMode.Allow && ComputerAvailable)
         {
             servers.Add(new McpServerSpec
             {
@@ -188,7 +287,7 @@ public sealed class McpServerSettings
             });
         }
 
-        if (PhoneEnabled && PhoneAvailable)
+        if (PhoneMode == AgentToolMode.Allow && PhoneAvailable)
         {
             servers.Add(new McpServerSpec
             {
@@ -277,7 +376,7 @@ public sealed class McpServerSettings
                 // Last, because --mcp-config takes any number of values and would swallow a trailing prompt.
                 "claude" => StageClaude(key, servers, tail, powershell),
                 "copilot" => $"copilot --additional-mcp-config {Quote(powershell, "@" + Stage("copilot", key, CopilotConfig(servers)))}{tail}",
-                "codex" => $"codex {CodexOverrides(powershell, servers)}{tail}",
+                "codex" => $"codex {CodexOverrides(powershell, servers)}{CodexFeatureOverrides(powershell)}{tail}",
                 "gemini" => WithEnv(powershell, "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
                     StageSettings("gemini", key, servers, Path.Combine(programData, "gemini-cli", "settings.json"), "GEMINI_CLI_SYSTEM_SETTINGS_PATH"),
                     "gemini" + tail),
@@ -315,6 +414,17 @@ public sealed class McpServerSettings
         sb.Append(Quote(powershell, configPath));
         sb.Append(" --settings ");
         sb.Append(Quote(powershell, settingsPath));
+        if (ClaudeChrome() is { } chrome)
+        {
+            sb.Append(chrome ? " --chrome" : " --no-chrome");
+        }
+
+        if (ClaudeDisallowedTools() is { } disallowed)
+        {
+            sb.Append(" --disallowedTools ");
+            sb.Append(Quote(powershell, disallowed));
+        }
+
         return sb.ToString();
     }
 
@@ -431,6 +541,10 @@ public sealed class McpServerSettings
         return string.Join(' ', parts);
     }
 
+    /// <summary>The Browser Use and Computer Use choices as Codex <c>-c features.*</c> overrides, each with a leading space.</summary>
+    private string CodexFeatureOverrides(bool powershell) =>
+        string.Concat(CodexFeatures().Select(f => $" -c {Quote(powershell, $"features.{f.Key}={(f.Value ? "true" : "false")}")}"));
+
     /// <summary>One argument, quoted for the shell the line was typed into.</summary>
     private static string Quote(bool powershell, string value) => powershell
         ? $"'{value.Replace("'", "''")}'"
@@ -496,7 +610,7 @@ public sealed class McpServerSettings
             }
 
             var map = doc[mapKey] as System.Text.Json.Nodes.JsonObject ?? new();
-            foreach (var key in map.Select(p => p.Key).Where(k => k.StartsWith("codale-", StringComparison.Ordinal)).ToList())
+            foreach (var key in map.Select(p => p.Key).Where(k => k.StartsWith("codale-", StringComparison.Ordinal) || OwnedNames.Contains(k)).ToList())
             {
                 map.Remove(key);
             }
@@ -604,9 +718,9 @@ public sealed class McpServerSettings
         {
             parts.Add(
                 $"You can control an Android phone or emulator over adb with the {McpServerSpec.PrefixOf(PhoneName)}* tools, to build and test " +
-                "mobile apps. MANDATORY: NEVER execute raw 'adb' commands via terminal or shell tools. Always use the codale-phone tools instead. " +
+                $"mobile apps. MANDATORY: NEVER execute raw 'adb' commands via terminal or shell tools. Always use the {PhoneName} tools instead. " +
                 "Call phone_devices first, and take a phone_screenshot or phone_ui_tree before every tap or swipe (coordinates are " +
-                "device pixels on the latest view). Build with the shell (e.g. gradlew installDebug; use start_task for long-running builds or " +
+                "device pixels on the latest view). Build with the shell (e.g. gradlew installDebug; use run_in_terminal for long-running builds or " +
                 "dev servers), install with phone_install, start the app with phone_launch_app and read phone_logcat for crashes before you " +
                 "report the work as done. phone_port_forward (reverse) lets the phone reach a dev server on this computer.");
         }
@@ -722,4 +836,17 @@ public sealed class McpServerSettings
             CopyDirectory(dir, Path.Combine(to, Path.GetFileName(dir)));
         }
     }
+}
+
+/// <summary>How an agent gets one kind of tool (browser, desktop, phone).</summary>
+public enum AgentToolMode
+{
+    /// <summary>Neither Codale's server nor the CLI's own equivalent.</summary>
+    Block,
+
+    /// <summary>Whatever the CLI itself brings (for Claude's browser: Claude in Chrome); Codale's server stays out.</summary>
+    CliDefault,
+
+    /// <summary>Codale's own MCP server.</summary>
+    Allow,
 }

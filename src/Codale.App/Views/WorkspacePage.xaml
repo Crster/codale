@@ -2110,27 +2110,29 @@
                                                 Glyph="&#xE774;"
                                                 Opacity="0.8" />
                                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
-                                                <TextBlock FontSize="13" FontWeight="SemiBold" Text="Browser" />
+                                                <TextBlock FontSize="13" FontWeight="SemiBold" Text="Browser Use" />
                                                 <TextBlock
                                                     FontSize="11.5"
                                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                    Text="{x:Bind ViewModel.McpTools.BrowserNote}"
+                                                    Text="{x:Bind ViewModel.McpTools.BrowserNote, Mode=OneWay}"
                                                     TextWrapping="Wrap" />
                                             </StackPanel>
-                                            <ToggleSwitch
+                                            <ComboBox
                                                 Grid.Column="2"
-                                                MinWidth="0"
+                                                MinWidth="118"
                                                 VerticalAlignment="Center"
-                                                IsEnabled="{x:Bind ViewModel.McpTools.BrowserAvailable}"
-                                                IsOn="{x:Bind ViewModel.McpTools.BrowserEnabled, Mode=TwoWay}"
-                                                OffContent=""
-                                                OnContent="" />
+                                                AutomationProperties.Name="Browser Use"
+                                                SelectedIndex="{x:Bind ViewModel.McpTools.BrowserMode, Mode=TwoWay}">
+                                                <ComboBoxItem Content="Block" />
+                                                <ComboBoxItem Content="CLI Default" />
+                                                <ComboBoxItem Content="Allow" />
+                                            </ComboBox>
                                         </Grid>
                                         <Button
                                             HorizontalAlignment="Stretch"
                                             Command="{x:Bind ViewModel.McpTools.OpenBrowserCommand}"
                                             Content="Open browser"
-                                            IsEnabled="{x:Bind ViewModel.McpTools.BrowserAvailable}" />
+                                            IsEnabled="{x:Bind ViewModel.McpTools.CanOpenBrowser, Mode=OneWay}" />
                                         <TextBlock
                                             FontSize="11.5"
                                             Foreground="{ThemeResource SystemFillColorCriticalBrush}"
@@ -2243,21 +2245,23 @@
                                             Glyph="&#xE7F4;"
                                             Opacity="0.8" />
                                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
-                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="Desktop" />
+                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="Computer Use" />
                                             <TextBlock
                                                 FontSize="11.5"
                                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                Text="{x:Bind ViewModel.McpTools.ComputerNote}"
+                                                Text="{x:Bind ViewModel.McpTools.ComputerNote, Mode=OneWay}"
                                                 TextWrapping="Wrap" />
                                         </StackPanel>
-                                        <ToggleSwitch
+                                        <ComboBox
                                             Grid.Column="2"
-                                            MinWidth="0"
+                                            MinWidth="118"
                                             VerticalAlignment="Center"
-                                            IsEnabled="{x:Bind ViewModel.McpTools.ComputerAvailable}"
-                                            IsOn="{x:Bind ViewModel.McpTools.ComputerEnabled, Mode=TwoWay}"
-                                            OffContent=""
-                                            OnContent="" />
+                                            AutomationProperties.Name="Computer Use"
+                                            SelectedIndex="{x:Bind ViewModel.McpTools.ComputerMode, Mode=TwoWay}">
+                                            <ComboBoxItem Content="Block" />
+                                            <ComboBoxItem Content="CLI Default" />
+                                            <ComboBoxItem Content="Allow" />
+                                        </ComboBox>
                                     </Grid>
 
                                     <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
@@ -2275,21 +2279,23 @@
                                             Glyph="&#xE8EA;"
                                             Opacity="0.8" />
                                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
-                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="Android" />
+                                            <TextBlock FontSize="13" FontWeight="SemiBold" Text="Phone Use" />
                                             <TextBlock
                                                 FontSize="11.5"
                                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                Text="{x:Bind ViewModel.McpTools.PhoneNote}"
+                                                Text="{x:Bind ViewModel.McpTools.PhoneNote, Mode=OneWay}"
                                                 TextWrapping="Wrap" />
                                         </StackPanel>
-                                        <ToggleSwitch
+                                        <ComboBox
                                             Grid.Column="2"
-                                            MinWidth="0"
+                                            MinWidth="118"
                                             VerticalAlignment="Center"
-                                            IsEnabled="{x:Bind ViewModel.McpTools.PhoneAvailable}"
-                                            IsOn="{x:Bind ViewModel.McpTools.PhoneEnabled, Mode=TwoWay}"
-                                            OffContent=""
-                                            OnContent="" />
+                                            AutomationProperties.Name="Phone Use"
+                                            SelectedIndex="{x:Bind ViewModel.McpTools.PhoneMode, Mode=TwoWay}">
+                                            <ComboBoxItem Content="Block" />
+                                            <ComboBoxItem Content="CLI Default" />
+                                            <ComboBoxItem Content="Allow" />
+                                        </ComboBox>
                                     </Grid>
                                 </StackPanel>
                             </Flyout>

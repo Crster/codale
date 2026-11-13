@@ -395,12 +395,27 @@ public sealed partial class EditorTab : UserControl
         var name = path is null ? null : root is null ? Path.GetFileName(path) : Path.GetRelativePath(root, path);
         var directory = root ?? (path is null ? Environment.CurrentDirectory : Path.GetDirectoryName(path)!);
         var raw = await smart.FillInMiddleAsync(new(directory, directory, "completion"), header + prefix, suffix, name, rejected, ct);
-        if (raw is null)
+        if (raw is null || IsChatReply(raw))
         {
             return null;
         }
 
-        return raw;
+        // The caret already sits after an indent or a space: the model's own leading whitespace would double it.
+        if (prefix.Length > 0 && prefix[^1] is ' ' or '\t')
+        {
+            raw = raw.TrimStart(' ', '\t');
+        }
+
+        return raw.Trim().Length == 0 ? null : raw;
+    }
+
+    /// <summary>An instruct model that answered instead of inserting ("Sure, here is…", a fenced block). Comments and strings in code are fine.</summary>
+    private static bool IsChatReply(string raw)
+    {
+        var first = raw.Replace("\r\n", "\n").TrimStart('\n', ' ', '\t').Split('\n')[0];
+        return raw.Contains("```", StringComparison.Ordinal) || raw.Contains("<think>", StringComparison.Ordinal) ||
+            System.Text.RegularExpressions.Regex.IsMatch(first, @"^(Sure|Certainly|Here('s| is)|It looks like|I('ll| will| can)|Let me)\b",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     }
 
     private string _relatedKey = "";

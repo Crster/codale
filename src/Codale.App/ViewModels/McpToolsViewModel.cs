@@ -16,7 +16,7 @@ using Windows.ApplicationModel.DataTransfer;
 namespace Codale.App.ViewModels;
 
 /// <summary>
-/// The built-in MCP servers as the status bar flyout toggles them. A toggle lands in
+/// The built-in MCP servers as the status bar flyout sets them (Block, CLI Default, Allow). A change lands in
 /// the store at once and reaches the next spawned session.
 /// </summary>
 public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
@@ -116,43 +116,54 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
 
     public void Dispose() => _servers.Changed -= OnServersChanged;
 
+    /// <summary>The Browser Use dropdown's index; its items are in <see cref="AgentToolMode"/> order (Block, CLI Default, Allow).</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Summary))]
-    public partial bool BrowserEnabled { get; set; }
+    [NotifyPropertyChangedFor(nameof(Summary), nameof(BrowserNote), nameof(CanOpenBrowser))]
+    public partial int BrowserMode { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Summary))]
-    public partial bool ComputerEnabled { get; set; }
+    [NotifyPropertyChangedFor(nameof(Summary), nameof(ComputerNote))]
+    public partial int ComputerMode { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Summary))]
-    public partial bool PhoneEnabled { get; set; }
+    [NotifyPropertyChangedFor(nameof(Summary), nameof(PhoneNote))]
+    public partial int PhoneMode { get; set; }
 
     public bool PhoneAvailable => _settings.PhoneAvailable;
-
-    public string PhoneNote => PhoneAvailable
-        ? "Use an Android device or emulator"
-        : "Not installed with this build.";
 
     public bool BrowserAvailable => _settings.BrowserAvailable;
 
     public bool ComputerAvailable => _settings.ComputerAvailable;
 
+    /// <summary>"Open browser" opens the window Codale's browser server attaches to, so it only matters on Allow.</summary>
+    public bool CanOpenBrowser => BrowserAvailable && (AgentToolMode)BrowserMode == AgentToolMode.Allow;
+
     /// <summary>The status bar button's text: what the agents can reach.</summary>
     public string Summary => string.Join(" + ", new[]
     {
-        BrowserEnabled ? "Browser" : null,
-        ComputerEnabled ? "Desktop" : null,
-        PhoneEnabled ? "Phone" : null,
+        BrowserMode != (int)AgentToolMode.Block ? "Browser" : null,
+        ComputerMode != (int)AgentToolMode.Block ? "Desktop" : null,
+        PhoneMode != (int)AgentToolMode.Block ? "Phone" : null,
     }.OfType<string>());
 
-    public string BrowserNote => BrowserAvailable
-        ? "Browse and check web pages"
-        : "Not installed with this build.";
+    public string BrowserNote => Note(BrowserMode, BrowserAvailable,
+        "Codale's browser: browse and check web pages",
+        "The CLI's own: Claude in Chrome or Codex's browser");
 
-    public string ComputerNote => ComputerAvailable
-        ? "Use the mouse and keyboard"
-        : "Not installed with this build.";
+    public string ComputerNote => Note(ComputerMode, ComputerAvailable,
+        "Codale's desktop control: mouse and keyboard",
+        "The CLI's own computer use (Codex, or Claude's if set up)");
+
+    public string PhoneNote => Note(PhoneMode, PhoneAvailable,
+        "Codale's adb tools: an Android device or emulator",
+        "Neither CLI has phone tools of its own");
+
+    private static string Note(int mode, bool available, string allow, string cliDefault) => (AgentToolMode)mode switch
+    {
+        AgentToolMode.Allow => available ? allow : "Codale's server is not installed with this build.",
+        AgentToolMode.CliDefault => cliDefault,
+        _ => "Off for agents",
+    };
 
     /// <summary>
     /// Must match <c>McpDefaults.BrowserAttachPort</c> (Codale.Mcp.Common), which the browser
@@ -198,33 +209,34 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
     public void Reload()
     {
         _loading = true;
-        BrowserEnabled = _settings.BrowserEnabled;
-        ComputerEnabled = _settings.ComputerEnabled;
-        PhoneEnabled = _settings.PhoneEnabled;
+        BrowserMode = (int)_settings.BrowserMode;
+        ComputerMode = (int)_settings.ComputerMode;
+        PhoneMode = (int)_settings.PhoneMode;
         _loading = false;
     }
 
-    partial void OnBrowserEnabledChanged(bool value)
+    // A ComboBox reports -1 while its items are swapped; that is not a choice.
+    partial void OnBrowserModeChanged(int value)
     {
-        if (!_loading)
+        if (!_loading && value >= 0)
         {
-            _settings.BrowserEnabled = value;
+            _settings.BrowserMode = (AgentToolMode)value;
         }
     }
 
-    partial void OnComputerEnabledChanged(bool value)
+    partial void OnComputerModeChanged(int value)
     {
-        if (!_loading)
+        if (!_loading && value >= 0)
         {
-            _settings.ComputerEnabled = value;
+            _settings.ComputerMode = (AgentToolMode)value;
         }
     }
 
-    partial void OnPhoneEnabledChanged(bool value)
+    partial void OnPhoneModeChanged(int value)
     {
-        if (!_loading)
+        if (!_loading && value >= 0)
         {
-            _settings.PhoneEnabled = value;
+            _settings.PhoneMode = (AgentToolMode)value;
         }
     }
 }

@@ -26,9 +26,12 @@ internal sealed class ComposerPredictor(string projectRoot)
     private const int MinCompletionPrefix = 2;
     private const int MinCorrectionLength = 3;
 
+    private const int MinModelPrompt = 12;
+
     private readonly Lock _gate = new();
     private (string Text, int Caret, Action<ComposerPrediction?> Done)? _pending;
     private bool _running;
+    private CancellationTokenSource? _model;
 
     /// <summary>
     /// Predicts for <paramref name="text"/> with the caret at <paramref name="caret"/> in the background;
@@ -38,6 +41,9 @@ internal sealed class ComposerPredictor(string projectRoot)
     {
         lock (_gate)
         {
+            // A newer keystroke supersedes a model continuation still waiting for its pause or answer.
+            _model?.Cancel();
+            _model = null;
             _pending = (text, caret, done);
             if (_running)
             {
@@ -83,10 +89,48 @@ internal sealed class ComposerPredictor(string projectRoot)
                 stale = _pending is not null;
             }
 
-            if (!stale)
+            if (stale)
             {
-                next.Done(prediction);
+                continue;
             }
+
+            if (prediction is null && WantsModel(next.Text, next.Caret))
+            {
+                // Nothing in the workspace vocabulary: after a pause, the Auto Complete (or Decision) model continues the prompt.
+                var cancel = new CancellationTokenSource();
+                lock (_gate)
+                {
+                    _model = cancel;
+                }
+
+                _ = ContinueAsync(next.Text, next.Caret, next.Done, cancel);
+                continue;
+            }
+
+            next.Done(prediction);
+        }
+    }
+
+    /// <summary>Only a prompt with some substance, at its end, after a finished word.</summary>
+    private static bool WantsModel(string text, int caret) =>
+        caret == text.Length && text.Length > 0 && text[^1] == ' ' && text.Trim().Length >= MinModelPrompt &&
+        SmartInlineCompletion.IsEnabled("compose-completion");
+
+    private async Task ContinueAsync(string text, int caret, Action<ComposerPrediction?> done, CancellationTokenSource cancel)
+    {
+        using (cancel)
+        {
+            var prefix = "A developer's message to an AI coding agent working in this project:\n\n" + text;
+            var continuation = await SmartInlineCompletion.SuggestAsync("compose-completion", projectRoot, prefix, cancel.Token).ConfigureAwait(false);
+            lock (_gate)
+            {
+                // Released before disposal, so a later keystroke never cancels a disposed source.
+                if (ReferenceEquals(_model, cancel)) _model = null;
+                if (cancel.IsCancellationRequested || _pending is not null) return;
+            }
+
+            continuation = continuation?.TrimStart();
+            done(continuation is { Length: > 0 } ? new ComposerPrediction(caret, 0, continuation, IsCorrection: false) : null);
         }
     }
 

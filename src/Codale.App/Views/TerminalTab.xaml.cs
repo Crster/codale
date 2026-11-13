@@ -373,7 +373,7 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(TerminalViewModel.State))
+        if (e.PropertyName is nameof(TerminalViewModel.State) or nameof(TerminalViewModel.ShellPreference))
         {
             UpdateContext();
         }
@@ -388,8 +388,162 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
         }
 
         CwdText.Text = CommandBlockView.ShortPath(viewModel.State.Cwd);
-        ToolTipService.SetToolTip(CwdText, viewModel.State.Cwd);
-        ShellText.Text = TerminalLook.ShellLabel;
+        ToolTipService.SetToolTip(CwdButton, $"{viewModel.State.Cwd}\nClick to change folder.");
+        ShellText.Text = viewModel.ShellName;
+    }
+
+    // ------------------------------------------------------------------ folder and shell
+
+    /// <summary>
+    /// The folder menu: the parent, the subfolders of where the next command runs, the project root,
+    /// and a picker for any folder. Moving only changes where new commands start.
+    /// </summary>
+    private void OnCwdClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel is not { } viewModel)
+        {
+            return;
+        }
+
+        var cwd = viewModel.State.Cwd;
+        var menu = new MenuFlyout { Placement = FlyoutPlacementMode.TopEdgeAlignedLeft };
+        MenuFlyoutItem Item(string text, string glyph, string? path, Action? action = null)
+        {
+            var item = new MenuFlyoutItem { Text = text, Icon = new FontIcon { Glyph = glyph } };
+            if (path is not null)
+            {
+                ToolTipService.SetToolTip(item, path);
+            }
+
+            item.Click += (_, _) =>
+            {
+                if (action is not null)
+                {
+                    action();
+                }
+                else if (path is not null)
+                {
+                    MoveTo(path);
+                }
+            };
+            return item;
+        }
+
+        if (Directory.GetParent(cwd) is { } parent)
+        {
+            menu.Items.Add(Item(".. (up one folder)", "", parent.FullName));
+        }
+
+        if (!string.Equals(Path.TrimEndingDirectorySeparator(cwd), Path.TrimEndingDirectorySeparator(viewModel.HistoryKey), StringComparison.OrdinalIgnoreCase))
+        {
+            menu.Items.Add(Item("Back to the start folder", "", viewModel.HistoryKey));
+        }
+
+        var subfolders = Subfolders(cwd);
+        if (subfolders.Count > 0)
+        {
+            menu.Items.Add(new MenuFlyoutSeparator());
+            var shown = subfolders.Take(25).ToList();
+            foreach (var folder in shown)
+            {
+                menu.Items.Add(Item(Path.GetFileName(folder), "", folder));
+            }
+
+            if (subfolders.Count > shown.Count)
+            {
+                menu.Items.Add(new MenuFlyoutItem { Text = $"{subfolders.Count - shown.Count} more - use Browse", IsEnabled = false });
+            }
+        }
+
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(Item("Browse for a folder...", "", null, () => _ = BrowseFolderAsync()));
+        menu.Items.Add(Item("Open in File Explorer", "", null, () => _ = Launcher.LaunchFolderPathAsync(cwd)));
+        menu.Items.Add(Item("Copy path", "", null, () => _ = ClipboardWriter.SetTextAsync(cwd)));
+        menu.ShowAt(CwdButton);
+    }
+
+    private static List<string> Subfolders(string cwd)
+    {
+        try
+        {
+            return new DirectoryInfo(cwd)
+                .EnumerateDirectories()
+                .Where(d => (d.Attributes & (FileAttributes.Hidden | FileAttributes.System)) == 0 && !d.Name.StartsWith('.'))
+                .Select(d => d.FullName)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return [];
+        }
+    }
+
+    private async Task BrowseFolderAsync()
+    {
+        try
+        {
+            var picker = new Windows.Storage.Pickers.FolderPicker { SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.ComputerFolder };
+            picker.FileTypeFilter.Add("*");
+            if (App.Current.MainWindowHandle is { } hwnd)
+            {
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+            }
+
+            if (await picker.PickSingleFolderAsync() is { } folder)
+            {
+                MoveTo(folder.Path);
+            }
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private void MoveTo(string path)
+    {
+        if (_viewModel?.ChangeDirectory(path) == true)
+        {
+            Input.Focus(FocusState.Programmatic);
+        }
+    }
+
+    /// <summary>The shell menu: the installed shells, checked on the one new commands run under.</summary>
+    private void OnShellClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel is not { } viewModel)
+        {
+            return;
+        }
+
+        var menu = new MenuFlyout { Placement = FlyoutPlacementMode.TopEdgeAlignedRight };
+        var current = viewModel.ShellPath;
+        foreach (var (id, label, path) in Codale.Terminal.TerminalSession.InstalledShells())
+        {
+            var item = new RadioMenuFlyoutItem
+            {
+                Text = label,
+                GroupName = "shell",
+                IsChecked = string.Equals(path, current, StringComparison.OrdinalIgnoreCase),
+            };
+            ToolTipService.SetToolTip(item, path);
+            item.Click += (_, _) =>
+            {
+                viewModel.ShellPreference = id;
+                Input.Focus(FocusState.Programmatic);
+            };
+            menu.Items.Add(item);
+        }
+
+        if (viewModel.ShellPreference is not null)
+        {
+            menu.Items.Add(new MenuFlyoutSeparator());
+            var reset = new MenuFlyoutItem { Text = "Use the Settings default", Icon = new FontIcon { Glyph = "" } };
+            reset.Click += (_, _) => viewModel.ShellPreference = null;
+            menu.Items.Add(reset);
+        }
+
+        menu.ShowAt(ShellButton);
     }
 
     // ------------------------------------------------------------------ target
@@ -457,14 +611,15 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
         }
 
         if (_translatingCommand) return;
-        if (AppSettings.SmartFeatureEnabled("shell"))
+        // Smart translates plain-language requests only; a command is run exactly as typed.
+        if (AppSettings.SmartFeatureEnabled("shell") && !Codale.Core.Shell.ShellCommandClassifier.IsShellCommand(text, viewModel.State.Cwd))
         {
             _translatingCommand = true;
             Input.IsEnabled = false;
             try
             {
                 var cwd = viewModel.State.Cwd;
-                var shell = Codale.Terminal.TerminalSession.ResolveShell(AppSettings.TerminalShell);
+                var shell = viewModel.ShellPath;
                 var translated = await SmartExperienceHost.Instance.ShellCommandAsync(
                     new(cwd, cwd, "shell"), text, shell);
                 if (translated?.Value is not { Length: > 0 } command)
@@ -473,11 +628,11 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
                     return;
                 }
                 if (!IsLoaded || !ReferenceEquals(_viewModel, viewModel)) return;
-                text = command;
+                text = Codale.Core.Shell.ShellCommandClassifier.StripShellPrefix(command);
             }
             catch (Exception)
             {
-                Input.PlaceholderText = "Smart could not translate this request. Check Developer Tools settings.";
+                Input.PlaceholderText = "Smart could not translate this request. Check Smart Features settings.";
                 return;
             }
             finally
@@ -631,6 +786,34 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
             .Where(s => !string.Equals(s, typed, StringComparison.Ordinal))
             .Take(5)
             .ToList();
+        _suggestionIndex = 0;
+        RenderSuggestions();
+        RequestSmartCompletion(viewModel, typed);
+    }
+
+    private CancellationTokenSource? _smartCompletion;
+
+    /// <summary>
+    /// History first; when it has nothing for a command being typed, the Auto Complete model (or Decision) offers one
+    /// line after a pause. Plain-language input is left to the Run shell parser on Enter.
+    /// </summary>
+    private async void RequestSmartCompletion(TerminalViewModel viewModel, string typed)
+    {
+        _smartCompletion?.Cancel();
+        _smartCompletion = null;
+        if (_suggestions.Count > 0 || typed.Trim().Length < 2 || !SmartInlineCompletion.IsEnabled("shell-completion")) return;
+        var cwd = viewModel.State.Cwd;
+        if (!Codale.Core.Shell.ShellCommandClassifier.IsShellCommand(typed, cwd)) return;
+        using var cancel = new CancellationTokenSource();
+        _smartCompletion = cancel;
+        var recent = CommandHistory.Recent(viewModel.HistoryKey).Take(8).Reverse();
+        var prefix = $"# Shell: {Path.GetFileNameWithoutExtension(viewModel.ShellPath)} on Windows\n# Directory: {cwd}\n" +
+            string.Concat(recent.Select(c => $"> {c}\n")) + "> " + typed;
+        var rest = await SmartInlineCompletion.SuggestAsync("shell-completion", cwd, prefix, cancel.Token);
+        if (ReferenceEquals(_smartCompletion, cancel)) _smartCompletion = null;
+        if (cancel.IsCancellationRequested || rest is not { Length: > 0 } || !IsLoaded || !ReferenceEquals(_viewModel, viewModel) ||
+            !string.Equals(Input.Text, typed, StringComparison.Ordinal) || _suggestions.Count > 0) return;
+        _suggestions = [typed + rest];
         _suggestionIndex = 0;
         RenderSuggestions();
     }

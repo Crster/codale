@@ -7,7 +7,7 @@ public sealed class SmartStatusTrackerTests
     private static SmartStatusTracker Create()
     {
         var tracker = new SmartStatusTracker();
-        tracker.Configure(SmartFeatureSettings.Groups.Select(g => (g.Id, true, (string?)null)));
+        tracker.Configure(SmartFeatureSettings.Roles.Select(r => (r.Id, true, (string?)null)));
         return tracker;
     }
 
@@ -29,15 +29,15 @@ public sealed class SmartStatusTrackerTests
     public void Error_survives_other_feature_success_and_cancellation_until_successful_retry()
     {
         var tracker = Create();
-        tracker.Start("a", "shell"); tracker.Finish("a", "error", "HTTP 401");
+        tracker.Start("a", "completion"); tracker.Finish("a", "error", "HTTP 401");
         tracker.Start("b", "summary");
         Assert.Equal("Smart: Processing", tracker.Snapshot().Text);
         tracker.Finish("b", "completed");
-        tracker.Start("c", "shell"); tracker.Finish("c", "cancelled");
+        tracker.Start("c", "completion"); tracker.Finish("c", "cancelled");
         Assert.Equal("Smart: Error", tracker.Snapshot().Text);
         Assert.True(tracker.Snapshot().Visible);
         Assert.Contains("HTTP 401", tracker.Snapshot().Detail);
-        tracker.Start("d", "shell"); tracker.Finish("d", "completed");
+        tracker.Start("d", "completion"); tracker.Finish("d", "completed");
         Assert.Equal("Smart: Idle", tracker.Snapshot().Text);
     }
 
@@ -57,5 +57,18 @@ public sealed class SmartStatusTrackerTests
         tracker.Finish("new", "completed");
         Assert.Equal("Smart: Off", tracker.Snapshot().Text);
         Assert.True(tracker.Snapshot().Visible);
+    }
+
+    [Fact]
+    public void Text_tasks_report_on_general_and_decide_needs_the_decision_role()
+    {
+        var tracker = new SmartStatusTracker();
+        tracker.Configure([("general", true, (string?)null), ("decision", false, (string?)null)]);
+        tracker.Start("off", "decide");
+        Assert.Equal("Smart: Idle", tracker.Snapshot().Text);
+        tracker.Start("a", "shell");
+        tracker.Finish("a", "error", "HTTP 500");
+        Assert.Contains("General: Error", tracker.Snapshot().Detail);
+        Assert.DoesNotContain("Decision", tracker.Snapshot().Detail);
     }
 }

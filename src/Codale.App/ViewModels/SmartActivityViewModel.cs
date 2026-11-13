@@ -69,6 +69,12 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
         "routing" => "Choosing the best agent",
         "context" => "Finding relevant code",
         "summary" => "Summarizing files",
+        "title" => "Naming the session",
+        "keywords" => "Choosing search keywords",
+        "commit" => "Writing a commit message",
+        "shell" => "Translating to a shell command",
+        "assess" => "Checking a command",
+        "completion" or "compose-completion" or "shell-completion" => "Suggesting a completion",
         "" => "Task",
         _ => char.ToUpperInvariant(task[0]) + task[1..]
     };

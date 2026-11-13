@@ -151,75 +151,26 @@ public sealed partial class SessionsViewModel : ObservableObject
         }
     }
 
-    private List<TranscriptSummary> ReadRows()
-    {
-        var readers = new Dictionary<(string, string), Dictionary<string, TranscriptSummary>>();
-
-        return _features.List()
-            .Select(f =>
-            {
-                var mapping = _features.ProviderSession(f.Id);
-                var provider = mapping?.Provider;
-                return new TranscriptSummary
-                {
-                    SessionId = f.Id,
-                    FilePath = "",
-                    StartedAt = f.CreatedAt,
-                    UpdatedAt = f.UpdatedAt,
-                    CustomTitle = NativeTitle(readers, mapping, f.Name, f.Description) ?? f.Name,
-                    FirstPrompt = f.Description,
-                    Detail = provider is not null ? provider == "codex" ? "Codex" : provider == "claude" ? "Claude" : provider : "Session",
-                };
-            })
-            .ToList();
-    }
-
     /// <summary>
-    /// The title the CLI stored for a feature's session, but only while the feature still carries the
-    /// name cut from its prompt: a name the user or the router chose is kept.
+    /// One row per history. Its title is Codale's own name for it, which follows the latest prompt
+    /// (see ChatViewModel.RenameSessionFromPrompt); the CLIs' stored session titles are not used.
     /// </summary>
-    private static string? NativeTitle(
-        Dictionary<(string, string), Dictionary<string, TranscriptSummary>> readers, ProviderSession? mapping, string name, string description)
-    {
-        if (mapping is null || string.IsNullOrWhiteSpace(mapping.ProviderSessionId))
+    private List<TranscriptSummary> ReadRows() => _features.List()
+        .Select(f =>
         {
-            return null;
-        }
-
-        var stem = name.TrimEnd('…', '.', ' ');
-        if (stem.Length == 0 || !description.Contains(stem, StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        var key = (mapping.Provider, mapping.Worktree);
-        if (!readers.TryGetValue(key, out var byId))
-        {
-            byId = [];
-            try
+            var provider = _features.ProviderSession(f.Id)?.Provider;
+            return new TranscriptSummary
             {
-                // Codale runs the CLI under its own account home (or a profile's), not the terminal's default:
-                // the session's transcript and title live in whichever of them started it.
-                foreach (var accountId in CodaleAccount.AccountIds(mapping.Provider))
-                {
-                    var home = CodaleAccount.ProfileHome(mapping.Provider, accountId);
-                    foreach (var s in CliResume.CreateReader(mapping.Provider, mapping.Worktree, home)?.ListSessions() ?? [])
-                    {
-                        byId.TryAdd(s.SessionId, s);
-                    }
-                }
-            }
-            catch (IOException)
-            {
-            }
-
-            readers[key] = byId;
-        }
-
-        return byId.TryGetValue(mapping.ProviderSessionId, out var hit) && !string.IsNullOrWhiteSpace(hit.CustomTitle)
-            ? hit.CustomTitle
-            : null;
-    }
+                SessionId = f.Id,
+                FilePath = "",
+                StartedAt = f.CreatedAt,
+                UpdatedAt = f.UpdatedAt,
+                CustomTitle = f.Name,
+                FirstPrompt = f.Description,
+                Detail = provider is not null ? provider == "codex" ? "Codex" : provider == "claude" ? "Claude" : provider : "Session",
+            };
+        })
+        .ToList();
 
     /// <summary>Renames a feature.</summary>
     public async Task RetitleAsync(SessionListItem item, string title)

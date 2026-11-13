@@ -40,20 +40,37 @@
                     </Grid.ColumnDefinitions>
 
                     <!--  Where the command will run, and which running command a line goes to while one is targeted.  -->
-                    <StackPanel VerticalAlignment="Top" Orientation="Horizontal" Spacing="7" Margin="0,3,0,0">
-                        <FontIcon
-                            Width="14"
+                    <StackPanel VerticalAlignment="Top" Orientation="Horizontal" Spacing="7" Margin="0,1,0,0">
+                        <!--  The folder: click to move to a subfolder, the parent, or any folder.  -->
+                        <Button
+                            x:Name="CwdButton"
+                            Height="22"
+                            Padding="4,0,6,0"
                             VerticalAlignment="Center"
-                            FontSize="10"
-                            Foreground="#505058"
-                            Glyph="&#xE8B7;" />
-                        <TextBlock
-                            x:Name="CwdText"
-                            MaxWidth="320"
-                            VerticalAlignment="Center"
-                            FontSize="11.5"
-                            Foreground="#808088"
-                            TextTrimming="CharacterEllipsis" />
+                            AutomationProperties.Name="Change folder"
+                            Click="OnCwdClick"
+                            Style="{StaticResource ShellTextButton}">
+                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                <FontIcon
+                                    Width="14"
+                                    VerticalAlignment="Center"
+                                    FontSize="10"
+                                    Foreground="#505058"
+                                    Glyph="&#xE8B7;" />
+                                <TextBlock
+                                    x:Name="CwdText"
+                                    MaxWidth="320"
+                                    VerticalAlignment="Center"
+                                    FontSize="11.5"
+                                    Foreground="#808088"
+                                    TextTrimming="CharacterEllipsis" />
+                                <FontIcon
+                                    VerticalAlignment="Center"
+                                    FontSize="7"
+                                    Foreground="#505058"
+                                    Glyph="&#xE70D;" />
+                            </StackPanel>
+                        </Button>
                         <Button
                             x:Name="TargetChip"
                             Height="20"
@@ -112,13 +129,31 @@
                         </TextBox.Resources>
                     </TextBox>
 
-                    <TextBlock
-                        x:Name="ShellText"
+                    <!--  The shell new commands run under: click to switch it for this tab.  -->
+                    <Button
+                        x:Name="ShellButton"
                         Grid.Column="2"
-                        Margin="0,3,10,0"
+                        Height="22"
+                        Margin="0,1,6,0"
+                        Padding="6,0"
                         VerticalAlignment="Top"
-                        FontSize="11.5"
-                        Foreground="#505058" />
+                        AutomationProperties.Name="Change shell"
+                        Click="OnShellClick"
+                        Style="{StaticResource ShellTextButton}"
+                        ToolTipService.ToolTip="The shell new commands run under. Click to switch.">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock
+                                x:Name="ShellText"
+                                VerticalAlignment="Center"
+                                FontSize="11.5"
+                                Foreground="#808088" />
+                            <FontIcon
+                                VerticalAlignment="Center"
+                                FontSize="7"
+                                Foreground="#505058"
+                                Glyph="&#xE70D;" />
+                        </StackPanel>
+                    </Button>
                 </Grid>
 
                 <!--  Commands from this project's history that start like what is typed; Tab takes the highlighted one.  -->

@@ -81,14 +81,6 @@ public sealed partial class TaskPeekPane : UserControl
             Transcript.Changed += OnTranscriptChanged;
         }
 
-        if (task.Hosted is { } hosted)
-        {
-            // Rebuild from the process's own buffer so the pane never depends on the 250 ms copy having run.
-            var (text, next) = hosted.Read(0);
-            task.Output = "";
-            task.AppendOutput(text);
-            task.HostOffset = next;
-        }
 
         Refresh(stickToEnd: true);
         StartTailing();
@@ -368,7 +360,7 @@ public sealed partial class TaskPeekPane : UserControl
         }
 
         var waiting = _task.IsShell && _task.Output.Length == 0 && _task.IsRunning
-            ? _task.OutputPath is null && _task.Hosted is null && _task.RuntimeId is null ? " · no output file reported" : " · waiting for output"
+            ? _task.OutputPath is null && _task.RuntimeId is null ? " · no output file reported" : " · waiting for output"
             : "";
         var termination = !_task.IsShell ? ""
             : _task.IsStopping ? " · stopping…"

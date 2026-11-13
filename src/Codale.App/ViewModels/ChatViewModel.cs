@@ -466,18 +466,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private readonly Dictionary<string, RunningTaskItem> _tasksByToolUse = [];
 
-    // Commands Codale itself runs for the agent (codale-tasks). One host per chat, kept
-    // across session restarts (DisposeSessionAsync) so a dev server survives a model
-    // switch; it dies with the chat (DisposeAsync), or when the conversation is reset.
-    private HostedTaskManager? _taskManager;
+    // The pipe Codale's workspace MCP servers reach this chat through (terminals, commands, the panel).
+    // One per chat, kept across session restarts (DisposeSessionAsync); it ends with the chat (DisposeAsync),
+    // or when the conversation is reset. Commands the agent runs live in terminal tabs, not here.
     private TaskPipeServer? _taskPipe;
-    private string? _taskManagerDir;
-    private DispatcherQueueTimer? _hostedTimer;
 
     /// <summary>The workspace's terminal tabs, readable by the agent's terminal tools; null for a chat without a workspace.</summary>
     public ITerminalSource? Terminals { get; init; }
 
-    /// <summary>The workspace's localhost folder servers, reached by the agent's serve_folder tool.</summary>
+    /// <summary>The workspace's localhost folder servers, started from the Agent tools flyout.</summary>
     public Codale.Core.Serving.FolderServerHost? FolderServers { get; init; }
 
     private string? _lastUserPrompt;
@@ -486,20 +483,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public string? LastUserPrompt =>
         _lastUserPrompt ?? Items.OfType<UserMessageItem>().LastOrDefault(m => !string.IsNullOrWhiteSpace(m.Text))?.Text;
 
-    /// <summary>The pipe and secret the codale-tasks MCP exe uses to reach this chat's manager, created on first use.</summary>
+    /// <summary>The pipe and secret Codale's workspace MCP servers use to reach this chat, created on first use.</summary>
     private (string Pipe, string Token)? EnsureTaskHost(string workingDirectory)
     {
-        if (_taskManager is not null && !string.Equals(_taskManagerDir, workingDirectory, StringComparison.OrdinalIgnoreCase))
+        if (_taskPipe is null)
         {
-            StopTaskHost(); // the project moved: its tasks belong to the old folder
-        }
-
-        if (_taskManager is null)
-        {
-            _taskManager = new HostedTaskManager(workingDirectory);
-            _taskManagerDir = workingDirectory;
-            _taskManager.TaskStarted += task => _dispatcher.TryEnqueue(() => OnHostedTaskStarted(task));
-            _taskPipe = new TaskPipeServer(new LocalTaskService(_taskManager, Terminals, FolderServers));
+            _taskPipe = new TaskPipeServer(new LocalTaskService(Terminals));
 
             // An agent CLI in a terminal reports its task list and artifacts here (see ServersForTerminalCli).
             _taskPipe.PanelPublished = (kind, input) => _dispatcher.TryEnqueue(() =>
@@ -534,9 +523,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         var workingDirectory = _projectPath;
         if (_mcpSettings.TasksAvailable &&
             EnsureTaskHost(workingDirectory) is { } host &&
-            _mcpSettings.TasksSpec(host.Pipe, host.Token, workingDirectory, pushToPanel: true) is { } tasks)
+            _mcpSettings.TaskServerSpecs(host.Pipe, host.Token, workingDirectory, pushToPanel: true) is { Count: > 0 } tasks)
         {
-            servers = [.. servers, tasks];
+            servers = [.. servers, .. tasks];
         }
 
         return servers;
@@ -544,100 +533,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private void StopTaskHost()
     {
-        _hostedTimer?.Stop();
         _taskPipe?.Dispose();
-        _taskManager?.Dispose();
         _taskPipe = null;
-        _taskManager = null;
-        _taskManagerDir = null;
-
-        foreach (var t in RunningTasks.Where(t => t.Hosted is not null && t.IsRunning))
-        {
-            t.Status = RunningTaskStatus.Ended;
-        }
-    }
-
-    private void OnHostedTaskStarted(HostedTask hosted)
-    {
-        if (RunningTasks.FirstOrDefault(t => t.Hosted == hosted) is not null)
-        {
-            return;
-        }
-
-        var item = new RunningTaskItem
-        {
-            ToolUseId = $"hosted:{hosted.Id}",
-            Kind = RunningTaskKind.Shell,
-            Title = hosted.Name,
-            StartedAt = hosted.StartedAt,
-            Hosted = hosted,
-            Pid = hosted.Pid,
-            Header = RunningTaskItem.CommandHeader(hosted.Command),
-        };
-        AddTask(item);
-
-        if (_toolCalls.Values.LastOrDefault(c => c.ToolName.Contains("start_task", StringComparison.OrdinalIgnoreCase) ||
-            c.ToolName.EndsWith("__run_command", StringComparison.OrdinalIgnoreCase)) is { } activeCall)
-        {
-            _tasksByToolUse[activeCall.ToolUseId] = item;
-        }
-
-        hosted.Finished += _ => _dispatcher.TryEnqueue(SyncHostedTasks);
-
-        if (_hostedTimer is null)
-        {
-            // Copy new output across in small batches: a chatty server would otherwise
-            // rebuild the log text once per line.
-            _hostedTimer = _dispatcher.CreateTimer();
-            _hostedTimer.Interval = TimeSpan.FromMilliseconds(250);
-            _hostedTimer.Tick += (_, _) => SyncHostedTasks();
-        }
-
-        if (!_hostedTimer.IsRunning)
-        {
-            _hostedTimer.Start();
-        }
-
-        SyncHostedTasks();
-    }
-
-    private void SyncHostedTasks()
-    {
-        var anyRunning = false;
-
-        foreach (var item in RunningTasks.Where(t => t.Hosted is not null && t.IsRunning).ToList())
-        {
-            var hosted = item.Hosted!;
-
-            // Sample the state first: output that lands after the read below is caught
-            // by the next tick only while the task still counts as running.
-            var state = hosted.State;
-            var (text, next) = hosted.Read(item.HostOffset);
-            if (text.Length > 0)
-            {
-                item.AppendOutput(text);
-            }
-
-            item.HostOffset = next;
-
-            switch (state)
-            {
-                case HostedTaskState.Exited:
-                    item.Status = hosted.ExitCode is 0 ? RunningTaskStatus.Completed : RunningTaskStatus.Failed;
-                    break;
-                case HostedTaskState.Stopped:
-                    item.Status = RunningTaskStatus.Ended;
-                    break;
-                default:
-                    anyRunning = true;
-                    break;
-            }
-        }
-
-        if (!anyRunning)
-        {
-            _hostedTimer?.Stop();
-        }
     }
 
     /// <summary>The tracked subagent a nested event belongs to, if any.</summary>
@@ -649,11 +546,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// so the composer keeps offering Stop and a stop reaches it.
     /// </summary>
     private bool HasActiveSubagents =>
-        RunningTasks.Any(t => t.Kind == RunningTaskKind.Subagent && t.Hosted is null && t.IsRunning);
+        RunningTasks.Any(t => t.Kind == RunningTaskKind.Subagent && t.IsRunning);
 
     /// <summary>Subagents still working, for the status bar.</summary>
     public int ActiveSubagentCount =>
-        RunningTasks.Count(t => t.Kind == RunningTaskKind.Subagent && t.Hosted is null && t.IsRunning);
+        RunningTasks.Count(t => t.Kind == RunningTaskKind.Subagent && t.IsRunning);
 
     public string ActiveSubagentText => ActiveSubagentCount == 1 ? "1 agent" : $"{ActiveSubagentCount} agents";
 
@@ -1232,16 +1129,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async Task StopTaskAsync(RunningTaskItem task)
     {
-        // A task Codale runs itself: kill the tree, the sync tick settles the status.
-        if (task.Hosted is { } hosted)
-        {
-            task.IsStopping = true;
-            await Task.Run(hosted.Stop);
-            task.IsStopping = false;
-            SyncHostedTasks();
-            return;
-        }
-
         if (task.Cancel is { } cancel)
         {
             cancel();
@@ -1329,8 +1216,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Whatever was still running has lost its process: mark it ended.</summary>
     private void EndAllTasks()
     {
-        // A hosted task's process is Codale's own and outlives the CLI session; SyncHostedTasks ends it.
-        foreach (var t in RunningTasks.Where(t => t.IsRunning && t.Hosted is null))
+        foreach (var t in RunningTasks.Where(t => t.IsRunning))
         {
             t.Status = RunningTaskStatus.Ended;
         }
@@ -1338,9 +1224,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private void ClearTasks()
     {
-        // A dev server Codale is running is not part of the transcript being cleared:
-        // its row stays until the process ends or the user stops it.
-        foreach (var task in RunningTasks.Where(t => t.Hosted is null || !t.IsRunning).ToList())
+        foreach (var task in RunningTasks.ToList())
         {
             RunningTasks.Remove(task);
             ResortTasks();
@@ -1448,6 +1332,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public partial NoticeItem? ComposerNotice { get; set; }
 
     public bool HasComposerNotice => ComposerNotice is not null;
+
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsBusyWorking))]
@@ -2145,14 +2030,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             var environment = endpointEnv is null ? new Dictionary<string, string>() : new Dictionary<string, string>(endpointEnv);
             var tasksHost = _mcpSettings is { TasksAvailable: true } ? EnsureTaskHost(workingDirectory) : null;
             if (tasksHost is { } host &&
-                _mcpSettings?.TasksSpec(host.Pipe, host.Token, workingDirectory) is { } tasksSpec)
+                _mcpSettings?.TaskServerSpecs(host.Pipe, host.Token, workingDirectory) is { Count: > 0 } taskServers)
             {
-                mcpServers = [.. mcpServers, tasksSpec];
+                mcpServers = [.. mcpServers, .. taskServers];
                 shellGuard = _mcpSettings.TasksGuardCommand();
             }
 
             mcpServers = WithBrowserControl(mcpServers);
             _sessionMcpServers = mcpServers;
+            _sessionToolModes = _mcpSettings?.ModesKey();
 
             if (endpointEnv is not null)
             {
@@ -2185,6 +2071,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     Effort = effort,
                     PermissionMode = permissionMode,
                     McpServers = mcpServers,
+                    Features = _mcpSettings?.CodexFeatures(),
                     // Read per turn, so a folder added mid-session is writable from the next turn.
                     AdditionalDirectoriesSource = () => ExtraRoots,
                     SystemPromptAppend = mcpServers.Count > 0 ? WithMcpDirective("", mcpServers).Trim() : null,
@@ -2205,7 +2092,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     SystemPromptAppend = WithMcpDirective(shellGuard is null ? AlwaysPlanDirective : "", mcpServers).Trim(),
                     McpServers = mcpServers,
                     BackgroundShellGuardCommand = shellGuard,
-                    DisallowedTools = shellGuard is not null ? McpServerSettings.NativeTodoTools : null,
+                    DisallowedTools = JoinTools(shellGuard is not null ? McpServerSettings.NativeTodoTools : null, _mcpSettings?.ClaudeDisallowedTools()),
+                    Chrome = _mcpSettings?.ClaudeChrome(),
                     PromptSuggestions = AppSettings.SuggestNextPrompt,
                     SessionId = ResumeSessionId is null ? Guid.NewGuid() : null,
                     ResumeSessionId = ResumeSessionId,
@@ -2372,11 +2260,18 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>The standing instruction followed by the enabled MCP servers' usage note, when there is one.</summary>
+    /// <summary>The modes (<see cref="McpServerSettings.ModesKey"/>) the running session started with.</summary>
+    private string? _sessionToolModes;
+
+    /// <summary>Two comma-separated tool lists as one, or null when both are empty.</summary>
+    private static string? JoinTools(string? a, string? b) =>
+        string.Join(',', new[] { a, b }.Where(t => t is { Length: > 0 })) is { Length: > 0 } joined ? joined : null;
+
     private string WithMcpDirective(string directive, IReadOnlyList<McpServerSpec> servers)
     {
         var text = servers.Count > 0 && _mcpSettings?.Directive(servers) is { Length: > 0 } note ? $"{directive} {note}" : directive;
         var tasks = IsCodexSession ? McpServerSettings.TasksDirectiveGeneric : McpServerSettings.TasksDirective;
-        return servers.Any(s => s.Name == McpServerSettings.TasksName) ? $"{text} {tasks}" : text;
+        return servers.Any(s => s.Name == Codale.Mcp.CodaleServers.Panel) ? $"{text} {tasks}" : text;
     }
 
     /// <summary>
@@ -2534,7 +2429,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             case ToolCallStarted started:
                 // The agent reports its task list and artifacts through Codale's own
-                // todos_set / artifact_add tools (codale-tasks), whose schema is ours.
+                // todos_set / artifact_add tools (codale-panel), whose schema is ours.
                 if (TodoParser.IsTodosTool(started.ToolName))
                 {
                     ApplyTodos(started.Input);
@@ -2974,13 +2869,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private static string? TaskParameterId(string toolName, JsonElement input)
     {
-        if (toolName.Contains("codale-tasks__", StringComparison.OrdinalIgnoreCase) &&
-            input.ValueKind == JsonValueKind.Object &&
-            input.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
-        {
-            return id.GetString();
-        }
-
         return BackgroundTaskDetector.ShellIdOf(input);
     }
 
@@ -2989,7 +2877,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         if (call.ParameterTaskId is { } id)
         {
-            return RunningTasks.FirstOrDefault(t => t.Hosted?.Id == id || t.RuntimeId == id || t.ShellId == id);
+            return RunningTasks.FirstOrDefault(t => t.RuntimeId == id || t.ShellId == id);
         }
 
         return _tasksByToolUse.GetValueOrDefault(call.ToolUseId)
@@ -3583,7 +3471,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     private void OfferPhoneTools()
     {
-        if (_phoneOffered || _mcpSettings is not { PhoneAvailable: true, PhoneEnabled: false } settings)
+        if (_phoneOffered || _mcpSettings is not { PhoneAvailable: true } settings || settings.PhoneMode == AgentToolMode.Allow)
         {
             return;
         }
@@ -3591,12 +3479,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _phoneOffered = true;
         Add(new NoticeItem
         {
-            Text = "This looks like an Android project. Turn on the Phone tools so the agent can install, launch and inspect the app on a device or emulator?",
-            ActionText = "Turn on Phone tools",
+            Text = "This looks like an Android project. Allow Phone Use so the agent can install, launch and inspect the app on a device or emulator?",
+            ActionText = "Allow Phone Use",
             Action = () =>
             {
-                settings.PhoneEnabled = true;
-                Add(new NoticeItem { Text = "Phone tools are on. They start with the next session; installing, clearing data and shell commands on the device still ask first." });
+                settings.PhoneMode = AgentToolMode.Allow;
+                Add(new NoticeItem { Text = "Phone Use is allowed. It starts with the next session; installing, clearing data and shell commands on the device still ask first." });
                 return Task.CompletedTask;
             },
         });
@@ -3850,8 +3738,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // improves a visible confirmation; it never changes automatic approval decisions.
         using var assessmentDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
         if (mcpRisk is null && ToolCallItem.IsShellName(approval.ToolName) &&
-            shellCommand is { Length: > 0 and <= 12000 } && AppSettings.SmartExperience &&
-            SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready)
+            shellCommand is { Length: > 0 and <= 12000 } && AppSettings.SmartFeatureEnabled("assess") &&
+            (SmartDecider.IsAvailable || SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready))
             _ = EnhanceConfirmationAsync(pending, approvalItem, answered.Task, shellCommand, shellAssessment, assessmentDeadline.Token);
 
         // The turn is blocked on the reader from here: say so, in case they are elsewhere.
@@ -4275,36 +4163,21 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             async Task RouteAndSendAsync()
             {
-            // The local rules settle most messages (go-aheads, plain questions, small changes, new features, big or unclear
-            // work), so the model is only asked about the ones they are unsure of, and its answer is checked against them.
-            var local = MessageRouting.Assess(text);
+            // The auto mode enhancer (ChatViewModel.Routing.cs): the mode for the turn, and whether the prompt belongs to another session.
             var decision = MessageRouting.RouteWithoutModel(text);
+            TopicRedirect? redirect = null;
             try
             {
-                if (!local.Confident && AppSettings.SmartExperience && SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready)
-                {
-                    ComposerNotice = new NoticeItem { Text = "Understanding your request…", Severity = NoticeSeverity.Info };
-                    // Routing is a convenience: if the model is slow, the local rules decide instead of making the user wait.
-                    using var quick = CancellationTokenSource.CreateLinkedTokenSource(routing.Token);
-                    quick.CancelAfter(TimeSpan.FromSeconds(4));
-                    Codale.Smart.SmartResult<Codale.Smart.SmartIntent?>? intent = null;
-                    try { intent = await SmartExperienceHost.Instance.ClassifyAsync(new(_projectPath, _projectPath, "routing", _chatId, preparationDeadline), text, LastRoutingReply, quick.Token).WaitAsync(quick.Token); }
-                    catch (OperationCanceledException) when (!routing.IsCancellationRequested) { }
-                    if (intent?.Value is { } selected) decision = MessageRouting.Reconcile(local, selected switch
-                    {
-                        Codale.Smart.SmartIntent.Ask => RouteIntent.Ask,
-                        Codale.Smart.SmartIntent.Plan => RouteIntent.Plan,
-                        _ => RouteIntent.Act,
-                    });
-                }
+                (decision, redirect) = await RouteSmartAsync(text, attachments.Count > 0, shown, routing.Token, preparationDeadline);
             }
             catch (OperationCanceledException) { if (stopped.IsCancellationRequested) return; }
             finally
             {
                 _briefing = null;
-                if (ComposerNotice?.Text == "Understanding your request…") ComposerNotice = null;
             }
             if (stopped.IsCancellationRequested) return;
+            // Held back, not sent: the prompt returns to the composer while the user picks its session.
+            if (redirect is not null) { OfferRedirect(redirect); return; }
             if (!IsAutomaticMode)
             {
                 await SendTurnAsync(text, attachments, planOnly: PermissionMode == "plan", askOnly: IsAskMode, preparation.Token, preparationDeadline);
@@ -4396,10 +4269,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // turn, preserving the conversation and leaving a running turn uninterrupted.
         // Claude also reads --add-dir only at spawn; Codex reads it on every turn.
         await _browserViewportRestore;
+        // CLI Default and Block change the CLI's own flags without touching Codale's servers.
         var toolsChanged = _mcpSettings is not null &&
+            (_sessionToolModes != _mcpSettings.ModesKey() ||
             !_sessionMcpServers.Where(s => s.Name is McpServerSettings.BrowserName or McpServerSettings.ComputerName or McpServerSettings.PhoneName)
                 .Select(s => s.Name).OrderBy(n => n, StringComparer.Ordinal)
-                .SequenceEqual(_mcpSettings.Servers().Select(s => s.Name).OrderBy(n => n, StringComparer.Ordinal), StringComparer.Ordinal);
+                .SequenceEqual(_mcpSettings.Servers().Select(s => s.Name).OrderBy(n => n, StringComparer.Ordinal), StringComparer.Ordinal));
         if (_session is not null && (toolsChanged ||
             (!IsCodexSession && !_connectedFolders.SequenceEqual(ExtraRoots, StringComparer.OrdinalIgnoreCase))))
         {
@@ -5022,7 +4897,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         // Stopping the main agent cascades: every subagent still running goes with it.
         var running = RunningTasks
-            .Where(t => t.Kind == RunningTaskKind.Subagent && t.Hosted is null && t.IsRunning)
+            .Where(t => t.Kind == RunningTaskKind.Subagent && t.IsRunning)
             .ToList();
 
         if (!IsBusy)

@@ -56,7 +56,11 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
         CommandText = command;
         CommandName = commandName ?? command;
         CliId = cliId;
-        State = IsCliTerminal ? new ShellState(workingDirectory, new Dictionary<string, string>()) : ShellState.Initial(workingDirectory);
+
+        // A task (project command) shows as a plain full terminal; only a tab opened as a terminal
+        // ("Terminal", "New terminal") is a notebook with an input cell.
+        IsSingleBlock = IsCommandTerminal && !IsCliTerminal;
+        State =IsCliTerminal ? new ShellState(workingDirectory, new Dictionary<string, string>()) : ShellState.Initial(workingDirectory);
 
         // A command tab reads busy from the start: the command launches with the tab.
         if (command is not null)
@@ -151,8 +155,9 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     // ------------------------------------------------------------------ notebook
 
     /// <summary>
-    /// A tab holding one block maximized out of a notebook ("Maximize in new tab"): shown as a plain
-    /// terminal - the block's output filling the tab, with no header and no input cell.
+    /// A tab holding one block - a task's command, or one maximized out of a notebook ("Maximize in
+    /// new tab"): shown as a plain terminal - the block's output filling the tab, with no header and
+    /// no input cell.
     /// </summary>
     public bool IsSingleBlock { get; set; }
 
@@ -167,7 +172,27 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     public partial ShellState State { get; private set; }
 
     /// <summary>The shell blocks run under, from Settings.</summary>
-    public string ShellPath => TerminalSession.ResolveShell(AppSettings.TerminalShell);
+    public string ShellPath => TerminalSession.ResolveShell(ShellPreference ?? AppSettings.TerminalShell);
+
+    /// <summary>The shell this tab picked from its input cell ("pwsh", "powershell", "cmd"); null follows Settings.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShellPath), nameof(ShellName))]
+    public partial string? ShellPreference { get; set; }
+
+    /// <summary>
+    /// Moves where the next command runs, keeping the environment: the folder picked from the input
+    /// cell's folder menu. False when the folder does not exist.
+    /// </summary>
+    public bool ChangeDirectory(string path)
+    {
+        if (!IsNotebook || !Directory.Exists(path))
+        {
+            return false;
+        }
+
+        State = State with { Cwd = Path.GetFullPath(path) };
+        return true;
+    }
 
     /// <summary>A short name for the shell, shown beside the input cell.</summary>
     public string ShellName => Path.GetFileNameWithoutExtension(ShellPath) switch
@@ -222,6 +247,17 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
         }
 
         var block = new CommandBlockViewModel(line, State);
+        if (IsSingleBlock)
+        {
+            // One command per tab: a run again replaces the finished one, and fills the tab.
+            foreach (var finished in Blocks.Where(b => !b.IsRunning).ToList())
+            {
+                RemoveBlock(finished);
+            }
+
+            block.Size = BlockSize.Fill;
+        }
+
         AddBlock(block);
         block.Run(ShellPath, AppSettings.TerminalLoadProfile);
         return block;

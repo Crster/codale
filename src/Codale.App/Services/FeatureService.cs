@@ -54,11 +54,11 @@ public sealed class FeatureService : IDisposable
     {
         try
         {
-            return new CodaleDb(ProjectPaths.FeatureDatabasePath(projectPath), new() { Embedder = new SmartEmbedder() });
+            return new CodaleDb(ProjectPaths.FeatureDatabasePath(projectPath), new() { Embedder = SmartEmbedder.Shared });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException)
         {
-            return new CodaleDb(Path.Combine(Path.GetTempPath(), "codale-features-" + Guid.NewGuid().ToString("N")), new() { Embedder = new SmartEmbedder() });
+            return new CodaleDb(Path.Combine(Path.GetTempPath(), "codale-features-" + Guid.NewGuid().ToString("N")), new() { Embedder = SmartEmbedder.Shared });
         }
     }
 
@@ -129,7 +129,7 @@ public sealed class FeatureService : IDisposable
     public async Task<RetrievalResult> RetrieveAsync(string worktree, string prompt, string recent, IReadOnlySet<string> delivered, string? currentSessionId,
         string? workingSessionId = null, CancellationToken preparationToken = default, DateTimeOffset? preparationDeadline = null, string? chatId = null, Codale.Smart.SmartIntent? intent = null, bool allowSmartReview = true)
     {
-        if (AppSettings.SmartExperience && allowSmartReview)
+        if (AppSettings.SmartFeatureEnabled("context") && allowSmartReview)
         {
             return await _knowledge.RetrieveSmartAsync(worktree, prompt, recent, delivered, currentSessionId,
                 workingSessionId is null ? null : _knowledge.FilesOf(workingSessionId, WorkingSetFiles), preparationToken, preparationDeadline, chatId, intent).ConfigureAwait(false);
@@ -139,16 +139,16 @@ public sealed class FeatureService : IDisposable
     }
 
     private string? _summaryIdentity;
+    private static string SummaryIdentity() => SmartExperienceHost.CreateRouter().ClientFor("summary")?.FeatureIdentity ?? "off";
     private void UpdateSummaryCache()
     {
-        _summaryIdentity = SmartExperienceHost.CreateClient("summary").FeatureIdentity("summary");
+        _summaryIdentity = SummaryIdentity();
         _knowledge.Summaries = new Codale.Smart.SummaryCache(Path.Combine(ProjectPaths.KnowledgeDirectory(_projectPath), "smart-summaries"), _summaryIdentity);
     }
 
     private void OnAppSettingsChanged(object? sender, EventArgs e)
     {
-        var client = SmartExperienceHost.CreateClient("summary");
-        if (_summaryIdentity != client.FeatureIdentity("summary")) UpdateSummaryCache();
+        if (_summaryIdentity != SummaryIdentity()) UpdateSummaryCache();
     }
 
     private const int WorkingSetFiles = 8;

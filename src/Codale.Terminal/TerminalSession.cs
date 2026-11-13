@@ -81,6 +81,26 @@ public sealed class TerminalSession : IDisposable, IAsyncDisposable
         return Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe";
     }
 
+    /// <summary>The shells a notebook block can run under that are installed here: (Settings id, label, path).</summary>
+    public static IReadOnlyList<(string Id, string Label, string Path)> InstalledShells()
+    {
+        var shells = new List<(string, string, string)>();
+        foreach (var (id, label, exe) in new[]
+                 {
+                     ("pwsh", "PowerShell 7", "pwsh.exe"),
+                     ("powershell", "Windows PowerShell", "powershell.exe"),
+                     ("cmd", "Command Prompt", "cmd.exe"),
+                 })
+        {
+            if (ResolveOnPath(exe) is { } path)
+            {
+                shells.Add((id, label, path));
+            }
+        }
+
+        return shells;
+    }
+
     /// <summary>
     /// Resolves the shell the user picked in Settings. "auto" and a named shell that
     /// is not installed both fall back to the automatic probe, so a terminal always

@@ -37,7 +37,7 @@ public sealed record ShellClassification(ShellClass Class, string Reason);
 /// <c>shell_commands.json</c>. The result is the highest class of any part. Whatever the parser
 /// cannot read, or the database does not know, is <see cref="ShellClass.Unknown"/>, never safe.
 /// </summary>
-public static class ShellCommandClassifier
+public static partial class ShellCommandClassifier
 {
     private const int MaxDepth = 6;
 

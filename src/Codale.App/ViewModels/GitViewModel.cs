@@ -45,8 +45,8 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     private async Task GenerateCommitMessageAsync()
     {
         if (IsGeneratingCommitMessage || IsBusy) return;
-        if (SmartExperienceHost.Instance.Status.State != Codale.Smart.SmartState.Ready || !AppSettings.SmartExperience)
-        { ActionError = "Choose a Smart experience provider in Settings before generating a commit message."; return; }
+        if (SmartExperienceHost.Instance.Status.State != Codale.Smart.SmartState.Ready || !AppSettings.SmartFeatureEnabled("commit"))
+        { ActionError = "Choose a General model in Settings > Smart Features before generating a commit message."; return; }
         using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         _smartCommit = cancel;
         IsGeneratingCommitMessage = true;
@@ -62,7 +62,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
             var current = await _repository.GetStagedDiffAsync(cancel.Token);
             if (revision != _messageRevision || current.TreeId != snapshot.TreeId)
             { ActionError = "The message or staged changes changed during generation. Generate again."; return; }
-            if (AppSettings.SmartExperience) CommitMessage = message;
+            if (AppSettings.SmartFeatureEnabled("commit")) CommitMessage = message;
         }
         catch (OperationCanceledException) { ActionError = "Commit-message generation timed out or was cancelled."; }
         catch (Exception ex) { ActionError = $"Commit-message generation failed: {ex.Message}"; }

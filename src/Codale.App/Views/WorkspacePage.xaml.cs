@@ -85,6 +85,7 @@ public sealed partial class WorkspacePage : Page
         ViewModel = workspace;
         ViewModel.PropertyChanged += OnWorkspacePropertyChanged;
         ViewModel.ChatActivationRequested += OnChatActivationRequested;
+        ViewModel.AgentTerminalOpened += OnAgentTerminalOpened;
         Bindings.Update();
 
         UpdateEmptyState();
@@ -123,6 +124,10 @@ public sealed partial class WorkspacePage : Page
         base.OnNavigatedFrom(e);
 
         AppSettings.Changed -= OnAppSettingsChanged;
+        if (ViewModel is not null)
+        {
+            ViewModel.AgentTerminalOpened -= OnAgentTerminalOpened;
+        }
         SmartExperienceHost.Status.Changed -= OnSmartStatusChanged;
         foreach (var entry in _terminalTabs) entry.Tab.CloseHost();
         foreach (var entry in _editorTabs) entry.Tab.CloseHost();
@@ -462,12 +467,14 @@ public sealed partial class WorkspacePage : Page
         return RunInNewTerminalAsync(command);
     }
 
+    /// <summary>The agent ran a command (run_in_terminal, run_command): it gets a tab of its own, without taking the user's focus.</summary>
+    private void OnAgentTerminalOpened(object? sender, TerminalViewModel terminal) =>
+        DispatcherQueue.TryEnqueue(() => AddTerminalTab(terminal, select: false));
+
     private Task RunInNewTerminalAsync(string command)
     {
-        // A notebook runs the command as its first block straight away: no prompt to wait for.
-        var terminal = ViewModel.CreateTerminal();
-        AddTerminalTab(terminal);
-        terminal.RunCommand(command, record: false);
+        // A command tab: the command fills the tab as a plain terminal, started when the tab opens.
+        AddTerminalTab(ViewModel.CreateTerminal(command));
         return Task.CompletedTask;
     }
 
@@ -806,7 +813,8 @@ public sealed partial class WorkspacePage : Page
     /// Shows a terminal - shell or command - as a centre tab. Every invocation is
     /// a new session: terminals stack as tabs like in VS Code.
     /// </summary>
-    private void AddTerminalTab(TerminalViewModel terminal, int insertIndex = -1)
+    /// <param name="select">False for a tab the agent opened: it appears without taking the user's focus.</param>
+    private void AddTerminalTab(TerminalViewModel terminal, int insertIndex = -1, bool select = true)
     {
         // An agent CLI typed at this terminal's prompt is launched in its own tab with its own
         // session's MCP servers (see TryOpenCliTab), so nothing is written for it here.
@@ -852,7 +860,10 @@ public sealed partial class WorkspacePage : Page
         AddTab(item, insertIndex);
 
         UpdateEmptyState();
-        SelectTab(item);
+        if (select)
+        {
+            SelectTab(item);
+        }
 
         // The shell lives exactly as long as its tab: started when the tab first
         // appears, terminated when the tab is closed.
@@ -1508,7 +1519,7 @@ public sealed partial class WorkspacePage : Page
             File.Exists(absolute));
     }
 
-    /// <summary>Clicking an explore, subagent, or start_task entry in the chat opens its peek, as selecting it in the task list does.</summary>
+    /// <summary>Clicking an explore or subagent entry in the chat opens its peek, as selecting it in the task list does.</summary>
     private void OnChatTaskPeekRequested(object? sender, ToolCallItem call)
     {
         if (sender is ChatTab { ViewModel: { } chat })
@@ -2056,9 +2067,6 @@ public sealed partial class WorkspacePage : Page
                 running.Add($"Chat: {busyChat.Chat.TabTitle}");
             }
 
-            running.AddRange(busyChat.Chat.RunningTasks
-                .Where(t => t.Hosted is not null && t.IsRunning)
-                .Select(t => $"Task: {t.DisplayTitle}"));
         }
         else if (_terminalTabs.FirstOrDefault(t => ReferenceEquals(t.Item, args.Item)) is { } busyTerminal
             && busyTerminal.Terminal.Activity == TerminalActivity.Busy

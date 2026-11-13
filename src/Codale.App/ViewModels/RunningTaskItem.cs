@@ -199,12 +199,6 @@ public sealed partial class RunningTaskItem : ObservableObject
     /// <summary>The tool call only launched it; the task runs on until the CLI says it ended.</summary>
     public bool LaunchedInBackground { get; set; }
 
-    /// <summary>The process Codale itself runs for this task (codale-tasks); null for the CLI's own tasks.</summary>
-    public HostedTask? Hosted { get; init; }
-
-    /// <summary>How much of <see cref="Hosted"/>'s output has been copied into <see cref="Output"/>.</summary>
-    public long HostOffset { get; set; }
-
     /// <summary>True while the peek pane shows this task: the poller then refreshes its output faster.</summary>
     public bool IsPeeked { get; set; }
 
@@ -244,7 +238,7 @@ public sealed partial class RunningTaskItem : ObservableObject
     public partial bool IsStopping { get; set; }
 
     /// <summary>Only runtime-tracked, still-running tasks can be stopped from here.</summary>
-    public bool CanStop => IsRunning && (RuntimeId is not null || Hosted is not null || Cancel is not null) && !IsStopping;
+    public bool CanStop => IsRunning && (RuntimeId is not null || Cancel is not null) && !IsStopping;
 
     /// <summary>Ends work Codale runs in-process (an explore); null for tasks stopped another way.</summary>
     public Action? Cancel

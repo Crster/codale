@@ -15,6 +15,8 @@ namespace Codale.Search;
 /// </remarks>
 public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
 {
+    /// <summary>The cosine a trained embedding model's neighbour needs without lexical support.</summary>
+    private const float ModelMatchSimilarity = 0.3f;
     // UTF-8 bytes are a conservative upper bound on byte-tokenizer tokens, including the briefing envelope.
     public const int MaxContextBytes = 3600;
     private const int MapBudget = 700;
@@ -220,7 +222,6 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
         {
             // Embed the topic, not the phrasing: "where does ... located" must not pull in prose that says "located".
             var topic = string.Join(' ', terms);
-            var embedder = HashedTextEmbedder.Instance;
             var similar = ChunkRoot(worktree).Query(topic, 40)
                 .Select(hit => (Id: ChunkId(hit.Node), hit.Score, hit.Node)).ToList();
             foreach (var near in similar) RememberChunk(near.Id, near.Node);
@@ -229,7 +230,8 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
                 // Relative cut: keep near-best neighbours only, so unrelated files never ride in on noise.
                 // Relative similarity alone always supplies neighbours, even for an absent topic.
                 // Lexical evidence can support weaker matches; otherwise require confidence.
-                var minimum = embedder.MatchSimilarity;
+                // Hashed n-gram scores run lower than a trained model's; each needs its own confidence bar.
+                var minimum = db.EmbeddingModel == HashedTextEmbedder.Instance.Model ? HashedTextEmbedder.Instance.MatchSimilarity : ModelMatchSimilarity;
                 var floor = similar.Count > 0 ? Math.Max(0.08f, similar[0].Score * 0.5f) : 1f;
                 // N-grams add fragments and inflections beside the exact-token ranking, at lower weight.
                 Fuse(similar.Where(v => v.Score >= floor && (lexicalIds.Contains(v.Id) || v.Score >= minimum)).Select(v => v.Id), 0.6);

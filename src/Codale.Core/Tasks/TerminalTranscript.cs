@@ -5,8 +5,8 @@ using Codale.Core.Agents;
 namespace Codale.Core.Tasks;
 
 /// <summary>
-/// The terminals the user has open, as the agent's <c>list_terminals</c> / <c>read_terminal</c>
-/// tools see them. The app implements it over its terminal tabs.
+/// The workspace's terminal tabs, as the agent's codale-terminal tools see them (list, read, run, stop).
+/// The app implements it over its terminal tabs.
 /// </summary>
 public interface ITerminalSource
 {
@@ -17,20 +17,17 @@ public interface ITerminalSource
 
     /// <summary>
     /// Runs a command the agent asked for in a new terminal tab and returns what it printed in
-    /// the first <paramref name="waitSeconds"/>; null when no tab can be opened (no window).
+    /// the first <paramref name="waitSeconds"/> (or until it ended); null when no tab can be opened (no window).
     /// </summary>
     Task<TaskSnapshot?> StartAsync(string command, string? name, int waitSeconds, CancellationToken ct);
 
     /// <summary>Interrupts the command of a tab the agent started (the tab stays, with its output); null when no such tab.</summary>
     Task<TaskSnapshot?> StopAsync(string id, CancellationToken ct);
-
-    /// <summary>The tabs the agent started, as list_tasks shows them.</summary>
-    IReadOnlyList<TaskSnapshot> ListStarted();
 }
 
 /// <summary>
 /// What a terminal printed, as plain text: escape sequences are removed so the agent reads
-/// the build output rather than colour codes. Capped like a hosted task's buffer, with
+/// the build output rather than colour codes. Capped, with
 /// absolute offsets so a reader can ask for just what arrived after its last read.
 /// </summary>
 public sealed class TerminalTranscript

@@ -23,7 +23,7 @@ public sealed partial class ChatViewModel
     private void TrackBrowserViewport(AgentEvent e)
     {
         if (e is ToolCallStarted call &&
-            call.ToolName.StartsWith("mcp__codale-browser__", StringComparison.Ordinal) &&
+            call.ToolName.StartsWith(McpServerSpec.PrefixOf(McpServerSettings.BrowserName), StringComparison.Ordinal) &&
             (call.ToolName.EndsWith("__browser_set_viewport", StringComparison.Ordinal) ||
              call.ToolName.EndsWith("__browser_resize", StringComparison.Ordinal)))
         {

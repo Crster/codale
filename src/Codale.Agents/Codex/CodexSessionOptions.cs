@@ -78,6 +78,9 @@ public sealed record CodexSessionOptions
     /// </summary>
     public IReadOnlyList<Codale.Core.Agents.McpServerSpec> McpServers { get; init; } = [];
 
+    /// <summary>Codex feature flags to force on or off (<c>-c features.NAME=true|false</c>), such as its own browser and computer use.</summary>
+    public IReadOnlyDictionary<string, bool>? Features { get; init; }
+
     /// <summary>
     /// Extra environment variables for the CLI process, layered over the inherited
     /// environment - how a custom API endpoint (OPENAI_BASE_URL and friends) reaches the CLI.
@@ -139,6 +142,12 @@ public sealed record CodexSessionOptions
         {
             args.Add("-c");
             args.Add($"{key}={value}");
+        }
+
+        foreach (var (name, on) in Features ?? new Dictionary<string, bool>())
+        {
+            args.Add("-c");
+            args.Add($"features.{name}={(on ? "true" : "false")}");
         }
 
         args.Add("app-server");

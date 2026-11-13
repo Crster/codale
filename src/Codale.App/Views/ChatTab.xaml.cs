@@ -1599,6 +1599,22 @@ public sealed partial class ChatTab : UserControl
         }
     }
 
+    private async void OnComposerNoticeSecondaryAction(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.ComposerNotice is { SecondaryAction: { } action })
+        {
+            ViewModel.ComposerNotice = null;
+            try
+            {
+                await action();
+            }
+            catch (Exception ex)
+            {
+                ViewModel.ComposerNotice = new NoticeItem { Text = ex.Message, Severity = NoticeSeverity.Error };
+            }
+        }
+    }
+
     /// <summary>Where pasted text and images are written: <c>%TEMP%\codale\paste</c>, created on demand.</summary>
     private static string PasteDirectory() =>
         Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codale", "paste")).FullName;

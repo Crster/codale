@@ -167,7 +167,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>The built-in browser and desktop-control servers, editable from the status bar flyout.</summary>
     public McpToolsViewModel McpTools { get; }
 
-    /// <summary>Folders served on localhost from the Agent tools flyout or an agent's serve_folder; they live as long as this window.</summary>
+    /// <summary>Folders served on localhost from the Agent tools flyout; they live as long as this window.</summary>
     public FolderServerHost FolderServers { get; } = new();
 
     /// <summary>
@@ -225,6 +225,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         chat.SessionStateChanged += OnSessionStateChanged;
         chat.TodosChanged += OnTodosChanged;
         chat.PropertyChanged += OnChatPropertyChanged;
+        chat.TopicRedirectRequested += OnTopicRedirectRequested;
         Chats.Add(chat);
         return chat;
     }
@@ -259,6 +260,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         chat.SessionStateChanged -= OnSessionStateChanged;
         chat.TodosChanged -= OnTodosChanged;
         chat.PropertyChanged -= OnChatPropertyChanged;
+        chat.TopicRedirectRequested -= OnTopicRedirectRequested;
         Chats.Remove(chat);
 
         // The panel always needs a chat to show; with the last one gone, a blank one
@@ -307,7 +309,13 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         return terminal;
     }
 
-    /// <summary>Command tabs the agent started, so list_tasks and stop_task can tell them from the user's.</summary>
+    /// <summary>
+    /// A command tab the agent opened (run_in_terminal, run_command). Raised off the UI thread; the page
+    /// shows it as a tab, which starts its command. Nothing subscribed means there is no window to show it in.
+    /// </summary>
+    public event EventHandler<TerminalViewModel>? AgentTerminalOpened;
+
+    /// <summary>Command tabs the agent started, so stop_terminal can tell them from the user's.</summary>
     private readonly HashSet<string> _agentTerminalIds = [];
 
     public bool IsAgentTerminal(TerminalViewModel terminal)
@@ -321,8 +329,32 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>The open terminals as the agent's terminal tools read them; safe to call off the UI thread.</summary>
     private sealed class TerminalSource(WorkspaceViewModel workspace) : ITerminalSource
     {
-        public Task<TaskSnapshot?> StartAsync(string command, string? name, int waitSeconds, CancellationToken ct) =>
-            Task.FromResult<TaskSnapshot?>(null);
+        public async Task<TaskSnapshot?> StartAsync(string command, string? name, int waitSeconds, CancellationToken ct)
+        {
+            if (workspace.AgentTerminalOpened is not { } opened)
+            {
+                return null;
+            }
+
+            var terminal = workspace.CreateTerminal(command, string.IsNullOrWhiteSpace(name) ? command : name);
+            terminal.IsAgentTerminal = true;
+            lock (workspace._terminals)
+            {
+                workspace._agentTerminalIds.Add(terminal.Id);
+            }
+
+            opened(workspace, terminal);
+
+            // Early output (a port number, a compile error) is what the agent needs next. The command starts
+            // when its tab opens; a command tab reads busy from creation until the command has finished.
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(waitSeconds);
+            while (DateTime.UtcNow < deadline && (!terminal.IsOpen || terminal.Activity == TerminalActivity.Busy))
+            {
+                await Task.Delay(100, ct).ConfigureAwait(false);
+            }
+
+            return Started(terminal, null, 8000);
+        }
 
         public async Task<TaskSnapshot?> StopAsync(string id, CancellationToken ct)
         {
@@ -336,9 +368,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             await Task.Delay(1500, ct).ConfigureAwait(false);
             return Started(terminal, null, 2000);
         }
-
-        public IReadOnlyList<TaskSnapshot> ListStarted() =>
-            [.. workspace.TerminalsSnapshot().Where(workspace.IsAgentTerminal).Select(t => Started(t, null, 0))];
 
         /// <summary>A tab's shell outlives its command: for a command the agent started, idle means it finished.</summary>
         private static TaskSnapshot Started(TerminalViewModel t, long? since, int? tailChars)
@@ -403,7 +432,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     public IReadOnlyList<TerminalViewModel> RunningCommands =>
         _terminals.Where(t => t.IsCommandTerminal && t.Activity == TerminalActivity.Busy).ToList();
 
-    /// <summary>What is still running behind the window (working chats, hosted tasks, commands), for the close prompt.</summary>
+    /// <summary>What is still running behind the window (working chats, commands), for the close prompt.</summary>
     public IReadOnlyList<string> RunningActivities
     {
         get
@@ -416,9 +445,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
                     list.Add($"Chat: {chat.TabTitle}");
                 }
 
-                list.AddRange(chat.RunningTasks
-                    .Where(t => t.Hosted is not null && t.IsRunning)
-                    .Select(t => $"Task: {t.DisplayTitle}"));
             }
 
             list.AddRange(RunningCommands.Select(t => $"Command: {t.CommandName ?? "terminal"}"));
@@ -716,11 +742,25 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     private long _lastLiveRefresh = -10_000;
 
     /// <summary>The session's opening message is named, never answered: it often is a task the model would happily start on.</summary>
-    public Task<string?> SuggestTitleAsync(SessionListItem item, CancellationToken ct = default)
+    /// The General model names it when configured; the local heuristic answers otherwise, or when the model is slow.
+    public async Task<string?> SuggestTitleAsync(SessionListItem item, CancellationToken ct = default)
     {
-        var prompt = item.Summary.FirstPrompt ?? item.Summary.LastPrompt;
-        var title = string.IsNullOrWhiteSpace(prompt) ? null : SessionTitles.FromPrompt(prompt);
-        return Task.FromResult<string?>(title?.Length > 0 ? title : null);
+        // Histories are named after their latest prompt: the open chat knows it, else the one it started with.
+        var prompt = FindOpenChat(item.SessionId)?.LatestUserPrompt ?? item.Summary.LastPrompt ?? item.Summary.FirstPrompt;
+        if (string.IsNullOrWhiteSpace(prompt)) return null;
+        if (AppSettings.SmartFeatureEnabled("title") && SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready)
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            deadline.CancelAfter(TimeSpan.FromSeconds(8));
+            try
+            {
+                var named = await SmartExperienceHost.Instance.TitleAsync(new(ProjectPath, ProjectPath, "title"), prompt, deadline.Token);
+                if (named?.Value is { Length: > 0 } smart) return smart;
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
+        }
+        var title = SessionTitles.FromPrompt(prompt);
+        return title.Length > 0 ? title : null;
     }
 
     private void OnSessionStateChanged(object? sender, EventArgs e)
@@ -917,6 +957,45 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         return chat;
     }
 
+    /// <summary>
+    /// Auto mode found a prompt belongs to another session and the user agreed: that session comes to the front (opened
+    /// in a chat of its own when it is not open yet), or a new one starts, and the prompt is sent there.
+    /// </summary>
+    private async void OnTopicRedirectRequested(object? sender, TopicRedirect redirect)
+    {
+        if (sender is not ChatViewModel from) return;
+        try
+        {
+            ChatViewModel target;
+            if (redirect.FeatureId is { } id)
+            {
+                if (FindOpenChat(id) is { } open) target = open;
+                else
+                {
+                    if (Features.Get(id) is not { } feature) { from.Draft = redirect.Text; return; }
+                    var owner = Features.ProviderSession(id)?.Provider;
+                    target = FreshChat(owner);
+                    if (ReferenceEquals(target, from)) target = CreateChat(owner);
+                    await target.AttachFeatureAsync(feature);
+                }
+            }
+            else
+            {
+                target = FreshChat(from.CliId);
+                if (ReferenceEquals(target, from)) target = CreateChat(from.CliId);
+                target.PermissionMode = from.PermissionMode;
+            }
+            IsViewingHistory = false;
+            HistoryTitle = null;
+            ChatActivationRequested?.Invoke(this, target);
+            await target.SendRedirectedAsync(redirect.Text, redirect.NewName);
+        }
+        catch (Exception)
+        {
+            from.Draft = redirect.Text;
+        }
+    }
+
     private ChatViewModel? FindOpenChat(string featureId) =>
         Chats.FirstOrDefault(c => c.FeatureId == featureId);
 
@@ -935,6 +1014,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             chat.SessionStateChanged -= OnSessionStateChanged;
             chat.TodosChanged -= OnTodosChanged;
             chat.PropertyChanged -= OnChatPropertyChanged;
+            chat.TopicRedirectRequested -= OnTopicRedirectRequested;
         }
 
         // Every session is told to go at once:

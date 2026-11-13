@@ -260,11 +260,11 @@ public enum ToolKind
 
 public static class ToolKinds
 {
-    /// <summary>Canonical action names for Codale's namespaced task tools.</summary>
+    /// <summary>Canonical action names for the tools of Codale's workspace servers (codale-panel, codale-command, ...).</summary>
     public static string ActionName(string toolName)
     {
         var parts = toolName.Split("__", StringSplitOptions.RemoveEmptyEntries);
-        return parts is ["mcp", "codale-tasks" or "codale_tasks", var action] ? action : toolName;
+        return parts is ["mcp", var server, var action] && server.StartsWith("codale", StringComparison.OrdinalIgnoreCase) ? action : toolName;
     }
 
     public static ToolKind Of(string toolName) => ActionName(toolName) switch
@@ -278,10 +278,9 @@ public static class ToolKinds
         "Task" or "Agent" => ToolKind.Agent,
         "AskUserQuestion" => ToolKind.Ask,
         "ExitPlanMode" => ToolKind.Plan,
-        "start_task" or "run_command" or "stop_task" => ToolKind.Shell,
-        "read_task" or "read_terminal" or "list_tasks" or "list_terminals" or "list_commands" or "list_served" => ToolKind.Read,
+        "run_in_terminal" or "run_command" or "stop_terminal" => ToolKind.Shell,
+        "read_terminal" or "list_terminals" or "list_commands" => ToolKind.Read,
         "add_command" => ToolKind.Write,
-        "serve_folder" or "stop_serving" => ToolKind.Web,
         _ when TodoParser.IsArtifactTool(toolName) => ToolKind.Write,
         _ when TodoParser.IsTodosTool(toolName) => ToolKind.Todo,
         _ => ToolKind.Other,
@@ -1155,9 +1154,7 @@ public sealed partial class ToolCallItem : ChatItem
     /// <summary>The referenced task id, retained after the raw input is released.</summary>
     public string? ParameterTaskId { get; init; }
 
-    public bool CanPeekParameter => IsShellTool || IsSubagentCall || ParameterTaskId is not null ||
-        ToolName.EndsWith("__start_task", StringComparison.OrdinalIgnoreCase) ||
-        ToolName.EndsWith("__run_command", StringComparison.OrdinalIgnoreCase);
+    public bool CanPeekParameter => IsShellTool || IsSubagentCall || ParameterTaskId is not null;
 
     public bool HasParameter => !HasFiles && Target.Length > 0;
 
@@ -1231,18 +1228,13 @@ public sealed partial class ToolCallItem : ChatItem
                 "Task" or "Agent" => ("Running agent", "Ran agent", "Run agent"),
                 "AskUserQuestion" => ("Asking you", "Asked you", "Ask you"),
                 "ExitPlanMode" => ("Proposing a plan", "Proposed a plan", "Propose a plan"),
-                "start_task" => ("Starting Task", "Started Task", "Start Task"),
+                "run_in_terminal" => ("Running in Terminal", "Ran in Terminal", "Run in Terminal"),
                 "run_command" => ("Running Command", "Ran Command", "Run Command"),
-                "stop_task" => ("Stopping Task", "Stopped Task", "Stop Task"),
-                "read_task" => ("Reading Task Output", "Read Task Output", "Read Task Output"),
+                "stop_terminal" => ("Stopping Terminal", "Stopped Terminal", "Stop Terminal"),
                 "read_terminal" => ("Reading Terminal", "Read Terminal", "Read Terminal"),
-                "list_tasks" => ("Listing Tasks", "Listed Tasks", "List Tasks"),
                 "list_terminals" => ("Listing Terminals", "Listed Terminals", "List Terminals"),
                 "list_commands" => ("Listing Commands", "Listed Commands", "List Commands"),
                 "add_command" => ("Saving Command", "Saved Command", "Save Command"),
-                "serve_folder" => ("Serving Folder", "Served Folder", "Serve Folder"),
-                "list_served" => ("Listing Served Folders", "Listed Served Folders", "List Served Folders"),
-                "stop_serving" => ("Stopping Server", "Stopped Server", "Stop Server"),
                 _ when TodoParser.IsTodosTool(ToolName) => ("Updating tasks", "Updated tasks", "Update tasks"),
                 _ when TodoParser.IsArtifactTool(ToolName) => ("Adding artifact", "Added artifact", "Add artifact"),
                 _ => (PrettyName(ToolName), PrettyName(ToolName), PrettyName(ToolName)),
@@ -1877,6 +1869,13 @@ public sealed partial class NoticeItem : ChatItem
     public Func<Task>? Action { get; init; }
 
     public bool HasAction => ActionText is not null && Action is not null;
+
+    /// <summary>An optional second button beside <see cref="ActionText"/>.</summary>
+    public string? SecondaryActionText { get; init; }
+
+    public Func<Task>? SecondaryAction { get; init; }
+
+    public bool HasSecondaryAction => SecondaryActionText is not null && SecondaryAction is not null;
 
     /// <summary>Segoe Fluent glyph for the severity: info, warning triangle, error circle.</summary>
     public string Glyph => Severity switch
