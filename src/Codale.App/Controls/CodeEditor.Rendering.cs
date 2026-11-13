@@ -308,24 +308,21 @@ public sealed partial class CodeEditor
         var originX = TextLeft - _scrollX;
         for (var r = firstRowInLine; r <= lastRowInLine; r++)
         {
+            // Every row ends exactly on the advance edge of its last character - the same edge the
+            // caret sits on there - so a multi-line selection is flush with the text on every line.
             var x1 = r == firstRowInLine ? ColumnX(line, r, fromCol) : 0;
-            double x2;
-            if (r == lastRowInLine)
-            {
-                x2 = ColumnX(line, r, toCol);
-                if (pastEnd)
-                {
-                    x2 += _charWidth * 0.6;
-                }
-            }
-            else
-            {
-                x2 = ColumnX(line, r, int.MaxValue) + _charWidth * 0.6;
-            }
+            var x2 = r == lastRowInLine ? ColumnX(line, r, toCol) : ColumnX(line, r, int.MaxValue);
 
-            if (x2 <= x1 && !pastEnd)
+            if (x2 <= x1)
             {
-                continue;
+                if (!pastEnd)
+                {
+                    continue;
+                }
+
+                // Nothing to cover (an empty line, or a selection starting at a line end) but the line
+                // break is selected: a narrow mark keeps it visible.
+                x2 = x1 + _charWidth / 2;
             }
 
             ds.FillRectangle((float)(originX + x1), RowY(lineRow + r) + inset, (float)Math.Max(1, x2 - x1), (float)_lineHeight - inset * 2, brush);
