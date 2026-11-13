@@ -1699,8 +1699,17 @@
                 <!-- A useful home for an idle workspace; chat stays one click away. -->
                 <ScrollViewer x:Name="EmptyState" HorizontalScrollBarVisibility="Disabled"
                               VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch"
-                              VerticalContentAlignment="Center">
-                    <StackPanel MaxWidth="560" Margin="32,36" Spacing="24">
+                              VerticalContentAlignment="Stretch">
+                    <!--  Centre explicitly: the middle column takes up to 624 (560 + margins) and the
+                          side columns split what is left, so the content sits in the middle of the card;
+                          MinHeight follows the viewport so short content is centred vertically too.  -->
+                    <Grid MinHeight="{Binding ViewportHeight, ElementName=EmptyState}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="1000*" MaxWidth="624" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="1" Margin="32,36" Spacing="24" VerticalAlignment="Center">
                         <StackPanel Spacing="14">
 
                             <StackPanel Spacing="8">
@@ -1838,6 +1847,7 @@
                             </ListView>
                         </StackPanel>
                     </StackPanel>
+                    </Grid>
                 </ScrollViewer>
 
                     <!--  The terminal dock: a command block dragged to the right edge runs here, beside
@@ -2305,7 +2315,7 @@
                         <Rectangle Style="{StaticResource StatusDivider}" />
                         <Border Style="{StaticResource StatusChip}">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE945;" FontSize="11" VerticalAlignment="Center"
+                                <controls:SparkleIcon Width="12" Height="12" VerticalAlignment="Center"
                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <TextBlock x:Name="SmartStatusText" FontSize="11.5"
                                     VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />

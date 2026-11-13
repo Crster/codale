@@ -192,7 +192,7 @@ public sealed partial class CodeEditor
             }
 
             var started = _frameClock.Elapsed.TotalMilliseconds;
-            using (var session = _swapChain!.CreateDrawingSession(Microsoft.UI.Colors.Transparent))
+            using (var session = _swapChain!.CreateDrawingSession(_surfaceColor))
             {
                 session.TextAntialiasing = CanvasTextAntialiasing.Grayscale;
                 DrawFrame(session);

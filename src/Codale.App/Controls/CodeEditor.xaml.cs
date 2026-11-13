@@ -409,6 +409,7 @@ public sealed partial class CodeEditor : UserControl
     private Windows.UI.Color _panelBorderColor = Microsoft.UI.Colors.Gray;
     private Windows.UI.Color _thumbColor = Microsoft.UI.Colors.Gray;
     private Windows.UI.Color _trackColor = Microsoft.UI.Colors.Transparent;
+    private Windows.UI.Color _surfaceColor = Microsoft.UI.Colors.White;
     private bool _light;
 
     private void RefreshThemeColors()
@@ -469,6 +470,13 @@ public sealed partial class CodeEditor : UserControl
         _panelBorderColor = _light ? Windows.UI.Color.FromArgb(0x30, 0, 0, 0) : Windows.UI.Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF);
         _thumbColor = _light ? Windows.UI.Color.FromArgb(0xFF, 0x50, 0x50, 0x50) : Windows.UI.Color.FromArgb(0xFF, 0xC8, 0xC8, 0xC8);
         _trackColor = _light ? Windows.UI.Color.FromArgb(0x0C, 0, 0, 0) : Windows.UI.Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF);
+
+        // The swap chain is cleared to this each frame. It must be opaque: a transparent swap
+        // chain is composited against the window's Mica backdrop, not the XAML pane behind it,
+        // so the wallpaper's colours bled through as a tinted gradient behind the code.
+        var surface = FromBrush("ShellCentreBackgroundBrush",
+            _light ? Microsoft.UI.Colors.White : Windows.UI.Color.FromArgb(0xFF, 0x1B, 0x1C, 0x20));
+        _surfaceColor = Windows.UI.Color.FromArgb(0xFF, surface.R, surface.G, surface.B);
     }
 
     // ------------------------------------------------------------------ helpers

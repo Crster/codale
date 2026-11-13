@@ -9,7 +9,7 @@ namespace Codale.App.Views;
 /// The workspace's answers to the global search palette: files on disk, the tabs that are
 /// open, past conversations, git changes, project commands and the everyday actions -
 /// ranked by how well their names match - with the project-wide content search (and the
-/// agentic ask) always offered last.
+/// agentic ask) offered first, so Enter searches by default.
 /// </summary>
 public sealed partial class WorkspacePage : IQuickSearchSource
 {
@@ -63,6 +63,8 @@ public sealed partial class WorkspacePage : IQuickSearchSource
 
         ct.ThrowIfCancellationRequested();
 
+        // Content search leads: the palette selects the first row, so typing and pressing Enter searches the project.
+        AddContentSearch(results, query);
         results.AddRange(OpenTabItems(query).Take(MaxPerGroup));
         results.AddRange(files.Select(file => new QuickSearchItem
         {
@@ -76,7 +78,6 @@ public sealed partial class WorkspacePage : IQuickSearchSource
         results.AddRange(HistoryItems(query).Take(MaxPerGroup));
         results.AddRange(CommandItems(query).Take(MaxPerGroup));
         results.AddRange(ActionItems(query));
-        AddContentSearch(results, query);
         return results;
     }
 

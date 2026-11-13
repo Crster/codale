@@ -48,6 +48,20 @@ public sealed class SearchFileItem
 
     public string RelativePath { get; init; } = "";
 
+    /// <summary>The file's name, shown first and bold in the result header.</summary>
+    public string FileName => System.IO.Path.GetFileName(RelativePath.Replace('\\', '/').TrimEnd('/')) is { Length: > 0 } name ? name : RelativePath;
+
+    /// <summary>The folder it sits in, shown dimmed after the name; "" at the root.</summary>
+    public string Folder
+    {
+        get
+        {
+            var path = RelativePath.Replace('\\', '/').TrimEnd('/');
+            var slash = path.LastIndexOf('/');
+            return slash > 0 ? path[..slash] : "";
+        }
+    }
+
     /// <summary>"4 matches", or "" for a file found by its name.</summary>
     public string Detail { get; init; } = "";
 

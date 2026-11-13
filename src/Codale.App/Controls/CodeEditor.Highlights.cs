@@ -283,15 +283,19 @@ public sealed partial class CodeEditor
 
     private void DrawResultHighlights(CanvasDrawingSession ds, int firstLine, int lastLine)
     {
+        // A soft band across each matched row with an accent bar on its left edge (same look as the Search tab).
         var rowBrush = Brush(SearchHighlightStyle.Row(_light));
+        var edgeBrush = Brush(SearchHighlightStyle.RowEdge(_light));
         var left = (float)GutterWidth;
         var right = (float)(ViewportWidth - VBarRestWidth);
         foreach (var (start, end) in _resultRows)
         {
             for (var line = Math.Max(firstLine, start); line <= Math.Min(lastLine, end); line++)
             {
-                var bottom = RowY(FirstRowOf(line) + RowCountOf(line)) - 1;
-                ds.FillRectangle(left, bottom, right - left, 1, rowBrush);
+                var top = RowY(FirstRowOf(line));
+                var height = (float)(RowCountOf(line) * _lineHeight);
+                ds.FillRectangle(left, top, right - left, height, rowBrush);
+                ds.FillRectangle(left, top, SearchHighlightStyle.RowEdgeWidth, height, edgeBrush);
             }
         }
 

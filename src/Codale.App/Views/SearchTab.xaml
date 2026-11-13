@@ -12,6 +12,7 @@
     <UserControl.Resources>
         <views:BoolToVisibilityConverter x:Key="BoolToVisibility" />
         <views:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility" />
+        <views:NullToVisibilityConverter x:Key="NullToVisibility" />
     </UserControl.Resources>
 
     <Grid>
@@ -95,20 +96,22 @@
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:SearchFileItem">
                             <Border
+                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                 BorderThickness="1"
-                                CornerRadius="6">
+                                CornerRadius="8">
                                 <StackPanel>
+                                    <!--  Header: file name first, its folder dimmed after it, the match count as a chip  -->
                                     <Button
-                                        Padding="12,6"
+                                        Padding="12,8"
                                         HorizontalAlignment="Stretch"
                                         HorizontalContentAlignment="Stretch"
-                                        Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                        Background="{ThemeResource SubtleFillColorTransparentBrush}"
                                         BorderThickness="0"
                                         Click="OnFileClick"
-                                        CornerRadius="6,6,0,0"
+                                        CornerRadius="8,8,0,0"
                                         Tag="{x:Bind}"
-                                        ToolTipService.ToolTip="Open in the editor">
+                                        ToolTipService.ToolTip="{x:Bind RelativePath}">
                                         <Grid ColumnSpacing="8">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto" />
@@ -116,20 +119,31 @@
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
                                             <FontIcon
-                                                FontSize="12"
-                                                Glyph="&#xE8A5;"
-                                                Opacity="0.7" />
+                                                VerticalAlignment="Center"
+                                                FontSize="13"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Glyph="&#xE8A5;" />
                                             <TextBlock
                                                 Grid.Column="1"
-                                                FontSize="13"
-                                                FontWeight="SemiBold"
-                                                Text="{x:Bind RelativePath}"
-                                                TextTrimming="CharacterEllipsis" />
-                                            <TextBlock
+                                                VerticalAlignment="Center"
+                                                TextTrimming="CharacterEllipsis"
+                                                TextWrapping="NoWrap">
+                                                <Run FontSize="13" FontWeight="SemiBold" Text="{x:Bind FileName}" />
+                                                <Run Text="  " />
+                                                <Run FontSize="12" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="{x:Bind Folder}" />
+                                            </TextBlock>
+                                            <Border
                                                 Grid.Column="2"
-                                                FontSize="11"
-                                                Opacity="0.55"
-                                                Text="{x:Bind Detail}" />
+                                                Padding="7,1,7,2"
+                                                VerticalAlignment="Center"
+                                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                                CornerRadius="9"
+                                                Visibility="{x:Bind Detail, Converter={StaticResource NullToVisibility}}">
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="{x:Bind Detail}" />
+                                            </Border>
                                         </Grid>
                                     </Button>
                                     <ItemsControl ItemsSource="{x:Bind Ranges}">
@@ -147,21 +161,32 @@
                                                         HorizontalScrollMode="Auto"
                                                         VerticalScrollBarVisibility="Disabled"
                                                         VerticalScrollMode="Disabled">
-                                                        <Grid Padding="0,6,12,6" ColumnSpacing="12">
+                                                        <!--  KeywordHighlight paints into the Canvas: a soft band with an
+                                                              accent edge across each matched row (gutter included) and a
+                                                              tint behind each keyword. Gutter numbers of matched rows are
+                                                              brought up to full contrast.  -->
+                                                        <Grid>
                                                             <Grid.ColumnDefinitions>
                                                                 <ColumnDefinition Width="Auto" />
                                                                 <ColumnDefinition Width="*" />
                                                             </Grid.ColumnDefinitions>
+                                                            <Canvas Grid.ColumnSpan="2" IsHitTestVisible="False" />
+                                                            <Border
+                                                                Padding="12,8,10,8"
+                                                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                                BorderThickness="0,0,1,0">
+                                                                <TextBlock
+                                                                    MinWidth="28"
+                                                                    FontFamily="Cascadia Mono, Consolas"
+                                                                    FontSize="12"
+                                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                                    IsTextSelectionEnabled="False"
+                                                                    Text="{x:Bind Gutter}"
+                                                                    TextAlignment="Right" />
+                                                            </Border>
                                                             <TextBlock
-                                                                MinWidth="40"
-                                                                FontFamily="Cascadia Mono, Consolas"
-                                                                FontSize="12"
-                                                                Opacity="0.6"
-                                                                Text="{x:Bind Gutter}"
-                                                                TextAlignment="Right" />
-                                                            <Grid Grid.Column="1">
-                                                                <Canvas IsHitTestVisible="False" />
-                                                            <TextBlock
+                                                                Grid.Column="1"
+                                                                Margin="12,8,16,8"
                                                                 FontFamily="Cascadia Mono, Consolas"
                                                                 FontSize="12"
                                                                 IsTextSelectionEnabled="True"
@@ -169,7 +194,6 @@
                                                                 views:KeywordHighlight.Lines="{x:Bind MatchLines}"
                                                                 views:KeywordHighlight.Path="{x:Bind FilePath}"
                                                                 views:KeywordHighlight.Terms="{x:Bind Terms}" />
-                                                            </Grid>
                                                         </Grid>
                                                     </ScrollViewer>
                                                 </Border>
