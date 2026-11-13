@@ -140,5 +140,13 @@ public sealed partial class DiffViewerViewModel : ObservableObject
         }
     }
 
-    partial void OnSelectedChanged(FileDiff? value) => OnPropertyChanged(nameof(Stat));
+    /// <summary>The selected file's hunks as one flat, virtualizable row list.</summary>
+    [ObservableProperty]
+    public partial DiffRowList Rows { get; set; } = DiffRowList.Empty;
+
+    partial void OnSelectedChanged(FileDiff? value)
+    {
+        Rows = value is null ? DiffRowList.Empty : new DiffRowList(value.Hunks);
+        OnPropertyChanged(nameof(Stat));
+    }
 }

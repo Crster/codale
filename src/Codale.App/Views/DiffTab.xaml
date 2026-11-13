@@ -7,6 +7,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:git="using:Codale.Git"
     xmlns:views="using:Codale.App.Views"
+    xmlns:vm="using:Codale.App.ViewModels"
     mc:Ignorable="d">
 
     <UserControl.Resources>
@@ -309,68 +310,70 @@
                         HorizontalScrollBarVisibility="Auto"
                         HorizontalScrollMode="Auto"
                         VerticalScrollBarVisibility="Auto">
-                        <ItemsControl ItemsSource="{x:Bind ViewModel.Selected.Hunks, Mode=OneWay}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="git:DiffHunk">
-                                    <StackPanel Margin="0,0,0,10">
+                        <!--  One flat row list in a virtualizing repeater: only the rows on screen are
+                              realized, so a diff of a 200,000-line file opens as fast as a small one.  -->
+                        <ItemsRepeater ItemsSource="{x:Bind ViewModel.Rows, Mode=OneWay}">
+                            <ItemsRepeater.Layout>
+                                <StackLayout />
+                            </ItemsRepeater.Layout>
+                            <ItemsRepeater.ItemTemplate>
+                                <DataTemplate x:DataType="vm:DiffRow">
+                                    <Grid>
                                         <!--  The @@ line as a quiet band, so hunks read as sections.  -->
-                                        <Border Padding="12,3" Background="{StaticResource AskSurfaceBrush}">
+                                        <Border
+                                            Margin="{x:Bind HeaderSpacing}"
+                                            Padding="12,3"
+                                            Background="{StaticResource AskSurfaceBrush}"
+                                            Visibility="{x:Bind HeaderVisibility}">
                                             <TextBlock
                                                 FontFamily="{StaticResource MonoFont}"
                                                 FontSize="11"
                                                 Foreground="{StaticResource DiffHunkHeaderBrush}"
                                                 Text="{x:Bind Header}" />
                                         </Border>
-                                        <ItemsControl ItemsSource="{x:Bind Lines}">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate x:DataType="git:DiffLine">
-                                                    <Grid Background="{x:Bind Kind, Converter={StaticResource DiffBackground}}">
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="46" />
-                                                            <ColumnDefinition Width="46" />
-                                                            <ColumnDefinition Width="20" />
-                                                            <ColumnDefinition Width="*" />
-                                                        </Grid.ColumnDefinitions>
-
-                                                        <TextBlock
-                                                            Grid.Column="0"
-                                                            Margin="0,0,8,0"
-                                                            FontFamily="{StaticResource MonoFont}"
-                                                            FontSize="12"
-                                                            Foreground="{StaticResource DiffGutterBrush}"
-                                                            Text="{x:Bind OldText}"
-                                                            TextAlignment="Right" />
-                                                        <TextBlock
-                                                            Grid.Column="1"
-                                                            Margin="0,0,8,0"
-                                                            FontFamily="{StaticResource MonoFont}"
-                                                            FontSize="12"
-                                                            Foreground="{StaticResource DiffGutterBrush}"
-                                                            Text="{x:Bind NewText}"
-                                                            TextAlignment="Right" />
-                                                        <TextBlock
-                                                            Grid.Column="2"
-                                                            FontFamily="{StaticResource MonoFont}"
-                                                            FontSize="12"
-                                                            Foreground="{x:Bind Kind, Converter={StaticResource DiffForeground}}"
-                                                            Text="{x:Bind Sign}"
-                                                            TextAlignment="Center" />
-                                                        <TextBlock
-                                                            Grid.Column="3"
-                                                            Margin="0,0,16,0"
-                                                            FontFamily="{StaticResource MonoFont}"
-                                                            FontSize="12"
-                                                            Foreground="{x:Bind Kind, Converter={StaticResource DiffForeground}}"
-                                                            Text="{x:Bind Text}"
-                                                            TextWrapping="NoWrap" />
-                                                    </Grid>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </StackPanel>
+                                        <Grid Background="{x:Bind Kind, Converter={StaticResource DiffBackground}}" Visibility="{x:Bind LineVisibility}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="54" />
+                                                <ColumnDefinition Width="54" />
+                                                <ColumnDefinition Width="20" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock
+                                                Grid.Column="0"
+                                                Margin="0,0,8,0"
+                                                FontFamily="{StaticResource MonoFont}"
+                                                FontSize="12"
+                                                Foreground="{StaticResource DiffGutterBrush}"
+                                                Text="{x:Bind OldText}"
+                                                TextAlignment="Right" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                Margin="0,0,8,0"
+                                                FontFamily="{StaticResource MonoFont}"
+                                                FontSize="12"
+                                                Foreground="{StaticResource DiffGutterBrush}"
+                                                Text="{x:Bind NewText}"
+                                                TextAlignment="Right" />
+                                            <TextBlock
+                                                Grid.Column="2"
+                                                FontFamily="{StaticResource MonoFont}"
+                                                FontSize="12"
+                                                Foreground="{x:Bind Kind, Converter={StaticResource DiffForeground}}"
+                                                Text="{x:Bind Sign}"
+                                                TextAlignment="Center" />
+                                            <TextBlock
+                                                Grid.Column="3"
+                                                Margin="0,0,16,0"
+                                                FontFamily="{StaticResource MonoFont}"
+                                                FontSize="12"
+                                                Foreground="{x:Bind Kind, Converter={StaticResource DiffForeground}}"
+                                                Text="{x:Bind Text}"
+                                                TextWrapping="NoWrap" />
+                                        </Grid>
+                                    </Grid>
                                 </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                            </ItemsRepeater.ItemTemplate>
+                        </ItemsRepeater>
                     </ScrollViewer>
                 </Grid>
             </Border>
