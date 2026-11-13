@@ -52,6 +52,8 @@ internal sealed class PromptEditor
         _box.CuttingToClipboard += OnCutting;
         // Handled events too: RichEdit takes the tap for itself to place the caret.
         _box.AddHandler(UIElement.TappedEvent, new TappedEventHandler(OnTapped), handledEventsToo: true);
+        _box.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(OnPointerMoved), handledEventsToo: true);
+        _box.AddHandler(UIElement.PointerExitedEvent, new PointerEventHandler(OnPointerExited), handledEventsToo: true);
         _box.ActualThemeChanged += (_, _) => RedrawPills();
     }
 
@@ -529,6 +531,19 @@ internal sealed class PromptEditor
         }
     }
 
+    private void OnPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (_box is PillRichEditBox pillBox)
+        {
+            pillBox.SetHandCursor(_pills.Count > 0 && PillAt(e.GetCurrentPoint(_box).Position) is not null);
+        }
+    }
+
+    private void OnPointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        (_box as PillRichEditBox)?.SetHandCursor(false);
+    }
+
     private void OnTapped(object sender, TappedRoutedEventArgs e)
     {
         if (PillAt(e.GetPosition(_box)) is { } pill)
@@ -550,6 +565,11 @@ internal sealed class PromptEditor
             }
 
             _box.Document.GetRange(candidate, candidate + 1).GetRect(PointOptions.ClientCoordinates, out var rect, out _);
+            // A little slack around the drawn pill: the text rect is tight and the pill is small.
+            rect.X -= 4;
+            rect.Y -= 4;
+            rect.Width += 8;
+            rect.Height += 8;
             if (rect.Contains(point))
             {
                 var index = CountObjects(_raw, 0, candidate);

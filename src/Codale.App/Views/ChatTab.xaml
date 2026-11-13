@@ -2472,7 +2472,7 @@
                     </Grid.RowDefinitions>
 
 
-                    <RichEditBox
+                    <views:PillRichEditBox
                         x:Name="DraftEditor"
                         Grid.Row="1"
                         MinHeight="44"
@@ -2496,7 +2496,7 @@
                               and falls through to the normal newline. Paste goes through
                               the Paste event, so Ctrl+V, Shift+Insert and the context
                               menu all take the same path.  -->
-                        <RichEditBox.KeyboardAccelerators>
+                        <views:PillRichEditBox.KeyboardAccelerators>
                             <KeyboardAccelerator Key="Enter" Invoked="OnEnterAccelerator" />
                             <KeyboardAccelerator
                                 Key="Enter"
@@ -2514,8 +2514,8 @@
                                 Key="Z"
                                 Invoked="OnRedoAccelerator"
                                 Modifiers="Control,Shift" />
-                        </RichEditBox.KeyboardAccelerators>
-                    </RichEditBox>
+                        </views:PillRichEditBox.KeyboardAccelerators>
+                    </views:PillRichEditBox>
 
                     <!--  The prediction at the caret, drawn over the box: the rest of the word being
                           typed, or a spelling fix for the word just written. Tab takes it.  -->
