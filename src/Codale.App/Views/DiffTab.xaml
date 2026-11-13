@@ -20,6 +20,10 @@
         <views:ChangeLetterBrushConverter x:Key="ChangeLetterBrush" />
 
         <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas</FontFamily>
+        <SolidColorBrush
+            x:Key="DiffSelectionBrush"
+            Opacity="0.28"
+            Color="{ThemeResource SystemAccentColor}" />
 
         <!--  One card look for the header, the file list and the diff pane.  -->
         <Style x:Key="DiffCard" TargetType="Border">
@@ -304,15 +308,49 @@
                         TextWrapping="Wrap"
                         Visibility="{x:Bind ViewModel.Error, Mode=OneWay, Converter={StaticResource NullToVisibility}}" />
 
+                    <!--  Rows select like lines in an editor: click, Shift+click, drag, Ctrl+A;
+                          Ctrl+C or the context menu copies them.  -->
                     <ScrollViewer
+                        x:Name="RowsHost"
                         Grid.Row="1"
                         Padding="0,6,0,6"
                         HorizontalScrollBarVisibility="Auto"
                         HorizontalScrollMode="Auto"
+                        IsTabStop="True"
+                        UseSystemFocusVisuals="False"
                         VerticalScrollBarVisibility="Auto">
+                        <ScrollViewer.ContextFlyout>
+                            <MenuFlyout Opening="OnRowsMenuOpening">
+                                <MenuFlyoutItem
+                                    x:Name="CopyLinesItem"
+                                    Click="OnCopyLinesClick"
+                                    KeyboardAcceleratorTextOverride="Ctrl+C"
+                                    Text="Copy">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE8C8;" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                                <MenuFlyoutItem
+                                    x:Name="CopyPatchItem"
+                                    Click="OnCopyPatchClick"
+                                    Text="Copy as diff" />
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem
+                                    Click="OnCopyAllClick"
+                                    Text="Copy whole diff" />
+                                <MenuFlyoutItem
+                                    Click="OnSelectAllClick"
+                                    KeyboardAcceleratorTextOverride="Ctrl+A"
+                                    Text="Select all" />
+                            </MenuFlyout>
+                        </ScrollViewer.ContextFlyout>
                         <!--  One flat row list in a virtualizing repeater: only the rows on screen are
                               realized, so a diff of a 200,000-line file opens as fast as a small one.  -->
-                        <ItemsRepeater ItemsSource="{x:Bind ViewModel.Rows, Mode=OneWay}">
+                        <ItemsRepeater
+                            x:Name="RowsRepeater"
+                            ElementIndexChanged="OnRowIndexChanged"
+                            ElementPrepared="OnRowPrepared"
+                            ItemsSource="{x:Bind ViewModel.Rows, Mode=OneWay}">
                             <ItemsRepeater.Layout>
                                 <StackLayout />
                             </ItemsRepeater.Layout>
@@ -370,6 +408,11 @@
                                                 Text="{x:Bind Text}"
                                                 TextWrapping="NoWrap" />
                                         </Grid>
+                                        <!--  Shown while the row is selected (set from code by index).  -->
+                                        <Rectangle
+                                            Fill="{StaticResource DiffSelectionBrush}"
+                                            IsHitTestVisible="False"
+                                            Visibility="Collapsed" />
                                     </Grid>
                                 </DataTemplate>
                             </ItemsRepeater.ItemTemplate>
