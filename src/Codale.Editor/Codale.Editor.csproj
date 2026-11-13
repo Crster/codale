@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The editor's engine: text buffer, selections, editing commands, undo and incremental
+    syntax colouring. No UI types live here, so everything is unit-testable; the WinUI view
+    (Codale.App/Controls/CodeEditor) renders and feeds input into it.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Codale.Editor.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Codale.Core\Codale.Core.csproj" />
+  </ItemGroup>
+
+</Project>

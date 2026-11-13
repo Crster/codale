@@ -341,12 +341,17 @@ public static class TextDiff
         var cx = n;
         var cy = m;
 
-        for (var d = found; d >= 0; d--)
+        // Walk back from the end. The move that reached diagonal k at step d was chosen from the
+        // furthest-reaching paths of step d - 1, so that is the trace row to consult (reading
+        // row d instead mislabels which lines were inserted or deleted).
+        for (var d = found; d > 0; d--)
         {
-            var vd = trace[d];
+            var previous = trace[d - 1];
+            int Reach(int diagonal) => previous[(diagonal + d - 1) / 2];
+
             var k = cx - cy;
-            var prevK = k == -d || (k != d && vd[(k - 1 + d) / 2] < vd[(k + 1 + d) / 2]) ? k + 1 : k - 1;
-            var prevX = vd[(prevK + d) / 2];
+            var prevK = k == -d || (k != d && Reach(k - 1) < Reach(k + 1)) ? k + 1 : k - 1;
+            var prevX = Reach(prevK);
             var prevY = prevX - prevK;
 
             while (cx > prevX && cy > prevY)
@@ -356,20 +361,24 @@ public static class TextDiff
                 cy--;
             }
 
-            if (d > 0)
+            if (cx == prevX)
             {
-                if (cx == prevX)
-                {
-                    steps.Add(new Step(Op.Insert, -1, bLo + cy - 1));
-                }
-                else
-                {
-                    steps.Add(new Step(Op.Delete, aLo + cx - 1, -1));
-                }
-
-                cx = prevX;
-                cy = prevY;
+                steps.Add(new Step(Op.Insert, -1, bLo + cy - 1));
             }
+            else
+            {
+                steps.Add(new Step(Op.Delete, aLo + cx - 1, -1));
+            }
+
+            cx = prevX;
+            cy = prevY;
+        }
+
+        while (cx > 0 && cy > 0)
+        {
+            steps.Add(new Step(Op.Equal, aLo + cx - 1, bLo + cy - 1));
+            cx--;
+            cy--;
         }
 
         steps.Reverse();

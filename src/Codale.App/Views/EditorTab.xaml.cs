@@ -38,6 +38,11 @@ public sealed partial class EditorTab : UserControl
     private int _preZoomCursorLine;
     private int _preZoomCursorCol;
 
+    private int _wordCountSequence;
+
+    /// <summary>Above this many characters the change bars refresh on load and save only, not while typing.</summary>
+    private const int LiveDiffMaxChars = 4_000_000;
+
     /// <summary>True while LoadText runs: programmatic text changes are neither dirty nor a word-count event.</summary>
     private bool _loadingText;
 
@@ -53,11 +58,21 @@ public sealed partial class EditorTab : UserControl
         _wordCountTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
         _wordCountTimer.Interval = TimeSpan.FromMilliseconds(300);
         _wordCountTimer.IsRepeating = false;
-        _wordCountTimer.Tick += (_, _) =>
+        _wordCountTimer.Tick += async (_, _) =>
         {
-            if (ViewModel is not null)
+            if (ViewModel is null)
             {
-                ViewModel.SetWordCount(EditorViewModel.CountWords(FileEditor.GetText()));
+                return;
+            }
+
+            // The text is an immutable snapshot, so counting can run off the UI thread; a newer
+            // count started meanwhile wins.
+            var sequence = ++_wordCountSequence;
+            var text = FileEditor.GetText();
+            var count = await Task.Run(() => EditorViewModel.CountWords(text));
+            if (sequence == _wordCountSequence && ViewModel is not null)
+            {
+                ViewModel.SetWordCount(count);
             }
         };
 
@@ -799,7 +814,7 @@ public sealed partial class EditorTab : UserControl
             Edited?.Invoke(this, EventArgs.Empty);
         }
 
-        if (!_loadingText)
+        if (!_loadingText && _headText is { Length: < LiveDiffMaxChars })
         {
             ScheduleDiffRefresh();
         }

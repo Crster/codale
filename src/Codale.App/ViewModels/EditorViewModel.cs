@@ -17,7 +17,7 @@ namespace Codale.App.ViewModels;
 public sealed partial class EditorViewModel : ObservableObject
 {
     /// <summary>Anything larger is not loaded; editing it would stall the UI.</summary>
-    private const int MaxEditBytes = 8 * 1024 * 1024;
+    private const int MaxEditBytes = 64 * 1024 * 1024;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(TabState))]
@@ -341,7 +341,12 @@ public sealed partial class EditorViewModel : ObservableObject
             // before the read, so a change that lands mid-read is caught on the next save.
             var stamp = (info.LastWriteTimeUtc, info.Length);
             var bytes = await File.ReadAllBytesAsync(path);
-            var (text, format) = await Task.Run(() => TextFileCodec.Decode(bytes));
+            // Decoding and the word count both walk the whole file: do them off the UI thread.
+            var (text, format, words) = await Task.Run(() =>
+            {
+                var (decoded, detected) = TextFileCodec.Decode(bytes);
+                return (decoded, detected, CountWords(decoded));
+            });
 
             if (LooksBinary(text))
             {
@@ -359,7 +364,7 @@ public sealed partial class EditorViewModel : ObservableObject
             OnPropertyChanged(nameof(LineEndingLabel));
             HasFile = true;
             CanEdit = true;
-            WordCount = CountWords(text);
+            WordCount = words;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

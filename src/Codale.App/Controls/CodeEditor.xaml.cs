@@ -1,423 +1,150 @@
-using System.Diagnostics;
-
 using Codale.App.Services;
-using Codale.Core.Syntax;
+using Codale.Editor;
 
-using Microsoft.Graphics.Canvas;
-using Microsoft.Graphics.Canvas.Brushes;
-using Microsoft.Graphics.Canvas.Text;
-using Microsoft.Graphics.Canvas.UI;
-using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 
 using Windows.System;
 using Windows.UI.Core;
-using Windows.UI.Text;
 
 namespace Codale.App.Controls;
 
 /// <summary>
-/// Codale's own native WinUI 3 code editor: a Win2D canvas that draws the buffer,
-/// the gutter, the active line and the selection, driven by a line-list document and
-/// a hand-written tokenizer (see <see cref="CodeTokenizer"/>).
+/// Codale's native code editor. <see cref="EditorModel"/> (Codale.Editor) owns the text, the
+/// selections, every editing command and undo; <see cref="SyntaxHighlighter"/> colours lines in
+/// idle time slices. This control is the view: it renders one frame per change into a swap chain
+/// (text, highlights, selections, carets, gutter, diff bars and scrollbars all in the same pass)
+/// and maps keyboard and pointer input onto the model.
 ///
-/// The caret blinks by itself, the active line is one subtle full-width band, and colours
-/// come from the theme resources so dark and light both read.
+/// The partial files split the view up: Layout (metrics, wrapping, column ↔ pixel mapping),
+/// Rendering (swap chain and the frame), Input (keys, pointer, commands), ScrollBars (scrolling
+/// and the minimap bars), Highlights (occurrences, pinned words, search results), DiffGutter,
+/// Completion and Ghost.
 /// </summary>
 public sealed partial class CodeEditor : UserControl
 {
-    /// <summary>How far zooming goes, in points of font size.</summary>
     private const float MinFontSize = 8;
     private const float MaxFontSize = 40;
-
     private const float DefaultFontSize = 13;
-    private const string EditorFontFamily = "Consolas";
-    private const string IconFontFamily = "Segoe MDL2 Assets";
 
-    /// <summary>The caret is 2 dip wide, a hair wider than a stroke so it reads.</summary>
-    private const float CaretWidth = 2;
+    private readonly EditorModel _model = new();
+    private readonly SyntaxHighlighter _highlighter;
+    private readonly LineMarkers _bookmarks;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _caretTimer;
 
-    /// <summary>
-    /// The active-line band, caret and selection sit this far below the top of the
-    /// line box, so they land on the glyphs: the text baseline sits low in the box
-    /// because the line spacing is taller than the font's natural height.
-    /// </summary>
-    private const double LineHighlightOffset = 1;
+    /// <summary>The font size Settings last handed this editor, so a zoomed tab can be told apart from one that follows the setting.</summary>
+    private double _settingsFontSize;
 
-    /// <summary>Padding left of the text, and between gutter numbers and the text.</summary>
-    private const double TextLeftPad = 8;
-
-    private readonly TextDocument _doc = new();
-    private DocumentPosition _caret;
-    private DocumentPosition _anchor;
-
-    private string? _languageId;
+    private bool _closed;
+    private bool _caretVisible = true;
 
     /// <summary>Whether the gutter draws line numbers (Settings).</summary>
     public bool ShowLineNumbers { get; set; } = true;
 
-    /// <summary>Whether tokens colour the text, or everything draws plain (Settings).</summary>
-    public bool EnableSyntaxHighlighting { get; set; } = true;
+    /// <summary>Whether tokens colour the text (Settings).</summary>
+    public bool EnableSyntaxHighlighting
+    {
+        get => _highlighter.Enabled;
+        set => _highlighter.Enabled = value;
+    }
 
     /// <summary>Whether long lines fold at the viewport edge instead of scrolling sideways (Settings).</summary>
     public bool WordWrap { get; set; }
-
-    /// <summary>
-    /// The font size Settings last handed this editor, so a live change can tell a tab
-    /// that still follows the setting apart from one the user zoomed.
-    /// </summary>
-    private double _settingsFontSize;
-
-    private double _charWidth = 8;
-    private double _lineHeight = 18;
-    private double _maxLineWidth;
-
-    private CanvasTextFormat? _textFormat;
-    private CanvasTextFormat? _lineNumberFormat;
-
-    private double _verticalOffset;
-    private double _horizontalOffset;
-
-    private readonly ScrollModel _scroll = new();
-    private readonly OverlayScrollBar _vBar;
-    private readonly OverlayScrollBar _hBar;
-
-
-    // Undo records edits as deltas (range, removed text, inserted text), so a step costs
-    // what the edit touched rather than a copy of the whole file. Continuous typing
-    // coalesces into one step; the step remembers the caret from before it started.
-    private const int UndoLimit = 500;
-
-    private readonly record struct EditRecord(
-        DocumentPosition Start, DocumentPosition RemovedEnd, string Removed, string Inserted, DocumentPosition InsertedEnd);
-
-    private sealed class UndoStep(DocumentPosition caretBefore)
-    {
-        public DocumentPosition CaretBefore { get; } = caretBefore;
-        public List<EditRecord> Edits { get; } = [];
-    }
-
-    private readonly List<UndoStep> _undo = [];
-    private readonly List<UndoStep> _redo = [];
-    private DateTime _lastEditUtc = DateTime.MinValue;
-
-    private bool _caretVisible = true;
-    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _caretTimer;
-
-    private Windows.UI.Color _baseText = Microsoft.UI.Colors.Black;
-    private Windows.UI.Color _lineNumberText = Microsoft.UI.Colors.Gray;
-    private Windows.UI.Color _selectionColor = Microsoft.UI.Colors.LightBlue;
-    private Windows.UI.Color _activeLineColor = Microsoft.UI.Colors.LightGray;
-    private Windows.UI.Color _caretColor = Microsoft.UI.Colors.Black;
-
-    /// <summary>Solid brushes are made against the draw device and reused across frames.</summary>
-    private readonly Dictionary<Windows.UI.Color, CanvasSolidColorBrush> _brushes = [];
-
-    /// <summary>The caret layer's brush, owned by CaretCanvas rather than the brush cache.</summary>
-    private CanvasSolidColorBrush? _caretBrush;
-
-    private CanvasSolidColorBrush Brush(CanvasDrawingSession session, Windows.UI.Color color)
-    {
-        if (!_brushes.TryGetValue(color, out var brush))
-        {
-            brush = new CanvasSolidColorBrush(session, color);
-            _brushes[color] = brush;
-        }
-
-        return brush;
-    }
-
-    /// <summary>
-    /// Per-line render cache: tokens plus the state chain that makes incremental
-    /// window tokenization correct, and the laid-out text once it has been drawn.
-    /// </summary>
-    private sealed class LineCache
-    {
-        public string? Source;
-        public string Display = "";
-        public CodeTokenState StateIn;
-        public CodeTokenState StateOut;
-        public readonly List<CodeToken> Tokens = [];
-
-        /// <summary>One laid-out text per visual row; a non-wrapped line has exactly one.</summary>
-        public readonly List<CanvasTextLayout> RowLayouts = [];
-
-        /// <summary>Whether this entry is listed in <see cref="_laidOut"/>.</summary>
-        public bool Tracked;
-
-        public void DisposeLayouts()
-        {
-            foreach (var layout in RowLayouts)
-            {
-                layout.Dispose();
-            }
-
-            RowLayouts.Clear();
-        }
-    }
-
-    private readonly List<LineCache> _lineCache = [];
-
-    /// <summary>
-    /// The entries that built layouts since the last trim. Scrolling through a large file
-    /// used to keep a DirectWrite layout alive for every line ever shown; the trim walks
-    /// this list instead of the whole cache and releases the ones far from the view.
-    /// </summary>
-    private readonly List<LineCache> _laidOut = [];
-
-    /// <summary>Line-number layouts by line index; the text depends on the index alone.</summary>
-    private readonly Dictionary<int, CanvasTextLayout> _lineNumberLayouts = [];
-
-    /// <summary>How many viewports of layouts are kept on either side of the visible one.</summary>
-    private const int LayoutKeepViewports = 3;
-
-    // Visual rows: a logical line folds into one or more rows of _wrapCols columns each
-    // (the sentinel NoWrapCols makes every line a single row when wrap is off). The row
-    // map is the prefix sum of rows-per-line and everything that turns a y into a line
-    // or a line into a y goes through it.
-    private const int NoWrapCols = int.MaxValue;
-
-    private int _wrapCols = NoWrapCols;
-    private bool _rowMapDirty = true;
-    private readonly List<int> _rowOffsets = [];
-    private int _totalRows = 1;
-
-    /// <summary>How many visual rows an expanded column count needs (never zero).</summary>
-    private int RowCountOf(int expandedLength) => expandedLength == 0 ? 1 : (expandedLength - 1) / _wrapCols + 1;
-
-    /// <summary>The first visual row of a logical line.</summary>
-    private int RowOffsetOf(int line) => _rowOffsets[line];
-
-    /// <summary>Splits an expanded column into (row within the line, column within that row).</summary>
-    private (int RowInLine, int ColInRow) Fold(int expandedCol) => (expandedCol / _wrapCols, expandedCol % _wrapCols);
-
-    /// <summary>
-    /// X offset (from the text origin) of a column within a visual row. Fixed-cell maths is
-    /// right for plain text, but emoji and other surrogate pairs are laid out wider than
-    /// their UTF-16 length, so those lines ask the real text layout instead.
-    /// </summary>
-    private double ColumnX(int line, int rowInLine, int colInRow)
-    {
-        if (line >= 0 && line < _lineCache.Count)
-        {
-            var entry = _lineCache[line];
-            var display = entry.Display;
-            if (entry.Source != null && display.Length > 0 && HasSurrogate(display))
-            {
-                EnsureRowLayouts(entry);
-                if (rowInLine < entry.RowLayouts.Count)
-                {
-                    var layout = entry.RowLayouts[rowInLine];
-                    var rowStart = rowInLine * _wrapCols;
-                    var rowLen = Math.Min(_wrapCols, display.Length - rowStart);
-                    if (rowLen > 0)
-                    {
-                        var index = Math.Clamp(colInRow, 0, rowLen);
-                        return index == rowLen
-                            ? layout.GetCaretPosition(rowLen - 1, true).X
-                            : layout.GetCaretPosition(index, false).X;
-                    }
-                }
-            }
-        }
-
-        return colInRow * _charWidth;
-    }
-
-    private static bool HasSurrogate(string text)
-    {
-        foreach (var c in text)
-        {
-            if (char.IsSurrogate(c))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Rebuilds the row map when dirty. The wrap width follows the viewport, so a
-    /// resize that changes it also drops the layout cache; only the layouts are
-    /// affected, tokens are per logical line and stay.
-    /// </summary>
-    private void EnsureRowMap()
-    {
-        if (!_rowMapDirty)
-        {
-            return;
-        }
-
-        _rowMapDirty = false;
-        var wrapCols = WordWrap
-            ? Math.Max(8, (int)((Canvas.ActualWidth - TextX - 40) / Math.Max(1, _charWidth)))
-            : NoWrapCols;
-        if (wrapCols != _wrapCols)
-        {
-            ClearLayouts();
-            _maxLineWidth = 0;
-        }
-
-        _wrapCols = wrapCols;
-        _rowOffsets.Clear();
-        var total = 0;
-        for (var i = 0; i < _doc.LineCount; i++)
-        {
-            _rowOffsets.Add(total);
-            var raw = _doc.Lines[i];
-            total += RowCountOf(TextDocument.ExpandedColFromRaw(raw, raw.Length));
-        }
-
-        _totalRows = Math.Max(1, total);
-    }
-
-    /// <summary>The logical line and row-within-line a visual row belongs to (binary search).</summary>
-    private (int Line, int RowInLine) RowAt(int visualRow)
-    {
-        var lo = 0;
-        var hi = _rowOffsets.Count - 1;
-        while (lo < hi)
-        {
-            var mid = (lo + hi + 1) / 2;
-            if (_rowOffsets[mid] <= visualRow)
-            {
-                lo = mid;
-            }
-            else
-            {
-                hi = mid - 1;
-            }
-        }
-
-        return (lo, visualRow - _rowOffsets[lo]);
-    }
-
-    /// <summary>The buffer-space visual row a position starts in, for overlays mapping lines to y.</summary>
-    public int VisualRowOfPosition(int line, int col)
-    {
-        EnsureRowMap();
-        line = Math.Clamp(line, 0, _doc.LineCount - 1);
-        var rawLine = _doc.GetLine(line);
-        var (rowInLine, _) = Fold(TextDocument.ExpandedColFromRaw(rawLine, Math.Clamp(col, 0, rawLine.Length)));
-        return _rowOffsets[line] + rowInLine;
-    }
-
-    /// <summary>
-    /// The row box a position is drawn in, in dips relative to this control at the current
-    /// scroll - for overlays that float next to the text, like the Ask panel.
-    /// </summary>
-    public Windows.Foundation.Rect PositionBounds(int line, int col)
-    {
-        EnsureMetrics();
-        EnsureRowMap();
-        line = Math.Clamp(line, 0, _doc.LineCount - 1);
-        var rawLine = _doc.GetLine(line);
-        var (rowInLine, colInRow) = Fold(TextDocument.ExpandedColFromRaw(rawLine, Math.Clamp(col, 0, rawLine.Length)));
-        var x = TextX + ColumnX(line, rowInLine, colInRow) - _horizontalOffset;
-        var y = (_rowOffsets[line] + rowInLine) * _lineHeight - _verticalOffset;
-        return new Windows.Foundation.Rect(x, y, CaretWidth, _lineHeight);
-    }
-
-    /// <summary>How many visual rows a logical line folds into.</summary>
-    public int VisualRowsOf(int line)
-    {
-        EnsureRowMap();
-        line = Math.Clamp(line, 0, _doc.LineCount - 1);
-        var raw = _doc.Lines[line];
-        return RowCountOf(TextDocument.ExpandedColFromRaw(raw, raw.Length));
-    }
 
     public CodeEditor()
     {
         InitializeComponent();
 
-        _vBar = new OverlayScrollBar(vertical: true);
-        _hBar = new OverlayScrollBar(vertical: false);
-        RootGrid.Children.Add(_vBar);
-        RootGrid.Children.Add(_hBar);
-        _vBar.ValueChanged += (_, value) => _scroll.ChangeView(null, value);
-        _hBar.ValueChanged += (_, value) => _scroll.ChangeView(value, null);
-        _vBar.WheelScrolled += OnPointerWheelChanged;
-        _vBar.MarkClicked += OnScrollMarkClicked;
-        _hBar.WheelScrolled += OnPointerWheelChanged;
-        _scroll.Changed += OnViewChanged;
+        _highlighter = new SyntaxHighlighter(_model.Buffer);
+        _bookmarks = new LineMarkers(_model.Buffer);
+        _model.TabWidth = AppSettings.EditorTabWidth;
+
+        _model.Buffer.Changed += OnBufferChanged;
+        _model.Buffer.Reloaded += OnBufferReloaded;
+        _model.SelectionsChanged += OnSelectionsChanged;
+        _model.Edited += OnModelEdited;
+        _highlighter.TokensChanged += OnTokensChanged;
+        _bookmarks.Changed += () =>
+        {
+            _marksDirty = true;
+            Invalidate();
+        };
 
         RefreshThemeColors();
         ActualThemeChanged += (_, _) =>
         {
             RefreshThemeColors();
-            if (_caretBrush is { } caret)
-            {
-                caret.Color = _caretColor;
-            }
-
-            ClearLayouts();
-            InvalidateAll();
+            DropAllVisuals();
+            _marksDirty = true;
+            Invalidate();
         };
 
         _caretTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
         _caretTimer.Interval = TimeSpan.FromMilliseconds(530);
         _caretTimer.Tick += (_, _) =>
         {
-            if (_closed) return;
-            // The blink redraws the caret layer only: a full viewport repaint twice a
-            // second while the editor sits idle was pure burn.
+            if (_closed)
+            {
+                return;
+            }
+
             _caretVisible = !_caretVisible;
-            CaretCanvas.Invalidate();
+            Invalidate();
         };
 
         GotFocus += (_, _) =>
         {
-            _caretVisible = true;
-            InvalidateAll();
-            _caretTimer.Start();
+            RestartCaretBlink();
         };
         LostFocus += (_, _) =>
         {
             _caretTimer.Stop();
             _caretVisible = false;
-            InvalidateAll();
+            Invalidate();
         };
-        LosingFocus += OnEditorLosingFocus;
+        Loaded += (_, _) =>
+        {
+            Surface.CompositionScaleChanged += OnCompositionScaleChanged;
+            Invalidate();
+        };
         Unloaded += (_, _) =>
         {
+            Surface.CompositionScaleChanged -= OnCompositionScaleChanged;
             _caretTimer.Stop();
             _autoScrollTimer?.Stop();
             _occurrenceTimer?.Stop();
             _ghostTimer?.Stop();
+            StopRenderLoop();
         };
 
-        // Tunnelling: the focus system takes Tab before a bubbling KeyDown fires.
+        // Tunnelling: the focus system takes Tab before a bubbling KeyDown would see it.
         PreviewKeyDown += OnEditorKeyDown;
         CharacterReceived += OnEditorCharacterReceived;
+        LosingFocus += OnEditorLosingFocus;
         InitCompletion();
 
-        // FontSize changes (zoom, or XAML styling) re-measure everything.
         RegisterPropertyChangedCallback(FontSizeProperty, (_, _) => OnFontMetricsChanged());
 
-        // Settings own the defaults; zoom still overrides per tab until the next
-        // ApplyAppSettings. EditorTab must not set FontSize in XAML, or it would
-        // overwrite this.
+        // Settings own the defaults; zoom overrides per tab until the next ApplyAppSettings.
         _settingsFontSize = Math.Clamp(AppSettings.EditorFontSize, MinFontSize, MaxFontSize);
         FontSize = _settingsFontSize;
         ShowLineNumbers = AppSettings.EditorLineNumbers;
-        EnableSyntaxHighlighting = AppSettings.EditorHighlighting;
+        _highlighter.Enabled = AppSettings.EditorHighlighting;
         WordWrap = AppSettings.EditorWordWrap;
     }
 
-    // ------------------------------------------------------------------ public surface
-
-    private bool _closed;
+    // ------------------------------------------------------------------ lifetime
 
     /// <summary>Releases native graphics when the owner permanently closes.</summary>
     public void Close()
     {
-        if (_closed) return;
+        if (_closed)
+        {
+            return;
+        }
+
         _closed = true;
         _caretTimer.Stop();
         _autoScrollTimer?.Stop();
@@ -425,124 +152,54 @@ public sealed partial class CodeEditor : UserControl
         _ghostTimer?.Stop();
         _ghostCts?.Cancel();
         CloseCompletion();
-        ClearLayouts();
-        _textFormat?.Dispose();
-        _lineNumberFormat?.Dispose();
-        foreach (var brush in _brushes.Values) brush.Dispose();
-        _brushes.Clear();
-        _caretBrush?.Dispose();
-        _vBar.Close();
-        _hBar.Close();
-        Canvas.RemoveFromVisualTree();
-        CaretCanvas.RemoveFromVisualTree();
-        Canvas = null!;
-        CaretCanvas = null!;
+        StopRenderLoop();
+        DropAllVisuals();
+        DisposeGraphics();
+        Surface.RemoveFromVisualTree();
     }
 
+    // ------------------------------------------------------------------ public surface
 
-    /// <summary>The whole buffer text, joined with CRLF.</summary>
-    public string GetText() => _doc.GetText();
+    /// <summary>The whole buffer text, joined with CRLF. Cached until the next edit.</summary>
+    public string GetText() => _model.Buffer.GetText();
 
-    public int NumberOfLines => _doc.LineCount;
+    public int NumberOfLines => _model.Buffer.LineCount;
 
     /// <summary>The height of one rendered line in dips; overlays key off it.</summary>
-    public double ActualLineHeight => _lineHeight;
+    public double ActualLineHeight
+    {
+        get
+        {
+            EnsureMetrics();
+            return _lineHeight;
+        }
+    }
 
     /// <summary>Vertical scroll offset in dips from the top of the buffer.</summary>
-    public double VerticalScroll => _verticalOffset;
+    public double VerticalScroll => _scrollY;
 
     /// <summary>Scrolls so <paramref name="offset"/> dips of the buffer are at the top.</summary>
-    public void SetVerticalScroll(double offset) => ScrollTo(null, Math.Max(0, offset));
+    public void SetVerticalScroll(double offset) => ScrollTo(null, Math.Max(0, offset), animate: false);
 
-    /// <summary>Moves the view after bringing the extent up to date, so a jump past the old end is not clamped away.</summary>
-    private void ScrollTo(double? horizontal, double? vertical)
-    {
-        UpdateExtent();
-        _scroll.ChangeView(horizontal, vertical);
-    }
+    /// <summary>The primary caret: line 0-based, column 1-based.</summary>
+    public EditorCursorPosition CursorPosition => new(_model.Primary.Caret.Line, _model.Primary.Caret.Col + 1);
 
-    /// <summary>The caret position: line 0-based, column 1-based.</summary>
-    public EditorCursorPosition CursorPosition =>
-        new(_caret.Line, _caret.Col + 1);
+    public bool HasSelection => _model.HasSelection;
 
-    public bool HasSelection => _anchor != _caret;
+    /// <summary>Characters selected across every selection, line breaks counted as CRLF.</summary>
+    public int SelectedTextLength => (int)Math.Min(int.MaxValue, _model.SelectedLength(2));
 
-    /// <summary>
-    /// The selection's character count, computed arithmetically. Building the whole
-    /// SelectedText string just to read its length used to allocate the selection
-    /// afresh on every pointer move during a drag.
-    /// </summary>
-    public int SelectedTextLength
-    {
-        get
-        {
-            var (start, end) = OrderedSelection();
-            if (start == end)
-            {
-                return 0;
-            }
+    /// <summary>The selected text (several selections one per line), or an empty string.</summary>
+    public string SelectedText => _model.GetSelectedText();
 
-            if (start.Line == end.Line)
-            {
-                return end.Col - start.Col;
-            }
-
-            var count = _doc.GetLine(start.Line).Length - start.Col;
-            for (var line = start.Line + 1; line < end.Line; line++)
-            {
-                count += _doc.GetLine(line).Length + Environment.NewLine.Length;
-            }
-
-            return count + Environment.NewLine.Length + end.Col;
-        }
-    }
-
-    /// <summary>The selected text, or an empty string when nothing is selected.</summary>
-    public string SelectedText
-    {
-        get
-        {
-            var (start, end) = OrderedSelection();
-            if (start == end)
-            {
-                return string.Empty;
-            }
-
-            if (start.Line == end.Line)
-            {
-                return _doc.GetLine(start.Line)[start.Col..end.Col];
-            }
-
-            var parts = new List<string> { _doc.GetLine(start.Line)[start.Col..] };
-            for (var line = start.Line + 1; line < end.Line; line++)
-            {
-                parts.Add(_doc.GetLine(line));
-            }
-
-            parts.Add(_doc.GetLine(end.Line)[..end.Col]);
-            return string.Join(Environment.NewLine, parts);
-        }
-    }
-
-    /// <summary>The selection as character offsets into <see cref="GetText"/>; both equal the caret when nothing is selected.</summary>
+    /// <summary>The primary selection as character offsets into <see cref="GetText"/>.</summary>
     public (int Start, int End) SelectionOffsets
     {
         get
         {
-            var (start, end) = OrderedSelection();
-            return (OffsetOf(start), OffsetOf(end));
+            var primary = _model.Primary;
+            return ((int)_model.Buffer.OffsetOf(primary.Start), (int)_model.Buffer.OffsetOf(primary.End));
         }
-    }
-
-    private int OffsetOf(DocumentPosition position)
-    {
-        var offset = position.Col;
-        for (var line = 0; line < position.Line; line++)
-        {
-            offset += _doc.GetLine(line).Length + 2;
-        }
-
-        return offset;
     }
 
     // Menu-facing wrappers over the keyboard paths.
@@ -552,89 +209,96 @@ public sealed partial class CodeEditor : UserControl
 
     public void PasteFromClipboard() => _ = PasteAsync();
 
-    public void SelectEverything() => SelectAll();
+    public void SelectEverything() => _model.SelectAll();
 
-    public void DeleteSelection() => Delete();
+    public void DeleteSelection() => _model.Delete();
 
-    public bool CanUndo => _undo.Count > 0;
+    public bool CanUndo => _model.CanUndo;
 
-    public bool CanRedo => _redo.Count > 0;
+    public bool CanRedo => _model.CanRedo;
 
-    /// <summary>Replaces the selection (or inserts at the caret) as one undo step.</summary>
-    public void ReplaceSelection(string text) => InsertText(text.Replace("\r\n", "\n").Replace('\r', '\n'));
+    public void Undo() => _model.Undo();
 
-    /// <summary>
-    /// Swaps the whole buffer for new text as one undo step, keeping the caret near its
-    /// old line. Unlike <see cref="LoadText"/> this stays undoable.
-    /// </summary>
+    public void Redo() => _model.Redo();
+
+    /// <summary>Replaces the selections (or inserts at the carets) as one undo step.</summary>
+    public void ReplaceSelection(string text) => _model.Paste(text);
+
+    /// <summary>Swaps the whole buffer for new text as one undo step, keeping the caret near its old line.</summary>
     public void ReplaceAllText(string text)
     {
-        var line = _caret.Line;
-        BeginUndoStep(canCoalesce: false);
-        var last = _doc.LineCount - 1;
-        Edit(new DocumentPosition(0, 0), new DocumentPosition(last, _doc.GetLine(last).Length), text);
-        _caret = _anchor = new DocumentPosition(Math.Min(line, _doc.LineCount - 1), 0);
-        AfterEdit();
-    }
-
-    /// <summary>True when the position (line 0-based, column 0-based) lies inside the selection.</summary>
-    private bool SelectionContains(DocumentPosition position)
-    {
-        var (start, end) = OrderedSelection();
-        return start != end && !(position < start) && !(position > end);
+        var line = _model.Primary.Caret.Line;
+        _model.ReplaceRange(default, _model.Buffer.End, text);
+        _model.SetCaret(new DocumentPosition(Math.Min(line, _model.Buffer.LineCount - 1), 0));
     }
 
     /// <summary>Replaces the buffer. Undo history restarts; the caret goes to the top.</summary>
     public void LoadText(string text)
     {
-        _doc.Load(text);
-        _undo.Clear();
-        _redo.Clear();
-        _caret = _anchor = default;
-        ResetAfterDocChange();
+        _model.Load(text);
+        SetScroll(0, 0);
         RaiseTextChanged();
-        RaiseSelectionChanged();
     }
 
-    /// <summary>Puts the caret (and optionally the selection anchor) at a position.</summary>
+    /// <summary>Puts the caret (and optionally extends the selection) at a position.</summary>
     public void SetCursorPosition(int line, int col, bool select = false, bool scrollIntoView = true)
     {
-        _caret = ClampPosition(new(Math.Max(0, line), Math.Max(0, col)));
-        if (!select)
-        {
-            _anchor = _caret;
-        }
-
+        _model.SetCaret(new DocumentPosition(Math.Max(0, line), Math.Max(0, col)), extend: select);
         if (scrollIntoView)
         {
-            ScrollIntoView();
+            RevealCaret();
         }
-
-        InvalidateAll();
-        RaiseSelectionChanged();
     }
 
     /// <summary>Scrolls a line into the vertical middle of the view.</summary>
     public void ScrollLineToCenter(int line)
     {
-        EnsureRowMap();
-        var target = (RowOffsetOf(Math.Clamp(line, 0, _doc.LineCount - 1)) + 0.5) * _lineHeight - Canvas.ActualHeight / 2;
-        ScrollTo(null, Math.Max(0, target));
+        EnsureMetrics();
+        line = Math.Clamp(line, 0, _model.Buffer.LineCount - 1);
+        var target = (FirstRowOf(line) + 0.5) * _lineHeight - ViewportHeight / 2;
+        ScrollTo(null, Math.Max(0, target), animate: false);
     }
 
     /// <summary>Moves the view so the caret's column is visible.</summary>
-    public void ScrollIntoViewHorizontally() => ScrollIntoView();
+    public void ScrollIntoViewHorizontally() => RevealCaret();
 
     /// <summary>Sets the language the buffer is coloured with.</summary>
     public void SelectSyntaxHighlightingById(string? languageId)
     {
-        _languageId = languageId;
-        ClearTokens();
-        InvalidateAll();
+        _highlighter.LanguageId = languageId;
+        DropAllVisuals();
+        QueueTokenizing();
+        Invalidate();
     }
 
     /// <summary>The id of the language the buffer is coloured with, or null for plain text.</summary>
-    public string? LanguageId => _languageId;
+    public string? LanguageId => _highlighter.LanguageId;
+
+    private string? _languageId => _highlighter.LanguageId;
+
+    /// <summary>The buffer-space visual row a position starts in, for overlays mapping lines to y.</summary>
+    public int VisualRowOfPosition(int line, int col)
+    {
+        EnsureMetrics();
+        var position = _model.Buffer.Clamp(new DocumentPosition(line, col));
+        return FirstRowOf(position.Line) + RowInLineOf(position.Line, position.Col);
+    }
+
+    /// <summary>How many visual rows a logical line folds into.</summary>
+    public int VisualRowsOf(int line)
+    {
+        EnsureMetrics();
+        return RowCountOf(Math.Clamp(line, 0, _model.Buffer.LineCount - 1));
+    }
+
+    /// <summary>The row box a position is drawn in, relative to this control at the current scroll.</summary>
+    public Windows.Foundation.Rect PositionBounds(int line, int col)
+    {
+        EnsureMetrics();
+        var position = _model.Buffer.Clamp(new DocumentPosition(line, col));
+        var (row, x) = Locate(position);
+        return new Windows.Foundation.Rect(TextLeft + x - _scrollX, row * _lineHeight - _scrollY, CaretWidth, _lineHeight);
+    }
 
     // ------------------------------------------------------------------ events
 
@@ -647,34 +311,114 @@ public sealed partial class CodeEditor : UserControl
 
     private void RaiseTextChanged()
     {
-        QueueOccurrences();
         _docWordsDirty = true;
         TextChanged?.Invoke(this);
     }
 
-    private void RaiseSelectionChanged()
+    private void OnModelEdited()
     {
+        RevealCaret();
+        RaiseTextChanged();
+    }
+
+    private void OnSelectionsChanged()
+    {
+        RestartCaretBlink();
         QueueOccurrences();
         _marksDirty = true;
-        UpdateExtent();
+        Invalidate();
+        var caret = _model.Primary.Caret;
         SelectionChanged?.Invoke(this, new EditorSelectionEventArgs
         {
-            LineNumber = _caret.Line,
-            CharacterPositionInLine = _caret.Col + 1,
+            LineNumber = caret.Line,
+            CharacterPositionInLine = caret.Col + 1,
         });
+    }
+
+    private void RestartCaretBlink()
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        _caretVisible = true;
+        _caretTimer.Stop();
+        if (FocusState != FocusState.Unfocused)
+        {
+            _caretTimer.Start();
+        }
+
+        Invalidate();
+    }
+
+    // ------------------------------------------------------------------ settings
+
+    private void OnFontMetricsChanged()
+    {
+        ResetMetrics();
+        Invalidate();
+        ZoomChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Applies the Settings values: font size (unless this tab was zoomed away from the last
+    /// setting), tab width, line numbers, highlighting and wrap.
+    /// </summary>
+    public void ApplyAppSettings()
+    {
+        var tabWidthChanged = _model.TabWidth != AppSettings.EditorTabWidth;
+        _model.TabWidth = AppSettings.EditorTabWidth;
+
+        var size = Math.Clamp(AppSettings.EditorFontSize, MinFontSize, MaxFontSize);
+        if (double.IsFinite(FontSize) && Math.Abs(FontSize - _settingsFontSize) < 0.1)
+        {
+            FontSize = size;
+        }
+
+        _settingsFontSize = size;
+        var wrapChanged = WordWrap != AppSettings.EditorWordWrap;
+        WordWrap = AppSettings.EditorWordWrap;
+        ShowLineNumbers = AppSettings.EditorLineNumbers;
+        _highlighter.Enabled = AppSettings.EditorHighlighting;
+
+        if (tabWidthChanged || wrapChanged)
+        {
+            ResetMetrics();
+        }
+
+        DropAllVisuals();
+        QueueTokenizing();
+        Invalidate();
     }
 
     // ------------------------------------------------------------------ theme colours
 
+    private Windows.UI.Color _baseText = Microsoft.UI.Colors.Black;
+    private Windows.UI.Color _lineNumberText = Microsoft.UI.Colors.Gray;
+    private Windows.UI.Color _activeLineNumberText = Microsoft.UI.Colors.Black;
+    private Windows.UI.Color _selectionColor = Microsoft.UI.Colors.LightBlue;
+    private Windows.UI.Color _inactiveSelectionColor = Microsoft.UI.Colors.LightGray;
+    private Windows.UI.Color _activeLineColor = Microsoft.UI.Colors.LightGray;
+    private Windows.UI.Color _caretColor = Microsoft.UI.Colors.Black;
+    private Windows.UI.Color _occurrenceColor = Microsoft.UI.Colors.LightGray;
+    private Windows.UI.Color _wordHighlightColor = Microsoft.UI.Colors.LightGray;
+    private Windows.UI.Color _bookmarkColor = Microsoft.UI.Colors.SteelBlue;
+    private Windows.UI.Color _bookmarkLineColor = Microsoft.UI.Colors.LightGray;
+    private Windows.UI.Color _panelColor = Microsoft.UI.Colors.White;
+    private Windows.UI.Color _panelBorderColor = Microsoft.UI.Colors.Gray;
+    private Windows.UI.Color _thumbColor = Microsoft.UI.Colors.Gray;
+    private Windows.UI.Color _trackColor = Microsoft.UI.Colors.Transparent;
+    private bool _light;
+
     private void RefreshThemeColors()
     {
-        // Application.Resources resolves the app-level theme, not this element's, so a
-        // Light override on the window would still hand back the dark (white) text.
-        // Look the key up in the matching theme dictionary instead.
+        // Application.Resources resolves the app theme, not this element's, so a Light override
+        // on the window would still hand back dark values: look in the matching theme dictionary.
         var resources = Application.Current.Resources;
-        var light = ActualTheme == ElementTheme.Light;
-        var themeKey = light ? "Light" : "Default";
-        Windows.UI.Color FromBrush(string key)
+        _light = ActualTheme == ElementTheme.Light;
+        var themeKey = _light ? "Light" : "Default";
+        Windows.UI.Color FromBrush(string key, Windows.UI.Color fallback)
         {
             foreach (var merged in resources.MergedDictionaries)
             {
@@ -687,1638 +431,54 @@ public sealed partial class CodeEditor : UserControl
                 }
             }
 
-            return ((SolidColorBrush)resources[key]).Color;
+            return resources.TryGetValue(key, out var any) && any is SolidColorBrush b ? b.Color : fallback;
         }
 
-        _baseText = FromBrush("TextFillColorPrimaryBrush");
-        _lineNumberText = FromBrush("TextFillColorTertiaryBrush");
-        if (light)
+        _baseText = FromBrush("TextFillColorPrimaryBrush", Microsoft.UI.Colors.White);
+        _lineNumberText = FromBrush("TextFillColorTertiaryBrush", Microsoft.UI.Colors.Gray);
+        if (_light)
         {
-            // Fluent's light text is a translucent black, which turns grey over the editor's
-            // pale surface; code reads better in a solid, near-black ink.
+            // Fluent's light text is a translucent black that greys out over the editor's pale
+            // surface; code reads better in a solid, near-black ink.
             _baseText = Windows.UI.Color.FromArgb(0xFF, 0x1F, 0x23, 0x28);
-            _lineNumberText = Windows.UI.Color.FromArgb(0xFF, 0x6A, 0x73, 0x7D);
+            _lineNumberText = Windows.UI.Color.FromArgb(0xFF, 0x8A, 0x92, 0x9A);
+            _activeLineNumberText = Windows.UI.Color.FromArgb(0xFF, 0x24, 0x29, 0x2F);
+        }
+        else
+        {
+            _lineNumberText = Windows.UI.Color.FromArgb(0xFF, 0x6E, 0x76, 0x81);
+            _activeLineNumberText = Windows.UI.Color.FromArgb(0xFF, 0xD0, 0xD7, 0xDE);
         }
 
         _caretColor = _baseText;
-
-        var accent = FromBrush("AccentFillColorDefaultBrush");
-        _selectionColor = Windows.UI.Color.FromArgb(0x42, accent.R, accent.G, accent.B);
-        _occurrenceColor = Windows.UI.Color.FromArgb(0x26, accent.R, accent.G, accent.B);
-
-        // The active line: a whisper of the text colour, so it works on any theme
-        // without competing with the selection.
-        var a = (byte)(ActualTheme == ElementTheme.Dark ? 0x0E : 0x0C);
-        _activeLineColor = ActualTheme == ElementTheme.Dark
-            ? Windows.UI.Color.FromArgb(a, 0xFF, 0xFF, 0xFF)
-            : Windows.UI.Color.FromArgb(a, 0x00, 0x00, 0x00);
-    }
-
-    // ------------------------------------------------------------------ metrics
-
-    private double GutterWidth
-    {
-        get
-        {
-            if (!ShowLineNumbers)
-            {
-                return 0;
-            }
-
-            var digits = Math.Max(2, _doc.LineCount.ToString().Length);
-            return TextLeftPad * 2 + digits * _charWidth;
-        }
-    }
-
-    private double TextX => GutterWidth + TextLeftPad;
-
-    /// <summary>Makes sure the fonts and monospace metrics match the current FontSize.</summary>
-    private void EnsureMetrics()
-    {
-        if (_textFormat is not null)
-        {
-            return;
-        }
-
-        var fontSize = (float)(double.IsFinite(FontSize) && FontSize > 0 ? FontSize : DefaultFontSize);
-        _lineHeight = Math.Round(fontSize * 1.38);
-
-        _textFormat = new CanvasTextFormat
-        {
-            FontFamily = EditorFontFamily,
-            FontSize = fontSize,
-            FontWeight = new FontWeight { Weight = 400 },
-            WordWrapping = CanvasWordWrapping.NoWrap,
-            HorizontalAlignment = CanvasHorizontalAlignment.Left,
-            LineSpacing = (float)_lineHeight,
-            LineSpacingBaseline = (float)Math.Round(_lineHeight * 0.8),
-        };
-        _lineNumberFormat = new CanvasTextFormat
-        {
-            FontFamily = EditorFontFamily,
-            FontSize = fontSize,
-            WordWrapping = CanvasWordWrapping.NoWrap,
-            HorizontalAlignment = CanvasHorizontalAlignment.Right,
-            LineSpacing = (float)_lineHeight,
-            LineSpacingBaseline = (float)Math.Round(_lineHeight * 0.8),
-        };
-
-        // The shared device, not the control: a search result can reach here from SizeChanged
-        // before the control's first CreateResources, when the control has no device yet.
-        using var measure = new CanvasTextLayout(CanvasDevice.GetSharedDevice(), new string('M', 100), _textFormat, 65536f, (float)_lineHeight * 2);
-
-        // LayoutBounds is advance-based; DrawBounds is ink-only and under-measures, which
-        // drifts the selection and caret further from the glyphs the longer the line is.
-        _charWidth = measure.LayoutBounds.Width / 100;
-        if (_charWidth <= 0)
-        {
-            _charWidth = fontSize * 0.55;
-        }
-    }
-
-    private void OnFontMetricsChanged()
-    {
-        ClearLayouts();
-        _maxLineWidth = 0;
-        _textFormat?.Dispose();
-        _lineNumberFormat?.Dispose();
-        _textFormat = null;
-        _lineNumberFormat = null;
-        _rowMapDirty = true;
-        UpdateExtent();
-        InvalidateAll();
-        ZoomChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    /// <summary>
-    /// Applies the Settings-window values to this editor: the configured font size
-    /// (unless the user zoomed this tab away from the last setting), tab width, line
-    /// numbers and highlighting. Called for open editors when a setting changes.
-    /// </summary>
-    public void ApplyAppSettings()
-    {
-        var tabWidthChanged = TextDocument.TabWidth != AppSettings.EditorTabWidth;
-        TextDocument.TabWidth = AppSettings.EditorTabWidth;
-
-        var size = Math.Clamp(AppSettings.EditorFontSize, MinFontSize, MaxFontSize);
-        if (double.IsFinite(FontSize) && Math.Abs(FontSize - _settingsFontSize) < 0.1)
-        {
-            // The tab still follows the setting, so it moves with it; a zoomed tab
-            // keeps the size the user picked.
-            FontSize = size;
-        }
-
-        _settingsFontSize = size;
-
-        var wrapChanged = WordWrap != AppSettings.EditorWordWrap;
-        WordWrap = AppSettings.EditorWordWrap;
-        if (wrapChanged)
-        {
-            _rowMapDirty = true;
-        }
-
-        var highlightingChanged = EnableSyntaxHighlighting != AppSettings.EditorHighlighting;
-        ShowLineNumbers = AppSettings.EditorLineNumbers;
-        EnableSyntaxHighlighting = AppSettings.EditorHighlighting;
-
-        if (tabWidthChanged || highlightingChanged)
-        {
-            // Tab expansion and token colours live in the render cache; drop it so
-            // the visible lines rebuild from the new values.
-            ClearTokens();
-            _maxLineWidth = 0;
-        }
-
-        UpdateExtent();
-        InvalidateAll();
-    }
-
-    // ------------------------------------------------------------------ token cache
-
-    /// <summary>
-    /// Number of lines at the top of the document known to be token-cache-valid, i.e.
-    /// every line below this index may need re-lexing. Skips the per-frame walk from
-    /// line 0, which at the bottom of a large file was O(document) on every draw.
-    /// </summary>
-    private int _stableLine;
-
-    private void ClearTokens()
-    {
-        ClearLayouts();
-        _lineCache.Clear();
-        _stableLine = 0;
-    }
-
-    /// <summary>
-    /// Marks everything from <paramref name="line"/> down as needing a re-lex, keeping
-    /// the cache and layouts above it. A localized edit (typing, undo, redo) only
-    /// invalidates the lines it touched, so the next draw rebuilds a handful of lines
-    /// instead of re-shaping the whole viewport.
-    /// </summary>
-    private void InvalidateTokensFrom(int line)
-    {
-        if (line < _stableLine)
-        {
-            _stableLine = Math.Clamp(line, 0, _doc.LineCount);
-        }
-    }
-
-    private void ClearLayouts()
-    {
-        foreach (var entry in _laidOut)
-        {
-            entry.DisposeLayouts();
-            entry.Tracked = false;
-        }
-
-        _laidOut.Clear();
-
-        foreach (var layout in _lineNumberLayouts.Values)
-        {
-            layout.Dispose();
-        }
-
-        _lineNumberLayouts.Clear();
-    }
-
-    private bool _prefetchQueued;
-
-    /// <summary>
-    /// Shaping a line costs far more than drawing it, and a wheel notch brings several new
-    /// lines into view at once - done inside the draw that stutters. Once the UI is idle this
-    /// shapes a viewport of lines either side of the view, in short slices, so the next
-    /// scroll finds them ready. The trim keeps three viewports each way, so none are lost.
-    /// </summary>
-    private void QueueLayoutPrefetch()
-    {
-        if (_prefetchQueued)
-        {
-            return;
-        }
-
-        _prefetchQueued = true;
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
-        {
-            _prefetchQueued = false;
-            if (_closed || !IsLoaded) return;
-            if (_textFormat is null || _doc.LineCount == 0 || _lineHeight <= 0 || Canvas.ActualHeight <= 0)
-            {
-                return;
-            }
-
-            EnsureRowMap();
-            var firstRow = Math.Max(0, (int)(_verticalOffset / _lineHeight));
-            var lastRow = Math.Min(_totalRows - 1, (int)((_verticalOffset + Canvas.ActualHeight) / _lineHeight));
-            var (firstLine, _) = RowAt(firstRow);
-            var (lastLine, _) = RowAt(lastRow);
-            var span = lastLine - firstLine + 1;
-            var from = Math.Max(0, firstLine - span);
-            var to = Math.Min(_doc.LineCount - 1, lastLine + span);
-
-            EnsureTokens(to);
-
-            var clock = System.Diagnostics.Stopwatch.StartNew();
-            for (var line = from; line <= to && line < _lineCache.Count; line++)
-            {
-                EnsureRowLayouts(_lineCache[line]);
-                if (clock.ElapsedMilliseconds >= 6)
-                {
-                    QueueLayoutPrefetch();
-                    return;
-                }
-            }
-
-            UpdateExtent();
-        });
-    }
-
-    /// <summary>
-    /// Releases layouts of lines well outside the view once the caches outgrow it, so a
-    /// long scroll holds a few viewports of layouts rather than one per line it passed.
-    /// </summary>
-    private void TrimLayoutCaches(int firstLine, int lastLine)
-    {
-        var margin = (lastLine - firstLine + 1) * LayoutKeepViewports;
-        var keepFrom = Math.Max(0, firstLine - margin);
-        var keepTo = Math.Min(_lineCache.Count - 1, lastLine + margin);
-        var budget = (keepTo - keepFrom + 1) * 2 + 256;
-
-        if (_laidOut.Count > budget)
-        {
-            var keep = new HashSet<LineCache>();
-            for (var i = keepFrom; i <= keepTo; i++)
-            {
-                keep.Add(_lineCache[i]);
-            }
-
-            _laidOut.RemoveAll(entry =>
-            {
-                if (keep.Contains(entry))
-                {
-                    return false;
-                }
-
-                entry.DisposeLayouts();
-                entry.Tracked = false;
-                return true;
-            });
-        }
-
-        if (_lineNumberLayouts.Count > budget)
-        {
-            foreach (var line in _lineNumberLayouts.Keys.Where(l => l < keepFrom || l > keepTo).ToList())
-            {
-                _lineNumberLayouts[line].Dispose();
-                _lineNumberLayouts.Remove(line);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Walks the token cache from the top, reusing every line whose cached entry was
-    /// built from the same line string (lines are immutable, so reference equality
-    /// means unchanged) with the same incoming state, and re-tokenizing the rest.
-    /// An edit therefore re-lexes only the touched line, plus following lines only
-    /// while a multi-line construct such as a block comment keeps changing their state.
-    /// </summary>
-    private void EnsureTokens(int lastLine)
-    {
-        var docLines = _doc.LineCount;
-        if (lastLine >= docLines)
-        {
-            lastLine = docLines - 1;
-        }
-
-        if (_stableLine > docLines)
-        {
-            _stableLine = docLines;
-        }
-
-        var state = new CodeTokenState();
-        var line = 0;
-
-        if (_stableLine > 0)
-        {
-            if (lastLine < _stableLine)
-            {
-                // Everything the viewport asks for is already verified: no walk at all.
-                line = lastLine + 1;
-            }
-            else
-            {
-                // Jump to the watermark. The state entering it is exactly what the
-                // previous verified line produced; the reference checks below still
-                // hold it honest.
-                line = _stableLine;
-                state = line > 0 && line - 1 < _lineCache.Count
-                    ? _lineCache[line - 1].StateOut
-                    : state;
-            }
-        }
-
-        for (; line <= lastLine && line < docLines; line++)
-        {
-            var source = _doc.Lines[line];
-            if (line < _lineCache.Count
-                && ReferenceEquals(_lineCache[line].Source, source)
-                && _lineCache[line].StateIn.SameAs(state))
-            {
-                state = _lineCache[line].StateOut;
-                continue;
-            }
-
-            while (_lineCache.Count <= line)
-            {
-                _lineCache.Add(new LineCache());
-            }
-
-            var entry = _lineCache[line];
-            entry.DisposeLayouts();
-            entry.Source = source;
-            entry.StateIn = state;
-            entry.Display = TextDocument.ExpandTabs(source);
-            entry.StateOut = CodeTokenizer.TokenizeLine(entry.Display, _languageId, state, entry.Tokens);
-            state = entry.StateOut;
-        }
-
-        if (lastLine + 1 > _stableLine)
-        {
-            _stableLine = lastLine + 1;
-        }
-
-        if (_lineCache.Count > _doc.LineCount)
-        {
-            for (var i = _doc.LineCount; i < _lineCache.Count; i++)
-            {
-                _lineCache[i].DisposeLayouts();
-            }
-
-            _lineCache.RemoveRange(_doc.LineCount, _lineCache.Count - _doc.LineCount);
-        }
-    }
-
-    /// <summary>
-    /// Builds (or reuses) a line's per-row text layouts. With wrap off a line has one
-    /// row covering the whole expanded text; with wrap on, row r is the substring
-    /// starting at column r * _wrapCols. Token colours index the expanded line, so
-    /// they are shifted back by the row's start column.
-    /// </summary>
-    private void EnsureRowLayouts(LineCache entry)
-    {
-        var display = entry.Display;
-        var rows = RowCountOf(display.Length);
-        if (entry.RowLayouts.Count == rows)
-        {
-            return;
-        }
-
-        entry.DisposeLayouts();
-        if (!entry.Tracked)
-        {
-            entry.Tracked = true;
-            _laidOut.Add(entry);
-        }
-
-        for (var r = 0; r < rows; r++)
-        {
-            var start = r * _wrapCols;
-            var len = Math.Min(_wrapCols, display.Length - start);
-            var text = len == display.Length ? display
-                : len > 0 ? display.Substring(start, len)
-                : " ";
-            var layout = new CanvasTextLayout(Canvas, text, _textFormat!, 65536f, (float)_lineHeight * 2);
-
-            if (EnableSyntaxHighlighting)
-            {
-                foreach (var token in entry.Tokens)
-                {
-                    if (token.Kind == CodeTokenKind.Plain)
-                    {
-                        continue;
-                    }
-
-                    var from = Math.Max(token.Start, start);
-                    var to = Math.Min(token.Start + token.Length, start + len);
-                    if (to > from)
-                    {
-                        layout.SetColor(from - start, to - from, CodePalette.Get(token.Kind, ActualTheme == ElementTheme.Light));
-                    }
-                }
-            }
-
-            // Consolas has no glyphs for private-use icons (Segoe MDL2 Assets), which would render as boxes.
-            for (var i = 0; i < text.Length; i++)
-            {
-                if (text[i] is >= '' and <= '')
-                {
-                    var runStart = i;
-                    while (i + 1 < text.Length && text[i + 1] is >= '' and <= '')
-                    {
-                        i++;
-                    }
-
-                    layout.SetFontFamily(runStart, i - runStart + 1, IconFontFamily);
-                }
-            }
-
-            // LayoutBounds comes from the metrics DirectWrite already computed; DrawBounds
-            // walks every glyph outline for ink bounds and was a large share of the cost of
-            // each line scrolled into view.
-            if (r == 0 && !WordWrap && display.Length > 0)
-            {
-                _maxLineWidth = Math.Max(_maxLineWidth, layout.LayoutBounds.Width);
-            }
-
-            entry.RowLayouts.Add(layout);
-        }
-    }
-
-    // ------------------------------------------------------------------ drawing
-
-    /// <summary>Invalidates both layers. Everything but the caret lives on Canvas; the caret alone on CaretCanvas.</summary>
-    private void InvalidateAll()
-    {
-        if (_closed) return;
-        Canvas.Invalidate();
-        CaretCanvas.Invalidate();
-    }
-
-    private void OnCreateResources(CanvasControl sender, CanvasCreateResourcesEventArgs args)
-    {
-        // A device rebuild invalidates every cached layout and brush; they are rebuilt
-        // lazily on the next draw.
-        ClearLayouts();
-        foreach (var brush in _brushes.Values)
-        {
-            brush.Dispose();
-        }
-
-        _brushes.Clear();
-        _textFormat?.Dispose();
-        _lineNumberFormat?.Dispose();
-        _textFormat = null;
-        _lineNumberFormat = null;
-    }
-
-    private void OnCaretCreateResources(CanvasControl sender, CanvasCreateResourcesEventArgs args)
-    {
-        _caretBrush?.Dispose();
-        _caretBrush = new CanvasSolidColorBrush(sender, _caretColor);
-    }
-
-    private void OnCaretCanvasDraw(CanvasControl sender, CanvasDrawEventArgs args)
-    {
-        if (FocusState == FocusState.Unfocused)
-        {
-            return;
-        }
-
-        EnsureMetrics();
-        var caretLine = _caret.Line;
-        var firstLine = Math.Max(0, (int)(_verticalOffset / _lineHeight));
-        var lastLine = (int)((_verticalOffset + sender.ActualHeight) / _lineHeight);
-        if (caretLine < firstLine || caretLine > lastLine)
-        {
-            return;
-        }
-
-        var rawLine = _doc.GetLine(caretLine);
-        var (caretRowInLine, caretColInRow) = Fold(TextDocument.ExpandedColFromRaw(rawLine, _caret.Col));
-        var x = TextX + ColumnX(caretLine, caretRowInLine, caretColInRow) - _horizontalOffset;
-        var y = (_rowOffsets[caretLine] + caretRowInLine) * _lineHeight - _verticalOffset + LineHighlightOffset;
-        if (_caretVisible)
-        {
-            args.DrawingSession.FillRectangle((float)x, (float)y, CaretWidth, (float)_lineHeight, _caretBrush!);
-        }
-
-        DrawGhost(args.DrawingSession, x, y - LineHighlightOffset);
-    }
-
-    private void OnCanvasDraw(CanvasControl sender, CanvasDrawEventArgs args)
-    {
-        EnsureMetrics();
-        EnsureRowMap();
-        var session = args.DrawingSession;
-
-        var viewportWidth = Canvas.ActualWidth;
-        var viewportHeight = Canvas.ActualHeight;
-        var firstRow = Math.Max(0, (int)(_verticalOffset / _lineHeight));
-        var lastRow = Math.Min(_totalRows - 1, (int)((_verticalOffset + viewportHeight) / _lineHeight));
-        var (firstLine, _) = RowAt(firstRow);
-        var (lastLine, _) = RowAt(lastRow);
-        var gutter = GutterWidth;
-
-        // Token validity first: the selection spans reuse the expanded line text below.
-        EnsureTokens(lastLine);
-
-        // The active line: a full-width band under the caret's visual row. Nudged down
-        // a couple of pixels so it sits on the glyphs rather than above them.
-        var focused = FocusState != FocusState.Unfocused;
-        if (focused)
-        {
-            var caretLine = _doc.GetLine(_caret.Line);
-            var (caretRowInLine, _) = Fold(TextDocument.ExpandedColFromRaw(caretLine, _caret.Col));
-            var caretRow = _rowOffsets[_caret.Line] + caretRowInLine;
-            if (caretRow >= firstRow && caretRow <= lastRow)
-            {
-                var y = caretRow * _lineHeight - _verticalOffset + LineHighlightOffset;
-                session.FillRectangle(0, (float)y, (float)viewportWidth, (float)_lineHeight, Brush(session, _activeLineColor));
-            }
-        }
-
-        DrawResultHighlights(session, firstLine, lastLine);
-        DrawOccurrences(session, firstLine, lastLine);
-
-        // Selection spans, one rectangle per folded row.
-        if (HasSelection)
-        {
-            var (start, end) = OrderedSelection();
-            for (var line = Math.Max(start.Line, firstLine); line <= Math.Min(end.Line, lastLine); line++)
-            {
-                var rawLine = _doc.GetLine(line);
-                var expanded = _lineCache[line].Display;
-                var fromCol = line == start.Line ? TextDocument.ExpandedColFromRaw(rawLine, start.Col) : 0;
-                var toCol = line == end.Line ? TextDocument.ExpandedColFromRaw(rawLine, end.Col) : expanded.Length;
-                var offset = _rowOffsets[line];
-                var firstR = fromCol / _wrapCols;
-                var lastR = toCol == 0 ? 0 : (toCol - 1) / _wrapCols;
-                for (var r = firstR; r <= lastR; r++)
-                {
-                    var rowStart = r * _wrapCols;
-                    var s = Math.Max(fromCol, rowStart);
-                    var e = Math.Min(toCol, rowStart + _wrapCols);
-                    var x1 = TextX + ColumnX(line, r, s - rowStart) - _horizontalOffset;
-                    var x2 = TextX + ColumnX(line, r, e - rowStart) - _horizontalOffset;
-                    var y = (offset + r) * _lineHeight - _verticalOffset + LineHighlightOffset;
-                    session.FillRectangle((float)x1, (float)y, (float)Math.Max(2, x2 - x1), (float)_lineHeight, Brush(session, _selectionColor));
-                }
-            }
-        }
-
-        // The buffer, one laid-out visual row at a time.
-        for (var line = firstLine; line <= lastLine; line++)
-        {
-            var entry = _lineCache[line];
-            EnsureRowLayouts(entry);
-            var offset = _rowOffsets[line];
-            var rows = RowCountOf(entry.Display.Length);
-            for (var r = 0; r < rows; r++)
-            {
-                var vrow = offset + r;
-                if (vrow < firstRow || vrow > lastRow)
-                {
-                    continue;
-                }
-
-                var y = vrow * _lineHeight - _verticalOffset;
-                session.DrawTextLayout(entry.RowLayouts[r], (float)(TextX - _horizontalOffset), (float)y, Brush(session, _baseText));
-
-                if (r == 0 && ShowLineNumbers)
-                {
-                    // DrawText(string) shapes a fresh layout on every call; cache them. A
-                    // zero-size box keeps DrawText's anchoring: right-aligned, ending at x.
-                    if (!_lineNumberLayouts.TryGetValue(line, out var number))
-                    {
-                        number = new CanvasTextLayout(Canvas, (line + 1).ToString(), _lineNumberFormat!, 0, 0);
-                        _lineNumberLayouts[line] = number;
-                    }
-
-                    session.DrawTextLayout(number, (float)(gutter - TextLeftPad), (float)y, Brush(session, _lineNumberText));
-                }
-            }
-        }
-
-        DrawDiffPeek(session, viewportHeight);
-        DrawDiffMarkers(session, viewportHeight);
-        TrimLayoutCaches(firstLine, lastLine);
-        UpdateExtent();
-        QueueLayoutPrefetch();
-    }
-
-    /// <summary>Sizes the scroll extent to the content, never smaller than the viewport.</summary>
-    private void UpdateExtent()
-    {
-        EnsureRowMap();
-        var width = WordWrap ? 0 : TextX + _maxLineWidth + 60;
-        var height = _totalRows * _lineHeight + 40;
-        var viewportWidth = Canvas.ActualWidth;
-        var viewportHeight = Canvas.ActualHeight;
-        _scroll.SetLayout(viewportWidth, viewportHeight, Math.Max(viewportWidth, width), Math.Max(viewportHeight, height));
-
-        if (_marksDirty || _marksRows != _totalRows)
-        {
-            RebuildScrollMarks();
-        }
-    }
-
-    // ------------------------------------------------------------------ scroll
-
-    private void OnViewChanged()
-    {
-        var changed = _verticalOffset != _scroll.VerticalOffset || _horizontalOffset != _scroll.HorizontalOffset;
-        _verticalOffset = _scroll.VerticalOffset;
-        _horizontalOffset = _scroll.HorizontalOffset;
-        SyncScrollBars(reveal: changed);
-        if (changed)
-        {
-            Canvas.Invalidate();
-
-            // The caret layer paints nothing without focus, so scrolling an idle editor leaves it be.
-            if (FocusState != FocusState.Unfocused)
-            {
-                CaretCanvas.Invalidate();
-            }
-
-            ScrollChanged?.Invoke(this, EventArgs.Empty);
-        }
-    }
-
-    private void SyncScrollBars(bool reveal)
-    {
-        var hasHorizontal = _scroll.ScrollableWidth > 0.5;
-        _vBar.Margin = new Thickness(0, 0, 0, hasHorizontal ? OverlayScrollBar.Thickness : 0);
-        _vBar.Update(_scroll.VerticalOffset, _scroll.ScrollableHeight, _scroll.ViewportHeight, reveal);
-        _hBar.Margin = new Thickness(0, 0, _scroll.ScrollableHeight > 0.5 ? OverlayScrollBar.Thickness : 0, 0);
-        _hBar.Update(_scroll.HorizontalOffset, _scroll.ScrollableWidth, _scroll.ViewportWidth, reveal);
-    }
-
-    // ------------------------------------------------------------------ track marks
-
-    private bool _marksDirty = true;
-    private int _marksRows = -1;
-    private IReadOnlyList<(int StartLine, int EndLine)> _searchMarks = [];
-    private int _currentSearchMark = -1;
-
-    private static readonly Windows.UI.Color CaretMarkColor = Windows.UI.Color.FromArgb(0xFF, 0x3B, 0x82, 0xF6);
-
-    /// <summary>A click on a scrollbar mark: put the caret there and bring it to the middle of the view.</summary>
-    private void OnScrollMarkClicked(object? sender, ScrollMark mark)
-    {
-        SetCursorPosition(mark.Line, mark.Column, scrollIntoView: false);
-        ScrollLineToCenter(_caret.Line);
-        Focus(FocusState.Pointer);
-    }
-
-    private static readonly Windows.UI.Color SearchMarkColor = Windows.UI.Color.FromArgb(0xC0, 0xE5, 0xB2, 0x3C);
-    private static readonly Windows.UI.Color CurrentSearchMarkColor = Windows.UI.Color.FromArgb(0xFF, 0xFF, 0x8C, 0x1A);
-
-    /// <summary>
-    /// Stripes the scrollbar track with where the search hit (0-based lines, inclusive
-    /// ranges) - the way to see all matches of a long file at once.
-    /// <paramref name="current"/> is the match the cursor is on, drawn brighter; -1 for none.
-    /// </summary>
-    public void SetSearchMarks(IReadOnlyList<(int StartLine, int EndLine)> spans, int current)
-    {
-        _searchMarks = spans;
-        _currentSearchMark = current;
-        _marksDirty = true;
-        UpdateExtent();
-    }
-
-    private void RebuildScrollMarks()
-    {
-        _marksDirty = false;
-        _marksRows = _totalRows;
-        var marks = new List<ScrollMark>(_diffMarkers.Count + _searchMarks.Count);
-        var lines = _doc.LineCount;
-        if (lines == 0 || _rowOffsets.Count < lines)
-        {
-            _vBar.Marks = marks;
-            return;
-        }
-
-        double RowOf(int line) => (double)(line >= lines ? _totalRows : _rowOffsets[Math.Max(0, line)]) / _totalRows;
-
-        foreach (var marker in _diffMarkers)
-        {
-            var start = Math.Clamp(marker.StartLine, 0, lines);
-            var end = marker.LineCount == 0 ? start : Math.Min(lines, start + marker.LineCount);
-            marks.Add(new ScrollMark(RowOf(start), RowOf(Math.Max(end, start)), DiffColor(marker.Kind), 0, start));
-        }
-
-        AddOccurrenceMarks(marks, RowOf, lines);
-
-        for (var i = 0; i < _searchMarks.Count; i++)
-        {
-            var (first, last) = _searchMarks[i];
-            first = Math.Clamp(first, 0, lines - 1);
-            last = Math.Clamp(Math.Max(first, last), 0, lines - 1);
-            marks.Add(new ScrollMark(
-                RowOf(first),
-                RowOf(last + 1),
-                i == _currentSearchMark ? CurrentSearchMarkColor : SearchMarkColor,
-                1,
-                first));
-        }
-
-        // The caret, last so it lies over the rest.
-        var caretLine = Math.Clamp(_caret.Line, 0, lines - 1);
-        marks.Add(new ScrollMark(RowOf(caretLine), RowOf(caretLine + 1), CaretMarkColor, 2, caretLine, _caret.Col));
-
-        _vBar.Marks = marks;
-    }
-
-    private void OnCanvasSizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        if (_closed) return;
-        UpdateExtent();
-        InvalidateAll();
-    }
-
-    private void ScrollIntoView()
-    {
-        EnsureMetrics();
-        EnsureRowMap();
-        var rawLine = _doc.GetLine(_caret.Line);
-        var (rowInLine, colInRow) = Fold(TextDocument.ExpandedColFromRaw(rawLine, _caret.Col));
-        var x = TextX + ColumnX(_caret.Line, rowInLine, colInRow);
-        var y = (_rowOffsets[_caret.Line] + rowInLine) * _lineHeight;
-
-        var targetVertical = _verticalOffset;
-        if (y < _verticalOffset)
-        {
-            targetVertical = y;
-        }
-        else if (y + _lineHeight > _verticalOffset + Canvas.ActualHeight)
-        {
-            targetVertical = y + _lineHeight - Canvas.ActualHeight;
-        }
-
-        var targetHorizontal = _horizontalOffset;
-        if (WordWrap)
-        {
-            // Folded lines never scroll sideways; a change of setting may have left
-            // the view scrolled right, so bring it home.
-            targetHorizontal = 0;
-        }
-        else
-        {
-            var viewX = x - _horizontalOffset;
-            if (viewX < GutterWidth)
-            {
-                targetHorizontal = Math.Max(0, x - TextLeftPad * 3);
-            }
-            else if (viewX > Canvas.ActualWidth - 40)
-            {
-                targetHorizontal = Math.Max(0, x - (Canvas.ActualWidth - TextX) / 3);
-            }
-        }
-
-        if (targetVertical != _verticalOffset || targetHorizontal != _horizontalOffset)
-        {
-            ScrollTo(targetHorizontal, targetVertical);
-        }
-    }
-
-    // ------------------------------------------------------------------ pointer input
-
-    private readonly Stopwatch _clickClock = new();
-    private Windows.Foundation.Point _lastClickPoint;
-    private int _clickCount;
-
-    private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        Focus(FocusState.Programmatic);
-        var point = e.GetCurrentPoint(Canvas);
-
-        // A right click opens the context menu: it moves the caret unless it lands in the
-        // selection, but never starts a drag.
-        if (point.Properties.IsRightButtonPressed)
-        {
-            var clicked = PointToDocumentPosition(point.Position);
-            if (!SelectionContains(clicked))
-            {
-                _caret = _anchor = clicked;
-                InvalidateAll();
-                RaiseSelectionChanged();
-            }
-
-            return;
-        }
-
-        Canvas.CapturePointer(e.Pointer);
-
-        // A double click selects the word under it.
-        _clickClock.Stop();
-        var isRepeat = _clickClock.ElapsedMilliseconds < 500
-            && Math.Abs(point.Position.X - _lastClickPoint.X) < _charWidth
-            && Math.Abs(point.Position.Y - _lastClickPoint.Y) < _lineHeight;
-        _clickCount = isRepeat ? _clickCount + 1 : 1;
-        _clickClock.Restart();
-        _lastClickPoint = point.Position;
-
-        if (_clickCount >= 2)
-        {
-            SelectWordAt(point.Position);
-        }
-        else
-        {
-            var position = PointToDocumentPosition(point.Position);
-            if (IsShiftDown())
-            {
-                // Shift+click extends the selection from the existing anchor.
-                _caret = position;
-            }
-            else
-            {
-                _caret = _anchor = position;
-            }
-        }
-
-        _dragPoint = point.Position;
-        InvalidateAll();
-        RaiseSelectionChanged();
-        e.Handled = true;
-    }
-
-    // The text area shows the I-beam; the scrollbars above the canvas keep the default arrow
-    // because the pointer leaves the canvas when it moves onto them.
-    private void OnPointerEntered(object sender, PointerRoutedEventArgs e) =>
-        ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.IBeam);
-
-    private void OnPointerExited(object sender, PointerRoutedEventArgs e)
-    {
-        HideDiffPreview();
-        if (!IsPointerCaptured(e))
-        {
-            ProtectedCursor = null;
-        }
-    }
-
-    private void OnPointerMoved(object sender, PointerRoutedEventArgs e)
-    {
-        if (!IsPointerCaptured(e))
-        {
-            UpdateDiffHover(e);
-            return;
-        }
-
-        var point = e.GetCurrentPoint(Canvas);
-        _dragPoint = point.Position;
-        if (point.Properties.IsLeftButtonPressed && _clickCount < 2)
-        {
-            _caret = PointToDocumentPosition(point.Position);
-            InvalidateAll();
-            RaiseSelectionChanged();
-            UpdateAutoScroll();
-        }
-    }
-
-    private void OnPointerReleased(object sender, PointerRoutedEventArgs e)
-    {
-        _autoScrollTimer?.Stop();
-        Canvas.ReleasePointerCapture(e.Pointer);
-
-        var position = e.GetCurrentPoint(Canvas).Position;
-        if (position.X < 0 || position.Y < 0 || position.X > Canvas.ActualWidth || position.Y > Canvas.ActualHeight)
-        {
-            ProtectedCursor = null;
-        }
-
-        e.Handled = true;
-    }
-
-    private void OnEditorLosingFocus(UIElement sender, LosingFocusEventArgs args)
-    {
-        if (args.NewFocusedElement is null ||
-            ReferenceEquals(args.NewFocusedElement, Canvas) ||
-            ReferenceEquals(args.NewFocusedElement, CaretCanvas))
-        {
-            args.TryCancel();
-        }
-    }
-
-    // Dragging a selection past the top or bottom edge keeps scrolling that way, even
-    // while the pointer is still, so a range can reach text that is out of view.
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _autoScrollTimer;
-    private Windows.Foundation.Point _dragPoint;
-
-    private void UpdateAutoScroll()
-    {
-        var outside = _dragPoint.Y < 0 || _dragPoint.Y > Canvas.ActualHeight
-            || (!WordWrap && (_dragPoint.X < GutterWidth || _dragPoint.X > Canvas.ActualWidth));
-        if (!outside)
-        {
-            _autoScrollTimer?.Stop();
-            return;
-        }
-
-        if (_autoScrollTimer is null)
-        {
-            _autoScrollTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
-            _autoScrollTimer.Interval = TimeSpan.FromMilliseconds(30);
-            _autoScrollTimer.Tick += (_, _) => OnAutoScrollTick();
-        }
-
-        if (!_autoScrollTimer.IsRunning)
-        {
-            _autoScrollTimer.Start();
-        }
-    }
-
-    private void OnAutoScrollTick()
-    {
-        if (Canvas.PointerCaptures is not { Count: > 0 })
-        {
-            _autoScrollTimer?.Stop();
-            return;
-        }
-
-        // Speed grows with the distance past the edge, capped at a few lines per tick.
-        double Step(double over) => Math.Clamp(over / 4, 4, _lineHeight * 3) * Math.Sign(over);
-
-        double? targetV = null;
-        double? targetH = null;
-        if (_dragPoint.Y < 0)
-        {
-            targetV = Math.Max(0, _verticalOffset + Step(_dragPoint.Y));
-        }
-        else if (_dragPoint.Y > Canvas.ActualHeight)
-        {
-            targetV = _verticalOffset + Step(_dragPoint.Y - Canvas.ActualHeight);
-        }
-
-        if (!WordWrap)
-        {
-            if (_dragPoint.X < GutterWidth)
-            {
-                targetH = Math.Max(0, _horizontalOffset + Step(_dragPoint.X - GutterWidth));
-            }
-            else if (_dragPoint.X > Canvas.ActualWidth)
-            {
-                targetH = _horizontalOffset + Step(_dragPoint.X - Canvas.ActualWidth);
-            }
-        }
-
-        if (targetV is null && targetH is null)
-        {
-            _autoScrollTimer?.Stop();
-            return;
-        }
-
-        ScrollTo(targetH, targetV);
-        _caret = PointToDocumentPosition(_dragPoint);
-        InvalidateAll();
-        RaiseSelectionChanged();
-    }
-
-    private bool IsPointerCaptured(PointerRoutedEventArgs e) =>
-        Canvas.PointerCaptures is { Count: > 0 };
-
-    private void OnPointerWheelChanged(object sender, PointerRoutedEventArgs e)
-    {
-        var point = e.GetCurrentPoint(Canvas);
-        var delta = point.Properties.MouseWheelDelta;
-
-        if (IsCtrlDown())
-        {
-            // One notch is one size step.
-            var steps = Math.Sign(delta);
-            var size = (float)(FontSize is double.NaN or <= 0 ? DefaultFontSize : FontSize) + steps;
-            if (size >= MinFontSize && size <= MaxFontSize && size != FontSize)
-            {
-                FontSize = size;
-            }
-
-            e.Handled = true;
-            return;
-        }
-
-        if (IsShiftDown())
-        {
-            _scroll.ChangeView(_horizontalOffset - delta, null);
-        }
-        else
-        {
-            // Apply the full delta immediately. CanvasControl coalesces invalidations;
-            // animating each notch instead added latency and repainted the viewport
-            // (and its overlays) repeatedly after input had already stopped.
-            _scroll.ChangeView(null, _verticalOffset - delta * 3 * _lineHeight / 120);
-        }
-
-        e.Handled = true;
-    }
-
-    private DocumentPosition PointToDocumentPosition(Windows.Foundation.Point point)
-    {
-        EnsureMetrics();
-        EnsureRowMap();
-        var visualRow = Math.Clamp(
-            (int)Math.Floor((point.Y + _verticalOffset) / _lineHeight), 0, _totalRows - 1);
-        var (line, rowInLine) = RowAt(visualRow);
-        var rowStart = rowInLine * _wrapCols;
-
-        var rawLine = _doc.GetLine(line);
-        var lineLen = TextDocument.ExpandedColFromRaw(rawLine, rawLine.Length);
-        var rowLen = Math.Max(0, Math.Min(_wrapCols, lineLen - rowStart));
-        var colInRow = Math.Clamp(
-            (int)Math.Round((point.X - TextX + _horizontalOffset) / _charWidth), 0, rowLen);
-        if (line < _lineCache.Count && _lineCache[line].Source != null && HasSurrogate(_lineCache[line].Display))
-        {
-            var target = point.X - TextX + _horizontalOffset;
-            var best = 0;
-            var bestDist = double.MaxValue;
-            for (var c = 0; c <= rowLen; c++)
-            {
-                var dist = Math.Abs(ColumnX(line, rowInLine, c) - target);
-                if (dist < bestDist)
-                {
-                    bestDist = dist;
-                    best = c;
-                }
-            }
-
-            colInRow = best;
-        }
-
-        var col = TextDocument.RawColFromExpanded(rawLine, rowStart + colInRow);
-        return new DocumentPosition(line, Math.Min(col, rawLine.Length));
-    }
-
-    private void SelectWordAt(Windows.Foundation.Point point)
-    {
-        var position = PointToDocumentPosition(point);
-        var line = _doc.GetLine(position.Line);
-        if (line.Length == 0)
-        {
-            _caret = _anchor = position;
-            return;
-        }
-
-        var isWordChar = Char.IsLetterOrDigit(line[Math.Min(position.Col, line.Length - 1)]) || line[Math.Min(position.Col, line.Length - 1)] == '_';
-        var start = position.Col;
-        while (start > 0 && IsWordChar(line[start - 1]) == isWordChar && (isWordChar || line[start - 1] != ' '))
-        {
-            start--;
-        }
-
-        var end = position.Col;
-        while (end < line.Length && IsWordChar(line[end]) == isWordChar && (isWordChar || line[end] != ' '))
-        {
-            end++;
-        }
-
-        _anchor = new DocumentPosition(position.Line, start);
-        _caret = new DocumentPosition(position.Line, end);
-        InvalidateAll();
-        RaiseSelectionChanged();
-    }
-
-    private bool IsWordChar(char ch) => char.IsLetterOrDigit(ch) || ch == '_';
-
-    // ------------------------------------------------------------------ keyboard input
-
-    private (DocumentPosition Start, DocumentPosition End) OrderedSelection() =>
-        _anchor < _caret ? (_anchor, _caret) : (_caret, _anchor);
-
-    private DocumentPosition ClampPosition(DocumentPosition position)
-    {
-        // The line is clamped first: the column limit comes from the clamped line,
-        // so a position past the buffer cannot survive with a stale column.
-        var line = Math.Clamp(position.Line, 0, _doc.LineCount - 1);
-        return new(line, Math.Clamp(position.Col, 0, _doc.GetLine(line).Length));
-    }
-
-    private void OnEditorKeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        if (e.Key == VirtualKey.Tab && !CompletionOpen && !IsShiftDown() && AcceptGhost())
-        {
-            e.Handled = true;
-            return;
-        }
-
-        if (e.Key == VirtualKey.Space && IsCtrlDown() && InlineCompleter is not null)
-        {
-            CloseCompletion();
-            RequestGhost();
-            e.Handled = true;
-            return;
-        }
-
-        if (e.Key == VirtualKey.Escape && GhostVisible && !CompletionOpen)
-        {
-            ClearGhost();
-            e.Handled = true;
-            return;
-        }
-
-        if (e.Key is not (VirtualKey.Shift or VirtualKey.Control or VirtualKey.Menu or VirtualKey.LeftShift or VirtualKey.RightShift
-            or VirtualKey.LeftControl or VirtualKey.RightControl))
-        {
-            ClearGhost();
-        }
-
-        if (HandleCompletionKey(e))
-        {
-            e.Handled = true;
-            return;
-        }
-
-        var ctrl = IsCtrlDown();
-        var shift = IsShiftDown();
-
-        switch (e.Key)
-        {
-            case VirtualKey.Left: MoveCaretHorizontal(ctrl ? Jump.Word : Jump.Character, back: true, select: shift); break;
-            case VirtualKey.Right: MoveCaretHorizontal(ctrl ? Jump.Word : Jump.Character, back: false, select: shift); break;
-            case VirtualKey.Up: MoveCaretVertical(-1, select: shift); break;
-            case VirtualKey.Down: MoveCaretVertical(1, select: shift); break;
-            case VirtualKey.Home: MoveCaretHome(select: shift); break;
-            case VirtualKey.End: MoveCaretLineEnd(select: shift); break;
-            case VirtualKey.PageUp: MoveCaretVertical(-VisibleLineCount(), select: shift); break;
-            case VirtualKey.PageDown: MoveCaretVertical(VisibleLineCount(), select: shift); break;
-            case VirtualKey.Back: Backspace(); break;
-            case VirtualKey.Delete: Delete(); break;
-            case VirtualKey.Enter: InsertNewLine(); break;
-            case VirtualKey.Tab: InsertText(new string(' ', TextDocument.TabWidth)); break;
-            case VirtualKey.A when ctrl: SelectAll(); break;
-            case VirtualKey.C when ctrl: CopySelection(); break;
-            case VirtualKey.X when ctrl: CutSelection(); break;
-            case VirtualKey.V when ctrl: _ = PasteAsync(); break;
-            case VirtualKey.Z when ctrl: Undo(); break;
-            case VirtualKey.Y when ctrl: Redo(); break;
-            default: return;
-        }
-
-        e.Handled = true;
-    }
-
-    private void OnEditorCharacterReceived(UIElement sender, CharacterReceivedRoutedEventArgs args)
-    {
-        // Control combos arrive here as control characters and are already handled in KeyDown.
-        if (IsCtrlDown() || IsAltDown())
-        {
-            return;
-        }
-
-        var ch = args.Character;
-        if (ch is '\r' or '\n' or '\t' || char.IsControl(ch))
-        {
-            return;
-        }
-
-        args.Handled = true;
-        InsertText(ch.ToString());
-        OnCharacterTyped(ch);
-        ScheduleGhost();
-    }
-
-    private int VisibleLineCount() => Math.Max(1, (int)(Canvas.ActualHeight / _lineHeight) - 1);
-
-    private enum Jump
-    {
-        Character,
-        Word,
-    }
-
-    private void MoveCaretHorizontal(Jump jump, bool back, bool select)
-    {
-        if (jump == Jump.Word)
-        {
-            MoveCaretWord(back, select);
-            return;
-        }
-
-        var caret = _caret;
-        if (!select && HasSelection)
-        {
-            // Collapse onto the end the movement is heading towards.
-            var (start, end) = OrderedSelection();
-            _caret = _anchor = back ? start : end;
-        }
-        else if (back)
-        {
-            if (caret.Col > 0)
-            {
-                _caret = new DocumentPosition(caret.Line, caret.Col - 1);
-            }
-            else if (caret.Line > 0)
-            {
-                _caret = new DocumentPosition(caret.Line - 1, _doc.GetLine(caret.Line - 1).Length);
-            }
-        }
-        else
-        {
-            var line = _doc.GetLine(caret.Line);
-            if (caret.Col < line.Length)
-            {
-                _caret = new DocumentPosition(caret.Line, caret.Col + 1);
-            }
-            else if (caret.Line < _doc.LineCount - 1)
-            {
-                _caret = new DocumentPosition(caret.Line + 1, 0);
-            }
-        }
-
-        if (!select)
-        {
-            _anchor = _caret;
-        }
-
-        AfterCaretMove();
-    }
-
-    private void MoveCaretWord(bool back, bool select)
-    {
-        var line = _doc.GetLine(_caret.Line);
-        var col = _caret.Col;
-
-        static bool Word(char ch) => char.IsLetterOrDigit(ch) || ch == '_';
-
-        if (back)
-        {
-            while (col > 0 && !Word(line[col - 1]))
-            {
-                col--;
-            }
-
-            while (col > 0 && Word(line[col - 1]))
-            {
-                col--;
-            }
-        }
-        else
-        {
-            while (col < line.Length && !Word(line[col]))
-            {
-                col++;
-            }
-
-            while (col < line.Length && Word(line[col]))
-            {
-                col++;
-            }
-        }
-
-        _caret = new DocumentPosition(_caret.Line, col);
-        if (!select)
-        {
-            _anchor = _caret;
-        }
-
-        AfterCaretMove();
-    }
-
-    /// <summary>
-    /// Moves the caret one visual row: with wrap on, a logical line spans several rows
-    /// and Up/Down walk them, keeping the visual column the way plain editors keep the
-    /// plain column. Landing past a shorter row clamps to its end.
-    /// </summary>
-    private void MoveCaretVertical(int deltaLines, bool select)
-    {
-        EnsureRowMap();
-        var caretLine = _doc.GetLine(_caret.Line);
-        var (rowInLine, colInRow) = Fold(TextDocument.ExpandedColFromRaw(caretLine, _caret.Col));
-        var targetRow = Math.Clamp(_rowOffsets[_caret.Line] + rowInLine + deltaLines, 0, _totalRows - 1);
-        var (line, targetRowInLine) = RowAt(targetRow);
-
-        var rawLine = _doc.GetLine(line);
-        var lineLen = TextDocument.ExpandedColFromRaw(rawLine, rawLine.Length);
-        var rowStart = targetRowInLine * _wrapCols;
-        var rowLen = Math.Max(0, Math.Min(_wrapCols, lineLen - rowStart));
-        var expandedCol = Math.Min(rowStart + Math.Min(colInRow, rowLen), lineLen);
-
-        var col = TextDocument.RawColFromExpanded(rawLine, expandedCol);
-        _caret = new DocumentPosition(line, Math.Min(col, rawLine.Length));
-        if (!select)
-        {
-            _anchor = _caret;
-        }
-
-        AfterCaretMove();
-    }
-
-    private void MoveCaretHome(bool select)
-    {
-        var line = _doc.GetLine(_caret.Line);
-        var indent = 0;
-        while (indent < line.Length && (line[indent] == ' ' || line[indent] == '\t'))
-        {
-            indent++;
-        }
-
-        // Smart home: first press lands on the text, second on the column start.
-        _caret = new DocumentPosition(_caret.Line, _caret.Col == indent ? 0 : indent);
-        if (!select)
-        {
-            _anchor = _caret;
-        }
-
-        AfterCaretMove();
-    }
-
-    private void MoveCaretLineEnd(bool select)
-    {
-        _caret = new DocumentPosition(_caret.Line, _doc.GetLine(_caret.Line).Length);
-        if (!select)
-        {
-            _anchor = _caret;
-        }
-
-        AfterCaretMove();
-    }
-
-    private void AfterCaretMove()
-    {
-        ScrollIntoView();
-        InvalidateAll();
-        RaiseSelectionChanged();
-    }
-
-    private void SelectAll()
-    {
-        _anchor = new DocumentPosition(0, 0);
-        _caret = new DocumentPosition(_doc.LineCount - 1, _doc.GetLine(_doc.LineCount - 1).Length);
-        InvalidateAll();
-        RaiseSelectionChanged();
-    }
-
-    // ------------------------------------------------------------------ editing
-
-    /// <summary>Inserts text at the caret, replacing any selection.</summary>
-    private void InsertText(string text)
-    {
-        BeginUndoStep(canCoalesce: text.Length == 1);
-        var (start, end) = OrderedSelection();
-        _caret = Edit(start, end, text);
-        _anchor = _caret;
-        AfterEdit();
-    }
-
-    private void InsertNewLine()
-    {
-        BeginUndoStep(canCoalesce: false);
-        var (start, end) = OrderedSelection();
-        Edit(start, end, "\n");
-
-        // Auto-indent: the new line inherits its predecessor's whitespace, plus one
-        // more level when the line opens a brace.
-        var indent = _doc.IndentOf(start.Line);
-        var opened = start.Col > 0 && "{[(".Contains(_doc.GetLine(start.Line)[Math.Max(0, start.Col - 1)]);
-        if (opened)
-        {
-            indent += new string(' ', TextDocument.TabWidth);
-        }
-
-        var caretLine = start.Line + 1;
-        if (indent.Length > 0)
-        {
-            Edit(new DocumentPosition(caretLine, 0), new DocumentPosition(caretLine, 0), indent);
-        }
-
-        _caret = _anchor = new DocumentPosition(caretLine, indent.Length);
-        AfterEdit();
-    }
-
-    private void Backspace()
-    {
-        var (start, end) = OrderedSelection();
-        if (start != end)
-        {
-            BeginUndoStep(canCoalesce: true);
-            _caret = Edit(start, end, string.Empty);
-            _anchor = _caret;
-            AfterEdit();
-            return;
-        }
-
-        if (start is { Line: 0, Col: 0 })
-        {
-            return;
-        }
-
-        BeginUndoStep(canCoalesce: true);
-
-        // At the start of a line, backspace removes the line break and joins it to
-        // the end of the line above.
-        if (start.Col == 0)
-        {
-            var above = new DocumentPosition(start.Line - 1, _doc.GetLine(start.Line - 1).Length);
-            _caret = Edit(above, start, string.Empty);
-            _anchor = _caret;
-            AfterEdit();
-            return;
-        }
-
-        // Backspace over leading whitespace eats a whole indent level, so de-indenting
-        // does not take four presses.
-        var line = _doc.GetLine(start.Line);
-        int deleteTo;
-        if (start.Col >= TextDocument.TabWidth && line[..start.Col].AsSpan().IndexOfAnyExcept(' ') < 0)
-        {
-            deleteTo = start.Col - TextDocument.TabWidth + (start.Col % TextDocument.TabWidth);
-        }
-        else
-        {
-            deleteTo = start.Col - 1;
-        }
-
-        _caret = Edit(new DocumentPosition(start.Line, Math.Max(0, deleteTo)), start, string.Empty);
-        _anchor = _caret;
-        AfterEdit();
-    }
-
-    private void Delete()
-    {
-        var (start, end) = OrderedSelection();
-        if (start != end)
-        {
-            BeginUndoStep(canCoalesce: true);
-            _caret = Edit(start, end, string.Empty);
-            _anchor = _caret;
-            AfterEdit();
-            return;
-        }
-
-        var line = _doc.GetLine(start.Line);
-        if (start.Col >= line.Length && start.Line >= _doc.LineCount - 1)
-        {
-            return;
-        }
-
-        BeginUndoStep(canCoalesce: true);
-        var next = start.Col < line.Length
-            ? new DocumentPosition(start.Line, start.Col + 1)
-            : new DocumentPosition(start.Line + 1, 0);
-        _caret = Edit(start, next, string.Empty);
-        _anchor = _caret;
-        AfterEdit();
-    }
-
-    private void AfterEdit()
-    {
-        ClampCaretState();
-
-        // Editing moves the caret: typing past the right edge, Enter on the bottom
-        // row and a big paste all have to bring it back into view.
-        ScrollIntoView();
-        UpdateExtent();
-        InvalidateAll();
-        RaiseTextChanged();
-        RaiseSelectionChanged();
-    }
-
-    private void ClampCaretState()
-    {
-        _caret = ClampPosition(_caret);
-        _anchor = ClampPosition(_anchor);
-    }
-
-    // ------------------------------------------------------------------ undo / redo
-
-    /// <summary>Opens a new undo step, or - for continuous typing - keeps appending to the current one.</summary>
-    private void BeginUndoStep(bool canCoalesce)
-    {
-        var now = DateTime.UtcNow;
-        var continuous = canCoalesce && _undo.Count > 0 && (now - _lastEditUtc).TotalMilliseconds < 600;
-        if (!continuous)
-        {
-            _undo.Add(new UndoStep(_caret));
-            if (_undo.Count > UndoLimit)
-            {
-                _undo.RemoveAt(0);
-            }
-        }
-
-        _redo.Clear();
-        _lastEditUtc = now;
-    }
-
-    /// <summary>Applies an edit to the document and records it, as a delta, in the open undo step.</summary>
-    private DocumentPosition Edit(DocumentPosition start, DocumentPosition end, string text)
-    {
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
-
-        text = text.Replace("\r\n", "\n").Replace('\r', '\n');
-        var removed = _doc.GetRange(start, end);
-        var after = _doc.Replace(start, end, text);
-        InvalidateTokensFrom(start.Line);
-        _rowMapDirty = true;
-        _undo[^1].Edits.Add(new EditRecord(start, end, removed, text, after));
-        return after;
-    }
-
-    public void Undo()
-    {
-        if (_undo.Count == 0)
-        {
-            return;
-        }
-
-        var step = _undo[^1];
-        _undo.RemoveAt(_undo.Count - 1);
-        for (var i = step.Edits.Count - 1; i >= 0; i--)
-        {
-            var edit = step.Edits[i];
-            _doc.Replace(edit.Start, edit.InsertedEnd, edit.Removed);
-        }
-
-        _redo.Add(step);
-        FinishUndoRedo(step.CaretBefore, FirstEditedLine(step, step.CaretBefore.Line));
-    }
-
-    public void Redo()
-    {
-        if (_redo.Count == 0)
-        {
-            return;
-        }
-
-        var step = _redo[^1];
-        _redo.RemoveAt(_redo.Count - 1);
-        foreach (var edit in step.Edits)
-        {
-            _doc.Replace(edit.Start, edit.RemovedEnd, edit.Inserted);
-        }
-
-        _undo.Add(step);
-        FinishUndoRedo(
-            step.Edits.Count > 0 ? step.Edits[^1].InsertedEnd : step.CaretBefore,
-            FirstEditedLine(step, step.CaretBefore.Line));
-    }
-
-    private static int FirstEditedLine(UndoStep step, int fallback) =>
-        step.Edits.Count == 0 ? fallback : step.Edits.Min(e => e.Start.Line);
-
-    private void FinishUndoRedo(DocumentPosition caret, int changedFrom)
-    {
-        _caret = _anchor = caret;
-        _lastEditUtc = DateTime.MinValue;
-        // An undo touches a handful of lines: re-lex from the earliest one instead of
-        // dropping the whole token and layout cache, which re-shaped the viewport on
-        // every undo step in large files.
-        InvalidateTokensFrom(changedFrom);
-        ClampCaretState();
-        _maxLineWidth = 0;
-        _rowMapDirty = true;
-        UpdateExtent();
-        InvalidateAll();
-        ScrollIntoView();
-        RaiseTextChanged();
-        RaiseSelectionChanged();
-    }
-
-    /// <summary>Everything that has to follow the buffer being swapped out wholesale.</summary>
-    private void ResetAfterDocChange()
-    {
-        ClampCaretState();
-        ClearTokens();
-        _maxLineWidth = 0;
-        _rowMapDirty = true;
-        UpdateExtent();
-        InvalidateAll();
-    }
-
-    // ------------------------------------------------------------------ clipboard
-
-    private void CopySelection()
-    {
-        if (!HasSelection)
-        {
-            return;
-        }
-
-        var package = new Windows.ApplicationModel.DataTransfer.DataPackage { RequestedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Copy };
-        package.SetText(SelectedText);
-        Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
-    }
-
-    private void CutSelection()
-    {
-        if (!HasSelection)
-        {
-            return;
-        }
-
-        var package = new Windows.ApplicationModel.DataTransfer.DataPackage { RequestedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move };
-        package.SetText(SelectedText);
-        Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
-        Delete();
-    }
-
-    private async Task PasteAsync()
-    {
-        var content = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
-        if (!content.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
-        {
-            return;
-        }
-
-        var text = await content.GetTextAsync();
-        InsertText(text.Replace("\r\n", "\n").Replace('\r', '\n'));
+        var accent = FromBrush("AccentFillColorDefaultBrush", Windows.UI.Color.FromArgb(0xFF, 0x3B, 0x82, 0xF6));
+        _selectionColor = Windows.UI.Color.FromArgb(0x48, accent.R, accent.G, accent.B);
+        _inactiveSelectionColor = Windows.UI.Color.FromArgb(0x28, accent.R, accent.G, accent.B);
+        _occurrenceColor = Windows.UI.Color.FromArgb(0x30, accent.R, accent.G, accent.B);
+        _wordHighlightColor = _light
+            ? Windows.UI.Color.FromArgb(0x24, 0x00, 0x00, 0x00)
+            : Windows.UI.Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF);
+        _activeLineColor = _light
+            ? Windows.UI.Color.FromArgb(0x0C, 0x00, 0x00, 0x00)
+            : Windows.UI.Color.FromArgb(0x0E, 0xFF, 0xFF, 0xFF);
+        _bookmarkColor = Windows.UI.Color.FromArgb(0xFF, 0x3B, 0x82, 0xF6);
+        _bookmarkLineColor = Windows.UI.Color.FromArgb(0x16, 0x3B, 0x82, 0xF6);
+        // An opaque surface for floating panels (the diff peek); fixed per theme so a resource
+        // that resolves against the app theme can never hand a dark panel to a light editor.
+        _panelColor = _light ? Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xFB, 0xFB) : Windows.UI.Color.FromArgb(0xFF, 0x25, 0x25, 0x26);
+        _panelBorderColor = _light ? Windows.UI.Color.FromArgb(0x30, 0, 0, 0) : Windows.UI.Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF);
+        _thumbColor = _light ? Windows.UI.Color.FromArgb(0xFF, 0x50, 0x50, 0x50) : Windows.UI.Color.FromArgb(0xFF, 0xC8, 0xC8, 0xC8);
+        _trackColor = _light ? Windows.UI.Color.FromArgb(0x0C, 0, 0, 0) : Windows.UI.Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF);
     }
 
     // ------------------------------------------------------------------ helpers
 
-    private static bool IsCtrlDown() =>
-        InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(CoreVirtualKeyStates.Down);
+    private static bool IsDown(VirtualKey key) =>
+        InputKeyboardSource.GetKeyStateForCurrentThread(key).HasFlag(CoreVirtualKeyStates.Down);
 
-    private static bool IsShiftDown() =>
-        InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(CoreVirtualKeyStates.Down);
+    private static bool IsCtrlDown() => IsDown(VirtualKey.Control);
 
-    private static bool IsAltDown() =>
-        InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu).HasFlag(CoreVirtualKeyStates.Down);
+    private static bool IsShiftDown() => IsDown(VirtualKey.Shift);
+
+    private static bool IsAltDown() => IsDown(VirtualKey.Menu);
 }
