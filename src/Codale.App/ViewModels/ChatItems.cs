@@ -1075,6 +1075,9 @@ public sealed partial class SuggestionOption
     public required PermissionSuggestion Suggestion { get; init; }
 
     public string Label => Suggestion.ToDisplayLabel();
+
+    /// <summary>Every folder or rule it covers and where it is saved, for the tooltip.</summary>
+    public string Detail => Suggestion.ToDisplayDetail();
 }
 
 /// <summary>

@@ -13,6 +13,12 @@ public sealed partial class ChatViewModel
     /// <summary>A call the transcript never shows as a step: task-list bookkeeping and the CLI's own plumbing.</summary>
     private static bool IsQuietCall(string toolName) => ToolKinds.IsTodo(toolName) || ToolKinds.IsPlumbing(toolName);
 
+    /// <summary>A prompt that opened a turn. A steer joined the turn already running, so it never splits one.</summary>
+    private static bool IsPrompt(AgentEvent e) => e is UserMessageRecorded { IsSteer: false };
+
+    private static UserMessageItem SteerItem(UserMessageRecorded steer) =>
+        new() { Text = steer.Text, Timestamp = steer.Timestamp ?? DateTimeOffset.Now, IsSteer = true };
+
     /// <summary>
     /// The rows a history replays as. Every prompt and answer is there; a turn that used tools gets one
     /// <see cref="HiddenActivityItem"/> in place of its block, and the narration between its tool calls stays with
@@ -24,7 +30,7 @@ public sealed partial class ChatViewModel
         for (var start = 0; start < events.Count;)
         {
             var end = start + 1;
-            while (end < events.Count && events[end] is not UserMessageRecorded)
+            while (end < events.Count && !IsPrompt(events[end]))
             {
                 end++;
             }
@@ -32,7 +38,7 @@ public sealed partial class ChatViewModel
             var turn = events.Skip(start).Take(end - start).ToList();
             if (turn[0] is UserMessageRecorded user)
             {
-                rows.Add(new UserMessageItem { Text = user.Text, Timestamp = user.Timestamp ?? DateTimeOffset.Now });
+                rows.Add(new UserMessageItem { Text = user.Text, Timestamp = user.Timestamp ?? DateTimeOffset.Now, IsSteer = user.IsSteer });
             }
 
             var tools = turn.OfType<ToolCallStarted>().Where(t => !IsQuietCall(t.ToolName)).ToList();
@@ -53,9 +59,15 @@ public sealed partial class ChatViewModel
                 });
             }
 
+            // Steers before the last tool call sit in the folded activity; later ones stay
+            // in plain view, in order with the replies around them.
             for (var i = lastTool + 1; i < turn.Count; i++)
             {
-                if (turn[i] is AssistantMessageCompleted { Text.Length: > 0 } reply)
+                if (i > 0 && turn[i] is UserMessageRecorded { IsSteer: true } steer)
+                {
+                    rows.Add(SteerItem(steer));
+                }
+                else if (turn[i] is AssistantMessageCompleted { Text.Length: > 0 } reply)
                 {
                     var item = new AssistantMessageItem { Timestamp = reply.Timestamp ?? DateTimeOffset.Now };
                     item.Complete(reply.Text);
@@ -79,13 +91,13 @@ public sealed partial class ChatViewModel
         }
 
         var first = at;
-        while (first > 0 && events[first - 1] is not UserMessageRecorded)
+        while (first > 0 && !IsPrompt(events[first - 1]))
         {
             first--;
         }
 
         var last = at;
-        while (last + 1 < events.Count && events[last + 1] is not UserMessageRecorded)
+        while (last + 1 < events.Count && !IsPrompt(events[last + 1]))
         {
             last++;
         }
@@ -116,6 +128,10 @@ public sealed partial class ChatViewModel
                     var note = new AssistantMessageItem { Timestamp = narration.Timestamp ?? DateTimeOffset.Now };
                     note.Complete(narration.Text);
                     activity.Steps.Add(note);
+                    break;
+
+                case UserMessageRecorded { IsSteer: true } steer when i > 0 && i < lastTool:
+                    activity.Steps.Add(SteerItem(steer));
                     break;
 
                 case ToolCallStarted started when !IsQuietCall(started.ToolName):

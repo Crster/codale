@@ -94,6 +94,8 @@ public sealed partial class EditorTab : UserControl
         };
         saveAccelerator.Invoked += OnSaveAcceleratorInvoked;
         KeyboardAccelerators.Add(saveAccelerator);
+        // WinUI otherwise pops an automatic "Ctrl+S" tooltip whenever the pointer rests on the tab.
+        KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
 
         // Find (Ctrl+F by default) is a window shortcut: the workspace scopes the title bar box to this file.
         AddAccelerator(Windows.System.VirtualKey.F3, Windows.System.VirtualKeyModifiers.None, args =>

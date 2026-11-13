@@ -81,8 +81,9 @@ public sealed partial class ChatViewModel
         }
 
         // The task-list row is bookkeeping, not a step: a closing todos_set after the
-        // answer must not keep the answer folded inside the timeline.
-        if (turn.Steps.LastOrDefault(s => s is not TodoStepItem) is AssistantMessageItem { Text.Length: > 0 } answer &&
+        // answer must not keep the answer folded inside the timeline. Nor must a steer the
+        // turn landed before answering: it is sent on as a prompt of its own.
+        if (turn.Steps.LastOrDefault(s => s is not TodoStepItem and not UserMessageItem { IsSteer: true }) is AssistantMessageItem { Text.Length: > 0 } answer &&
             !string.IsNullOrWhiteSpace(answer.Text))
         {
             turn.Steps.Remove(answer);

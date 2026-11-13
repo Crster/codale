@@ -2768,8 +2768,12 @@ public sealed partial class WorkspacePage : Page
 
         FilesPage.Visibility = page == "Files" ? Visibility.Visible : Visibility.Collapsed;
         GitPage.Visibility = page == "Git" ? Visibility.Visible : Visibility.Collapsed;
-        HistoryPage.Visibility = page == "History" ? Visibility.Visible : Visibility.Collapsed;
+        HistoryPage.Visibility = page == "Session" ? Visibility.Visible : Visibility.Collapsed;
         FilesActions.Visibility = FilesPage.Visibility;
+        if (page == "Session")
+        {
+            RefreshKnowledge();
+        }
     }
 
     /// <summary>

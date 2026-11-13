@@ -2336,10 +2336,41 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    /// <summary>The "retry 1 of 10" notice on show, if any: cleared once the retry has worked.</summary>
+    private NoticeItem? _retryNotice;
+
+    /// <summary>
+    /// The model answering (text, thinking, a tool call) or the turn completing means the
+    /// retry went through; its notice is stale, so it goes. A notice that has since been
+    /// replaced by something else is left alone, and a failed turn keeps it as the explanation.
+    /// </summary>
+    private void ClearRetryNoticeOnProgress(AgentEvent e)
+    {
+        if (_retryNotice is null)
+        {
+            return;
+        }
+
+        var succeeded = e is AssistantTextDelta or AssistantThinkingDelta or AssistantMessageCompleted or ToolCallStarted
+            || e is TurnCompleted { IsError: false };
+        if (!succeeded && e is not TurnCompleted and not SessionEnded)
+        {
+            return;
+        }
+
+        if (succeeded && ReferenceEquals(ComposerNotice, _retryNotice))
+        {
+            ComposerNotice = null;
+        }
+
+        _retryNotice = null;
+    }
+
     private void Handle(AgentEvent e)
     {
         TrackBrowserViewport(e);
         ResumeUnpromptedTurn(e);
+        ClearRetryNoticeOnProgress(e);
 
         RecordFeatureEvent(e);
 
@@ -2772,6 +2803,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 // A notification about the CLI itself, not part of the conversation: pinned
                 // above the composer, where it can be dismissed.
                 ComposerNotice = new NoticeItem { Text = info.Text, Severity = info.IsWarning ? NoticeSeverity.Warning : NoticeSeverity.Info };
+                _retryNotice = info.IsRetry ? ComposerNotice : null;
                 break;
 
             case CommandsChanged:
@@ -4397,17 +4429,36 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>
-    /// Inserts a prompt into the turn in flight. The timeline so far folds as its own
-    /// segment, the prompt lands in the transcript in order, and a fresh segment opens
-    /// under it with the live clock carrying on. Busy stays on: the turn is still running.
+    /// Inserts a prompt into the turn in flight. The prompt joins the running timeline as
+    /// a step, in order, and the agent's work carries on below it - nothing folds, the
+    /// clock keeps running. Busy stays on: the CLI answers both in the one turn.
     /// </summary>
     private async Task SteerTurnAsync(IAgentSession session, string text, IReadOnlyList<TurnAttachment> attachments)
     {
+        var turn = _activeTurn;
+        if (turn is null)
+        {
+            await SendTurnAsync(text, attachments, planOnly: false, askOnly: IsAskMode);
+            return;
+        }
+
         Draft = "";
         NextPromptSuggestion = null;
         Attachments.Clear();
         ComposerNotice = null;
         var sent = new UserMessageItem { Text = text, Attachments = attachments, IsSteer = true };
+
+        // Shown at once, inside the timeline. The narration in progress closes here so
+        // the agent's next words open a fresh step below the steer, not above it.
+        if (_streaming is { } open)
+        {
+            open.PublishPending();
+            open.IsStreaming = false;
+            _streaming = null;
+        }
+
+        turn.Steps.Add(sent);
+
         RetrievalResult? retrieved;
         try
         {
@@ -4415,24 +4466,25 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
-            if (ReferenceEquals(session, _session)) Draft = text;
+            if (ReferenceEquals(session, _session))
+            {
+                turn.Steps.Remove(sent);
+                Draft = text;
+            }
+
             return;
         }
         if (!ReferenceEquals(session, _session)) return;
         // A turn may finish while the lookup runs. Send as a fresh turn in that case,
         // preserving its mode and session rather than leaving a new prompt looking idle.
-        if (!IsBusy || _activeTurn is null)
+        if (!IsBusy || !ReferenceEquals(_activeTurn, turn))
         {
+            turn.Steps.Remove(sent);
             await SendTurnAsync(text, attachments, planOnly: false, askOnly: IsAskMode);
             return;
         }
         _lastUserPrompt = text;
-        var started = _turnStarted;
-        EndTurn(TurnOutcome.Completed);
-        Add(sent);
-        RecordUserTurn(text);
-        BeginTurn();
-        _turnStarted = started;
+        RecordUserTurn(text, steer: true);
         try
         {
             await session.SendAsync(new UserTurn(text) { Attachments = attachments,

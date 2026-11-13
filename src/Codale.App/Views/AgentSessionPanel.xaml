@@ -349,9 +349,9 @@
                 <Button Style="{StaticResource CompactAction}" AutomationProperties.Name="Todos"
                         ToolTipService.ToolTip="Todos">
                     <StackPanel Spacing="1" VerticalAlignment="Center">
-                        <FontIcon Glyph="&#xE9D5;" FontSize="10"
+                        <FontIcon Glyph="&#xE9D5;" FontSize="13"
                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
-                        <TextBlock Text="{x:Bind Session.TasksTotal, Mode=OneWay}" FontSize="18" FontWeight="SemiBold"
+                        <TextBlock Text="{x:Bind Session.TasksTotal, Mode=OneWay}" FontSize="14" FontWeight="SemiBold"
                                    HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="38" />
                     </StackPanel>
                     <Button.Flyout>
@@ -434,9 +434,9 @@
                 <Button Style="{StaticResource CompactAction}" AutomationProperties.Name="Background tasks"
                         ToolTipService.ToolTip="Background tasks">
                     <StackPanel Spacing="1" VerticalAlignment="Center">
-                        <FontIcon Glyph="&#xE945;" FontSize="10"
+                        <FontIcon Glyph="&#xE756;" FontSize="13"
                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
-                        <TextBlock Text="{x:Bind Session.SortedTasks.Count, Mode=OneWay}" FontSize="18" FontWeight="SemiBold"
+                        <TextBlock Text="{x:Bind Session.SortedTasks.Count, Mode=OneWay}" FontSize="14" FontWeight="SemiBold"
                                    HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="38" />
                     </StackPanel>
                     <Button.Flyout>
@@ -548,9 +548,9 @@
                 <Button Style="{StaticResource CompactAction}" AutomationProperties.Name="Session changes"
                         ToolTipService.ToolTip="Session changes">
                     <StackPanel Spacing="1" VerticalAlignment="Center">
-                        <FontIcon Glyph="&#xE70F;" FontSize="10"
+                        <FontIcon Glyph="&#xE70F;" FontSize="13"
                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
-                        <TextBlock Text="{x:Bind Session.Status.ChangeCount, Mode=OneWay}" FontSize="18" FontWeight="SemiBold"
+                        <TextBlock Text="{x:Bind Session.Status.ChangeCount, Mode=OneWay}" FontSize="14" FontWeight="SemiBold"
                                    HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="38" />
                     </StackPanel>
                     <Button.Flyout>
@@ -652,9 +652,9 @@
                 <Button Style="{StaticResource CompactAction}" AutomationProperties.Name="Artifacts"
                         ToolTipService.ToolTip="Artifacts">
                     <StackPanel Spacing="1" VerticalAlignment="Center">
-                        <FontIcon Glyph="&#xE8A5;" FontSize="10"
+                        <FontIcon Glyph="&#xE8A5;" FontSize="13"
                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
-                        <TextBlock Text="{x:Bind Session.Artifacts.Count, Mode=OneWay}" FontSize="18" FontWeight="SemiBold"
+                        <TextBlock Text="{x:Bind Session.Artifacts.Count, Mode=OneWay}" FontSize="14" FontWeight="SemiBold"
                                    HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="38" />
                     </StackPanel>
                     <Button.Flyout>

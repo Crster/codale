@@ -209,7 +209,7 @@ public sealed partial class ChatViewModel
         PublishFeatureActivity(false);
     }
 
-    private void RecordUserTurn(string text)
+    private void RecordUserTurn(string text, bool steer = false)
     {
         if (Features is not { } features) return;
         if (FeatureId is null)
@@ -226,7 +226,7 @@ public sealed partial class ChatViewModel
         if (_featureLog is not { } log || FeatureId is not { } id) return;
         if (!_attachLogged) { log.Attach(CliId); _attachLogged = true; }
         BindHistoryProvider();
-        log.AppendUser(text);
+        log.AppendUser(text, steer);
         features.RecordProgress(id, log, text);
         _featureRequest = text;
         _turnStartedUtc = DateTime.UtcNow;

@@ -82,4 +82,51 @@ public sealed class ApprovalResponseTests
         Assert.Equal("success", response.GetProperty("subtype").GetString());
         Assert.Equal("req-42", response.GetProperty("request_id").GetString());
     }
+
+    [Fact]
+    public void Accepted_directory_suggestion_is_returned_verbatim_as_updated_permissions()
+    {
+        var parser = new ClaudeStreamParser();
+        var request = Assert.IsType<ApprovalRequested>(Assert.Single(parser.Parse(
+            """{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"},"permission_suggestions":[{"type":"addDirectories","directories":["X:\\repo\\src"],"destination":"session"}]}}""")));
+        var suggestion = Assert.Single(request.Suggestions);
+        Assert.Equal("Allow access to src", suggestion.ToDisplayLabel());
+
+        var response = Response(new ApprovalDecision { Behavior = ApprovalBehavior.Allow, AcceptedSuggestion = suggestion });
+
+        var update = Assert.Single(response.GetProperty("updatedPermissions").EnumerateArray().ToList());
+        Assert.Equal("addDirectories", update.GetProperty("type").GetString());
+        Assert.Equal("X:\\repo\\src", update.GetProperty("directories")[0].GetString());
+    }
+
+    [Fact]
+    public void Mode_suggestion_and_plain_allow_send_no_permission_update()
+    {
+        var mode = new PermissionSuggestion { Type = "setMode", Mode = "acceptEdits", Destination = "session" };
+        Assert.False(Response(new ApprovalDecision { Behavior = ApprovalBehavior.Allow, AcceptedSuggestion = mode })
+            .TryGetProperty("updatedPermissions", out _));
+        Assert.False(Response(ApprovalDecision.Allow()).TryGetProperty("updatedPermissions", out _));
+    }
+
+    [Theory]
+    [InlineData("setMode", "acceptEdits", "session", "Allow all edits this session")]
+    [InlineData("removeDirectories", null, "session", "Remove directories")]
+    [InlineData("addDirectories", null, "session", "Allow folder access")]
+    public void Suggestion_labels_are_words_not_identifiers(string type, string? mode, string destination, string expected) =>
+        Assert.Equal(expected, new PermissionSuggestion { Type = type, Mode = mode, Destination = destination }.ToDisplayLabel());
+
+    [Fact]
+    public void Rule_suggestion_names_the_command()
+    {
+        var rule = new PermissionSuggestion
+        {
+            Type = "addRules",
+            Behavior = "allow",
+            Destination = "localSettings",
+            Rules = [("Bash", "npm test:*")],
+        };
+
+        Assert.Equal("Always allow “npm test”", rule.ToDisplayLabel());
+        Assert.Contains("settings.local.json", rule.ToDisplayDetail());
+    }
 }

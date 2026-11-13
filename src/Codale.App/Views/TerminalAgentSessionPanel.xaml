@@ -327,13 +327,13 @@
                     ToolTipService.ToolTip="Todos">
                     <StackPanel VerticalAlignment="Center" Spacing="1">
                         <FontIcon
-                            FontSize="10"
+                            FontSize="13"
                             Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                             Glyph="&#xE9D5;" />
                         <TextBlock
                             MaxWidth="38"
                             HorizontalAlignment="Center"
-                            FontSize="18"
+                            FontSize="14"
                             FontWeight="SemiBold"
                             Text="{x:Bind Session.TasksTotal, Mode=OneWay}"
                             TextTrimming="CharacterEllipsis" />
@@ -431,13 +431,13 @@
                     ToolTipService.ToolTip="Background tasks">
                     <StackPanel VerticalAlignment="Center" Spacing="1">
                         <FontIcon
-                            FontSize="10"
+                            FontSize="13"
                             Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                            Glyph="&#xE945;" />
+                            Glyph="&#xE756;" />
                         <TextBlock
                             MaxWidth="38"
                             HorizontalAlignment="Center"
-                            FontSize="18"
+                            FontSize="14"
                             FontWeight="SemiBold"
                             Text="{x:Bind Session.SortedTasks.Count, Mode=OneWay}"
                             TextTrimming="CharacterEllipsis" />
@@ -559,13 +559,13 @@
                     ToolTipService.ToolTip="Session changes">
                     <StackPanel VerticalAlignment="Center" Spacing="1">
                         <FontIcon
-                            FontSize="10"
+                            FontSize="13"
                             Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                             Glyph="&#xE70F;" />
                         <TextBlock
                             MaxWidth="38"
                             HorizontalAlignment="Center"
-                            FontSize="18"
+                            FontSize="14"
                             FontWeight="SemiBold"
                             Text="{x:Bind Session.Status.ChangeCount, Mode=OneWay}"
                             TextTrimming="CharacterEllipsis" />
@@ -676,13 +676,13 @@
                     ToolTipService.ToolTip="Artifacts">
                     <StackPanel VerticalAlignment="Center" Spacing="1">
                         <FontIcon
-                            FontSize="10"
+                            FontSize="13"
                             Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                             Glyph="&#xE8A5;" />
                         <TextBlock
                             MaxWidth="38"
                             HorizontalAlignment="Center"
-                            FontSize="18"
+                            FontSize="14"
                             FontWeight="SemiBold"
                             Text="{x:Bind Session.Artifacts.Count, Mode=OneWay}"
                             TextTrimming="CharacterEllipsis" />
@@ -786,13 +786,13 @@
                     ToolTipService.ToolTip="History">
                     <StackPanel VerticalAlignment="Center" Spacing="1">
                         <FontIcon
-                            FontSize="10"
+                            FontSize="13"
                             Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                             Glyph="&#xE81C;" />
                         <TextBlock
                             MaxWidth="38"
                             HorizontalAlignment="Center"
-                            FontSize="18"
+                            FontSize="14"
                             FontWeight="SemiBold"
                             Text="{x:Bind HistoryCount, Mode=OneWay}"
                             TextTrimming="CharacterEllipsis" />

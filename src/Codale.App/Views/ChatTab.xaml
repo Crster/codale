@@ -758,10 +758,28 @@
                                     TextWrapping="Wrap"
                                     Visibility="{x:Bind Approval.HasRiskNote, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                             </StackPanel>
+                            <!--  Every button here shares one height and text size, accent or not.  -->
                             <StackPanel
                                 Grid.Column="2"
+                                VerticalAlignment="Center"
                                 Orientation="Horizontal"
                                 Spacing="6">
+                                <StackPanel.Resources>
+                                    <Style x:Key="ApprovalQuietButton" BasedOn="{StaticResource QuietButton}" TargetType="Button">
+                                        <Setter Property="Height" Value="30" />
+                                        <Setter Property="Padding" Value="12,0" />
+                                        <Setter Property="FontSize" Value="12.5" />
+                                        <Setter Property="VerticalAlignment" Value="Center" />
+                                        <Setter Property="VerticalContentAlignment" Value="Center" />
+                                    </Style>
+                                    <Style x:Key="ApprovalAccentButton" BasedOn="{StaticResource AccentButtonStyle}" TargetType="Button">
+                                        <Setter Property="Height" Value="30" />
+                                        <Setter Property="Padding" Value="16,0" />
+                                        <Setter Property="FontSize" Value="12.5" />
+                                        <Setter Property="VerticalAlignment" Value="Center" />
+                                        <Setter Property="VerticalContentAlignment" Value="Center" />
+                                    </Style>
+                                </StackPanel.Resources>
                                 <ItemsControl VerticalAlignment="Center" ItemsSource="{x:Bind Approval.Suggestions, Mode=OneWay}">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
@@ -773,29 +791,28 @@
                                             <Button
                                                 Click="OnApprovalSuggestion"
                                                 Content="{x:Bind Label}"
-                                                FontSize="12"
-                                                Style="{StaticResource QuietButton}"
-                                                Tag="{x:Bind}" />
+                                                Style="{StaticResource ApprovalQuietButton}"
+                                                Tag="{x:Bind}"
+                                                ToolTipService.ToolTip="{x:Bind Detail}" />
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
                                 <Button
                                     Click="OnApprovalAllowTurn"
                                     Content="Allow for this turn"
-                                    Style="{StaticResource QuietButton}"
+                                    Style="{StaticResource ApprovalQuietButton}"
                                     Tag="{x:Bind Approval, Mode=OneWay}"
                                     ToolTipService.ToolTip="Allow this and every other confirmation until the turn ends (Shift+Enter)" />
                                 <Button
                                     Click="OnApprovalDeny"
                                     Content="Deny"
-                                    Style="{StaticResource QuietButton}"
+                                    Style="{StaticResource ApprovalQuietButton}"
                                     Tag="{x:Bind Approval, Mode=OneWay}"
                                     ToolTipService.ToolTip="Deny (Esc)" />
                                 <Button
-                                    Padding="16,5"
                                     Click="OnApprovalAllow"
                                     Content="Allow"
-                                    Style="{StaticResource AccentButtonStyle}"
+                                    Style="{StaticResource ApprovalAccentButton}"
                                     Tag="{x:Bind Approval, Mode=OneWay}"
                                     ToolTipService.ToolTip="Allow (Enter)" />
                             </StackPanel>
@@ -1126,10 +1143,74 @@
             </Grid>
         </DataTemplate>
 
+        <!--  A prompt sent while the turn runs: it joins the timeline where it landed,
+              and the agent's work carries on below it.  -->
+        <DataTemplate x:Key="StepSteerTemplate" x:DataType="vm:UserMessageItem">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="22" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Rectangle
+                    Width="1"
+                    Height="12"
+                    VerticalAlignment="Top"
+                    Fill="{StaticResource TimelineRailBrush}" />
+                <Ellipse
+                    Width="6"
+                    Height="6"
+                    Margin="0,13,0,0"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Top"
+                    Fill="{StaticResource KindEditBrush}" />
+                <Rectangle
+                    Width="1"
+                    Margin="0,21,0,0"
+                    Fill="{StaticResource TimelineRailBrush}" />
+                <StackPanel
+                    Grid.Column="1"
+                    MaxWidth="640"
+                    Margin="6,4,0,8"
+                    HorizontalAlignment="Right"
+                    Spacing="3">
+                    <Border
+                        Padding="14,9"
+                        HorizontalAlignment="Right"
+                        Background="{StaticResource UserBubbleBrush}"
+                        BorderBrush="{StaticResource UserBubbleStrokeBrush}"
+                        BorderThickness="1"
+                        CornerRadius="12">
+                        <views:PromptText
+                            Attachments="{x:Bind Attachments}"
+                            FontSize="{x:Bind S13_5, Mode=OneWay}"
+                            Text="{x:Bind Text}" />
+                    </Border>
+                    <StackPanel
+                        Margin="0,0,4,0"
+                        HorizontalAlignment="Right"
+                        Orientation="Horizontal"
+                        Spacing="8">
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind S10_5, Mode=OneWay}"
+                            FontWeight="SemiBold"
+                            Foreground="{StaticResource KindEditBrush}"
+                            Text="Steer" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind S10_5, Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Text="{x:Bind Timestamp, Converter={StaticResource TimestampText}}" />
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
         <views:StepTemplateSelector
             x:Key="StepSelector"
             ExploreTemplate="{StaticResource StepExploreTemplate}"
             NarrationTemplate="{StaticResource StepNarrationTemplate}"
+            SteerTemplate="{StaticResource StepSteerTemplate}"
             TodoTemplate="{StaticResource StepTodoTemplate}"
             ToolTemplate="{StaticResource StepToolTemplate}" />
 

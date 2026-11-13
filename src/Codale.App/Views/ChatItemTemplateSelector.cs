@@ -52,9 +52,11 @@ public sealed partial class StepTemplateSelector : DataTemplateSelector
     public DataTemplate? ToolTemplate { get; set; }
     public DataTemplate? ExploreTemplate { get; set; }
     public DataTemplate? TodoTemplate { get; set; }
+    public DataTemplate? SteerTemplate { get; set; }
 
     protected override DataTemplate? SelectTemplateCore(object item) => item switch
     {
+        UserMessageItem => SteerTemplate,
         AssistantMessageItem => NarrationTemplate,
         ToolCallItem => ToolTemplate,
         ExploreGroupStep => ExploreTemplate,

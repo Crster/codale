@@ -82,12 +82,83 @@ public sealed partial class SourceExplorer
 
     public async Task<DiscoveryResult> RunAsync(string query, CancellationToken ct = default)
     {
+        var snapshot = await _index.GetSnapshotAsync(ct).ConfigureAwait(false);
+        var literal = LiteralPhrase(snapshot, query);
+        var result = await RunCoreAsync(query, snapshot, literal, ct).ConfigureAwait(false);
+        return literal is null ? result : WithLiteralFirst(snapshot, result, literal);
+    }
+
+    private const int MaxLiteralFiles = 6;
+
+    /// <summary>
+    /// The query as typed, when it is a few plain words the source holds together - "Source
+    /// Control" is a label in a XAML file, not "source" and "control" anywhere, and not
+    /// whatever the model or semantic retrieval associate with it. Null when the query is a
+    /// sentence, quotes its own phrases, is one word, or no file holds the words in order.
+    /// </summary>
+    internal static ResolvedTerm? LiteralPhrase(SourceSnapshot snapshot, string query)
+    {
+        var text = query.Trim();
+        if (text.Length < 3 || !text.Any(char.IsWhiteSpace) ||
+            CodeDiscovery.QuotedPhrases(query).Count > 0 || SearchQueryIntent.IsNaturalLanguage(query))
+        {
+            return null;
+        }
+
+        var phrase = ResolvePhrase(snapshot, new ExploreTerm(text, 1.5, Exact: true), text);
+        return phrase.PhraseFiles is { Count: > 0 } ? phrase : null;
+    }
+
+    /// <summary>
+    /// Files that hold the typed text verbatim lead the result, whatever the model and the
+    /// semantic pass made of it: someone typing text that exists in the code wants to see it.
+    /// </summary>
+    private static DiscoveryResult WithLiteralFirst(SourceSnapshot snapshot, DiscoveryResult result, ResolvedTerm literal)
+    {
+        var ids = literal.PhraseFiles!;
+        var ranked = Rank(snapshot, [literal], [], setup: false)
+            .Where(r => ids.Contains(snapshot.IdOf(r.File)))
+            .Concat(ids.Select(id => new Ranked(snapshot.Files[id])))
+            .DistinctBy(r => r.File.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxLiteralFiles)
+            .ToList();
+
+        var existing = result.Files.ToDictionary(f => f.RelativePath, StringComparer.OrdinalIgnoreCase);
+        var lead = new List<DiscoveredFile>();
+        foreach (var entry in ranked)
+        {
+            var file = ToFile(entry, [literal], confirmed: false, setup: false);
+            if (file is null)
+            {
+                continue;
+            }
+
+            // The literal slices, so the matched text is what the row shows and highlights.
+            lead.Add(existing.TryGetValue(file.RelativePath, out var kept)
+                ? file with { Confirmed = kept.Confirmed, Keywords = [literal.Term.Text] }
+                : file with { Keywords = [literal.Term.Text] });
+        }
+
+        var taken = lead.Select(f => f.RelativePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return result with
+        {
+            Files = [.. lead, .. result.Files.Where(f => !taken.Contains(f.RelativePath))],
+            Keywords = [literal.Term.Text, .. result.Keywords.Where(k => !string.Equals(k, literal.Term.Text, StringComparison.OrdinalIgnoreCase))],
+        };
+    }
+
+    private async Task<DiscoveryResult> RunCoreAsync(string query, SourceSnapshot snapshot, ResolvedTerm? literal, CancellationToken ct)
+    {
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
         budget.CancelAfter(Budget);
 
-        var snapshot = await _index.GetSnapshotAsync(ct).ConfigureAwait(false);
         var setup = SearchAgentLoop.IsSetupQuestion(query);
         var questionTerms = QueryTerms(query);
+        if (literal is not null)
+        {
+            // Carried through every round like a quoted phrase, so the model's keywords never drop it.
+            questionTerms.Insert(0, literal.Term);
+        }
 
         _model?.Prewarm(CodeDiscovery.JudgeSystemPrompt, [CodeDiscovery.JudgeTool]);
 
@@ -112,16 +183,25 @@ public sealed partial class SourceExplorer
                 instant = retrieved.Concat(instant.Where(c => retrieved.All(r => r.File != c.File))).ToList();
             }
         }
+
+        if (literal?.PhraseFiles is { Count: > 0 } literalFiles)
+        {
+            // The typed text found verbatim outranks anything semantically near it.
+            instant = instant.OrderBy(r => literalFiles.Contains(snapshot.IdOf(r.File)) ? 0 : 1).ToList();
+        }
+
+        void Report(DiscoveryResult result) =>
+            Progress?.Invoke(this, literal is null ? result : WithLiteralFirst(snapshot, result, literal));
         var provisional = Build(snapshot, instant.Take(_model is null ? MaxRankedResults : MaxProvisional).ToList(), question,
             confirmed: false, round: 0, isFinal: _model is null, setup);
-        Progress?.Invoke(this, provisional);
+        Report(provisional);
 
         ct.ThrowIfCancellationRequested();
         if (_model is not null && enriched)
         {
             // Retrieval chose the related files; the provider reads their source, drops
             // the ones that do not answer, and marks the exact rows and words.
-            Progress?.Invoke(this, provisional with { Round = 1 });
+            Report(provisional with { Round = 1 });
             var (reviewed, answered) = await ReviewRetrievedAsync(snapshot, query, provisional,
                 instant.Take(MaxCandidates).ToList(), question, setup, budget.Token, ct).ConfigureAwait(false);
             if (reviewed is not null) return reviewed;
@@ -213,7 +293,7 @@ public sealed partial class SourceExplorer
             (best, bestTerms) = (candidates, terms);
 
             latest = Build(snapshot, candidates.Take(MaxProvisional).ToList(), terms, confirmed: false, round, isFinal: false, setup);
-            Progress?.Invoke(this, latest);
+            Report(latest);
 
             call = await AskAsync(CodeDiscovery.JudgeSystemPrompt, BuildJudgePrompt(query, fresh, candidates, terms) + "\nProject files:\n" + CodeDiscovery.BuildFileList(snapshot.Files.Select(f => f.RelativePath).ToList()),
                 CodeDiscovery.JudgeTool, budget.Token).ConfigureAwait(false);

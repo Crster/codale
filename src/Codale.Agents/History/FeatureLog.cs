@@ -93,7 +93,18 @@ public sealed class FeatureLog(string workspaceDirectory, string featureId, stri
     /// <summary>Notes that a session of <paramref name="cli"/> took up the feature.</summary>
     public void Attach(string cli) => Append(new { type = "session", cli, at = DateTimeOffset.Now });
 
-    public void AppendUser(string text) => Append(new { type = "user", text, at = DateTimeOffset.Now });
+    /// <summary>Notes a prompt; a <paramref name="steer"/> joined the running turn instead of starting one.</summary>
+    public void AppendUser(string text, bool steer = false)
+    {
+        if (steer)
+        {
+            Append(new { type = "user", text, steer, at = DateTimeOffset.Now });
+        }
+        else
+        {
+            Append(new { type = "user", text, at = DateTimeOffset.Now });
+        }
+    }
 
     /// <summary>Notes the project context a prompt was enriched with; replayed as its own row, never as conversation.</summary>
     public void AppendContext(string summary, string details) => Append(new { type = "context", summary, details, at = DateTimeOffset.Now });
@@ -347,7 +358,7 @@ public sealed class FeatureLog(string workspaceDirectory, string featureId, stri
 
     private static AgentEvent? Translate(JsonElement record) => record.Str("type") switch
     {
-        "user" when record.Str("text") is { Length: > 0 } text => new UserMessageRecorded(text),
+        "user" when record.Str("text") is { Length: > 0 } text => new UserMessageRecorded(text) { IsSteer = record.Bool("steer") },
         "context" when record.Str("summary") is { Length: > 0 } summary => new ContextEnrichmentRecorded(summary, record.Str("details") ?? ""),
         "assistant" => new AssistantMessageCompleted
         {

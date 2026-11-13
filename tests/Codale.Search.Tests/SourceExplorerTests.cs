@@ -175,6 +175,27 @@ public sealed class SourceExplorerTests : IDisposable
         }});
 
     [Fact]
+    public async Task Typed_words_found_verbatim_lead_over_the_models_keywords()
+    {
+        Write("src/Views/Workspace.xaml", """
+            <Grid>
+                <TextBlock Text="Source Control" />
+            </Grid>
+            """);
+        Write("src/Git/GitPanel.cs", """
+            // git source of truth; control flow for the git panel
+            public sealed class GitPanel { public void Commit() { } public string Source => "git"; public int Control; }
+            """);
+
+        var model = new ScriptedModel(Keywords("git, GitPanel, Commit"), Pick("1"));
+        var result = await new SourceExplorer(_index, model) { MaxRelated = 0 }.RunAsync("Source Control");
+
+        Assert.Equal(P("src/Views/Workspace.xaml"), result.Files[0].RelativePath);
+        Assert.Contains(result.Files[0].Ranges, r => r.Code.Contains("Source Control"));
+        Assert.Equal("Source Control", result.Keywords[0]);
+    }
+
+    [Fact]
     public async Task Sidebar_logo_edit_follows_the_component_and_marks_the_asset_source()
     {
         Write("web/Sidebar.tsx", """

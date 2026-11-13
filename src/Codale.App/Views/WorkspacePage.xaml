@@ -500,10 +500,10 @@
                         <RadioButton
                             x:Name="HistoryTabButton"
                             Checked="OnLeftTabChecked"
-                            Content="History"
+                            Content="Session"
                             GroupName="LeftPanelTabs"
                             Style="{StaticResource ShellSegment}"
-                            Tag="History" />
+                            Tag="Session" />
                     </StackPanel>
                 </Grid>
 
@@ -540,6 +540,10 @@
                             </TextBlock.ContextFlyout>
                         </TextBlock>
                         <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <Button Width="26" Height="26" Click="OnFilesAddFolderClick"
+                            Style="{StaticResource ShellIconButton}" ToolTipService.ToolTip="Add folder to workspace (this session only)">
+                            <FontIcon FontSize="12" Glyph="&#xE8F4;" />
+                        </Button>
                         <Button Width="26" Height="26" Click="OnFilesNewFileClick"
                             Style="{StaticResource ShellIconButton}" ToolTipService.ToolTip="New file">
                             <FontIcon FontSize="12" Glyph="&#xE8A5;" />
@@ -1338,13 +1342,24 @@
                     </Grid>
                     </Grid>
 
-                <!--  History  -->
+                <!--  Session: past conversations above, the workspace's memory and secrets below  -->
                     <Grid x:Name="HistoryPage" RowSpacing="4" Visibility="Collapsed">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
+                            <RowDefinition x:Name="SessionHistoryRow" Height="*" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition x:Name="SessionKnowledgeRow" Height="*" />
                         </Grid.RowDefinitions>
 
+                        <ToggleButton
+                            x:Name="SessionHistorySection"
+                            Click="OnSessionSectionClick"
+                            IsChecked="True"
+                            Style="{StaticResource SectionHeader}">
+                            <TextBlock Text="HISTORY" />
+                        </ToggleButton>
+
+                        <Grid Grid.Row="1" Visibility="{x:Bind SessionHistorySection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
                         <TextBlock
                             Margin="8,16,8,0"
                             HorizontalAlignment="Center"
@@ -1436,6 +1451,112 @@
                                 </DataTemplate>
                             </ListView.ItemTemplate>
                         </ListView>
+                        </Grid>
+
+                        <Border
+                            Grid.Row="2"
+                            Margin="0,6,0,0"
+                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                            BorderThickness="0,1,0,0">
+                            <Grid>
+                                <ToggleButton
+                                    x:Name="SessionKnowledgeSection"
+                                    HorizontalAlignment="Stretch"
+                                    Click="OnSessionSectionClick"
+                                    IsChecked="True"
+                                    Style="{StaticResource SectionHeader}">
+                                    <TextBlock Text="MEMORY &amp; SECRETS" />
+                                </ToggleButton>
+                                <StackPanel
+                                    Margin="0,0,4,0"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal">
+                                    <Button
+                                        Padding="6,3"
+                                        AutomationProperties.Name="Add secret"
+                                        Background="Transparent"
+                                        BorderBrush="Transparent"
+                                        Click="OnAddSecretClick"
+                                        ToolTipService.ToolTip="Add secret">
+                                        <FontIcon FontSize="12" Glyph="&#xE710;" />
+                                    </Button>
+                                    <Button
+                                        Padding="6,3"
+                                        AutomationProperties.Name="Refresh"
+                                        Background="Transparent"
+                                        BorderBrush="Transparent"
+                                        Click="OnRefreshKnowledgeClick"
+                                        ToolTipService.ToolTip="Refresh">
+                                        <FontIcon FontSize="12" Glyph="&#xE72C;" />
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Grid Grid.Row="3" Visibility="{x:Bind SessionKnowledgeSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
+                            <TextBlock
+                                x:Name="KnowledgeHint"
+                                Margin="8,12,8,0"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Top"
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Text="Notes and secrets the agent saves for this workspace appear here."
+                                TextAlignment="Center"
+                                TextWrapping="Wrap" />
+                            <ListView
+                                Padding="0,4,0,8"
+                                ItemContainerStyle="{StaticResource HistoryItem}"
+                                ItemsSource="{x:Bind KnowledgeRows}"
+                                SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="views:KnowledgeRow">
+                                        <Grid
+                                            Padding="8,6"
+                                            Background="Transparent"
+                                            ColumnSpacing="8"
+                                            ToolTipService.ToolTip="{x:Bind Tooltip}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.ContextFlyout>
+                                                <MenuFlyout>
+                                                    <MenuFlyoutItem
+                                                        Click="OnForgetKnowledgeClick"
+                                                        Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                                        Text="{x:Bind DeleteText}">
+                                                        <MenuFlyoutItem.Icon>
+                                                            <FontIcon Foreground="{ThemeResource SystemFillColorCriticalBrush}" Glyph="&#xE74D;" />
+                                                        </MenuFlyoutItem.Icon>
+                                                    </MenuFlyoutItem>
+                                                </MenuFlyout>
+                                            </Grid.ContextFlyout>
+                                            <FontIcon
+                                                Margin="0,2,0,0"
+                                                VerticalAlignment="Top"
+                                                FontSize="12"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Glyph="{x:Bind Glyph}" />
+                                            <StackPanel Grid.Column="1" Spacing="2">
+                                                <TextBlock
+                                                    FontSize="12"
+                                                    Text="{x:Bind Title}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    FontSize="10.5"
+                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                    MaxLines="2"
+                                                    Text="{x:Bind Detail}"
+                                                    TextTrimming="CharacterEllipsis"
+                                                    TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
                     </Grid>
                 </Grid>
             </Grid>
