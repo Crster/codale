@@ -475,28 +475,10 @@
                         <RadioButton
                             x:Name="GitTabButton"
                             Checked="OnLeftTabChecked"
+                            Content="Source Control"
                             GroupName="LeftPanelTabs"
                             Style="{StaticResource ShellSegment}"
-                            Tag="Git">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <TextBlock Text="Source Control" />
-                                <Border
-                                    MinWidth="16"
-                                    Height="15"
-                                    Padding="4,0"
-                                    VerticalAlignment="Center"
-                                    Background="{StaticResource KindEditTintBrush}"
-                                    CornerRadius="7.5"
-                                    Visibility="{x:Bind ViewModel.Git.ChangeCount, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
-                                    <TextBlock
-                                        HorizontalAlignment="Center"
-                                        VerticalAlignment="Center"
-                                        FontSize="10"
-                                        Foreground="{StaticResource KindEditBrush}"
-                                        Text="{x:Bind ViewModel.Git.ChangeCount, Mode=OneWay}" />
-                                </Border>
-                            </StackPanel>
-                        </RadioButton>
+                            Tag="Git" />
                         <RadioButton
                             x:Name="HistoryTabButton"
                             Checked="OnLeftTabChecked"

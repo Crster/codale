@@ -421,18 +421,37 @@ public sealed partial class CodeEditor : UserControl
         var themeKey = _light ? "Light" : "Default";
         Windows.UI.Color FromBrush(string key, Windows.UI.Color fallback)
         {
+            // The shell brushes live in App.xaml's own ThemeDictionaries, the rest in merged ones;
+            // check the root first or the editor surface falls back to the app's (dark) value.
+            if (TryThemeBrush(resources, key, out var rootColor))
+            {
+                return rootColor;
+            }
+
             foreach (var merged in resources.MergedDictionaries)
             {
-                if (merged.ThemeDictionaries.TryGetValue(themeKey, out var theme)
-                    && theme is ResourceDictionary dictionary
-                    && dictionary.TryGetValue(key, out var value)
-                    && value is SolidColorBrush brush)
+                if (TryThemeBrush(merged, key, out var color))
                 {
-                    return brush.Color;
+                    return color;
                 }
             }
 
             return resources.TryGetValue(key, out var any) && any is SolidColorBrush b ? b.Color : fallback;
+        }
+
+        bool TryThemeBrush(ResourceDictionary source, string key, out Windows.UI.Color color)
+        {
+            if (source.ThemeDictionaries.TryGetValue(themeKey, out var theme)
+                && theme is ResourceDictionary dictionary
+                && dictionary.TryGetValue(key, out var value)
+                && value is SolidColorBrush brush)
+            {
+                color = brush.Color;
+                return true;
+            }
+
+            color = default;
+            return false;
         }
 
         _baseText = FromBrush("TextFillColorPrimaryBrush", Microsoft.UI.Colors.White);
