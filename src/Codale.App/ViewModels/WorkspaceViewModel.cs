@@ -498,8 +498,30 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         }
     }
 
-    private void UpdateRunningCommandCount() =>
-        RunningCommandCount = _terminals.Count(t => t.IsCommandTerminal && t.Activity == TerminalActivity.Busy);
+    /// <summary>The window's UI thread; the workspace is created on it.</summary>
+    private readonly Microsoft.UI.Dispatching.DispatcherQueue? _ui =
+        Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+
+    /// <summary>
+    /// The badge count is bound in XAML, so it is set on the UI thread: the agent's terminal tools
+    /// and a terminal's activity changes call this from background threads.
+    /// </summary>
+    private void UpdateRunningCommandCount()
+    {
+        if (_ui is not null && !_ui.HasThreadAccess)
+        {
+            _ui.TryEnqueue(UpdateRunningCommandCount);
+            return;
+        }
+
+        int count;
+        lock (_terminals)
+        {
+            count = _terminals.Count(t => t.IsCommandTerminal && t.Activity == TerminalActivity.Busy);
+        }
+
+        RunningCommandCount = count;
+    }
 
     /// <summary>The command's directory, relative ones resolved against the project root.</summary>
     private string ResolveCommandDirectory(ProjectCommand command)
