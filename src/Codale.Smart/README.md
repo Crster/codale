@@ -34,8 +34,11 @@ one, with at least 60% certainty, it is held back and the composer offers to mov
 there, start a new session, or send it here anyway.
 
 Auto Complete requires an explicit code model. OpenRouter instruct models use
-`POST /chat/completions` with the code before and after the cursor and instructions
-to return only the insertion. Other OpenAI-compatible endpoints require a
+`POST /chat/completions` with the file as raw text, a `<CURSOR>` marker at the caret, and
+instructions to return a short insertion (never past the caret's line, capped at 96 tokens).
+A comment header lists the project types the file uses with their member signatures, so
+the model completes `_board.` with real members. Editor ghost text keeps only the rest of
+the caret's line, or one statement on an empty line. Other OpenAI-compatible endpoints require a
 fill-in-the-middle (FIM) model. Those requests use
 `POST /completions` with `prompt` (code before the cursor) and `suffix` (code after
 the cursor), and insert the returned `choices[0].text` without trimming whitespace.

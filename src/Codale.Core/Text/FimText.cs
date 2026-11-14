@@ -55,6 +55,110 @@ public static class FimText
         return text.Trim().Length == 0 ? "" : text;
     }
 
+    /// <summary>The marker that stands for the caret when code goes to a chat (instruct) model.</summary>
+    public const string CursorMarker = "<CURSOR>";
+
+    /// <summary>
+    /// Lines kept from a proposal on an empty line: one statement, a small bit to Tab through rather than a block to
+    /// read and review (the next pause asks for the line after it).
+    /// </summary>
+    public const int MaxBlockLines = 1;
+
+    /// <summary>
+    /// The code around the caret as one file with <see cref="CursorMarker"/> in its place, for an instruct model.
+    /// Raw text, not JSON: a JSON string escapes quotes and brackets (<c>"</c>), and models copy the escapes back.
+    /// </summary>
+    public static string CursorDocument(string? fileName, string prefix, string suffix) =>
+        $"File: {(string.IsNullOrWhiteSpace(fileName) ? "(unsaved)" : fileName.Replace('\\', '/'))}\n<code>\n{prefix}{CursorMarker}{suffix}\n</code>";
+
+    /// <summary>
+    /// The ghost text for an instruct model's raw insertion at the caret. With code before the caret on its line, only
+    /// that line is finished; on an empty line a short block is kept, up to where it starts repeating the code that
+    /// follows. Indentation the caret already has, a restatement of the caret's line and a repeat of the rest of the line
+    /// are dropped. Empty when nothing is left.
+    /// </summary>
+    public static string Tidy(string raw, string prefix, string suffix)
+    {
+        var text = raw.Replace("\r\n", "\n").Replace(CursorMarker, "", StringComparison.Ordinal);
+        var caretLine = prefix.Replace("\r\n", "\n");
+        caretLine = caretLine[(caretLine.LastIndexOf('\n') + 1)..];
+        var midLine = caretLine.Trim().Length > 0;
+
+        if (midLine)
+        {
+            // A reply that starts on a new line says the caret's line is finished: its next line does not belong here.
+            if (text.TrimStart(' ', '\t').StartsWith('\n'))
+            {
+                return "";
+            }
+
+            text = FirstLine(text, suffix, prefix);
+            // The caret's own indentation copied into the middle of a line ("(" + "        cards[j]").
+            if (text.Length > 1 && char.IsWhiteSpace(text[0]) && char.IsWhiteSpace(text[1]))
+            {
+                text = text.TrimStart(' ', '\t');
+            }
+
+            return WithoutRestatedLine(caretLine, text);
+        }
+
+        var lines = text.TrimStart('\n').Split('\n').Select(l => l.TrimEnd()).ToList();
+        var next = suffix.Replace("\r\n", "\n").Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0);
+        var kept = new List<string>();
+        foreach (var line in lines)
+        {
+            // The model went on to write the code that already follows the caret.
+            if (kept.Count >= MaxBlockLines || (next is { Length: > 1 } && line.Trim() == next))
+            {
+                break;
+            }
+
+            kept.Add(line);
+        }
+
+        while (kept.Count > 0 && kept[^1].Trim().Length == 0)
+        {
+            kept.RemoveAt(kept.Count - 1);
+        }
+
+        if (kept.Count == 0)
+        {
+            return "";
+        }
+
+        // The caret already sits on the indent: the first line's own indent would double it.
+        if (caretLine.Length > 0)
+        {
+            kept[0] = kept[0].TrimStart(' ', '\t');
+        }
+
+        var block = string.Join("\n", kept);
+        return block.Trim().Length == 0 ? "" : block;
+    }
+
+    /// <summary>
+    /// Drops the start of <paramref name="completion"/> when it restates the end of the caret's line
+    /// ("var j = " + "j = random.Next(i + 1);"): the longest overlap that is at least three characters and starts a token.
+    /// </summary>
+    private static string WithoutRestatedLine(string caretLine, string completion)
+    {
+        var line = caretLine.TrimStart();
+        for (var length = Math.Min(line.Length, completion.Length); length >= 3; length--)
+        {
+            var start = line.Length - length;
+            var startsToken = start == 0 || !IsWord(line[start - 1]) || !IsWord(line[start]);
+            if (startsToken && string.CompareOrdinal(line, start, completion, 0, length) == 0)
+            {
+                var rest = completion[length..];
+                return rest.Trim().Length == 0 ? "" : rest;
+            }
+        }
+
+        return completion;
+
+        static bool IsWord(char c) => char.IsLetterOrDigit(c) || c == '_';
+    }
+
     /// <summary>
     /// True when <paramref name="completion"/> reads as a chat reply rather than code: an instruct model sometimes
     /// answers the caret with "It looks like you're...". Such text is never shown as a completion.

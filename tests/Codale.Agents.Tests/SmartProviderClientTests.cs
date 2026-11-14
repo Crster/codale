@@ -21,12 +21,17 @@ public sealed class SmartProviderClientTests
             Assert.Equal("https://openrouter.ai/api/v1/chat/completions", request.RequestUri!.AbsoluteUri);
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             Assert.Equal("qwen/code-instruct", body.RootElement.GetProperty("model").GetString());
-            Assert.Contains("suffix", body.RootElement.GetProperty("messages")[1].GetProperty("content").GetString());
+            // The file with a caret marker, its quotes as written (a JSON string would send ", which models copy back).
+            var user = body.RootElement.GetProperty("messages")[1].GetProperty("content").GetString()!;
+            Assert.Contains("File: src/calc.js", user);
+            Assert.Contains("say(\"<CURSOR>\")\n}", user);
+            Assert.Contains("<CURSOR>", body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString());
             return Json("{\"choices\":[{\"message\":{\"content\":\"\\n    return a + b;\"}}]}");
         }));
         var profile = Profile(); profile.BaseUrl = "https://openrouter.ai/api/v1";
         var client = new SmartProviderClient(Completion, "openai", profile, "qwen/code-instruct", http);
-        Assert.Equal("\n    return a + b;", await client.CompleteAsync("completion", "", "{\"prefix\":\"\",\"suffix\":\"}\"}", 48, default));
+        var input = JsonSerializer.Serialize(new { fileName = "src\\calc.js", prefix = "say(\"", suffix = "\")\n}" });
+        Assert.Equal("\n    return a + b;", await client.CompleteAsync("completion", "", input, 48, default));
     }
 
     [Fact]

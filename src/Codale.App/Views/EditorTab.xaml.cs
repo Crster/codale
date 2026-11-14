@@ -402,13 +402,9 @@ public sealed partial class EditorTab : UserControl
             return null;
         }
 
-        // The caret already sits after an indent or a space: the model's own leading whitespace would double it.
-        if (prefix.Length > 0 && prefix[^1] is ' ' or '\t')
-        {
-            raw = raw.TrimStart(' ', '\t');
-        }
-
-        return raw.Trim().Length == 0 ? null : raw;
+        // Mid-line: just the rest of that line; on an empty line a short block, cut where it starts repeating the code below.
+        var text = Codale.Core.Text.FimText.Tidy(raw, prefix, suffix);
+        return text.Length == 0 || rejected.Contains(text.Trim()) ? null : text;
     }
 
     /// <summary>An instruct model that answered instead of inserting ("Sure, here is…", a fenced block). Comments and strings in code are fine.</summary>

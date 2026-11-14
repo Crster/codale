@@ -32,6 +32,44 @@ public sealed class FimTextTests
     }
 
     [Theory]
+    // Mid-line: one line, no restatement of the caret's line, no indent leaked after a bracket.
+    [InlineData("best)\n{", "        if (score > ", "\n        {", "best)")]
+    [InlineData("j = random.Next(i + 1);", "        var j = ", "\n", "random.Next(i + 1);")]
+    [InlineData("                cards[j], cards[i]);", "        (cards[i], cards[j]) = (", "\n", "cards[j], cards[i]);")]
+    [InlineData("deck);", "        var score = PlayRound(", ");\n", "deck")]
+    [InlineData("\n        {", "        if (score > best)", "\n", "")]
+    [InlineData("Count<CURSOR>", "        var n = items.", "\n", "Count")]
+    [InlineData(" + 1;", "        var n = x", "\n", " + 1;")]
+    public void Mid_line_proposals_finish_only_the_caret_line(string raw, string prefix, string suffix, string expected) =>
+        Assert.Equal(expected, FimText.Tidy(raw, prefix, suffix));
+
+    [Fact]
+    public void A_block_on_an_empty_line_stops_where_the_following_code_begins()
+    {
+        const string suffix = "\n        var score = 0;\n        return score;\n    }";
+        var raw = "var deck = NewDeck(random);\n        var score = 0;\n        return score;\n    }";
+        Assert.Equal("var deck = NewDeck(random);", FimText.Tidy(raw, "{\n        ", suffix));
+    }
+
+    [Fact]
+    public void An_empty_line_gets_one_statement_and_the_caret_indent_once()
+    {
+        var raw = "\n        if (done)\n        {\n            break;\n        }";
+        Assert.Equal("if (done)", FimText.Tidy(raw, "{\n        ", "\n    }"));
+        var longBlock = string.Join("\n", Enumerable.Range(0, 20).Select(i => $"        Step{i}();"));
+        Assert.Equal(FimText.MaxBlockLines, FimText.Tidy(longBlock, "{\n        ", "\n}").Split('\n').Length);
+    }
+
+    [Fact]
+    public void The_cursor_document_is_raw_code_with_a_marker()
+    {
+        var document = FimText.CursorDocument("src\\Game.cs", "if (key is '", "' or 'l')");
+        Assert.Contains("File: src/Game.cs", document);
+        Assert.Contains("if (key is '<CURSOR>' or 'l')", document);
+        Assert.DoesNotContain("\\u0027", document);
+    }
+
+    [Theory]
     [InlineData("It looks like you're writing a loop", true)]
     [InlineData("// No code output needed; replace the placeholder with a statement.", true)]
     [InlineData("```csharp", true)]

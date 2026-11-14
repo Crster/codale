@@ -15,7 +15,9 @@ public static partial class CompletionContext
     private const int MaxAmbiguous = 3;
     private const int MaxSiblings = 6;
     private const int MaxLineChars = 140;
-    private const int MaxChars = 1800;
+    private const int MaxChars = 2600;
+    private const int MaxOutlines = 5;
+    private const int MaxMembers = 10;
     private const int MaxRelated = 2;
     private const int RelatedLines = 4;
 
@@ -45,7 +47,8 @@ public static partial class CompletionContext
         {
             var self = snapshot.Find(relative);
             AppendSiblings(builder, comment, snapshot, relative);
-            AppendDeclarations(builder, comment, snapshot, self, nearby);
+            var outlined = AppendTypeOutlines(builder, comment, snapshot, self, nearby);
+            AppendDeclarations(builder, comment, snapshot, self, nearby, outlined);
         }
 
         AppendRelated(builder, comment, related, relative, nearby);
@@ -121,7 +124,141 @@ public static partial class CompletionContext
         }
     }
 
-    private static void AppendDeclarations(StringBuilder builder, string comment, SourceSnapshot snapshot, SourceFile? self, string nearby)
+    /// <summary>
+    /// The members of the project's own types that this file uses (a field's type, a constructor call), one signature a
+    /// line: without them a model completing "_snake." can only guess the API. Types named near the caret come first.
+    /// Returns the names of the types outlined.
+    /// </summary>
+    private static HashSet<string> AppendTypeOutlines(StringBuilder builder, string comment, SourceSnapshot snapshot, SourceFile? self, string nearby)
+    {
+        var outlined = new HashSet<string>(StringComparer.Ordinal);
+        var fileText = self is null ? "" : string.Join("\n", self.ReadLines());
+        var near = WordRegex().Matches(nearby).Select(m => m.Value).Reverse().ToList();
+        // A field or local named after its type ("_board", "snake") is the strongest hint: "_board." needs Board's members.
+        var named = near.Select(w => w.TrimStart('_')).Where(w => w.Length >= 3)
+            .Select(w => char.ToUpperInvariant(w[0]) + w[1..]);
+        var names = named.Concat(near).Concat(WordRegex().Matches(fileText).Select(m => m.Value))
+            .Where(w => w.Length >= 3 && char.IsUpper(w[0]))
+            .Distinct(StringComparer.Ordinal);
+
+        var blocks = new List<string>();
+        foreach (var name in names)
+        {
+            if (blocks.Count >= MaxOutlines)
+            {
+                break;
+            }
+
+            var found = snapshot.Definitions(name)
+                .Where(d => d.Symbol.Kind == SourceSymbolKind.Type && !ReferenceEquals(d.File, self))
+                .Take(MaxAmbiguous + 1).ToList();
+            if (found.Count is 0 or > MaxAmbiguous)
+            {
+                continue;
+            }
+
+            var outline = Outline(found[0], outlined);
+            if (outline.Count == 0)
+            {
+                continue;
+            }
+
+            outlined.Add(name);
+            var block = new StringBuilder();
+            block.Append(comment).Append("   ").Append(outline[0]).Append("   [").Append(found[0].File.RelativePath.Replace('\\', '/')).Append("]\n");
+            foreach (var member in outline.Skip(1))
+            {
+                block.Append(comment).Append("     ").Append(member).Append('\n');
+            }
+
+            blocks.Add(block.ToString());
+        }
+
+        if (blocks.Count > 0)
+        {
+            builder.Append(comment).Append(" Project types used in this file (members):\n");
+            foreach (var block in blocks)
+            {
+                builder.Append(block);
+            }
+        }
+
+        return outlined;
+    }
+
+    /// <summary>
+    /// A type's declaration and its non-private members' signatures (bodies cut at "=>" or "{"); an enum as one line
+    /// with its values. Each member listed is added to <paramref name="listed"/> as <see cref="MemberKey"/>.
+    /// </summary>
+    private static List<string> Outline(SymbolLocation type, HashSet<string> listed)
+    {
+        var source = type.File.ReadLines();
+        var start = type.Symbol.Line - 1;
+        var end = Math.Min(type.Symbol.EndLine, source.Length);
+        if (start < 0 || start >= source.Length)
+        {
+            return [];
+        }
+
+        var declaration = Signature(source[start]);
+        if (Regex.IsMatch(declaration, @"\benum\b"))
+        {
+            var values = source[(start + 1)..Math.Max(start + 1, end)]
+                .Select(l => Regex.Match(l.Trim(), @"^([A-Za-z_][A-Za-z0-9_]*)\s*(=|,|$)"))
+                .Where(m => m.Success).Select(m => m.Groups[1].Value);
+            var line = $"{declaration} {{ {string.Join(", ", values)} }}";
+            return [line.Length > MaxLineChars * 2 ? line[..(MaxLineChars * 2)] : line];
+        }
+
+        var lines = new List<string> { declaration };
+        foreach (var member in type.File.Symbols
+                     .Where(s => s.Kind is SourceSymbolKind.Function or SourceSymbolKind.Property &&
+                                 s.Line > type.Symbol.Line && s.Line <= end)
+                     .OrderBy(s => s.Line))
+        {
+            if (lines.Count > MaxMembers)
+            {
+                break;
+            }
+
+            var text = member.Line <= source.Length ? Signature(source[member.Line - 1]) : "";
+            if (text.Length == 0 || Regex.IsMatch(text, @"^(private|protected)\b(?!\s+(internal|protected)\b)") ||
+                !text.Contains(member.Name, StringComparison.Ordinal) || lines.Contains(text))
+            {
+                continue;
+            }
+
+            lines.Add(text);
+            listed.Add(MemberKey(type.File, member));
+        }
+
+        return lines;
+    }
+
+    private static string MemberKey(SourceFile file, SourceSymbol symbol) => $"{file.RelativePath}#{symbol.Line}";
+
+    /// <summary>A declaration line without its body or comment: "public Point NextHead() => Head.Move(...)" → "public Point NextHead()".</summary>
+    private static string Signature(string line)
+    {
+        var text = line.Trim();
+        var arrow = text.IndexOf("=>", StringComparison.Ordinal);
+        if (arrow > 0)
+        {
+            text = text[..arrow];
+        }
+
+        var comment = text.IndexOf("//", StringComparison.Ordinal);
+        if (comment > 0)
+        {
+            text = text[..comment];
+        }
+
+        text = text.TrimEnd().TrimEnd('{').TrimEnd();
+        return text.Length > MaxLineChars ? text[..MaxLineChars] : text;
+    }
+
+    private static void AppendDeclarations(StringBuilder builder, string comment, SourceSnapshot snapshot, SourceFile? self, string nearby,
+        IReadOnlySet<string> outlined)
     {
         // Nearest to the caret first: the words at the end of the text are what the next line will use.
         var words = WordRegex().Matches(nearby).Select(m => m.Value).Reverse().Distinct(StringComparer.Ordinal).Take(40).ToList();
@@ -131,7 +268,7 @@ public static partial class CompletionContext
         for (var order = 0; order < words.Count; order++)
         {
             var word = words[order];
-            if (word.Length < MinNameChars)
+            if (word.Length < MinNameChars || outlined.Contains(word))
             {
                 continue;
             }
@@ -149,6 +286,10 @@ public static partial class CompletionContext
             }
 
             var found = definitions.OrderBy(d => ProjectOf(d.File.RelativePath) == home ? 0 : 1).ThenBy(d => d.File.IsTestOrDoc).First();
+            if (outlined.Contains(MemberKey(found.File, found.Symbol)))
+            {
+                continue;
+            }
             // Types first, then the project the file belongs to, then everything else.
             var tier = (found.Symbol.Kind == SourceSymbolKind.Type ? 0 : 2) + (ProjectOf(found.File.RelativePath) == home ? 0 : 1);
             candidates.Add((order, tier, found));
