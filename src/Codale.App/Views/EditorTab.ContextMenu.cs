@@ -64,7 +64,7 @@ public sealed partial class EditorTab
         foreach (var item in new MenuFlyoutItemBase[]
         {
             _copyItem, _pasteItem, new MenuFlyoutSeparator(),
-            _referencesItem, new MenuFlyoutSeparator(),
+            _referencesItem,
             _previewSeparator,
             _previewItem,
         })

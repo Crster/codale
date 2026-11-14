@@ -5,6 +5,7 @@ using Codale.App.Controls;
 using Codale.App.Services;
 using Codale.App.ViewModels;
 using Codale.Core.Text;
+using Codale.Terminal;
 
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
@@ -54,10 +55,7 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
         InitializeComponent();
         Loaded += OnLoaded;
 
-        Input.FontFamily = TerminalLook.MonoFont;
-        Input.FontSize = TerminalLook.MonoSize;
-        PromptGlyph.FontFamily = TerminalLook.MonoFont;
-        PromptGlyph.FontSize = TerminalLook.MonoSize;
+        ApplyInputFont();
 
         Scroller.ViewChanged += (_, _) => OnScrolled();
         Scroller.SizeChanged += (_, _) => UpdateFillHeight();
@@ -123,14 +121,24 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
     /// <summary>Live-applies Settings changes (font size, scrollback, block height) to every block.</summary>
     public void ApplyAppSettings()
     {
-        Input.FontFamily = TerminalLook.MonoFont;
-        Input.FontSize = TerminalLook.MonoSize;
-        PromptGlyph.FontFamily = TerminalLook.MonoFont;
-        PromptGlyph.FontSize = TerminalLook.MonoSize;
+        ApplyInputFont();
         foreach (var view in _views)
         {
             view.ApplyAppSettings();
         }
+    }
+
+    /// <summary>The input, its ghost and the prompt glyph share the terminal's font, so the ghost lines up with the typed text.</summary>
+    private void ApplyInputFont()
+    {
+        var font = TerminalLook.MonoFont;
+        var size = TerminalLook.MonoSize;
+        Input.FontFamily = font;
+        Input.FontSize = size;
+        Ghost.FontFamily = font;
+        Ghost.FontSize = size;
+        PromptGlyph.FontFamily = font;
+        PromptGlyph.FontSize = size;
     }
 
     /// <summary>The tab header's menu: notebook-wide actions.</summary>
@@ -571,6 +579,8 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
             TargetText.Text = "→ " + (first.Length > 40 ? first[..40] + "…" : first);
             TargetChip.Visibility = Visibility.Visible;
             PromptGlyph.Text = "→";
+            CancelGhostLookup();
+            ClearGhost();
 
             // Queued: the click that selected the block is still being handled, and the header's
             // selectable text would take the focus back from an immediate call.
@@ -676,10 +686,27 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
                 AcceptSuggestion(_suggestionIndex);
                 return;
 
+            // The ghost, like PSReadLine: Tab, Right or End at the end of the line take all of it,
+            // Ctrl+Right the next word.
+            case VirtualKey.Tab or VirtualKey.Right or VirtualKey.End when GhostShown && !shift && !ctrl:
+                e.Handled = true;
+                AcceptGhost(wholeLine: true);
+                return;
+
+            case VirtualKey.Right when GhostShown && ctrl && !shift:
+                e.Handled = true;
+                AcceptGhost(wholeLine: false);
+                return;
+
             case VirtualKey.Escape:
                 if (SuggestionList.Visibility == Visibility.Visible)
                 {
                     HideSuggestions();
+                    ClearGhost();
+                }
+                else if (_ghost is not null)
+                {
+                    ClearGhost();
                 }
                 else if (_target is not null)
                 {
@@ -755,6 +782,7 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
 
         _historyIndex = Math.Max(-1, next);
         HideSuggestions();
+        ClearGhost();
         SetInput(_historyIndex < 0 ? _draft : _history[_historyIndex]);
         return true;
     }
@@ -768,7 +796,9 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
 
         if (_programmaticText is not null && string.Equals(Input.Text, _programmaticText, StringComparison.Ordinal))
         {
+            // Text this view set (a recall, an accepted ghost word): keep only a ghost that still fits it.
             _programmaticText = null;
+            ShowGhost(_ghost);
             return;
         }
 
@@ -779,6 +809,8 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
         if (typed.Trim().Length == 0 || typed.Contains('\r') || _target is not null)
         {
             HideSuggestions();
+            CancelGhostLookup();
+            ClearGhost();
             return;
         }
 
@@ -788,34 +820,172 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
             .ToList();
         _suggestionIndex = 0;
         RenderSuggestions();
-        RequestSmartCompletion(viewModel, typed);
+        RequestGhost(viewModel, typed);
     }
 
-    private CancellationTokenSource? _smartCompletion;
+    private void OnInputSelectionChanged(object sender, RoutedEventArgs e)
+    {
+        // The ghost belongs at the end of the line: hidden while the caret is elsewhere (or text is
+        // selected), back when it returns. Any edit re-checks it against the text.
+        if (_ghost is { } ghost)
+        {
+            var fits = ghost.Length > Input.Text.Length && ghost.StartsWith(Input.Text, StringComparison.OrdinalIgnoreCase);
+            Ghost.Visibility = fits && CaretAtEnd() ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    // ------------------------------------------------------------------ ghost suggestion
+
+    /// <summary>The whole line the ghost completes the input to (typed text plus the faint rest), or null.</summary>
+    private string? _ghost;
+    private CancellationTokenSource? _ghostLookup;
+
+    private bool CaretAtEnd() => Input.SelectionLength == 0 && Input.SelectionStart == Input.Text.Length;
+
+    private bool GhostShown => _ghost is not null && Ghost.Visibility == Visibility.Visible && CaretAtEnd();
 
     /// <summary>
-    /// History first; when it has nothing for a command being typed, the Auto Complete model (or Decision) offers one
-    /// line after a pause. Plain-language input is left to the Run shell parser on Enter.
+    /// Finds the ghost for what is typed. The highlighted row of the history list when it shows (Tab
+    /// takes that one anyway); otherwise, under PowerShell, the newest matching line of the PSReadLine
+    /// history, then PowerShell's own completion of the word being typed; and when neither has
+    /// anything, Shell autocomplete (Smart Features) offers one line after a pause. Plain-language
+    /// input is left to the Run shell parser on Enter.
     /// </summary>
-    private async void RequestSmartCompletion(TerminalViewModel viewModel, string typed)
+    private async void RequestGhost(TerminalViewModel viewModel, string typed)
     {
-        _smartCompletion?.Cancel();
-        _smartCompletion = null;
-        if (_suggestions.Count > 0 || typed.Trim().Length < 2 || !SmartInlineCompletion.IsEnabled("shell-completion")) return;
+        CancelGhostLookup();
+
+        // Typing along with the ghost shrinks it at once, until a fresh answer replaces it.
+        ShowGhost(_ghost is { } old && old.StartsWith(typed, StringComparison.OrdinalIgnoreCase) ? old : null);
+        if (_suggestions.Count > 0)
+        {
+            ShowGhost(_suggestions[_suggestionIndex]);
+            return;
+        }
+
+        var shell = viewModel.ShellPath;
+        var isPowerShell = PowerShellSuggestions.IsPowerShell(shell);
+        if (isPowerShell && PowerShellSuggestions.FromHistory(typed) is { } fromHistory)
+        {
+            ShowGhost(fromHistory);
+            return;
+        }
+
         var cwd = viewModel.State.Cwd;
-        if (!Codale.Core.Shell.ShellCommandClassifier.IsShellCommand(typed, cwd)) return;
-        using var cancel = new CancellationTokenSource();
-        _smartCompletion = cancel;
-        var recent = CommandHistory.Recent(viewModel.HistoryKey).Take(8).Reverse();
-        var prefix = $"# Shell: {Path.GetFileNameWithoutExtension(viewModel.ShellPath)} on Windows\n# Directory: {cwd}\n" +
-            string.Concat(recent.Select(c => $"> {c}\n")) + "> " + typed;
-        var rest = await SmartInlineCompletion.SuggestAsync("shell-completion", cwd, prefix, cancel.Token);
-        if (ReferenceEquals(_smartCompletion, cancel)) _smartCompletion = null;
-        if (cancel.IsCancellationRequested || rest is not { Length: > 0 } || !IsLoaded || !ReferenceEquals(_viewModel, viewModel) ||
-            !string.Equals(Input.Text, typed, StringComparison.Ordinal) || _suggestions.Count > 0) return;
-        _suggestions = [typed + rest];
-        _suggestionIndex = 0;
-        RenderSuggestions();
+        var cancel = new CancellationTokenSource();
+        _ghostLookup = cancel;
+        try
+        {
+            string? line = null;
+            if (isPowerShell)
+            {
+                await Task.Delay(90, cancel.Token);
+                line = await PowerShellCompletionHost.For(shell, AppSettings.TerminalLoadProfile)
+                    .CompleteLineAsync(typed, cwd, cancel.Token);
+            }
+
+            if (line is null && typed.Trim().Length >= 2 && SmartInlineCompletion.IsEnabled("shell-completion") &&
+                Codale.Core.Shell.ShellCommandClassifier.IsShellCommand(typed, cwd))
+            {
+                var recent = CommandHistory.Recent(viewModel.HistoryKey).Take(8).Reverse();
+                var prefix = $"# Shell: {Path.GetFileNameWithoutExtension(shell)} on Windows\n# Directory: {cwd}\n" +
+                    string.Concat(recent.Select(c => $"> {c}\n")) + "> " + typed;
+                if (await SmartInlineCompletion.SuggestAsync("shell-completion", cwd, prefix, cancel.Token) is { Length: > 0 } rest)
+                {
+                    line = typed + rest;
+                }
+            }
+
+            if (cancel.IsCancellationRequested || !IsLoaded || !ReferenceEquals(_viewModel, viewModel) ||
+                !string.Equals(Input.Text, typed, StringComparison.Ordinal) || _suggestions.Count > 0)
+            {
+                return;
+            }
+
+            ShowGhost(line);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            if (ReferenceEquals(_ghostLookup, cancel))
+            {
+                _ghostLookup = null;
+            }
+
+            cancel.Dispose();
+        }
+    }
+
+    private void CancelGhostLookup()
+    {
+        _ghostLookup?.Cancel();
+        _ghostLookup = null;
+    }
+
+    /// <summary>Shows <paramref name="line"/> as the ghost when it carries the input further from the caret at its end; otherwise none.</summary>
+    private void ShowGhost(string? line)
+    {
+        var typed = Input.Text;
+        if (line is null || typed.Trim().Length == 0 || line.Length <= typed.Length || _target is not null ||
+            !line.StartsWith(typed, StringComparison.OrdinalIgnoreCase) || line.AsSpan(typed.Length).IndexOfAny('\r', '\n') >= 0 ||
+            !CaretAtEnd())
+        {
+            ClearGhost();
+            return;
+        }
+
+        // The typed part keeps the user's own casing.
+        _ghost = typed + line[typed.Length..];
+        GhostTyped.Text = typed;
+        GhostRest.Text = line[typed.Length..];
+        Ghost.Visibility = Visibility.Visible;
+    }
+
+    private void ClearGhost()
+    {
+        _ghost = null;
+        GhostTyped.Text = "";
+        GhostRest.Text = "";
+        Ghost.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>Takes the whole ghost, or only its next word (and the path separator after it).</summary>
+    private void AcceptGhost(bool wholeLine)
+    {
+        if (_ghost is not { } ghost)
+        {
+            return;
+        }
+
+        var typed = Input.Text;
+        var rest = ghost[typed.Length..];
+        var take = rest.Length;
+        if (!wholeLine)
+        {
+            take = 0;
+            while (take < rest.Length && char.IsWhiteSpace(rest[take]))
+            {
+                take++;
+            }
+
+            while (take < rest.Length && !char.IsWhiteSpace(rest[take]))
+            {
+                take++;
+                if (rest[take - 1] is '\\' or '/')
+                {
+                    break;
+                }
+            }
+        }
+
+        CancelGhostLookup();
+        HideSuggestions();
+        SetInput(typed + rest[..take]);
+
+        // What is left of the ghost stays for the next Ctrl+Right.
+        ShowGhost(ghost);
     }
 
     private void RenderSuggestions()
@@ -865,6 +1035,7 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
     {
         _suggestionIndex = (_suggestionIndex + delta + _suggestions.Count) % _suggestions.Count;
         RenderSuggestions();
+        ShowGhost(_suggestions[_suggestionIndex]);
     }
 
     private void AcceptSuggestion(int index)

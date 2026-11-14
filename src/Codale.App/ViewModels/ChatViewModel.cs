@@ -3022,6 +3022,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         // Only a list this turn set: one carried over from history or an earlier turn is
         // not this turn's work, and settling it gave a task-less turn a "Tasks n/n done" row.
+        if (outcome == TurnOutcome.Stopped && OpenTodos.Count > 0)
+        {
+            // A stopped turn has no one working the list: close the composer panel but keep
+            // Todos (and the statuses) for the session panel and persistence.
+            OpenTodos.Clear();
+            OnPropertyChanged(nameof(HasOpenTodos));
+            OnPropertyChanged(nameof(HasComposerTray));
+            return;
+        }
+
         if (_turnTodo is null || outcome != TurnOutcome.Completed || TasksTotal == 0 || TasksDone == TasksTotal)
         {
             return;

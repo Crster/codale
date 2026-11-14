@@ -1278,6 +1278,15 @@ public sealed class CodexAgentSession : IAgentSession
                     var command = item.Prop("command") is { ValueKind: JsonValueKind.Array } parts
                         ? string.Join(' ', parts.EnumerateArray().Select(part => part.GetString() ?? ""))
                         : item.Str("command") ?? "";
+                    if (string.IsNullOrWhiteSpace(command))
+                    {
+                        // Polling or feeding a process that is already running carries no command of its own;
+                        // as "Bash" it showed as a bare "Ran". It is a read of that process's output.
+                        await EmitAsync(parent, new ToolCallStarted { ToolUseId = itemId, ToolName = "BashOutput", Input = JsonSerializer.SerializeToElement(new { }, WireJson) })
+                            .ConfigureAwait(false);
+                        return;
+                    }
+
                     var input = JsonSerializer.SerializeToElement(new { command, cwd = item.Str("cwd") }, WireJson);
                     await EmitAsync(parent, new ToolCallStarted { ToolUseId = itemId, ToolName = "Bash", Input = input, TrackAsSessionTask = parent is null })
                         .ConfigureAwait(false);

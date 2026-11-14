@@ -31,7 +31,7 @@ public sealed partial class ArtifactTab : UserControl
         VerticalAlignment = VerticalAlignment.Center,
     };
 
-    private readonly MarkdownView _markdown = new() { HostOwnsTextMenu = true, BaseFontSize = 16 };
+    private readonly MarkdownView _markdown = new() { HostOwnsTextMenu = true, BaseFontSize = 14.5 };
 
     private readonly TextBlock _revisionNote = new()
     {

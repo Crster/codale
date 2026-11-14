@@ -1223,6 +1223,8 @@ public sealed partial class ToolCallItem : ChatItem
                 "LS" => ("Listing", "Listed", "List"),
                 "Edit" or "MultiEdit" or "NotebookEdit" => ("Editing", "Edited", "Edit"),
                 "Write" => ("Writing", Diff?.IsNew == true ? "Created" : "Wrote", "Write"),
+                // A shell call with no command of its own is a poll of a process already running.
+                "Bash" or "PowerShell" when Command.Length == 0 => ("Reading output", "Read output", "Read output"),
                 "Bash" or "PowerShell" => ("Running", "Ran", "Run"),
                 "BashOutput" => ("Reading output", "Read output", "Read output"),
                 "KillShell" => ("Stopping shell", "Stopped shell", "Stop shell"),

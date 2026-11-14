@@ -92,12 +92,25 @@
                             Text="❯" />
                     </StackPanel>
 
+                    <Grid Grid.Column="1" VerticalAlignment="Center">
+                    <!--
+                      The ghost suggestion under the typed text: what is typed again, invisible, so the
+                      rest lands right after the caret in faint grey. From PowerShell (its history and tab
+                      completion) or Shell autocomplete; Tab or Right takes it, Ctrl+Right one word.
+                    -->
+                    <TextBlock
+                        x:Name="Ghost"
+                        Padding="0,2,0,2"
+                        VerticalAlignment="Top"
+                        IsHitTestVisible="False"
+                        TextWrapping="Wrap"
+                        Visibility="Collapsed"><Run x:Name="GhostTyped" Foreground="Transparent" /><Run x:Name="GhostRest" Foreground="#5C5C66" /></TextBlock>
+
                     <TextBox
                         x:Name="Input"
-                        Grid.Column="1"
                         MinHeight="0"
                         Padding="0,2,0,2"
-                        VerticalAlignment="Center"
+                        VerticalAlignment="Top"
                         AcceptsReturn="True"
                         AutomationProperties.Name="Command"
                         Background="Transparent"
@@ -108,6 +121,7 @@
                         PlaceholderForeground="#505058"
                         PlaceholderText="type a command"
                         PreviewKeyDown="OnInputPreviewKeyDown"
+                        SelectionChanged="OnInputSelectionChanged"
                         SelectionHighlightColor="#264F78"
                         TextChanged="OnInputTextChanged"
                         TextWrapping="Wrap">
@@ -129,6 +143,7 @@
                             <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
                         </TextBox.Resources>
                     </TextBox>
+                    </Grid>
 
                     <!--  The shell new commands run under: click to switch it for this tab.  -->
                     <Button

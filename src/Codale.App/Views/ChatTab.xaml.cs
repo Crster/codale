@@ -226,10 +226,16 @@ public sealed partial class ChatTab : UserControl
                 _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
                 _viewModel.Suggestions.CollectionChanged -= OnSuggestionsChanged;
                 _viewModel.Attachments.CollectionChanged -= OnAttachmentsChanged;
+                _viewModel.Items.CollectionChanged -= OnTranscriptChanged;
+                _viewModel.FilesChanged -= OnSessionFilesChanged;
             }
 
             _viewModel = value;
             _predictor = string.IsNullOrEmpty(value.ProjectPath) ? null : new ComposerPredictor(value.ProjectPath);
+            _fedContext.Clear();
+            _contextDirty = true;
+            _viewModel.Items.CollectionChanged += OnTranscriptChanged;
+            _viewModel.FilesChanged += OnSessionFilesChanged;
             HidePrediction();
             _viewModel.PropertyChanged += OnViewModelPropertyChanged;
             _viewModel.Suggestions.CollectionChanged += OnSuggestionsChanged;
@@ -286,14 +292,14 @@ public sealed partial class ChatTab : UserControl
                 return;
             }
 
-            var fade = new ColorAnimation
+            var fade = new DoubleAnimation
             {
-                From = Windows.UI.Color.FromArgb(0x26, 0xCD, 0x5C, 0x5C),
-                To = Windows.UI.Color.FromArgb(0xD9, 0xCD, 0x5C, 0x5C),
+                From = 0.15,
+                To = 0.85,
                 Duration = new Duration(TimeSpan.FromMilliseconds(800)),
             };
-            Storyboard.SetTarget(fade, StopPulseBrush);
-            Storyboard.SetTargetProperty(fade, "Color");
+            Storyboard.SetTarget(fade, StopPulse);
+            Storyboard.SetTargetProperty(fade, "Opacity");
 
             _stopPulse = new Storyboard
             {
@@ -315,7 +321,7 @@ public sealed partial class ChatTab : UserControl
         {
             _stopPulse.Stop();
             _stopPulse = null;
-            StopPulseBrush.Color = Microsoft.UI.Colors.Transparent;
+            StopPulse.Opacity = 0;
         }
     }
 
@@ -1337,11 +1343,14 @@ public sealed partial class ChatTab : UserControl
             return;
         }
 
+        FeedPredictorContext();
+
         // Typing the predicted letters: shrink the ghost at once rather than wait for the answer.
+        // Ordinal: the ghost only ever extends exactly what was typed, so a letter in another case is a different word.
         if (_prediction is { IsCorrection: false } shown &&
             PromptWords.Before(text, caret) is { } word && word.Start == shown.Start &&
             word.Length < shown.Replacement.Length &&
-            shown.Replacement.StartsWith(word.Text, StringComparison.OrdinalIgnoreCase))
+            shown.Replacement.StartsWith(word.Text, StringComparison.Ordinal))
         {
             ShowPrediction(shown with { Length = word.Length });
         }
@@ -1367,6 +1376,109 @@ public sealed partial class ChatTab : UserControl
 
             ShowPrediction(prediction);
         }));
+    }
+
+    /// <summary>Transcript items (and finished tool calls) already handed to the predictor.</summary>
+    private readonly HashSet<object> _fedContext = new(ReferenceEqualityComparer.Instance);
+
+    private bool _contextDirty = true;
+    private long _contextFedAt;
+
+    private void OnTranscriptChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
+        {
+            _fedContext.Clear();
+            _predictor?.ResetSession();
+        }
+
+        _contextDirty = true;
+    }
+
+    private void OnSessionFilesChanged(object? sender, EventArgs e) => _contextDirty = true;
+
+    /// <summary>
+    /// Hands the predictor this session's words it has not seen yet: sent prompts, finished replies,
+    /// and the files and code the agent touched. Only references are gathered here; the worker reads them.
+    /// A streaming reply or a running tool is picked up on a later pass, once it is final.
+    /// </summary>
+    private void FeedPredictorContext()
+    {
+        if (_predictor is not { } predictor || _viewModel is null)
+        {
+            return;
+        }
+
+        var now = Environment.TickCount64;
+        if (!_contextDirty && now - _contextFedAt < 3000)
+        {
+            return;
+        }
+
+        _contextDirty = false;
+        _contextFedAt = now;
+        foreach (var item in _viewModel.Items)
+        {
+            switch (item)
+            {
+                case UserMessageItem user when _fedContext.Add(user):
+                    predictor.Feed(user.Text, VocabularySource.User);
+                    break;
+                case AssistantMessageItem reply:
+                    FeedReply(predictor, reply);
+                    break;
+                case TurnActivityItem turn:
+                    foreach (var step in turn.Steps)
+                    {
+                        if (step is AssistantMessageItem narration)
+                        {
+                            FeedReply(predictor, narration);
+                        }
+                    }
+
+                    foreach (var tool in turn.AllTools)
+                    {
+                        FeedTool(predictor, tool);
+                    }
+
+                    break;
+                case ToolCallItem tool:
+                    FeedTool(predictor, tool);
+                    break;
+            }
+        }
+    }
+
+    private void FeedReply(ComposerPredictor predictor, AssistantMessageItem reply)
+    {
+        if (!reply.IsStreaming && reply.Text.Length > 0 && _fedContext.Add(reply))
+        {
+            predictor.Feed(reply.Text, VocabularySource.Assistant);
+        }
+    }
+
+    private void FeedTool(ComposerPredictor predictor, ToolCallItem tool)
+    {
+        if (!tool.IsFinished || !_fedContext.Add(tool))
+        {
+            return;
+        }
+
+        foreach (var file in tool.Files)
+        {
+            predictor.Feed(file.Path, VocabularySource.FileName);
+        }
+
+        if (tool.Diff is { Hunks.Count: > 0 } diff)
+        {
+            // An edited file counts again on top of its mention: what the agent changed is the topic.
+            predictor.Feed(diff.Path, VocabularySource.FileName);
+            var added = string.Join('\n', diff.Hunks
+                .SelectMany(h => h.Lines)
+                .Where(l => l.Kind == Codale.Git.DiffLineKind.Added)
+                .Select(l => l.Text));
+            predictor.Feed(added, VocabularySource.Code);
+        }
     }
 
     /// <summary>A prediction only makes sense with a caret (no selection) at the end of a line, in a focused box, with no list open.</summary>

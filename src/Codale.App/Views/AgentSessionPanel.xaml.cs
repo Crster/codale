@@ -99,9 +99,27 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         s.HasFiveHour ? s.FiveHourSummary : s.HasLongWindowOnly ? s.SevenDaySummary : s.TokenUsageSummary;
     public string UsagePercentText => $"{UsagePercent:0}%";
 
+    /// <summary>What the latest prompt cost of the 5-hour window: the measure of how expensive a call was.</summary>
+    public string LastPromptText => Session?.Status is { HasFiveHour: true, LastPromptPercent: >= 0.05 } s
+        ? $"Last prompt +{s.LastPromptPercent:0.#}%"
+        : "";
+
+    /// <summary>A usage meter segment: a share of 0-100 as a star column width.</summary>
+    public GridLength Star(double percent) => new(Math.Clamp(percent, 0, 100), GridUnitType.Star);
+
+    /// <summary>The unfilled rest of a usage meter.</summary>
+    public GridLength Remainder(double percent) => Star(100 - percent);
+
+    /// <summary>Session cost and tokens as the CLI reports them; empty when it reports neither.</summary>
+    public string SessionTotalsText => Session?.Status is not { } s ? "" : string.Join("  ·  ", new[]
+    {
+        s.SessionCostUsd > 0 ? $"Session cost ${s.SessionCostUsd:0.00}" : null,
+        s.HasSessionTokens ? s.TokensText : null,
+    }.Where(t => t is not null));
+
     private void OnStatusPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        foreach (var property in new[] { nameof(HasUsage), nameof(UsagePercent), nameof(UsageSummary), nameof(UsagePercentText) })
+        foreach (var property in new[] { nameof(HasUsage), nameof(UsagePercent), nameof(UsageSummary), nameof(UsagePercentText), nameof(LastPromptText), nameof(SessionTotalsText) })
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
     }
 
@@ -124,8 +142,17 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             ToolTipService.SetToolTip(tooltip.Anchor, tooltip.Content);
     }
 
+    private async void OnUsageDetailsClick(object sender, RoutedEventArgs e)
+    {
+        var codex = Session?.Status.CliName.Contains("Codex", StringComparison.OrdinalIgnoreCase) == true;
+        var url = codex ? "https://chatgpt.com/codex/settings/usage" : "https://claude.ai/settings/usage";
+        UsageFlyout.Hide();
+        await Windows.System.Launcher.LaunchUriAsync(new Uri(url));
+    }
+
     private void HideDetails()
     {
+        UsageFlyout.Hide();
         TodosFlyout.Hide();
         TasksFlyout.Hide();
         FilesFlyout.Hide();

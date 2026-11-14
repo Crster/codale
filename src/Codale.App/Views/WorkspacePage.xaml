@@ -1901,7 +1901,7 @@
                                     <FontIcon Glyph="&#xE72C;" FontSize="12" />
                                 </Button>
                             </Grid>
-                            <ProgressBar IsIndeterminate="True"
+                            <ProgressBar IsIndeterminate="{x:Bind ViewModel.Sessions.IsLoading, Mode=OneWay}"
                                          Visibility="{x:Bind ViewModel.Sessions.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                             <TextBlock Text="Your conversations will appear here after you send your first message."
                                        FontSize="12" TextWrapping="Wrap"

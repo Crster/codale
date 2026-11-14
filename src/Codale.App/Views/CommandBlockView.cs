@@ -32,7 +32,7 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
     // shell and when it ran. Actions appear on hover.
     private readonly Grid _statusHost = new() { Width = 14, Height = 14, VerticalAlignment = VerticalAlignment.Center };
     private readonly FontIcon _statusGlyph = new() { FontSize = 10, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-    private readonly ProgressRing _statusRing = new() { IsActive = true, Width = 10, Height = 10, MinWidth = 0, MinHeight = 0, Foreground = TerminalLook.Brush(TerminalLook.Accent) };
+    private readonly ProgressRing _statusRing = new() { IsActive = false, Width = 10, Height = 10, MinWidth = 0, MinHeight = 0, Foreground = TerminalLook.Brush(TerminalLook.Accent) };
     private readonly TextBlock _where = new() { FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 280 };
     private readonly TextBlock _timing = new() { FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _result = new() { FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center };
@@ -491,6 +491,9 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
     private void UpdateStatus()
     {
         _stopButton.Visibility = Block.IsRunning ? Visibility.Visible : Visibility.Collapsed;
+        // A collapsed ring that is still active keeps its animation ticking on the compositor,
+        // so every finished block in the scrollback would redraw the window each frame.
+        _statusRing.IsActive = Block.IsRunning;
         _statusRing.Visibility = Block.IsRunning ? Visibility.Visible : Visibility.Collapsed;
         _statusGlyph.Visibility = Block.IsRunning ? Visibility.Collapsed : Visibility.Visible;
 

@@ -164,6 +164,7 @@ public sealed partial class StatusViewModel : ObservableObject
         FiveHourResetsAt = null;
         SevenDayResetsAt = null;
         LongWindowMins = null;
+        _promptBaseline = null;
         OnPropertyChanged(nameof(LongWindowLabel));
     }
 
@@ -235,7 +236,7 @@ public sealed partial class StatusViewModel : ObservableObject
     /// <summary>0-100, for the status bar meters.</summary>
     public double FiveHourPercent => Math.Clamp((FiveHourUtilization ?? 0) * 100, 0, 100);
 
-    private double _promptBaseline;
+    private double? _promptBaseline;
 
     /// <summary>Marks the 5-hour usage so far as history; what is spent after this is the latest prompt's.</summary>
     public void BeginPrompt()
@@ -245,8 +246,11 @@ public sealed partial class StatusViewModel : ObservableObject
         OnPropertyChanged(nameof(LastPromptPercent));
     }
 
-    /// <summary>The 5-hour usage before the latest prompt (the whole bar once the window has rolled over).</summary>
-    public double PreviousFiveHourPercent => Math.Min(_promptBaseline, FiveHourPercent);
+    /// <summary>
+    /// The 5-hour usage before the latest prompt (the whole bar once the window has rolled over).
+    /// Before any prompt in this run there is no baseline, so all usage counts as history.
+    /// </summary>
+    public double PreviousFiveHourPercent => Math.Min(_promptBaseline ?? FiveHourPercent, FiveHourPercent);
 
     /// <summary>The share of the 5-hour window the latest prompt spent.</summary>
     public double LastPromptPercent => FiveHourPercent - PreviousFiveHourPercent;

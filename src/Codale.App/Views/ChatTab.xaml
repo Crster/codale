@@ -13,7 +13,6 @@
 
     <UserControl.Resources>
         <!--  The stop button's pulse: animated from code-behind while a turn runs.  -->
-        <SolidColorBrush x:Name="StopPulseBrush" Color="Transparent" />
 
         <views:BoolToVisibilityConverter x:Key="BoolToVisibility" />
         <views:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility" />
@@ -316,15 +315,7 @@
                                         FontSize="{x:Bind S10, Mode=OneWay}"
                                         Foreground="{x:Bind Kind, Converter={StaticResource ToolKindBrush}}"
                                         Glyph="{x:Bind Kind, Converter={StaticResource ToolKindGlyph}}"
-                                        Visibility="{Binding IsWorking, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}" />
-                                    <ProgressRing
-                                        Width="12"
-                                        Height="12"
-                                        HorizontalAlignment="Center"
-                                        VerticalAlignment="Center"
-                                        Foreground="{x:Bind Kind, Converter={StaticResource ToolKindBrush}}"
-                                        IsActive="{Binding IsWorking, Mode=OneWay}"
-                                        Visibility="{Binding IsWorking, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                        views:Pulse.IsActive="{Binding IsWorking, Mode=OneWay}" />
                                 </Grid>
                             </Border>
                             <TextBlock
@@ -1441,30 +1432,42 @@
         </DataTemplate>
 
         <DataTemplate x:Key="NoticeTemplate" x:DataType="vm:NoticeItem">
-            <Border
+            <Grid
                 Margin="{x:Bind RowMargin, Mode=OneWay}"
-                Padding="12,8"
-                Background="{StaticResource DetailSurfaceBrush}"
-                BorderBrush="{x:Bind Severity, Converter={StaticResource NoticeBrush}}"
-                BorderThickness="2,0,0,0"
-                CornerRadius="0,8,8,0">
-                <Grid ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
+                Padding="0,6"
+                ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Rectangle
+                    Height="1"
+                    VerticalAlignment="Center"
+                    Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                <StackPanel
+                    Grid.Column="1"
+                    Orientation="Horizontal"
+                    Spacing="6">
                     <FontIcon
+                        VerticalAlignment="Center"
                         FontSize="{x:Bind S12, Mode=OneWay}"
                         Foreground="{x:Bind Severity, Converter={StaticResource NoticeBrush}}"
                         Glyph="{x:Bind Glyph}" />
                     <TextBlock
-                        Grid.Column="1"
+                        MaxWidth="520"
+                        VerticalAlignment="Center"
                         FontSize="{x:Bind S12, Mode=OneWay}"
                         Foreground="{x:Bind Severity, Converter={StaticResource NoticeBrush}}"
                         Text="{x:Bind Text}"
                         TextWrapping="Wrap" />
-                </Grid>
-            </Border>
+                </StackPanel>
+                <Rectangle
+                    Grid.Column="2"
+                    Height="1"
+                    VerticalAlignment="Center"
+                    Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+            </Grid>
         </DataTemplate>
 
         <!--  Auto routing wants to move a conversation under way: the question and its three answers,
@@ -2752,18 +2755,22 @@
                                 Visibility="{x:Bind ViewModel.ShowStop, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
                                 <FontIcon FontSize="14" Glyph="&#xE74A;" />
                             </Button>
+                            <Grid Visibility="{x:Bind ViewModel.ShowStop, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                <!-- Opacity is animated on the compositor; animating a brush colour redraws on the UI thread every frame. -->
+                                <Border x:Name="StopPulse" Width="32" Height="32" CornerRadius="16" IsHitTestVisible="False" Opacity="0"
+                                        Background="#CD5C5C" />
                             <Button
                                 Width="32"
                                 Height="32"
                                 Padding="0"
-                                Background="{StaticResource StopPulseBrush}"
                                 Command="{x:Bind ViewModel.InterruptCommand}"
                                 CornerRadius="16"
                                 Style="{StaticResource ComposerIconButton}"
                                 ToolTipService.ToolTip="Stop the current turn"
-                                Visibility="{x:Bind ViewModel.ShowStop, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                >
                                 <FontIcon FontSize="14" Glyph="&#xE71A;" />
                             </Button>
+                            </Grid>
                         </StackPanel>
                     </Grid>
                 </Grid>

@@ -50,6 +50,10 @@ public static class Pulse
             element.SetValue(HookedProperty, true);
             element.Loaded += (_, _) => Apply(element);
             element.Unloaded += (_, _) => Stop(element);
+
+            // Collapsed is still loaded, and the compositor keeps ticking (and presenting)
+            // an animation nobody can see; pause it while hidden.
+            element.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => Apply(element));
         }
 
         Apply(element);
@@ -59,7 +63,7 @@ public static class Pulse
     {
         Stop(element);
 
-        if (!GetIsActive(element) || !element.IsLoaded)
+        if (!GetIsActive(element) || !element.IsLoaded || element.Visibility != Visibility.Visible)
         {
             return;
         }

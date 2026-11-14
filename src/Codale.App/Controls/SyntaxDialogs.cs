@@ -49,7 +49,7 @@ public static class SyntaxDialogs
         }
 
         var status = Note();
-        var progress = new ProgressBar { IsIndeterminate = true, Visibility = Visibility.Collapsed };
+        var progress = new ProgressBar { IsIndeterminate = false, Visibility = Visibility.Collapsed };
         var body = new StackPanel { Spacing = 10, Width = 420 };
         body.Children.Add(Note("Grammars are downloaded from the projects named in each tooltip when you click Install. Nothing is fetched until then."));
         body.Children.Add(new ScrollViewer { MaxHeight = 280, Content = list });
@@ -71,6 +71,7 @@ public static class SyntaxDialogs
             var deferral = args.GetDeferral();
             args.Cancel = true;
             dialog.IsPrimaryButtonEnabled = false;
+            progress.IsIndeterminate = true;
             progress.Visibility = Visibility.Visible;
             var client = new SyntaxCatalogClient();
             var failures = new List<string>();
@@ -93,6 +94,7 @@ public static class SyntaxDialogs
                 }
             }
 
+            progress.IsIndeterminate = false;
             progress.Visibility = Visibility.Collapsed;
             status.Text = (done > 0 ? $"Installed {done}. " : "") + string.Join(" ", failures);
             dialog.IsPrimaryButtonEnabled = true;
