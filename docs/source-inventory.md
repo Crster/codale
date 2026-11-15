@@ -16,10 +16,10 @@
 - [ ] Refactor command discovery into focused detectors and a common execution workflow.
 - [x] Consolidate MCP configuration, approval and host integration workflows.
 - [x] Review editor, terminal, file explorer and Markdown responsibilities and shared flows.
-- [ ] Complete project boundary redesign and architecture dependency checks.
-- [ ] Add resource lifetime and failure/cancellation integration coverage.
+- [x] Complete project boundary redesign and architecture dependency checks.
+- [x] Add resource lifetime and failure/cancellation integration coverage.
 - [x] Resolve the search retrieval evaluation failure without weakening thresholds.
-- [ ] Complete full automated validation and manual Windows feature checks.
+- [ ] Complete full automated validation and manual Windows feature checks. (Automated validation complete; manual checks remain.)
 
 This inventory maps the current implementation to its owning source. It is a starting point for the architecture redesign; an entry identifies ownership, not a claim that all flows have already been unified.
 
@@ -194,6 +194,25 @@ Item 7 stays unchecked: the Markdown responsibilities (`MarkdownView`, 1,142 lin
 `MarkdownLinks` in `Codale.Core/Markdown` holds the pure rules `MarkdownView` used: where a link points (`FileTarget`, a file or a line of one, a file URI, or nothing for a web address), the visible text of inline runs (`InlineText`), and the decoding of an inline data image with its size limit (`DecodeDataImage`). `MarkdownView` is now 1,048 lines and keeps the WinUI rendering. `MarkdownLinksTests` (9 cases) cover them. Core (1,004) and agent (400) suites pass; the app builds clean.
 
 Item 7 is complete as recorded: the responsibilities are reviewed, the boundaries hold, the pickers, the path rules and the file-open entry points are consolidated, and the Markdown rules are pure and tested. The Markdown rendering stays in one WinUI view by design, since it is the view's job.
+
+### Project layering contract (2026-11-15)
+
+The project boundary is now a declared contract in `tests/Codale.Agents.Tests/ProjectLayeringTests.cs`. It lists, for each source project, the projects it may reference, and fails when any reference changes until the contract is updated on purpose. The graph as it stands matches the declaration, so the redesign is the contract itself. Its rules:
+- `Codale.Core` depends on nothing.
+- `Codale.Smart` depends only on Core.
+- `Codale.Agents` does not reach Smart, Settings or the app.
+- Nothing references the application except the application.
+- The MCP hosts stay out of the domain libraries.
+
+The application's MCP references are bundled in one `ProjectReference` with `ReferenceOutputAssembly="false"`; the test reads the semicolon-separated list, so the bundle is part of the contract. Six tests cover the matrix and the rules. Item 8 is complete as recorded.
+
+### Lifetime coverage and validation (2026-11-15)
+
+`KnowledgeLifetimeTests` (5 cases) prove the knowledge index's lifetime rules against a real database and a 300-file tree: disposing during a refresh cancels it and returns promptly, a refresh after disposal does nothing, double disposal is safe, retrieval after disposal answers without throwing, and disposing after a finished refresh leaves no work behind. Existing coverage already spans the workspace data factory and pool, settings disposal, the cancellation workflows for Smart requests, helpers and embeddings, and the terminal and Git suites.
+
+Automated validation: every library test project passes (Core 1,004; Agents 406; Smart 163; Search 340; Terminal 78; Git 73; Db 53; Commands 55; Mcp 52; Editor 32; Settings 8; Workspace 8). The whole solution builds with the default configuration: 0 errors. Two pre-existing warnings remain and are not from this work: an xUnit analyzer warning in `FimTextTests`, and a duplicate `FimText` type in `Codale.Smart.Smoke`, which compiles Core's source directly.
+
+Manual Windows checks remain open and need a person at the app: live chat scaling, shortcut recording, grammar changes, close and cancel, launcher-only close, project switching, and external settings edits. Item 10 stays unchecked until they are done.
 
 ### Store caller migration (2026-11-15)
 
