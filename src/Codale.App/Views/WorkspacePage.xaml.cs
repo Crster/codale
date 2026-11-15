@@ -442,30 +442,36 @@ public sealed partial class WorkspacePage : Page
     {
         var cli = CliLocator.KnownClis.First(known => known.Id == cliId);
         var terminal = ViewModel.CreateTerminal(CodaleAccountCli.LoginCommand(cliId, accountId), $"{cli.DisplayName} sign in", cliId);
-        AddTerminalTab(terminal);
-        if (terminal.StartupError is { Length: > 0 } error)
+        try
         {
-            throw new InvalidOperationException(error);
-        }
+            AddTerminalTab(terminal);
+            if (terminal.StartupError is { Length: > 0 } error)
+            {
+                throw new InvalidOperationException(error);
+            }
 
-        // A dedicated command exits with login. Closing the tab also ends this wait,
-        // allowing Settings to re-read credentials after either completion or cancellation.
-        while (terminal.IsRunning && IsLoaded)
+            // Closing the tab cancels login. Leaving the workspace also ends the wait.
+            while (terminal.IsRunning && IsLoaded)
+            {
+                await Task.Delay(500);
+            }
+        }
+        finally
         {
-            await Task.Delay(500);
+            // Account setup is temporary: release its process and tab before Settings
+            // checks the credentials and the user starts or returns to a chat.
+            if (_terminalTabs.FirstOrDefault(entry => ReferenceEquals(entry.Terminal, terminal)) is { } entry)
+            {
+                CloseTerminalTab(entry);
+            }
+            else
+            {
+                terminal.Close();
+            }
         }
     }
 
-    private Task UpdateCliAsync(string command)
-    {
-        var codex = CliLocator.KnownClis.Single(cli => cli.Id == "codex");
-        if (command == CliVersionCheck.UpdateCommand(codex))
-        {
-            return App.Current.MainWindow?.UpdateCodexAsync() ?? Task.CompletedTask;
-        }
-
-        return RunInNewTerminalAsync(command);
-    }
+    private Task UpdateCliAsync(string command) => RunInNewTerminalAsync(command);
 
     /// <summary>The agent ran a command (run_in_terminal, run_command): it gets a tab of its own, without taking the user's focus.</summary>
     private void OnAgentTerminalOpened(object? sender, TerminalViewModel terminal) =>

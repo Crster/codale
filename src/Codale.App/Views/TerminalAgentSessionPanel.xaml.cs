@@ -486,11 +486,6 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
             CliFlyout.Hide();
             UpdateCliRequested?.Invoke(this, command);
 
-            if (cli.Id == "codex")
-            {
-                return;
-            }
-
             for (var i = 0; i < 36 && CliUpdate.UpdateAvailable && CliUpdate.Cli == cli; i++)
             {
                 await Task.Delay(TimeSpan.FromSeconds(5));

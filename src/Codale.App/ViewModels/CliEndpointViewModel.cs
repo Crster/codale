@@ -29,6 +29,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(AvatarInitials))]
+    [NotifyPropertyChangedFor(nameof(AccountStatusBrush))]
     public partial ProviderChoice? Selected { get; set; }
 
     /// <summary>The chat in front, whose provider the picker shows and changes; null before one is attached.</summary>
@@ -78,6 +79,13 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
     public string ActiveName => Selected?.Label ?? "Choose profile";
 
     /// <summary>The account name or email initials; CLI profiles do not expose a profile photo.</summary>
+    public Microsoft.UI.Xaml.Media.Brush AccountStatusBrush =>
+        new Microsoft.UI.Xaml.Media.SolidColorBrush(IsActive
+            ? Windows.UI.Color.FromArgb(255, 34, 197, 139)
+            : (Selected?.CliId ?? _chat?.CliId) == "codex"
+                ? Windows.UI.Color.FromArgb(255, 59, 130, 246)
+                : Windows.UI.Color.FromArgb(255, 217, 119, 87));
+
     public string AvatarInitials
     {
         get

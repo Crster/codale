@@ -435,8 +435,6 @@ public sealed partial class MainWindow : Window
     private bool _closeConfirmed;
     private bool _isClosing;
 
-    public Task UpdateCodexAsync() => CloseAfterCleanupAsync(updateCodex: true);
-
     private void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
         if (_closeConfirmed || _workspace is null)
@@ -452,7 +450,7 @@ public sealed partial class MainWindow : Window
     /// Asks about unsaved edits, then stops every agent process and terminal before the
     /// window really closes: doing it in Closed raced the process exit, so a CLI could outlive the app.
     /// </summary>
-    private async Task CloseAfterCleanupAsync(bool updateCodex = false)
+    private async Task CloseAfterCleanupAsync()
     {
         if (_isClosing)
         {
@@ -463,32 +461,9 @@ public sealed partial class MainWindow : Window
         try
         {
             if (!await ConfirmUnsavedEditsAsync() ||
-                !await ConfirmRunningWorkAsync(updateCodex ? "Closing Codale to update Codex" : "Closing Codale"))
+                !await ConfirmRunningWorkAsync("Closing Codale"))
             {
                 return;
-            }
-
-            if (updateCodex)
-            {
-                try
-                {
-                    // Use an explicit package path: a shell-launched updater may not share
-                    // the app's redirected LocalAppData view.
-                    var logPath = Path.Combine(Windows.Storage.ApplicationData.Current.LocalCacheFolder.Path,
-                        "Codale", "codex-update.log");
-                    await Codale.Agents.Codex.CodexUpdater.StartAfterExitAsync(logPath);
-                }
-                catch (Exception ex)
-                {
-                    await AppDialog.Apply(new ContentDialog
-                    {
-                        XamlRoot = RootGrid.XamlRoot,
-                        Title = "Could not start Codex update",
-                        Content = ex.Message,
-                        CloseButtonText = "OK",
-                    }, DialogTone.Danger).ShowAsync();
-                    return;
-                }
             }
 
             // The decision is made: the window goes away at once, the cleanup finishes behind it.

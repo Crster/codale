@@ -15,7 +15,7 @@ namespace Codale.Agents.Codex;
 /// turns become turns, thread items become tool calls and messages, and the app
 /// server's approval requests become <see cref="ApprovalRequested"/>.
 /// </summary>
-public sealed class CodexAgentSession : IAgentSession
+public sealed partial class CodexAgentSession : IAgentSession
 {
     private static readonly JsonSerializerOptions WireJson = new(JsonSerializerDefaults.Web);
 
@@ -32,6 +32,7 @@ public sealed class CodexAgentSession : IAgentSession
     /// <summary>The app server's requests awaiting our answer, keyed by its id: pending approvals.</summary>
     private readonly Dictionary<int, PendingApproval> _pendingApprovals = [];
     private readonly Dictionary<string, (string ThreadId, string? TurnId, JsonElement Item)> _mcpCalls = [];
+    private readonly Dictionary<(string ThreadId, string ItemId), JsonElement> _fileChangeItems = [];
 
     private Process? _process;
     private Task? _readLoop;
@@ -136,6 +137,12 @@ public sealed class CodexAgentSession : IAgentSession
             await WriteNotificationAsync("initialized", new { }, startTimeout.Token).ConfigureAwait(false);
 
             var threadParams = new Dictionary<string, object?> { ["cwd"] = _options.WorkingDirectory };
+            if (_predictionOnly)
+            {
+                threadParams["ephemeral"] = true;
+                threadParams["sandbox"] = "read-only";
+                threadParams["baseInstructions"] = PredictionInstructions;
+            }
             if (_options.CustomProvider is not null)
             {
                 threadParams["modelProvider"] = "custom";
@@ -147,7 +154,7 @@ public sealed class CodexAgentSession : IAgentSession
 
             var (approvalPolicy, sandbox) = CodexSessionOptions.PermissionPolicy(_permissionMode);
             threadParams["approvalPolicy"] = approvalPolicy;
-            threadParams["sandboxPolicy"] = CodexSessionOptions.SandboxPolicy(sandbox, ExtraFolders());
+            threadParams["sandboxPolicy"] = _predictionOnly ? new { type = "readOnly" } : CodexSessionOptions.SandboxPolicy(sandbox, ExtraFolders());
 
             if (_options.SystemPromptAppend is { Length: > 0 } instructions)
             {
@@ -276,6 +283,9 @@ public sealed class CodexAgentSession : IAgentSession
     {
         var threadId = RequireThread();
         _predictionSourceTurnId = null;
+        _predictionTurn?.Cancel();
+        _predictionUserText = _options.PromptSuggestions ? turn.Text : "";
+        _predictionAssistantText.Clear();
 
         var input = new List<object>();
 
@@ -325,6 +335,13 @@ public sealed class CodexAgentSession : IAgentSession
     /// <summary>Folds the live model, effort and permission mode into a turn's parameters.</summary>
     internal void ApplyTurnOverrides(Dictionary<string, object?> parameters, bool askOnly, bool planOnly = false)
     {
+        if (_predictionOnly)
+        {
+            parameters["approvalPolicy"] = "untrusted";
+            parameters["sandboxPolicy"] = new { type = "readOnly" };
+            parameters["effort"] = "low";
+            return;
+        }
         if (_liveModel is { Length: > 0 } model)
         {
             parameters["model"] = model;
@@ -431,6 +448,8 @@ public sealed class CodexAgentSession : IAgentSession
         if (model is not null)
         {
             _liveModel = model.Length > 0 ? model : null;
+            // The model resolved at thread startup no longer describes subsequent turns.
+            _threadModel = null;
         }
 
         if (effort is not null)
@@ -821,7 +840,7 @@ public sealed class CodexAgentSession : IAgentSession
                 {
                     if (message.Prop("error") is { } error)
                     {
-                        completion.TrySetException(new InvalidOperationException(
+                        completion.TrySetException(new CodexRpcException(error.Int("code"),
                             $"codex rejected the request: {error.Str("message") ?? error.GetRawText()}"));
                     }
                     else
@@ -839,6 +858,12 @@ public sealed class CodexAgentSession : IAgentSession
     /// </summary>
     internal async Task HandleServerRequestAsync(JsonElement id, string method, JsonElement message)
     {
+        if (_predictionOnly)
+        {
+            await WriteErrorResponseAsync(id.GetInt32(), -32601, "Tools are disabled for prompt prediction.", CancellationToken.None)
+                .ConfigureAwait(false);
+            return;
+        }
         if (message.Prop("params") is not { } parameters || !IsSupportedServerRequest(method))
         {
             await WriteErrorResponseAsync(id.GetInt32(), -32601, $"Codale does not support the '{method}' server request.", CancellationToken.None)
@@ -848,6 +873,12 @@ public sealed class CodexAgentSession : IAgentSession
 
         var threadId = parameters.Str("threadId") ?? _threadId ?? "";
         var item = parameters.Prop("item") ?? FindMcpApprovalItem(method, parameters, threadId);
+        if (item is null && method == "item/fileChange/requestApproval" &&
+            parameters.Str("itemId") is { } fileItemId &&
+            _fileChangeItems.TryGetValue((threadId, fileItemId), out var fileItem))
+        {
+            item = fileItem;
+        }
         var (toolName, input) = DescribeApproval(method, parameters, item);
 
         var approvalId = id.GetInt32();
@@ -948,10 +979,16 @@ public sealed class CodexAgentSession : IAgentSession
         }
 
         var changes = source.Prop("changes") ?? source.Prop("fileChanges") ?? parameters.Prop("fileChanges");
-        if (changes is { ValueKind: JsonValueKind.Object } changesObj)
+        if (changes is { ValueKind: JsonValueKind.Object or JsonValueKind.Array })
         {
-            var paths = changesObj.EnumerateObject().Select(property => property.Name).ToList();
+            var paths = ParseFileChanges(changes).Select(change => change.FilePath).ToArray();
             return ("Edit", JsonSerializer.SerializeToElement(new { paths }, WireJson));
+        }
+
+        if (method is "item/fileChange/requestApproval" or "applyPatchApproval")
+        {
+            // Missing paths must still be reviewed, rather than approving an unidentified edit.
+            return ("Edit", JsonSerializer.SerializeToElement(new { paths = Array.Empty<string>() }, WireJson));
         }
 
         if (method.Contains("permissions", StringComparison.Ordinal))
@@ -1025,6 +1062,8 @@ public sealed class CodexAgentSession : IAgentSession
             case "item/agentMessage/delta":
                 if (parameters.Str("delta") is { Length: > 0 } delta)
                 {
+                    if (_options.PromptSuggestions && _predictionAssistantText.Length < 8000)
+                        _predictionAssistantText.Append(delta.AsSpan(0, Math.Min(delta.Length, 8000 - _predictionAssistantText.Length)));
                     await _events.Writer.WriteAsync(new AssistantTextDelta(delta)).ConfigureAwait(false);
                 }
 
@@ -1046,6 +1085,7 @@ public sealed class CodexAgentSession : IAgentSession
 
             case "turn/started":
                 _predictionSourceTurnId = null;
+                _predictionTurn?.Cancel();
                 _currentTurnId = parameters.Prop("turn")?.Str("id") ?? parameters.Str("turnId") ?? _currentTurnId;
                 return;
 
@@ -1248,10 +1288,15 @@ public sealed class CodexAgentSession : IAgentSession
             case "agentMessage":
                 if (completed)
                 {
+                    if (parent is null && _options.PromptSuggestions && item.Str("text") is { } answer)
+                    {
+                        _predictionAssistantText.Clear();
+                        _predictionAssistantText.Append(answer.AsSpan(0, Math.Min(answer.Length, 8000)));
+                    }
                     await EmitAsync(parent, new AssistantMessageCompleted
                     {
                         MessageId = itemId,
-                        Model = _threadModel ?? _liveModel ?? "CLI",
+                        Model = item.Str("model") ?? _threadModel ?? _liveModel ?? "CLI",
                         Text = item.Str("text") ?? "",
                     }).ConfigureAwait(false);
                 }
@@ -1340,6 +1385,7 @@ public sealed class CodexAgentSession : IAgentSession
             case "fileChange":
                 if (!completed)
                 {
+                    _fileChangeItems[(parameters.Str("threadId") ?? _threadId ?? "", itemId)] = item.Clone();
                     var changes = ParseFileChanges(item.Prop("changes"));
                     var input = JsonSerializer.SerializeToElement(new { file_path = changes.FirstOrDefault()?.FilePath, paths = changes.Select(c => c.FilePath).ToArray() }, WireJson);
                     await EmitAsync(parent, new ToolCallStarted { ToolUseId = itemId, ToolName = "Edit", Input = input })
@@ -1347,6 +1393,7 @@ public sealed class CodexAgentSession : IAgentSession
                 }
                 else
                 {
+                    _fileChangeItems.Remove((parameters.Str("threadId") ?? _threadId ?? "", itemId));
                     await EmitAsync(parent, new ToolCallCompleted
                     {
                         ToolUseId = itemId,
@@ -1445,24 +1492,51 @@ public sealed class CodexAgentSession : IAgentSession
         {
             _predictionSourceTurnId = sourceTurnId;
             // Never await an RPC response on the read loop: it must keep reading to resolve it.
-            _predictionRequest = RequestPredictionAsync(threadId, sourceTurnId);
+            _predictionTurn?.Cancel();
+            _predictionTurn?.Dispose();
+            _predictionTurn = CancellationTokenSource.CreateLinkedTokenSource(_predictionLifetime.Token);
+            var previous = _predictionRequest;
+            _predictionRequest = RequestPredictionAsync(threadId, sourceTurnId, previous, _predictionTurn.Token);
         }
     }
 
-    private async Task RequestPredictionAsync(string threadId, string sourceTurnId)
+    private async Task RequestPredictionAsync(string threadId, string sourceTurnId, Task previous, CancellationToken ct)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_predictionLifetime.Token);
+        var context = $"User: {_predictionUserText[..Math.Min(_predictionUserText.Length, 8000)]}\nAssistant: {_predictionAssistantText}";
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(30));
         try
         {
-            await SendRequestAsync("thread/prediction/request", request =>
+            await previous.ConfigureAwait(false);
+            if (!_nativePredictionUnsupported)
             {
-                request["threadId"] = threadId;
-                request["sourceTurnId"] = sourceTurnId;
-            }, timeout.Token).ConfigureAwait(false);
+                try
+                {
+                    await SendRequestAsync("thread/prediction/request", request =>
+                    {
+                        request["threadId"] = threadId;
+                        request["sourceTurnId"] = sourceTurnId;
+                    }, timeout.Token).ConfigureAwait(false);
+                    return;
+                }
+                catch (CodexRpcException ex) when (ex.Code == -32601)
+                {
+                    _nativePredictionUnsupported = true;
+                    ReportPredictionDiagnostic($"{ex.Message}; using an ephemeral prediction conversation.");
+                }
+            }
+            var text = await (PredictionGenerator ?? GeneratePredictionAsync)(context, timeout.Token).ConfigureAwait(false);
+            if (!timeout.IsCancellationRequested && _predictionSourceTurnId == sourceTurnId)
+            {
+                _predictionSourceTurnId = null;
+                if (!string.IsNullOrWhiteSpace(text))
+                    await _events.Writer.WriteAsync(new PromptSuggested(text.Trim())).ConfigureAwait(false);
+            }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            if (!ct.IsCancellationRequested)
+                ReportPredictionDiagnostic($"Prediction failed: {ex.GetType().Name}: {ex.Message}");
             // Optional, experimental API: older CLIs and unavailable predictions must not fail chat.
             if (_predictionSourceTurnId == sourceTurnId)
             {
@@ -1620,5 +1694,6 @@ public sealed class CodexAgentSession : IAgentSession
 
         _stdinLock.Dispose();
         _predictionLifetime.Dispose();
+        _predictionTurn?.Dispose();
     }
 }

@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
@@ -1297,7 +1297,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private string? _activityToolId;
 
     /// <summary>The status line's detail: the step in flight, else the task the agent says it is on.</summary>
-    public string? StatusDetail => _activeTurn is { LiveStage.Length: > 0 } turn ? turn.LiveStage
+    public string? StatusDetail => _preparingTask is not null ? null
+        : _activeTurn is { LiveStage.Length: > 0 } turn ? turn.LiveStage
         : CurrentActivity is { Length: > 0 } activity ? activity : ActiveTask;
 
     private void SetActivity(string? activity, string? toolUseId)
@@ -4207,6 +4208,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             {
             // The auto mode enhancer (ChatViewModel.Routing.cs): the mode for the turn, and whether the prompt belongs to another session.
             var decision = MessageRouting.RouteWithoutModel(text);
+            var routingClock = System.Diagnostics.Stopwatch.StartNew();
             TopicRedirect? redirect = null;
             try
             {
@@ -4215,6 +4217,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             catch (OperationCanceledException) { if (stopped.IsCancellationRequested) return; }
             finally
             {
+                routingClock.Stop();
+                Add(new NoticeItem { Text = $"Auto Mode · {routingClock.Elapsed.TotalSeconds:0.00}s · {(stopped.IsCancellationRequested ? "Stopped" : redirect is not null ? "Suggested another session" : decision.Intent.ToString())}" });
                 _briefing = null;
             }
             if (stopped.IsCancellationRequested) return;
@@ -4361,6 +4365,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (_activeTurn is null) BeginTurn();
         _preparingTask = "context";
         _activeTurn!.LiveStage = compact ? "Compacting" : "Gathering context";
+        var contextClock = System.Diagnostics.Stopwatch.StartNew();
+        var contextStatus = new NoticeItem { Text = compact ? "Compacting…" : "Gathering context…" };
+        Add(contextStatus);
 
         if (!compact) RecordUserTurn(text);
         if (compact) ForgetDeliveredContext();
@@ -4393,6 +4400,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             return;
         }
+
+        contextClock.Stop();
+        var contextIndex = Items.IndexOf(contextStatus);
+        if (contextIndex >= 0) Items[contextIndex] = new NoticeItem { Text = $"{(compact ? "Compaction prepared" : "Context gathered")} · {contextClock.Elapsed.TotalSeconds:0.00}s" };
+        Reflow();
 
         // "/compact" is housekeeping, not part of the conversation a resumed history replays.
         _preparingTask = null;
@@ -5118,6 +5130,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         var item = _streaming ?? Streaming();
+        item.Model = done.Model;
         item.Complete(done.Text);
         item.HasThinking = done.HasThinking;
         _streaming = null;

@@ -271,9 +271,9 @@
                         <PersonPicture Width="30" Height="30"
                                        Initials="{x:Bind Workspace.CliEndpoint.AvatarInitials, Mode=OneWay}"
                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                       Background="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                       Background="Transparent" />
                         <Ellipse Width="7" Height="7" HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                 Fill="{StaticResource StatusSuccessBrush}"
+                                 Fill="{x:Bind Workspace.CliEndpoint.AccountStatusBrush, Mode=OneWay}"
                                  Visibility="{x:Bind Session.IsConnected, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                     </Grid>
                     <Button.Flyout>
@@ -788,7 +788,16 @@
                                     Visibility="{x:Bind PlansSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
                                     <ListView.ItemTemplate>
                                         <DataTemplate x:DataType="vm:SessionArtifact">
-                                            <Grid ColumnSpacing="10">
+                                            <Grid ColumnSpacing="10" Background="Transparent">
+                                                <Grid.ContextFlyout>
+                                                    <MenuFlyout>
+                                                        <MenuFlyoutItem Text="Download…" Tag="{x:Bind}" Click="OnSaveArtifactClick">
+                                                            <MenuFlyoutItem.Icon>
+                                                                <FontIcon Glyph="&#xE896;" />
+                                                            </MenuFlyoutItem.Icon>
+                                                        </MenuFlyoutItem>
+                                                    </MenuFlyout>
+                                                </Grid.ContextFlyout>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
@@ -824,6 +833,7 @@
                                                     FontSize="10.5"
                                                     Foreground="{x:Bind Status, Mode=OneWay, Converter={StaticResource ArtifactStatusBrush}}"
                                                     Text="{x:Bind StatusText, Mode=OneWay}" />
+
                                             </Grid>
                                         </DataTemplate>
                                     </ListView.ItemTemplate>

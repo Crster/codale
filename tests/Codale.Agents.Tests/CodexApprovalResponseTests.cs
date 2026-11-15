@@ -11,6 +11,46 @@ namespace Codale.Agents.Tests;
 /// </summary>
 public sealed class CodexApprovalResponseTests
 {
+    [Theory]
+    [InlineData("src/ChatItems.cs", Codale.Core.Shell.ApprovalVerdict.Allow)]
+    [InlineData("X:/other/ChatItems.cs", Codale.Core.Shell.ApprovalVerdict.Ask)]
+    [InlineData(".git/config", Codale.Core.Shell.ApprovalVerdict.Ask)]
+    public async Task File_approval_uses_the_started_items_paths(string path, Codale.Core.Shell.ApprovalVerdict expected)
+    {
+        const string root = "X:/CrsterSite/codale";
+        await using var session = new CodexAgentSession(new CodexSessionOptions { WorkingDirectory = root });
+        await session.HandleNotificationAsync("item/started", Serialize(new
+        {
+            @params = new { threadId = "main", item = new { id = "edit", type = "fileChange",
+                changes = new[] { new { path, kind = "update", diff = "" } } } },
+        }));
+        while (session.Events.TryRead(out _)) { }
+        await session.HandleServerRequestAsync(Serialize(7), "item/fileChange/requestApproval", Serialize(new
+        {
+            @params = new { threadId = "main", itemId = "edit" },
+        }));
+        Assert.True(session.Events.TryRead(out var evt));
+        var approval = Assert.IsType<ApprovalRequested>(evt);
+        Assert.Equal("Edit", approval.ToolName);
+        Assert.Equal(expected, Codale.Core.Shell.ApprovalPolicy.Decide("automatic", approval.ToolName,
+            null, approval.Input, root, null).Verdict);
+    }
+
+    [Fact]
+    public async Task File_approval_without_a_matching_item_keeps_paths_unknown()
+    {
+        await using var session = new CodexAgentSession(new CodexSessionOptions { WorkingDirectory = "." });
+        await session.HandleServerRequestAsync(Serialize(7), "item/fileChange/requestApproval", Serialize(new
+        {
+            @params = new { threadId = "main", itemId = "missing" },
+        }));
+        Assert.True(session.Events.TryRead(out var evt));
+        var approval = Assert.IsType<ApprovalRequested>(evt);
+        Assert.Equal("Edit", approval.ToolName);
+        Assert.Equal(Codale.Core.Shell.ApprovalVerdict.Ask, Codale.Core.Shell.ApprovalPolicy.Decide(
+            "automatic", approval.ToolName, null, approval.Input, "X:/CrsterSite/codale", null).Verdict);
+    }
+
     private static JsonElement Serialize(object obj) =>
         JsonDocument.Parse(JsonSerializer.Serialize(obj)).RootElement;
 

@@ -13,6 +13,7 @@ public sealed class CodexPromptPredictionTests
         CodexAgentSession? session = null;
         session = new(new CodexSessionOptions { WorkingDirectory = ".", PromptSuggestions = enabled })
         {
+            PredictionGenerator = (_, _) => Task.FromResult<string?>(null),
             MessageWriter = (message, _) =>
             {
                 var frame = Json(message);
@@ -160,5 +161,110 @@ public sealed class CodexPromptPredictionTests
         {
             await session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
         }
+    }
+
+    [Fact]
+    public async Task Unimplemented_native_api_uses_fallback_and_remembers_capability()
+    {
+        var requests = new List<string>();
+        var diagnostics = new List<string>();
+        string? context = null;
+        CodexAgentSession? session = null;
+        session = new(new CodexSessionOptions { WorkingDirectory = ".", PromptSuggestions = true })
+        {
+            PredictionDiagnostic = diagnostics.Add,
+            PredictionGenerator = (text, _) => { context = text; return Task.FromResult<string?>("  Show me the code  "); },
+            MessageWriter = (message, _) =>
+            {
+                var frame = Json(message);
+                var method = frame.GetProperty("method").GetString()!;
+                requests.Add(method);
+                session!.HandleResponse(method == "thread/prediction/request"
+                    ? Json(new { id = frame.GetProperty("id").GetInt32(), error = new { code = -32601, message = "thread/prediction/request is not implemented yet" } })
+                    : Json(new { id = frame.GetProperty("id").GetInt32(), result = new { } }));
+                return Task.CompletedTask;
+            },
+        };
+        await using var owned = session;
+        session.AdoptThread("main");
+        await session.SendAsync(new UserTurn("Explain hello world"));
+        await session.HandleNotificationAsync("item/agentMessage/delta", Json(new { threadId = "main", delta = "Create a console app." }));
+        Drain(session);
+        await Complete(session);
+        Assert.IsType<TurnCompleted>(await session.Events.ReadAsync());
+        Assert.Equal("Show me the code", Assert.IsType<PromptSuggested>(await session.Events.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5))).Text);
+        Assert.Contains("Explain hello world", context);
+        Assert.Contains("Create a console app.", context);
+        Assert.Contains("not implemented yet", Assert.Single(diagnostics));
+        await Complete(session, turn: "turn-2");
+        Assert.IsType<TurnCompleted>(await session.Events.ReadAsync());
+        Assert.IsType<PromptSuggested>(await session.Events.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Single(requests, method => method == "thread/prediction/request");
+    }
+
+    [Fact]
+    public async Task New_turn_cancels_fallback_and_discards_late_result()
+    {
+        var started = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var result = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        CodexAgentSession? session = null;
+        session = new(new CodexSessionOptions { WorkingDirectory = ".", PromptSuggestions = true })
+        {
+            PredictionGenerator = (_, ct) => { started.SetResult(ct); return result.Task; },
+            MessageWriter = (message, _) =>
+            {
+                var frame = Json(message);
+                session!.HandleResponse(Json(new { id = frame.GetProperty("id").GetInt32(), error = new { code = -32601, message = "Method not found" } }));
+                return Task.CompletedTask;
+            },
+        };
+        session.AdoptThread("main");
+        await Complete(session);
+        var ct = await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await session.HandleNotificationAsync("turn/started", Json(new { threadId = "main", turn = new { id = "turn-2" } }));
+        result.SetResult("Stale suggestion");
+        await session.DisposeAsync();
+        Assert.True(ct.IsCancellationRequested);
+        Assert.IsType<TurnCompleted>(await session.Events.ReadAsync());
+        Assert.False(session.Events.TryRead(out _));
+    }
+
+    [Theory]
+    [InlineData(-32602, false)]
+    [InlineData(-32601, true)]
+    public async Task Prediction_errors_are_diagnosed_without_failing_the_turn(int code, bool fallbackExpected)
+    {
+        var diagnostics = new List<string>();
+        var fallbackCalled = false;
+        var failed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        CodexAgentSession? session = null;
+        session = new(new CodexSessionOptions { WorkingDirectory = ".", PromptSuggestions = true })
+        {
+            PredictionDiagnostic = message =>
+            {
+                diagnostics.Add(message);
+                if (message.StartsWith("Prediction failed:", StringComparison.Ordinal)) failed.TrySetResult();
+            },
+            PredictionGenerator = (_, _) =>
+            {
+                fallbackCalled = true;
+                throw new InvalidOperationException("Fallback provider unavailable");
+            },
+            MessageWriter = (message, _) =>
+            {
+                var frame = Json(message);
+                session!.HandleResponse(Json(new { id = frame.GetProperty("id").GetInt32(), error = new { code, message = "Native prediction unavailable" } }));
+                return Task.CompletedTask;
+            },
+        };
+        await using var owned = session;
+        session.AdoptThread("main");
+        await Complete(session);
+        Assert.IsType<TurnCompleted>(await session.Events.ReadAsync());
+        await failed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(fallbackExpected, fallbackCalled);
+        Assert.Contains(diagnostics, message => message.Contains("Native prediction unavailable"));
+        if (fallbackExpected) Assert.Contains(diagnostics, message => message.Contains("Fallback provider unavailable"));
+        Assert.False(session.Events.TryRead(out _));
     }
 }

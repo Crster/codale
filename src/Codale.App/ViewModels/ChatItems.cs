@@ -181,6 +181,16 @@ public sealed partial class AssistantMessageItem : ChatItem
 {
     public override TranscriptBlock Block => TranscriptBlock.Prose;
 
+    /// <summary>The model recorded on this reply, independent of the current model picker.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ModelLabel))]
+    [NotifyPropertyChangedFor(nameof(HasModel))]
+    public partial string? Model { get; set; }
+
+    public string ModelLabel => Model is null or "" or "unknown" or "CLI" or "<synthetic>" ? "" : Model;
+
+    public bool HasModel => ModelLabel.Length > 0;
+
     /// <summary>Grows as deltas arrive, then is replaced by the authoritative message.</summary>
     [ObservableProperty]
     public partial string Text { get; set; } = "";

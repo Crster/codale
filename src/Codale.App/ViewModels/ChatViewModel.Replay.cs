@@ -69,7 +69,7 @@ public sealed partial class ChatViewModel
                 }
                 else if (turn[i] is AssistantMessageCompleted { Text.Length: > 0 } reply)
                 {
-                    var item = new AssistantMessageItem { Timestamp = reply.Timestamp ?? DateTimeOffset.Now };
+                    var item = new AssistantMessageItem { Timestamp = reply.Timestamp ?? DateTimeOffset.Now, Model = reply.Model };
                     item.Complete(reply.Text);
                     rows.Add(item);
                 }
@@ -125,7 +125,7 @@ public sealed partial class ChatViewModel
             switch (turn[i])
             {
                 case AssistantMessageCompleted { Text.Length: > 0 } narration when i < lastTool:
-                    var note = new AssistantMessageItem { Timestamp = narration.Timestamp ?? DateTimeOffset.Now };
+                    var note = new AssistantMessageItem { Timestamp = narration.Timestamp ?? DateTimeOffset.Now, Model = narration.Model };
                     note.Complete(narration.Text);
                     activity.Steps.Add(note);
                     break;

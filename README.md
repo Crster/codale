@@ -57,6 +57,7 @@ The chat tab provides a clear, high-density stream of the agent's thoughts, tool
 - **Model & Effort Switching**: Switch between frontier models (e.g., Opus, Sonnet, Haiku) and adjust thinking/reasoning effort levels (`low`, `medium`, `high`, `xhigh`, `max`) on the fly.
 - **Bring Your Own Key (BYOK)**: Connect Claude Code to any Anthropic-compatible gateway or reverse proxy, or use OpenAI-compatible endpoints translated seamlessly into Anthropic streaming protocol via the built-in `MessagesBridge`.
 - **Session History & Crash Recovery**: Replay past conversations from local CLI transcript logs. If Codale or your machine restarts during an active agent turn, Codale detects the unfinished turn and offers one-click resumption.
+- **Next Prompt Suggestions**: With `chat.suggestNextPrompt` enabled (the default), new chat sessions predict a follow-up after successful turns. Press Tab in an empty composer to accept it. If Codex reports that its experimental prediction endpoint is unimplemented, Codale uses a separate ephemeral, read-only conversation with the selected account and model. This adds one short model request using a bounded excerpt of the latest user prompt and answer, without adding a turn to the main chat. Starting another turn cancels the pending suggestion. Prediction failures are available through .NET trace warnings.
 
 ---
 

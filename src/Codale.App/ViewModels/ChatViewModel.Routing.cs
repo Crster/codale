@@ -1,4 +1,4 @@
-using Codale.App.Services;
+﻿using Codale.App.Services;
 using Codale.Core.Agents;
 using Codale.Core.Features;
 using Codale.Core.Helper;
@@ -57,7 +57,6 @@ public sealed partial class ChatViewModel
         if (!AppSettings.SmartRoleEnabled(SmartFeatureSettings.General) || SmartExperienceHost.Instance.Status.State != Codale.Smart.SmartState.Ready)
             return (fallback, null);
 
-        ComposerNotice = new NoticeItem { Text = "Understanding your request…", Severity = NoticeSeverity.Info };
         try
         {
             using var quick = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -96,7 +95,7 @@ public sealed partial class ChatViewModel
         catch (HelperModelException) { return (fallback, null); }
         finally
         {
-            if (ComposerNotice?.Text == "Understanding your request…") ComposerNotice = null;
+            if (_activeTurn is { } routedTurn) routedTurn.LiveStage = "Routing";
         }
     }
 
@@ -113,7 +112,6 @@ public sealed partial class ChatViewModel
         if (!local.Confident) questions["intent"] = SmartDecisions.IntentQuestion();
         if (askSession) questions["session"] = SmartDecisions.SessionQuestion(sessions, FeatureId!);
 
-        ComposerNotice = new NoticeItem { Text = "Understanding your request…", Severity = NoticeSeverity.Info };
         try
         {
             using var quick = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -134,7 +132,7 @@ public sealed partial class ChatViewModel
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return null; }
         finally
         {
-            if (ComposerNotice?.Text == "Understanding your request…") ComposerNotice = null;
+            if (_activeTurn is { } routedTurn) routedTurn.LiveStage = "Routing";
         }
     }
 
@@ -222,3 +220,4 @@ public sealed partial class ChatViewModel
         catch (InvalidOperationException) { }
     }
 }
+

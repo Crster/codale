@@ -52,14 +52,19 @@ public sealed partial class SettingsPanel : UserControl
 
     private void OnOpenInstallFolderClick(object sender, RoutedEventArgs e) => OpenFolder(AppContext.BaseDirectory);
 
-    private void OnOpenDataFolderClick(object sender, RoutedEventArgs e) => OpenFolder(McpServerSettings.CodaleDataRoot());
+    private void OnOpenDataFolderClick(object sender, RoutedEventArgs e) => OpenFolder(AppDb.Folder);
 
     private static void OpenFolder(string path)
     {
         try
         {
             Directory.CreateDirectory(path);
-            _ = Launcher.LaunchFolderPathAsync(path);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                ArgumentList = { path },
+                UseShellExecute = false,
+            });
         }
         catch (Exception)
         {

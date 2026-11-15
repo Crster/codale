@@ -309,11 +309,6 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             ProfileFlyout.Hide();
             UpdateCliRequested?.Invoke(this, command);
 
-            if (cli.Id == "codex")
-            {
-                return;
-            }
-
             for (var i = 0; i < 36 && CliUpdate.UpdateAvailable && CliUpdate.Cli == cli && PanelCli == cli; i++)
             {
                 await Task.Delay(TimeSpan.FromSeconds(5));
@@ -514,6 +509,53 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         }
     }
 
+    private async void OnSaveArtifactClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuFlyoutItem { Tag: SessionArtifact artifact } button) return;
+        button.IsEnabled = false;
+        try
+        {
+            var source = artifact.SourcePath is { Length: > 0 } path
+                ? System.IO.Path.GetFullPath(path, WorkingDirectory) : null;
+            var name = source is not null ? System.IO.Path.GetFileName(source) : artifact.Title;
+            foreach (var invalid in System.IO.Path.GetInvalidFileNameChars())
+                name = name.Replace(invalid, '_');
+            if (string.IsNullOrWhiteSpace(name)) name = "Artifact";
+            var extension = source is not null ? System.IO.Path.GetExtension(source) : ".md";
+            if (string.IsNullOrEmpty(extension)) extension = ".txt";
+            var windowId = App.Current.MainWindowHandle is { } hwnd ? Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd) : default;
+            var picker = new Microsoft.Windows.Storage.Pickers.FileSavePicker(windowId)
+            {
+                SuggestedFileName = name,
+            };
+            picker.FileTypeChoices.Add("Artifact", [extension]);
+            if (await picker.PickSaveFileAsync() is not { } destination) return;
+            if (source is not null)
+            {
+                if (!string.Equals(source, System.IO.Path.GetFullPath(destination.Path), StringComparison.OrdinalIgnoreCase))
+                    System.IO.File.Copy(source, destination.Path, overwrite: true);
+            }
+            else
+            {
+                await System.IO.File.WriteAllTextAsync(destination.Path, artifact.Markdown);
+            }
+        }
+        catch (Exception ex)
+        {
+            await new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "Couldn't save artifact",
+                Content = ex.Message,
+                CloseButtonText = "OK",
+            }.ShowAsync();
+        }
+        finally
+        {
+            button.IsEnabled = true;
+        }
+    }
+
     private void OnArtifactClick(object sender, ItemClickEventArgs e)
     {
         HideDetails();
@@ -546,3 +588,4 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     #endregion
 
 }
+

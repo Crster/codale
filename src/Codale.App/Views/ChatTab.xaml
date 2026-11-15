@@ -1386,6 +1386,13 @@
                         FontSize="{x:Bind S10_5, Mode=OneWay}"
                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                         Text="{x:Bind Timestamp, Converter={StaticResource TimestampText}}" />
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontSize="{x:Bind S10_5, Mode=OneWay}"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Text="{x:Bind ModelLabel, Mode=OneWay}"
+                        ToolTipService.ToolTip="Model used for this response"
+                        Visibility="{x:Bind HasModel, Mode=OneWay}" />
                     <Button
                         Width="20"
                         Height="20"

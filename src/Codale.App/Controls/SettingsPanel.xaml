@@ -188,7 +188,7 @@
 
             <!--  Main Content Area  -->
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                <Grid MaxWidth="760" Padding="32,4,32,32" HorizontalAlignment="Left">
+                <Grid Padding="32,4,32,32" HorizontalAlignment="Stretch">
 
                     <!-- ========================================== -->
                     <!-- 1. GENERAL (Appearance & Chat UI)         -->
