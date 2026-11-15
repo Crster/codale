@@ -25,7 +25,7 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
     private const int MaxToolRows = 5;
     private readonly string _project;
     private readonly DispatcherQueue _ui = DispatcherQueue.GetForCurrentThread();
-    private readonly SmartExperience _smart = SmartExperienceHost.Instance;
+    private readonly SmartExperience _smart;
     private int _refreshing, _dirty;
     private bool _disposed;
     private (int Done, int Total) _summary;
@@ -40,9 +40,10 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
     private void OnIndexingChanged() => Refresh();
     /// <summary>Progress of the background file summaries; called from any thread.</summary>
     public void SetSummaryProgress(int done, int total) { _summary = (done, total); Refresh(); }
-    public SmartActivityViewModel(string project)
+    public SmartActivityViewModel(string project, SmartExperience smart)
     {
         _project = project;
+        _smart = smart;
         _smart.Changed += OnChanged;
         _smart.ActivityChanged += OnChanged;
         Refresh();

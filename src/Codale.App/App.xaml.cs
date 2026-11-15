@@ -16,13 +16,15 @@ public partial class App : Application
 
     private MainWindow? _window;
 
+    public ApplicationServices Services { get; } = new();
+
     public App(ActivationRequest request, AppInstance instance)
     {
         _request = request;
         _instance = instance;
 
         UnhandledErrors.Install();
-        AppSettings.AttachUiThread();
+        Services.Settings.AttachUiThread(action => _dispatcherQueue.TryEnqueue(() => action()), () => _dispatcherQueue.HasThreadAccess);
         InitializeComponent();
 
         // Fires when another launch was redirected here because this instance already
@@ -32,31 +34,16 @@ public partial class App : Application
 
     public static new App Current => (App)Application.Current;
 
-    /// <summary>HWND of the project window, for APIs that must be told their owner (pickers, dialogs).</summary>
-    public IntPtr? MainWindowHandle =>
-        _window is null ? null : WinRT.Interop.WindowNative.GetWindowHandle(_window);
-
-    /// <summary>The window itself, for cross-element wiring (title bar ↔ workspace page).</summary>
-    public MainWindow? MainWindow => _window;
-
-    /// <summary>
-    /// Opens a project in the existing window instead of launching a second one. The
-    /// welcome content is simply replaced by the workspace.
-    /// </summary>
-    public void OpenProjectInPlace(string projectPath)
-    {
-        if (_window is not null)
-        {
-            _window.OpenProject(projectPath);
-        }
-    }
-
     protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
-        Services.SyntaxSelection.Start();
-        SmartExperienceHost.Start();
-        _window = new MainWindow(_request);
-        _window.Closed += async (_, _) => await SmartExperienceHost.Instance.DisposeAsync();
+        Services.Syntax.Start();
+        Services.Smart.Start();
+        _window = new MainWindow(_request, Services);
+        _window.Closed += (_, _) =>
+        {
+            _instance.Activated -= OnRedirectedActivation;
+            _window = null;
+        };
         _window.Activate();
     }
 

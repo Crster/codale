@@ -17,6 +17,7 @@ namespace Codale.App.Services;
 public sealed class FeatureService : IDisposable
 {
     private readonly string _projectPath;
+    private readonly IWorkspaceData _data;
     private readonly CodaleDb _db;
     private readonly ProjectKnowledgeIndex _knowledge;
     public ProjectKnowledgeIndex Knowledge => _knowledge;
@@ -26,16 +27,30 @@ public sealed class FeatureService : IDisposable
     /// <summary>Shared with every other window on the project: open chats, running summaries, the create gate.</summary>
     private readonly FeatureActivity _activity;
 
-    public FeatureService(string projectPath)
+    private readonly SmartEmbedder _embedder;
+    private readonly SmartExperienceHost _smart;
+
+    public FeatureService(string projectPath, SmartExperienceHost smart, IWorkspaceData data)
     {
         _projectPath = projectPath;
-        _db = OpenDatabase(projectPath);
+        _data = data;
+        _smart = smart;
+        _embedder = new SmartEmbedder(smart);
+        try
+        {
+            _db = OpenDatabase(projectPath, _embedder);
+        }
+        catch
+        {
+            _embedder.Dispose();
+            throw;
+        }
         _knowledge = new ProjectKnowledgeIndex(_db);
-        _knowledge.Smart = SmartExperienceHost.Instance;
+        _knowledge.Smart = smart.Instance;
         _knowledge.SmartProjectRoot = projectPath;
         UpdateSummaryCache();
-        _knowledge.SummariesEnabled = () => AppSettings.SmartSummaries;
-        AppSettings.Changed += OnAppSettingsChanged;
+        _knowledge.SummariesEnabled = () => _smart.Settings.SmartSummaries;
+        _smart.Settings.Changed += OnAppSettingsChanged;
         _activity = FeatureActivity.For(projectPath);
         _activity.HistoryDeleted += OnHistoryDeleted;
         _historyRefresh = new Timer(_ => Changed?.Invoke(this, EventArgs.Empty));
@@ -50,15 +65,15 @@ public sealed class FeatureService : IDisposable
     }
 
     /// <summary>The project's database; a throwaway one when it cannot be opened (a path too long, a folder another process holds), so history never keeps the window from opening.</summary>
-    private static CodaleDb OpenDatabase(string projectPath)
+    private static CodaleDb OpenDatabase(string projectPath, IEmbedder embedder)
     {
         try
         {
-            return new CodaleDb(ProjectPaths.FeatureDatabasePath(projectPath), new() { Embedder = SmartEmbedder.Shared });
+            return new CodaleDb(ProjectPaths.FeatureDatabasePath(projectPath), new() { Embedder = embedder });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException)
         {
-            return new CodaleDb(Path.Combine(Path.GetTempPath(), "codale-features-" + Guid.NewGuid().ToString("N")), new() { Embedder = SmartEmbedder.Shared });
+            return new CodaleDb(Path.Combine(Path.GetTempPath(), "codale-features-" + Guid.NewGuid().ToString("N")), new() { Embedder = embedder });
         }
     }
 
@@ -105,7 +120,7 @@ public sealed class FeatureService : IDisposable
     }
 
     /// <summary>A feature's log; <paramref name="chatId"/> is the chat its appends are written as (null for a reader).</summary>
-    public FeatureLog LogOf(string id, string? chatId = null) => new(WorkspaceDb.DirectoryFor(_projectPath), id, chatId);
+    public FeatureLog LogOf(string id, string? chatId = null) => new(_data.History, id, chatId);
 
     /// <summary>A prompt was added to a feature's log: its size and what it asked are what the feature is found by.</summary>
     public void RecordProgress(string id, FeatureLog log, string? prompt)
@@ -129,7 +144,7 @@ public sealed class FeatureService : IDisposable
     public async Task<RetrievalResult> RetrieveAsync(string worktree, string prompt, string recent, IReadOnlySet<string> delivered, string? currentSessionId,
         string? workingSessionId = null, CancellationToken preparationToken = default, DateTimeOffset? preparationDeadline = null, string? chatId = null, Codale.Smart.SmartIntent? intent = null, bool allowSmartReview = true)
     {
-        if (AppSettings.SmartFeatureEnabled("context") && allowSmartReview)
+        if (_smart.Settings.SmartFeatureEnabled("context") && allowSmartReview)
         {
             return await _knowledge.RetrieveSmartAsync(worktree, prompt, recent, delivered, currentSessionId,
                 workingSessionId is null ? null : _knowledge.FilesOf(workingSessionId, WorkingSetFiles), preparationToken, preparationDeadline, chatId, intent).ConfigureAwait(false);
@@ -139,7 +154,7 @@ public sealed class FeatureService : IDisposable
     }
 
     private string? _summaryIdentity;
-    private static string SummaryIdentity() => SmartExperienceHost.CreateRouter().ClientFor("summary")?.FeatureIdentity ?? "off";
+    private string SummaryIdentity() => _smart.CreateRouter().ClientFor("summary")?.FeatureIdentity ?? "off";
     private void UpdateSummaryCache()
     {
         _summaryIdentity = SummaryIdentity();
@@ -218,9 +233,10 @@ public sealed class FeatureService : IDisposable
         _databaseWatch.Dispose();
         _historyRefresh.Dispose();
         _activity.HistoryDeleted -= OnHistoryDeleted;
-        AppSettings.Changed -= OnAppSettingsChanged;
+        _smart.Settings.Changed -= OnAppSettingsChanged;
         _knowledge.Dispose();
         _db.Dispose();
+        _embedder.Dispose();
     }
 }
 

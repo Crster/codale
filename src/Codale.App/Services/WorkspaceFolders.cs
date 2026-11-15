@@ -18,10 +18,12 @@ public sealed class WorkspaceFolders
     private readonly List<string> _folders = [];
 
     private readonly string _projectPath;
+    private readonly ApplicationDatabase _database;
 
-    public WorkspaceFolders(string projectPath)
+    public WorkspaceFolders(string projectPath, ApplicationDatabase database)
     {
         _projectPath = projectPath;
+        _database = database;
     }
 
     public event EventHandler? Changed;
@@ -84,7 +86,7 @@ public sealed class WorkspaceFolders
         {
             try
             {
-                using var db = AppDb.Open();
+                using var db = _database.Open();
                 return db.Project(_projectPath).Open("ui").Open(RecentKey).Read() is { Length: > 0 } json
                     ? (JsonSerializer.Deserialize<List<string>>(json) ?? []).Where(Directory.Exists).ToList()
                     : [];
@@ -100,7 +102,7 @@ public sealed class WorkspaceFolders
     {
         var folder = ProjectPaths.Normalize(path);
         var recent = RecentCwds.Where(r => !string.Equals(r, folder, StringComparison.OrdinalIgnoreCase)).Prepend(folder).Take(MaxRecent);
-        using var db = AppDb.Open();
+        using var db = _database.Open();
         db.Project(_projectPath).Open("ui").Open(RecentKey).Write(JsonSerializer.Serialize(recent));
     }
 

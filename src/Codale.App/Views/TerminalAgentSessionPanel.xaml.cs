@@ -173,12 +173,12 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
     /// <summary>Opens the history reader once there is a project path; Workspace can arrive after Session.</summary>
     private void EnsureReader()
     {
-        if (_session is null || _reader is not null || string.IsNullOrWhiteSpace(ProjectPath))
+        if (_workspace is null || _session is null || _reader is not null || string.IsNullOrWhiteSpace(ProjectPath))
         {
             return;
         }
 
-        _reader = CliResume.CreateReader(_session.TerminalCli?.Id, ProjectPath);
+        _reader = _workspace.CliHistory.Create(_session.TerminalCli?.Id, ProjectPath);
         WatchHistory();
         _ = RefreshHistoryAsync();
     }
@@ -329,7 +329,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
             {
                 if (await Task.Run(() => ClaudeContextProbe.Read(source, since)) is { } reading)
                 {
-                    var known = reading.Model is { Length: > 0 } model ? AppSettings.ClaudeContextWindowFor(model) : null;
+                    var known = reading.Model is { Length: > 0 } model ? _workspace!.Smart.Settings.ClaudeContextWindowFor(model) : null;
                     var window = ClaudeContextProbe.WindowFor(reading.Tokens, known);
                     session.Status.ContextTokens = reading.Tokens;
                     session.Status.ContextWindow = window;
@@ -338,7 +338,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
                     // this one after a compact) does not fall back to 200K.
                     if (reading.Model is { Length: > 0 } seen && window > (known ?? 200_000))
                     {
-                        AppSettings.RememberClaudeContextWindow(seen, window);
+                        _workspace!.Smart.Settings.RememberClaudeContextWindow(seen, window);
                     }
                 }
 

@@ -98,7 +98,7 @@ public sealed partial class WorkspacePage
     {
         if (_sideDiff is null)
         {
-            _sideDiffViewModel = new DiffViewerViewModel(ViewModel.ProjectPath);
+            _sideDiffViewModel = ViewModel.CreateDiffViewer();
             _sideDiff = new DiffTab().WithViewModel(_sideDiffViewModel);
             _sideDiff.FileOpenRequested += (_, relativePath) =>
             {

@@ -20,6 +20,9 @@ namespace Codale.App.Views;
 /// </summary>
 public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChanged
 {
+    /// <summary>The project window that owns this view's pickers and attention feedback.</summary>
+    public IWindowOwner? Owner { get; set; }
+
     private ChatViewModel? _session;
     private WorkspaceViewModel? _workspace;
     private int _todoCountSeen;
@@ -523,7 +526,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             if (string.IsNullOrWhiteSpace(name)) name = "Artifact";
             var extension = source is not null ? System.IO.Path.GetExtension(source) : ".md";
             if (string.IsNullOrEmpty(extension)) extension = ".txt";
-            var windowId = App.Current.MainWindowHandle is { } hwnd ? Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd) : default;
+            var windowId = Owner?.WindowHandle is { } hwnd ? Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd) : default;
             var picker = new Microsoft.Windows.Storage.Pickers.FileSavePicker(windowId)
             {
                 SuggestedFileName = name,

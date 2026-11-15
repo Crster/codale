@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Codale.App.Services;
+using Codale.Agents.Providers;
 using Codale.Core.Agents;
 
 namespace Codale.Agents.Tests;

@@ -29,6 +29,9 @@ namespace Codale.App.Views;
 /// </summary>
 public sealed partial class TerminalTab : UserControl, ITerminalHost
 {
+    /// <summary>The project window that owns this terminal's pickers and attention feedback.</summary>
+    public IWindowOwner? Owner { get; set; }
+
     /// <summary>Output views this far outside the visible area are released; closer ones are kept.</summary>
     private const double RealizeMargin = 800;
 
@@ -50,8 +53,13 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
     private List<string> _suggestions = [];
     private int _suggestionIndex;
 
-    public TerminalTab()
+    private readonly SmartExperienceHost _smart;
+    private readonly SmartInlineCompletion _completion;
+
+    public TerminalTab(SmartExperienceHost smart)
     {
+        _smart = smart;
+        _completion = new SmartInlineCompletion(smart);
         InitializeComponent();
         Loaded += OnLoaded;
 
@@ -131,8 +139,8 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
     /// <summary>The input, its ghost and the prompt glyph share the terminal's font, so the ghost lines up with the typed text.</summary>
     private void ApplyInputFont()
     {
-        var font = TerminalLook.MonoFont;
-        var size = TerminalLook.MonoSize;
+        var font = TerminalLook.MonoFont(_smart.Settings);
+        var size = TerminalLook.MonoSize(_smart.Settings);
         Input.FontFamily = font;
         Input.FontSize = size;
         Ghost.FontFamily = font;
@@ -493,7 +501,7 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
         {
             var picker = new Windows.Storage.Pickers.FolderPicker { SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.ComputerFolder };
             picker.FileTypeFilter.Add("*");
-            if (App.Current.MainWindowHandle is { } hwnd)
+            if (Owner?.WindowHandle is { } hwnd)
             {
                 WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
             }
@@ -622,7 +630,7 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
 
         if (_translatingCommand) return;
         // Smart translates plain-language requests only; a command is run exactly as typed.
-        if (AppSettings.SmartFeatureEnabled("shell") && !Codale.Core.Shell.ShellCommandClassifier.IsShellCommand(text, viewModel.State.Cwd))
+        if (_smart.Settings.SmartFeatureEnabled("shell") && !Codale.Core.Shell.ShellCommandClassifier.IsShellCommand(text, viewModel.State.Cwd))
         {
             _translatingCommand = true;
             Input.IsEnabled = false;
@@ -630,7 +638,7 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
             {
                 var cwd = viewModel.State.Cwd;
                 var shell = viewModel.ShellPath;
-                var translated = await SmartExperienceHost.Instance.ShellCommandAsync(
+                var translated = await _smart.Instance.ShellCommandAsync(
                     new(cwd, cwd, "shell"), text, shell);
                 if (translated?.Value is not { Length: > 0 } command)
                 {
@@ -770,7 +778,7 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
 
         if (_historyIndex < 0)
         {
-            _history = CommandHistory.Recent(viewModel.HistoryKey);
+            _history = viewModel.History.Recent(viewModel.HistoryKey);
             _draft = Input.Text;
         }
 
@@ -814,7 +822,7 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
             return;
         }
 
-        _suggestions = CommandHistory.Suggest(viewModel.HistoryKey, typed)
+        _suggestions = viewModel.History.Suggest(viewModel.HistoryKey, typed)
             .Where(s => !string.Equals(s, typed, StringComparison.Ordinal))
             .Take(5)
             .ToList();
@@ -880,17 +888,17 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
             if (isPowerShell)
             {
                 await Task.Delay(90, cancel.Token);
-                line = await PowerShellCompletionHost.For(shell, AppSettings.TerminalLoadProfile)
+                line = await PowerShellCompletionHost.For(shell, _smart.Settings.TerminalLoadProfile)
                     .CompleteLineAsync(typed, cwd, cancel.Token);
             }
 
-            if (line is null && typed.Trim().Length >= 2 && SmartInlineCompletion.IsEnabled("shell-completion") &&
+            if (line is null && typed.Trim().Length >= 2 && _completion.IsEnabled("shell-completion") &&
                 Codale.Core.Shell.ShellCommandClassifier.IsShellCommand(typed, cwd))
             {
-                var recent = CommandHistory.Recent(viewModel.HistoryKey).Take(8).Reverse();
+                var recent = viewModel.History.Recent(viewModel.HistoryKey).Take(8).Reverse();
                 var prefix = $"# Shell: {Path.GetFileNameWithoutExtension(shell)} on Windows\n# Directory: {cwd}\n" +
                     string.Concat(recent.Select(c => $"> {c}\n")) + "> " + typed;
-                if (await SmartInlineCompletion.SuggestAsync("shell-completion", cwd, prefix, cancel.Token) is { Length: > 0 } rest)
+                if (await _completion.SuggestAsync("shell-completion", cwd, prefix, cancel.Token) is { Length: > 0 } rest)
                 {
                     line = typed + rest;
                 }

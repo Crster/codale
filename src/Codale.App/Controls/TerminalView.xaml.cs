@@ -130,9 +130,9 @@ public sealed partial class TerminalView : UserControl
         InitializeComponent();
 
         // Settings drive the defaults; ApplyAppSettings follows a live change.
-        _fontSize = Math.Clamp(AppSettings.TerminalFontSize, AppSettings.MinFontSize, AppSettings.MaxFontSize);
-        _fontFamily = ResolveFontFamily(AppSettings.TerminalFontFamily);
-        _emulator.ScrollbackLimit = AppSettings.TerminalScrollback;
+        _fontSize = 13;
+        _fontFamily = ResolveFontFamily("Cascadia Mono");
+        _emulator.ScrollbackLimit = 10000;
 
         // Every fed chunk repaints - without this, output (including the echo of each
         // keystroke) only showed up on the next caret blink, up to 530ms late.
@@ -216,12 +216,12 @@ public sealed partial class TerminalView : UserControl
     /// follow), and a new scrollback limit takes effect as lines push. Called for open
     /// terminals when a setting changes.
     /// </summary>
-    public void ApplyAppSettings()
+    public void ApplyAppSettings(AppSettingsStore settings)
     {
-        _emulator.ScrollbackLimit = AppSettings.TerminalScrollback;
+        _emulator.ScrollbackLimit = settings.TerminalScrollback;
 
-        var family = ResolveFontFamily(AppSettings.TerminalFontFamily);
-        var size = Math.Clamp(AppSettings.TerminalFontSize, AppSettings.MinFontSize, AppSettings.MaxFontSize);
+        var family = ResolveFontFamily(settings.TerminalFontFamily);
+        var size = Math.Clamp(settings.TerminalFontSize, AppSettingsStore.MinFontSize, AppSettingsStore.MaxFontSize);
         if (Math.Abs(_fontSize - size) < 0.01 && string.Equals(_fontFamily, family, StringComparison.Ordinal))
         {
             return;

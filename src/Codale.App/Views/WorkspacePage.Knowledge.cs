@@ -86,7 +86,7 @@ public sealed partial class WorkspacePage
             DefaultButton = ContentDialogButton.Primary,
         });
 
-        var directory = WorkspaceDb.DirectoryFor(project);
+        var data = ViewModel.Data;
         dialog.PrimaryButtonClick += async (_, args) =>
         {
             var deferral = args.GetDeferral();
@@ -99,7 +99,7 @@ public sealed partial class WorkspacePage
                     throw new ArgumentException("Enter the secret's value.");
                 }
 
-                await Task.Run(() => new EnvStore(directory).Set(key, secret));
+                await Task.Run(() => data.Secrets.Set(key, secret));
             }
             catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or InvalidOperationException)
             {
@@ -127,21 +127,21 @@ public sealed partial class WorkspacePage
         }
 
         var load = ++_knowledgeLoad;
-        var directory = WorkspaceDb.DirectoryFor(project);
+        var data = ViewModel.Data;
         List<KnowledgeRow> rows;
         try
         {
             rows = await Task.Run(() =>
             {
                 var list = new List<KnowledgeRow>();
-                foreach (var note in new MemoryStore(directory).List())
+                foreach (var note in data.Memory.List())
                 {
                     var tags = note.Tags.Count > 0 ? $"\n{string.Join(", ", note.Tags)}" : "";
                     list.Add(new KnowledgeRow(false, note.Id, note.Title, note.Text.ReplaceLineEndings(" "),
                         $"{note.Title}\n\n{note.Text}{tags}"));
                 }
 
-                foreach (var name in new EnvStore(directory).Names())
+                foreach (var name in data.Secrets.Names())
                 {
                     list.Add(new KnowledgeRow(true, name, name, "Secret · ••••••••",
                         $"{name}\nThe value is encrypted and only given to the agent on request."));
@@ -193,10 +193,10 @@ public sealed partial class WorkspacePage
             return;
         }
 
-        var directory = WorkspaceDb.DirectoryFor(project);
+        var data = ViewModel.Data;
         try
         {
-            await Task.Run(() => row.IsSecret ? new EnvStore(directory).Remove(row.Id) : new MemoryStore(directory).Forget(row.Id));
+            await Task.Run(() => row.IsSecret ? data.Secrets.Remove(row.Id) : data.Memory.Forget(row.Id));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
         {

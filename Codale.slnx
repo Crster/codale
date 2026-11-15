@@ -14,6 +14,7 @@
     <Project Path="src/Codale.Mcp.Tasks/Codale.Mcp.Tasks.csproj" />
     <Project Path="src/Codale.Search/Codale.Search.csproj" />
     <Project Path="src/Codale.Smart/Codale.Smart.csproj" />
+    <Project Path="src/Codale.Settings/Codale.Settings.csproj" />
     <Project Path="src/Codale.Db/Codale.Db.csproj" />
     <Project Path="src/Codale.Editor/Codale.Editor.csproj" />
     <Project Path="src/Codale.Workspace/Codale.Workspace.csproj" />
@@ -21,6 +22,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Codale.Agents.Tests/Codale.Agents.Tests.csproj" />
+    <Project Path="tests/Codale.Settings.Tests/Codale.Settings.Tests.csproj" />
     <Project Path="tests/Codale.Commands.Tests/Codale.Commands.Tests.csproj" />
     <Project Path="tests/Codale.Core.Tests/Codale.Core.Tests.csproj" />
     <Project Path="tests/Codale.Git.Tests/Codale.Git.Tests.csproj" />

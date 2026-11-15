@@ -5,9 +5,6 @@ using Windows.UI.Core;
 
 namespace Codale.App.Services;
 
-/// <summary>One thing a shortcut can do, and the chord it starts with.</summary>
-public sealed record ShortcutAction(string Id, string Label, string Description, string Default);
-
 /// <summary>A key with its modifiers, e.g. <c>Ctrl+Shift+I</c>. The text form is what settings.json stores.</summary>
 public readonly record struct KeyChord(VirtualKey Key, bool Ctrl, bool Shift, bool Alt)
 {
@@ -174,7 +171,7 @@ public readonly record struct KeyChord(VirtualKey Key, bool Ctrl, bool Shift, bo
 /// user's overrides from settings.json (<c>shortcut.*</c>). A chord stored as "none"
 /// disables the action; an unreadable one falls back to the default.
 /// </summary>
-public static class KeyboardShortcuts
+public sealed class KeyboardShortcuts : IDisposable
 {
     public const string OpenTerminal = "openTerminal";
     public const string FocusShellCommand = "focusShellCommand";
@@ -210,71 +207,37 @@ public static class KeyboardShortcuts
     private static readonly HashSet<string> Reserved = ["Ctrl+A", "Ctrl+C", "Ctrl+V", "Ctrl+X", "Ctrl+Z", "Ctrl+Y", "Ctrl+S"];
 
     /// <summary>While a Settings recorder waits for a chord, the window must not act on the keys it is about to capture.</summary>
-    public static bool IsRecording { get; set; }
+    public bool IsRecording { get; set; }
 
-    private static Dictionary<KeyChord, string>? _map;
+    private readonly ShortcutBindings _bindings;
 
-    static KeyboardShortcuts() => AppSettings.Changed += (_, _) => _map = null;
+    public KeyboardShortcuts(AppSettingsStore settings) => _bindings = new(settings, Actions,
+        text => text.Equals(DoubleEscape, StringComparison.OrdinalIgnoreCase) ? DoubleEscape : KeyChord.Parse(text)?.ToString());
+
+    public void Dispose()
+    {
+        _bindings.Dispose();
+        IsRecording = false;
+    }
 
     public static ShortcutAction ActionFor(string id) => Actions.First(a => a.Id == id);
 
     /// <summary>The chord text for an action, or "" when it is disabled.</summary>
-    public static string Get(string id)
-    {
-        var stored = AppSettings.GetShortcut(id);
-        if (stored is null)
-        {
-            return ActionFor(id).Default;
-        }
-
-        if (stored.Equals("none", StringComparison.OrdinalIgnoreCase))
-        {
-            return "";
-        }
-
-        if (id == StopChat && stored.Equals(DoubleEscape, StringComparison.OrdinalIgnoreCase))
-        {
-            return DoubleEscape;
-        }
-
-        return KeyChord.Parse(stored)?.ToString() ?? ActionFor(id).Default;
-    }
+    public string Get(string id) => _bindings.Get(id);
 
     /// <summary>True while the user has Esc Esc bound to stopping the chat.</summary>
-    public static bool StopOnDoubleEscape => Get(StopChat) == DoubleEscape;
+    public bool StopOnDoubleEscape => Get(StopChat) == DoubleEscape;
 
     /// <summary>Stores a chord (or "" to disable the action); the default is stored as the absence of a setting.</summary>
-    public static void Set(string id, string chord)
-    {
-        var value = chord.Length == 0 ? "none" : chord;
-        AppSettings.SetShortcut(id, value == ActionFor(id).Default ? null : value);
-    }
+    public void Set(string id, string chord) => _bindings.Set(id, chord);
 
     public static bool IsReserved(KeyChord chord) => Reserved.Contains(chord.ToString());
 
     /// <summary>The action currently bound to a chord, or null.</summary>
-    public static string? Find(KeyChord chord)
-    {
-        _map ??= Build();
-        return _map.GetValueOrDefault(chord);
-    }
+    public string? Find(KeyChord chord) => _bindings.Find(chord.ToString());
 
     /// <summary>The action (other than <paramref name="except"/>) already using the chord, for the conflict message.</summary>
-    public static ShortcutAction? Owner(KeyChord chord, string except) =>
+    public ShortcutAction? Owner(KeyChord chord, string except) =>
         Find(chord) is { } id && id != except ? ActionFor(id) : null;
 
-    private static Dictionary<KeyChord, string> Build()
-    {
-        var map = new Dictionary<KeyChord, string>();
-        foreach (var action in Actions)
-        {
-            // A hand-edited duplicate: the first action listed keeps the chord.
-            if (KeyChord.Parse(Get(action.Id)) is { } chord)
-            {
-                map.TryAdd(chord, action.Id);
-            }
-        }
-
-        return map;
-    }
 }

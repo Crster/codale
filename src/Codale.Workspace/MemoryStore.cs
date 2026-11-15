@@ -11,7 +11,7 @@ public sealed record MemoryNote(string Id, string Title, string Text, IReadOnlyL
 /// meaning (the database's embeddings) and by the words themselves, so an exact term still finds its note.
 /// </summary>
 /// <remarks>Layout: <c>memory.ID</c> is the note as JSON; the note's text is embedded on that same node.</remarks>
-public sealed class MemoryStore(string directory)
+public sealed class MemoryStore(string directory, WorkspaceDatabasePool? databases = null)
 {
     private const int MaxText = 8000;
     /// <exception cref="ArgumentException">There is no text, or no title to name it by.</exception>
@@ -32,7 +32,7 @@ public sealed class MemoryStore(string directory)
         var note = new MemoryNote(IdOf(title), title, text,
             [.. (tags ?? []).Select(t => t.Trim()).Where(t => t.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)],
             DateTimeOffset.Now);
-        WorkspaceDb.Use(directory, db => db.Batch(() =>
+        (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Batch(() =>
         {
             var node = db.Open("memory").Open(note.Id);
             node.WriteJson(note);
@@ -42,17 +42,17 @@ public sealed class MemoryStore(string directory)
     }
 
     public MemoryNote? Get(string id) =>
-        WorkspaceDb.Use(directory, db => db.Open("memory").Open(IdOf(id)).ReadJson<MemoryNote>());
+        (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("memory").Open(IdOf(id)).ReadJson<MemoryNote>());
 
     public bool Forget(string id) =>
-        WorkspaceDb.Use(directory, db => db.Open("memory").Open(IdOf(id)).Remove());
+        (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("memory").Open(IdOf(id)).Remove());
 
     /// <summary>Every note, newest first.</summary>
-    public IReadOnlyList<MemoryNote> List() => WorkspaceDb.Use(directory, db =>
+    public IReadOnlyList<MemoryNote> List() => (databases ?? WorkspaceDb.Shared).Use(directory, db =>
         (IReadOnlyList<MemoryNote>)Everything(db).OrderByDescending(n => n.SavedAt).ToList());
 
     /// <summary>The notes that best answer <paramref name="query"/>, best first; empty when none relate to it.</summary>
-    public IReadOnlyList<MemoryNote> Search(string query, int limit = 5) => WorkspaceDb.Use(directory, db =>
+    public IReadOnlyList<MemoryNote> Search(string query, int limit = 5) => (databases ?? WorkspaceDb.Shared).Use(directory, db =>
     {
         var terms = Terms(query);
         var scores = new Dictionary<string, (MemoryNote Note, double Score)>();

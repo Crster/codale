@@ -17,77 +17,11 @@ namespace Codale.Workspace;
 /// </remarks>
 public static class WorkspaceDb
 {
-    private static readonly TimeSpan IdleClose = TimeSpan.FromMilliseconds(300);
-    private static readonly TimeSpan MaxHold = TimeSpan.FromSeconds(1.5);
-    private static readonly TimeSpan LockWait = TimeSpan.FromSeconds(5);
-    private static readonly object Gate = new();
-    private static readonly Dictionary<string, Pin> Pins = new(StringComparer.OrdinalIgnoreCase);
+    internal static WorkspaceDatabasePool Shared { get; } = new();
 
-    private sealed class Pin
-    {
-        public CodaleDb? Db;
-        public DateTime Since;
-        public Timer? Timer;
-    }
-
-    /// <summary>The database folder for a project (shared by its linked worktrees).</summary>
     public static string DirectoryFor(string projectPath) =>
         Path.Combine(ProjectPaths.KnowledgeDirectory(projectPath), "workspace-db");
 
-    public static void Use(string directory, Action<CodaleDb> action) => Use<object?>(directory, db =>
-    {
-        action(db);
-        return null;
-    });
-
-    /// <exception cref="IOException">Another process kept the database busy longer than the wait.</exception>
-    public static T Use<T>(string directory, Func<CodaleDb, T> work)
-    {
-        var key = Path.GetFullPath(directory);
-        CodaleDb lease;
-        lock (Gate)
-        {
-            if (!Pins.TryGetValue(key, out var pin))
-            {
-                Pins[key] = pin = new Pin();
-            }
-
-            var options = new CodaleDbOptions { LockTimeout = LockWait };
-            if (pin.Db is null)
-            {
-                pin.Db = CodaleDb.Acquire(key, options);
-                pin.Since = DateTime.UtcNow;
-                pin.Timer = new Timer(_ => Release(key), null, IdleClose, Timeout.InfiniteTimeSpan);
-            }
-            else if (DateTime.UtcNow - pin.Since < MaxHold)
-            {
-                pin.Timer!.Change(IdleClose, Timeout.InfiniteTimeSpan);
-            }
-
-            lease = CodaleDb.Acquire(key, options);
-        }
-
-        try
-        {
-            return work(lease);
-        }
-        finally
-        {
-            lease.Dispose();
-        }
-    }
-
-    private static void Release(string key)
-    {
-        lock (Gate)
-        {
-            if (!Pins.Remove(key, out var pin))
-            {
-                return;
-            }
-
-            pin.Timer?.Dispose();
-            pin.Db?.Dispose();
-        }
-    }
+    public static void Use(string directory, Action<CodaleDb> action) => Shared.Use(directory, action);
+    public static T Use<T>(string directory, Func<CodaleDb, T> work) => Shared.Use(directory, work);
 }

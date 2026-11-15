@@ -17,11 +17,11 @@ public sealed partial class ChatViewModel
             // The Decision model rates the risk in about a second; General (when set) still writes the description.
             using var decisionDeadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
             decisionDeadline.CancelAfter(TimeSpan.FromSeconds(8));
-            var decided = SmartDecider.IsAvailable
-                ? SmartDecider.AskAsync(new { command }, new Dictionary<string, SmartQuestion> { ["risk"] = SmartDecisions.RiskQuestion() }, decisionDeadline.Token)
+            var decided = _decider.IsAvailable
+                ? _decider.AskAsync(new { command }, new Dictionary<string, SmartQuestion> { ["risk"] = SmartDecisions.RiskQuestion() }, decisionDeadline.Token)
                 : Task.FromResult<IReadOnlyDictionary<string, SmartDecision>?>(null);
-            var described = AppSettings.SmartRoleEnabled(SmartFeatureSettings.General)
-                ? SmartExperienceHost.Instance.AssessCommandAsync(
+            var described = _smart.Settings.SmartRoleEnabled(SmartFeatureSettings.General)
+                ? _smart.Instance.AssessCommandAsync(
                     new(_projectPath, _projectPath, "command-confirmation", _chatId, DateTimeOffset.UtcNow.AddSeconds(8)),
                     command, baseline.FormatAssessment(), ct)
                 : Task.FromResult<Codale.Smart.SmartResult<Codale.Smart.SmartCommandAssessment>?>(null);

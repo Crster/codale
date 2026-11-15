@@ -31,7 +31,7 @@ public sealed partial class WorkspacePage : IQuickSearchSource
                     Title = $"Find “{query}”",
                     Detail = fileScope,
                     Hint = "Enter",
-                    Invoke = () => OnTitleBarSearchSubmitted(App.Current.MainWindow, new SearchSubmission(query, InFile: true)),
+                    Invoke = () => OnTitleBarSearchSubmitted(_window, new SearchSubmission(query, InFile: true)),
                 });
                 AddContentSearch(results, query);
             }
@@ -90,7 +90,7 @@ public sealed partial class WorkspacePage : IQuickSearchSource
             Title = $"Search contents for “{query}”",
             Detail = "or ask a question about the code",
             Hint = "Search",
-            Invoke = () => OnTitleBarSearchSubmitted(App.Current.MainWindow, new SearchSubmission(query, InFile: false)),
+            Invoke = () => OnTitleBarSearchSubmitted(_window, new SearchSubmission(query, InFile: false)),
         });
 
     /// <summary>
@@ -271,7 +271,7 @@ public sealed partial class WorkspacePage : IQuickSearchSource
             ("", "New file", "file untitled create", OpenNewFileTab),
             ("", "Show Git", "git changes commit branch", ShowGitPanel),
             ("", "Toggle side panel", "files sidebar left panel", ToggleLeftPanel),
-            ("", "Settings", "settings preferences options theme", () => App.Current.MainWindow?.SetSettingsOpen(true)),
+            ("", "Settings", "settings preferences options theme", () => _window?.SetSettingsOpen(true)),
             ("", "Open browser", "browser web preview", () => ViewModel.McpTools.OpenBrowserCommand.Execute(null)),
         };
 

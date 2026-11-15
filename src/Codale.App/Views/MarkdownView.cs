@@ -57,7 +57,6 @@ public sealed class MarkdownView : StackPanel
         // an offscreen or unloaded view must not keep a timer ticking (or rebuild at all).
         Loaded += (_, _) =>
         {
-            Services.SyntaxSelection.Start();
             Core.Syntax.SyntaxService.Store.Changed += OnGrammarsChanged;
             if (_markdownStale)
             {
@@ -558,7 +557,6 @@ public sealed class MarkdownView : StackPanel
         // A fence naming a language the catalog knows is coloured by its grammar; a shell fence with
         // no usable grammar keeps the command-row colours, and everything else stays plain so prose
         // fences ("text", "diff output") stay calm.
-        Services.SyntaxSelection.Start();
         var language = Core.Syntax.SyntaxService.Catalog.ByName(code.Language);
         if (language is not null && Core.Syntax.SyntaxService.Tokenizer.Supports(language.Id))
         {

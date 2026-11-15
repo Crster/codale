@@ -16,6 +16,9 @@ namespace Codale.App.Views;
 /// </summary>
 public sealed partial class EditorTab : UserControl
 {
+    /// <summary>The project window that owns this view's pickers and attention feedback.</summary>
+    public IWindowOwner? Owner { get; set; }
+
     /// <summary>False for a tab started as a new file: the first save picks a path.</summary>
     public bool IsUntitled => ViewModel.FilePath is null;
 
@@ -46,9 +49,16 @@ public sealed partial class EditorTab : UserControl
     /// <summary>True while LoadText runs: programmatic text changes are neither dirty nor a word-count event.</summary>
     private bool _loadingText;
 
-    public EditorTab()
+    private readonly SmartExperienceHost _smart;
+
+    private readonly SyntaxSelection _syntax;
+
+    public EditorTab(SmartExperienceHost smart, SyntaxSelection syntax)
     {
+        _smart = smart;
+        _syntax = syntax;
         InitializeComponent();
+        FileEditor.ApplyAppSettings(smart.Settings);
 
         _zoomSettleTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
         _zoomSettleTimer.Interval = TimeSpan.FromMilliseconds(120);
@@ -142,8 +152,8 @@ public sealed partial class EditorTab : UserControl
     /// <summary>Live-applies Settings changes to the editor (font size, tabs, gutter, colours, wrap).</summary>
     public void ApplyAppSettings()
     {
-        FileEditor.ApplyAppSettings();
-        FileEditor.AutomaticInlineCompletions = AppSettings.SmartCompletions;
+        FileEditor.ApplyAppSettings(_smart.Settings);
+        FileEditor.AutomaticInlineCompletions = _smart.Settings.SmartCompletions;
         RenderHighlights();
     }
 
@@ -373,8 +383,8 @@ public sealed partial class EditorTab : UserControl
     /// </summary>
     private async Task<string?> CompleteInlineAsync(string prefix, string suffix, IReadOnlyList<string> rejected, CancellationToken ct)
     {
-        var smart = SmartExperienceHost.Instance;
-        if (!AppSettings.SmartExperience || !AppSettings.SmartCompletions || smart.Status.State != Codale.Smart.SmartState.Ready)
+        var smart = _smart.Instance;
+        if (!_smart.Settings.SmartExperience || !_smart.Settings.SmartCompletions || smart.Status.State != Codale.Smart.SmartState.Ready)
         {
             return null;
         }
@@ -893,7 +903,7 @@ public sealed partial class EditorTab : UserControl
         {
             // The App SDK picker, unlike the WinRT one, can open in an arbitrary folder,
             // so an untitled buffer starts out in the workspace it was created from.
-            var windowId = App.Current.MainWindowHandle is { } hwnd
+            var windowId = Owner?.WindowHandle is { } hwnd
                 ? Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd)
                 : default;
             var picker = new Microsoft.Windows.Storage.Pickers.FileSavePicker(windowId)
@@ -917,7 +927,7 @@ public sealed partial class EditorTab : UserControl
             // Keep a hand-picked language across the first save, otherwise detect from the new name.
             if (_untitledLanguage is not null)
             {
-                SyntaxSelection.SetOverride(file.Path, _untitledLanguage);
+                _syntax.SetOverride(file.Path, _untitledLanguage);
                 _untitledLanguage = null;
             }
 
@@ -953,12 +963,12 @@ public sealed partial class EditorTab : UserControl
 
     private void ApplyHighlighting(string path)
     {
-        var id = SyntaxSelection.IdFor(path);
-        if (id is null && !SyntaxSelection.HasOverride(path) && FileEditor.GetText() is { Length: > 0 } text)
+        var id = _syntax.IdFor(path);
+        if (id is null && !_syntax.HasOverride(path) && FileEditor.GetText() is { Length: > 0 } text)
         {
             // Only files the name does not identify pay for reading a first line (a shebang, "<?xml").
             var end = text.IndexOf('\n');
-            id = SyntaxSelection.IdFor(path, text[..Math.Min(end < 0 ? text.Length : end, 200)]);
+            id = _syntax.IdFor(path, text[..Math.Min(end < 0 ? text.Length : end, 200)]);
         }
 
         FileEditor.SelectSyntaxHighlightingById(id);
@@ -982,7 +992,7 @@ public sealed partial class EditorTab : UserControl
             return;
         }
 
-        SyntaxSelection.SetOverride(ViewModel.FilePath, languageId);
+        _syntax.SetOverride(ViewModel.FilePath, languageId);
         ApplyHighlighting(ViewModel.FilePath);
     }
 
@@ -991,5 +1001,5 @@ public sealed partial class EditorTab : UserControl
     /// <summary>True when the language was picked by hand rather than detected from the file.</summary>
     public bool HasManualLanguage => string.IsNullOrEmpty(ViewModel.FilePath)
         ? _untitledLanguage is not null
-        : SyntaxSelection.HasOverride(ViewModel.FilePath);
+        : _syntax.HasOverride(ViewModel.FilePath);
 }

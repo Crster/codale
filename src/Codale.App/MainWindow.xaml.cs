@@ -12,6 +12,12 @@ using Microsoft.UI.Xaml.Media.Animation;
 
 namespace Codale.App;
 
+/// <summary>Navigation argument for the workspace page: the project and the window that hosts it.</summary>
+public sealed record WorkspaceNavigation(WorkspaceViewModel Workspace, MainWindow Window);
+
+/// <summary>Navigation argument for the project picker: the recent projects and the window that opens them.</summary>
+public sealed record ProjectPickerNavigation(RecentProjects Recents, MainWindow Window);
+
 /// <summary>A title bar search: the query, and whether it is scoped to the open file.</summary>
 public sealed record SearchSubmission(string Query, bool InFile);
 
@@ -27,13 +33,17 @@ public sealed class ShortcutEventArgs(string actionId) : EventArgs
 /// The project window. One of these exists per project; the launcher variant shows the
 /// picker until a project is chosen.
 /// </summary>
-public sealed partial class MainWindow : Window
+public sealed partial class MainWindow : Window, IWindowOwner
 {
     private WorkspaceViewModel? _workspace;
+    private readonly ApplicationServices _services;
+    private readonly List<Task> _retiringWorkspaces = [];
 
-    public MainWindow(ActivationRequest request)
+    public MainWindow(ActivationRequest request, ApplicationServices services)
     {
+        _services = services;
         InitializeComponent();
+        SettingsHost.InitializeServices(services.Smart, services.AgentSessions, services.Settings, services.Shortcuts, services.Syntax, this);
 
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
@@ -41,7 +51,7 @@ public sealed partial class MainWindow : Window
 
         ApplyTheme();
         RootGrid.ActualThemeChanged += (_, _) => ChatPaletteTheme.Apply(RootGrid.ActualTheme == ElementTheme.Light);
-        AppSettings.Changed += OnAppSettingsChanged;
+        _services.Settings.Changed += OnAppSettingsChanged;
 
         // Closing (not Closed) is where unsaved edits are asked about and the sessions are
         // stopped: it can still be cancelled, and the process outlives it.
@@ -69,7 +79,7 @@ public sealed partial class MainWindow : Window
         {
             Title = "Codale";
             AppTitleBar.Title = "Codale";
-            RootFrame.Navigate(typeof(ProjectPickerPage));
+            RootFrame.Navigate(typeof(ProjectPickerPage), new ProjectPickerNavigation(_services.RecentProjects, this));
         }
     }
 
@@ -98,11 +108,12 @@ public sealed partial class MainWindow : Window
         if (_workspace is { } previous)
         {
             _workspace = null;
-            _ = DisposeWorkspaceAsync(previous);
+            _retiringWorkspaces.RemoveAll(task => task.IsCompleted);
+            _retiringWorkspaces.Add(DisposeWorkspaceAsync(previous));
         }
 
-        RecentProjects.Record(projectPath);
-        _workspace = new WorkspaceViewModel(projectPath);
+        _services.RecentProjects.Record(projectPath);
+        _workspace = _services.CreateWorkspace(projectPath);
 
         // Project chrome (panel toggles, folder switch, search) only exists once
         // there is something to act on.
@@ -119,10 +130,13 @@ public sealed partial class MainWindow : Window
         AppTitleBar.Title = _workspace.DisplayName;
         AppTitleBar.Subtitle = _workspace.ProjectPath;
 
-        RootFrame.Navigate(typeof(WorkspacePage), _workspace);
+        RootFrame.Navigate(typeof(WorkspacePage), new WorkspaceNavigation(_workspace, this));
     }
 
     /// <summary>Called when a second launch for this project was redirected here.</summary>
+    /// <inheritdoc />
+    public IntPtr? WindowHandle => WinRT.Interop.WindowNative.GetWindowHandle(this);
+
     public void BringToFront()
     {
         if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter)
@@ -167,7 +181,7 @@ public sealed partial class MainWindow : Window
     /// <summary>The launcher shows the chord that opens it, as configured in Settings.</summary>
     private void UpdateSearchShortcutText()
     {
-        var chord = KeyboardShortcuts.Get(KeyboardShortcuts.Search);
+        var chord = _services.Shortcuts.Get(KeyboardShortcuts.Search);
         SearchShortcutText.Text = string.IsNullOrWhiteSpace(chord) ? "" : chord;
         SearchShortcutText.Visibility = string.IsNullOrWhiteSpace(chord) ? Visibility.Collapsed : Visibility.Visible;
     }
@@ -308,9 +322,9 @@ public sealed partial class MainWindow : Window
 
     private void OnRootPreviewKeyDown(object _, KeyRoutedEventArgs e)
     {
-        if (KeyboardShortcuts.IsRecording || ShortcutInvoked is null ||
+        if (_services.Shortcuts.IsRecording || ShortcutInvoked is null ||
             KeyChord.FromKeyPress(e.Key, usableOnly: true) is not { IsUsable: true } chord ||
-            KeyboardShortcuts.Find(chord) is not { } actionId)
+            _services.Shortcuts.Find(chord) is not { } actionId)
         {
             return;
         }
@@ -349,7 +363,7 @@ public sealed partial class MainWindow : Window
 
     private void ApplyTheme()
     {
-        RootGrid.RequestedTheme = AppSettings.Theme switch
+        RootGrid.RequestedTheme = _services.Settings.Theme switch
         {
             "Light" => ElementTheme.Light,
             "Dark" => ElementTheme.Dark,
@@ -424,7 +438,7 @@ public sealed partial class MainWindow : Window
             TitleBarCenter.Visibility = Visibility.Collapsed;
             QuickSearchHost.Close();
             QuickSearchHost.Source = null;
-            RootFrame.Navigate(typeof(ProjectPickerPage));
+            RootFrame.Navigate(typeof(ProjectPickerPage), new ProjectPickerNavigation(_services.RecentProjects, this));
         }
         catch (Exception)
         {
@@ -437,7 +451,7 @@ public sealed partial class MainWindow : Window
 
     private void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
-        if (_closeConfirmed || _workspace is null)
+        if (_closeConfirmed)
         {
             return;
         }
@@ -474,6 +488,9 @@ public sealed partial class MainWindow : Window
                 _workspace = null;
                 await DisposeWorkspaceAsync(workspace);
             }
+
+            await Task.WhenAll(_retiringWorkspaces);
+            await _services.DisposeAsync();
         }
         catch (Exception)
         {
@@ -566,7 +583,7 @@ public sealed partial class MainWindow : Window
 
     private async void OnClosed(object sender, WindowEventArgs args)
     {
-        AppSettings.Changed -= OnAppSettingsChanged;
+        _services.Settings.Changed -= OnAppSettingsChanged;
 
         // Normally already torn down by CloseAfterCleanupAsync; this catches any other way out.
         if (_workspace is { } workspace)

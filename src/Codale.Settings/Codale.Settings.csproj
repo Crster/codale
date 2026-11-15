@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Codale.Agents/Codale.Agents.csproj" />
+    <ProjectReference Include="../Codale.Db/Codale.Db.csproj" />
+  </ItemGroup>
+</Project>

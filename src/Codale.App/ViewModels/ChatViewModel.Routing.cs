@@ -32,7 +32,7 @@ public sealed partial class ChatViewModel
     {
         var local = MessageRouting.Assess(text);
         var fallback = MessageRouting.RouteWithoutModel(text);
-        if (!AppSettings.SmartFeatureEnabled("routing")) return (fallback, null);
+        if (!_smart.Settings.SmartFeatureEnabled("routing")) return (fallback, null);
 
         var earlier = Items.OfType<UserMessageItem>().Where(i => !ReferenceEquals(i, shown) && i.Text.Length > 0)
             .TakeLast(3).Select(i => i.Text).ToList();
@@ -42,7 +42,7 @@ public sealed partial class ChatViewModel
 
         // The Decision model answers in about a second, so every prompt with a subject of its own is checked
         // against the project's sessions; its answer is trusted only when it is sure.
-        if (SmartDecider.IsAvailable)
+        if (_decider.IsAvailable)
         {
             var askSession = canRedirect && SearchText.HasTopic(text) && !MessageRouting.IsFollowUp(text);
             if (local.Confident && !askSession) return (fallback, null);
@@ -52,9 +52,9 @@ public sealed partial class ChatViewModel
         }
 
         var shifted = canRedirect && TopicShift.IsNewTopic(text, earlier, LastRoutingReply)
-            && AppSettings.SmartRoleEnabled(SmartFeatureSettings.General);
+            && _smart.Settings.SmartRoleEnabled(SmartFeatureSettings.General);
         if (local.Confident && !shifted) return (fallback, null);
-        if (!AppSettings.SmartRoleEnabled(SmartFeatureSettings.General) || SmartExperienceHost.Instance.Status.State != Codale.Smart.SmartState.Ready)
+        if (!_smart.Settings.SmartRoleEnabled(SmartFeatureSettings.General) || _smart.Instance.Status.State != Codale.Smart.SmartState.Ready)
             return (fallback, null);
 
         try
@@ -63,7 +63,7 @@ public sealed partial class ChatViewModel
             quick.CancelAfter(TimeSpan.FromSeconds(shifted ? 6 : 4));
             if (!shifted)
             {
-                var intent = await SmartExperienceHost.Instance.ClassifyAsync(new(_projectPath, _projectPath, "routing", _chatId, deadline),
+                var intent = await _smart.Instance.ClassifyAsync(new(_projectPath, _projectPath, "routing", _chatId, deadline),
                     text, LastRoutingReply, quick.Token).WaitAsync(quick.Token);
                 return intent?.Value is { } selected ? (MessageRouting.Reconcile(local, selected switch
                 {
@@ -76,7 +76,7 @@ public sealed partial class ChatViewModel
             // Recent sessions only: the list is the model's prompt, and a far-off session is rarely the right one.
             var sessions = Features!.List().OrderByDescending(f => f.Id == FeatureId).ThenByDescending(f => f.UpdatedAt)
                 .Take(MaxRoutedSessions).ToList();
-            var helper = new SmartHelperModel(_projectPath, "routing", TimeSpan.FromSeconds(6));
+            var helper = new SmartHelperModel(_projectPath, "routing", TimeSpan.FromSeconds(6), _smart);
             var call = await helper.CallToolAsync(FeatureRouting.SystemPrompt,
                 FeatureRouting.BuildConversation(text, sessions, FeatureId, LastRoutingReply), [FeatureRouting.RouteTool(sessions)], quick.Token);
             if (call is null) return (fallback, null);
@@ -117,7 +117,7 @@ public sealed partial class ChatViewModel
             using var quick = CancellationTokenSource.CreateLinkedTokenSource(ct);
             quick.CancelAfter(TimeSpan.FromSeconds(4));
             var current = sessions.FirstOrDefault(s => s.Id == FeatureId) ?? (FeatureId is { } id ? Features?.Get(id) : null);
-            var answers = await SmartDecider.AskAsync(SmartDecisions.State(text, current, LastRoutingReply), questions, quick.Token);
+            var answers = await _decider.AskAsync(SmartDecisions.State(text, current, LastRoutingReply), questions, quick.Token);
             if (answers is null) return null;
             var decision = answers.TryGetValue("intent", out var intent) ? SmartDecisions.Route(local, intent) : fallback;
             TopicRedirect? redirect = null;
@@ -202,11 +202,11 @@ public sealed partial class ChatViewModel
     /// <summary>The General model names the session from a prompt; the quick name stands until then, or when it is off.</summary>
     private async void NameSessionAsync(string id, string prompt, string placeholder)
     {
-        if (!AppSettings.SmartFeatureEnabled("title") || Features is not { } features) return;
+        if (!_smart.Settings.SmartFeatureEnabled("title") || Features is not { } features) return;
         try
         {
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            var named = await SmartExperienceHost.Instance.TitleAsync(new(_projectPath, _projectPath, "title", _chatId), prompt, deadline.Token);
+            var named = await _smart.Instance.TitleAsync(new(_projectPath, _projectPath, "title", _chatId), prompt, deadline.Token);
             if (named?.Value is not { Length: > 0 } title) return;
             _dispatcher.TryEnqueue(() =>
             {

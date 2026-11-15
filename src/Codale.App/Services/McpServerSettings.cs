@@ -34,11 +34,13 @@ public sealed class McpServerSettings
     public const string ClaudeComputerServer = "computer-use";
 
     private readonly string _projectPath;
+    private readonly ApplicationDatabase _database;
     private readonly string _baseDirectory;
 
-    public McpServerSettings(string projectPath, string? baseDirectory = null)
+    public McpServerSettings(string projectPath, ApplicationDatabase database, string? baseDirectory = null)
     {
         _projectPath = projectPath;
+        _database = database;
         _baseDirectory = baseDirectory ?? AppContext.BaseDirectory;
     }
 
@@ -47,12 +49,12 @@ public sealed class McpServerSettings
     {
         get
         {
-            using var db = AppDb.Open();
+            using var db = _database.Open();
             return ParseMode(db.Setting(BrowserKey).Read(), AgentToolMode.Allow);
         }
         set
         {
-            using var db = AppDb.Open();
+            using var db = _database.Open();
             db.Setting(BrowserKey).Write(FormatMode(value));
         }
     }
@@ -62,12 +64,12 @@ public sealed class McpServerSettings
     {
         get
         {
-            using var db = AppDb.Open();
+            using var db = _database.Open();
             return ParseMode(db.Project(_projectPath).Open("ui").Open(ComputerKey).Read(), AgentToolMode.Block);
         }
         set
         {
-            using var db = AppDb.Open();
+            using var db = _database.Open();
             db.Project(_projectPath).Open("ui").Open(ComputerKey).Write(FormatMode(value));
         }
     }
@@ -77,12 +79,12 @@ public sealed class McpServerSettings
     {
         get
         {
-            using var db = AppDb.Open();
+            using var db = _database.Open();
             return ParseMode(db.Project(_projectPath).Open("ui").Open(PhoneKey).Read(), AgentToolMode.Block);
         }
         set
         {
-            using var db = AppDb.Open();
+            using var db = _database.Open();
             db.Project(_projectPath).Open("ui").Open(PhoneKey).Write(FormatMode(value));
         }
     }

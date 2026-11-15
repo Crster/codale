@@ -60,6 +60,9 @@ public sealed partial class WorkspacePage : Page
     /// <summary>The one tab a file click may replace; null once its file is edited.</summary>
     private EditorTabEntry? _previewTab;
 
+    /// <summary>The window that hosts this page; set from the navigation argument.</summary>
+    private MainWindow? _window;
+
     public WorkspacePage()
     {
         InitializeComponent();
@@ -77,12 +80,13 @@ public sealed partial class WorkspacePage : Page
     {
         base.OnNavigatedTo(e);
 
-        if (e.Parameter is not WorkspaceViewModel workspace)
+        if (e.Parameter is not WorkspaceNavigation navigation)
         {
             return;
         }
 
-        ViewModel = workspace;
+        _window = navigation.Window;
+        ViewModel = navigation.Workspace;
         ViewModel.PropertyChanged += OnWorkspacePropertyChanged;
         ViewModel.ChatActivationRequested += OnChatActivationRequested;
         ViewModel.AgentTerminalOpened += OnAgentTerminalOpened;
@@ -90,7 +94,7 @@ public sealed partial class WorkspacePage : Page
 
         UpdateEmptyState();
 
-        if (App.Current.MainWindow is { } window)
+        if (_window is { } window)
         {
             window.CommandsRequested += OnTitleBarCommandsRequested;
             window.McpToolsRequested += OnTitleBarMcpToolsRequested;
@@ -102,8 +106,8 @@ public sealed partial class WorkspacePage : Page
 
         // The Settings window writes app-level preferences; this page applies them
         // live to the tabs it owns. All windows share one UI thread.
-        AppSettings.Changed += OnAppSettingsChanged;
-        SmartExperienceHost.Status.Changed += OnSmartStatusChanged;
+        ViewModel.Smart.Settings.Changed += OnAppSettingsChanged;
+        ViewModel.Smart.Status.Changed += OnSmartStatusChanged;
         RefreshSmartStatus();
 
         // Everything except the CLI: no agent session starts until the user opens a
@@ -123,16 +127,16 @@ public sealed partial class WorkspacePage : Page
     {
         base.OnNavigatedFrom(e);
 
-        AppSettings.Changed -= OnAppSettingsChanged;
         if (ViewModel is not null)
         {
+            ViewModel.Smart.Settings.Changed -= OnAppSettingsChanged;
             ViewModel.AgentTerminalOpened -= OnAgentTerminalOpened;
+            ViewModel.Smart.Status.Changed -= OnSmartStatusChanged;
         }
-        SmartExperienceHost.Status.Changed -= OnSmartStatusChanged;
         foreach (var entry in _terminalTabs) entry.Tab.CloseHost();
         foreach (var entry in _editorTabs) entry.Tab.CloseHost();
 
-        if (App.Current.MainWindow is { } window)
+        if (_window is { } window)
         {
             window.CommandsRequested -= OnTitleBarCommandsRequested;
             window.McpToolsRequested -= OnTitleBarMcpToolsRequested;
@@ -192,7 +196,7 @@ public sealed partial class WorkspacePage : Page
 
     private void RefreshSmartStatus()
     {
-        var status = SmartExperienceHost.Status.Snapshot();
+        var status = ViewModel.Smart.Status.Snapshot();
         SmartStatusText.Text = status.Text;
         SmartStatusHost.Visibility = status.Visible ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -379,7 +383,7 @@ public sealed partial class WorkspacePage : Page
                 break;
             case "search":
                 OpenSearchTab();
-                App.Current.MainWindow?.FocusSearch();
+                _window?.FocusSearch();
                 break;
         }
     }
@@ -403,8 +407,8 @@ public sealed partial class WorkspacePage : Page
     {
         if (cliId is null)
         {
-            var profile = await AppSettings.ResolveChatProfileAsync();
-            AppSettings.SetCliProvider(profile.Cli, profile.Provider);
+            var profile = await ViewModel.Smart.Settings.ResolveChatProfileAsync();
+            ViewModel.Smart.Settings.SetCliProvider(profile.Cli, profile.Provider);
             cliId = profile.Cli;
         }
         var cli = CliLocator.KnownClis.First(known => known.Id == cliId);
@@ -528,7 +532,7 @@ public sealed partial class WorkspacePage : Page
                 }, DialogTone.Info, AppDialog.Glyphs.Account);
                 if (await dialog.ShowAsync() == ContentDialogResult.Primary)
                 {
-                    App.Current.MainWindow?.OpenAccountSettings();
+                    _window?.OpenAccountSettings();
                 }
             }
             finally
@@ -575,7 +579,7 @@ public sealed partial class WorkspacePage : Page
     private void OnChatAttentionNeeded(object? sender, AttentionRequest request)
     {
         if (sender is not ChatViewModel chat ||
-            App.Current.MainWindowHandle is not { } hwnd ||
+            _window?.WindowHandle is not { } hwnd ||
             Services.Attention.IsForeground(hwnd))
         {
             return;
@@ -604,7 +608,7 @@ public sealed partial class WorkspacePage : Page
             _attentionChat = chat;
         }
 
-        if (!_watchingActivation && App.Current.MainWindow is { } window)
+        if (!_watchingActivation && _window is { } window)
         {
             _watchingActivation = true;
             window.Activated += OnWindowActivated;
@@ -651,7 +655,7 @@ public sealed partial class WorkspacePage : Page
 
         if (entry is null)
         {
-            var tab = new ChatTab { ViewModel = chat, Workspace = ViewModel };
+            var tab = new ChatTab(ViewModel.Smart.Settings, ViewModel.Shortcuts) { ViewModel = chat, Workspace = ViewModel, Owner = _window };
             tab.ToolFileRequested += OnChatToolFileRequested;
             tab.PlanOpenRequested += OnChatPlanOpenRequested;
             tab.TaskPeekRequested += OnChatTaskPeekRequested;
@@ -830,7 +834,7 @@ public sealed partial class WorkspacePage : Page
         if (terminal.AgentSession is not null)
         {
             // An agent CLI: its TUI in a rounded card beside the session panel.
-            var cli = new CliTerminalTab { ViewModel = terminal, Workspace = ViewModel };
+            var cli = new CliTerminalTab(ViewModel.Smart.Settings) { ViewModel = terminal, Workspace = ViewModel };
             cli.FileDiffRequested += (_, path) => OnChatToolFileRequested(cli, new ToolFileRequestEventArgs(path, isEdit: true));
             cli.ArtifactRequested += (_, artifact) => ShowArtifactFromChat(artifact);
             cli.UpdateCliRequested += (_, cmd) => _ = UpdateCliAsync(cmd);
@@ -848,7 +852,7 @@ public sealed partial class WorkspacePage : Page
         }
         else
         {
-            var notebook = new TerminalTab { ViewModel = terminal };
+            var notebook = new TerminalTab(ViewModel.Smart) { ViewModel = terminal, Owner = _window };
             notebook.BlockPopOutRequested += (_, block) => OpenBlockInNewTab(terminal, block);
             notebook.BlockDockRequested += (_, request) => DockBlock(terminal, request.Block, request.Dock);
             notebook.BlockDragStarted += (_, block) => BeginDockDrag(terminal, block);
@@ -1042,7 +1046,7 @@ public sealed partial class WorkspacePage : Page
     /// <summary>Flashes the taskbar and raises a Windows notification, unless Codale is already in front.</summary>
     private void NotifyAttention(string title, string detail)
     {
-        if (ViewModel is null || App.Current.MainWindowHandle is not { } hwnd || Services.Attention.IsForeground(hwnd))
+        if (ViewModel is null || _window?.WindowHandle is not { } hwnd || Services.Attention.IsForeground(hwnd))
         {
             return;
         }
@@ -1182,7 +1186,7 @@ public sealed partial class WorkspacePage : Page
         picker.FileTypeFilter.Add("*");
 
         // A packaged picker needs to be told which window owns it.
-        if (App.Current.MainWindowHandle is { } hwnd)
+        if (_window?.WindowHandle is { } hwnd)
         {
             WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
         }
@@ -1904,7 +1908,7 @@ public sealed partial class WorkspacePage : Page
 
         // A save changes the working tree, so git re-colours the file tree now rather than on the next poll.
         editor.Saved += (_, _) => _ = ViewModel.Git.RefreshAsync();
-        var tab = new EditorTab { ProjectRoot = ViewModel.ProjectPath, Knowledge = ViewModel.Features.Knowledge }.WithViewModel(editor);
+        var tab = new EditorTab(ViewModel.Smart, ViewModel.Syntax) { ProjectRoot = ViewModel.ProjectPath, Knowledge = ViewModel.Features.Knowledge, Owner = _window }.WithViewModel(editor);
         tab.FindReferencesRequested += (_, text) =>
         {
             ShowReferences(text);
@@ -2201,7 +2205,7 @@ public sealed partial class WorkspacePage : Page
             var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
             picker.FileTypeFilter.Add("*");
 
-            if (App.Current.MainWindowHandle is { } hwnd)
+            if (_window?.WindowHandle is { } hwnd)
             {
                 WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
             }
@@ -2257,7 +2261,7 @@ public sealed partial class WorkspacePage : Page
         {
             open.Hide();
         }
-        else if (App.Current.MainWindow is { } window)
+        else if (_window is { } window)
         {
             ShowCommandsFlyout(window.CommandsButtonAnchor);
         }
@@ -2334,7 +2338,7 @@ public sealed partial class WorkspacePage : Page
 
         // The open menu holds the keyboard focus in its own popup, out of reach of the
         // window's key handler; a menu item's accelerator is how the chord reaches it.
-        if (KeyChord.Parse(KeyboardShortcuts.Get(KeyboardShortcuts.ToggleCommands)) is { } toggle)
+        if (KeyChord.Parse(ViewModel.Shortcuts.Get(KeyboardShortcuts.ToggleCommands)) is { } toggle)
         {
             var accelerator = new KeyboardAccelerator
             {
@@ -2437,7 +2441,7 @@ public sealed partial class WorkspacePage : Page
     {
         if (e.PropertyName == nameof(WorkspaceViewModel.RunningCommandCount))
         {
-            App.Current.MainWindow?.SetCommandsBadge(ViewModel.RunningCommandCount);
+            _window?.SetCommandsBadge(ViewModel.RunningCommandCount);
         }
         else if (e.PropertyName == nameof(WorkspaceViewModel.Panel))
         {
@@ -2714,7 +2718,7 @@ public sealed partial class WorkspacePage : Page
     /// </summary>
     private void FocusSearchFromShortcut()
     {
-        var window = App.Current.MainWindow;
+        var window = _window;
         if (window is null)
         {
             return;
@@ -2977,7 +2981,7 @@ public sealed partial class WorkspacePage : Page
             var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
             picker.FileTypeFilter.Add("*");
 
-            if (App.Current.MainWindowHandle is { } hwnd)
+            if (_window?.WindowHandle is { } hwnd)
             {
                 WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
             }

@@ -8,6 +8,18 @@ namespace Codale.Agents.Tests;
 
 public sealed class FeatureLogTests : IDisposable
 {
+    [Fact]
+    public void LogsUseTheComposedWorkspaceHistoryLifetime()
+    {
+        using var data = new Codale.Workspace.WorkspaceDataFactory(_ => _directory);
+        var workspace = data.Open("project");
+        var log = new FeatureLog(workspace.History, "feature", "chat");
+        log.AppendUser("saved request");
+        Assert.NotEmpty(log.ReadAllSnapshot().Entries);
+        data.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => log.ReadAllSnapshot());
+    }
+
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "codale-featurelog-" + Guid.NewGuid().ToString("N"));
 
     public void Dispose()

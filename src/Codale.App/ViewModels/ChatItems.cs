@@ -23,7 +23,7 @@ public static class ChatTypography
 {
     public const double BaseSize = 12.5;
 
-    public static double Scaled(double size) => Math.Round(size * AppSettings.ChatFontSize / BaseSize, 2);
+    public static double Scaled(double size, double fontSize) => Math.Round(size * fontSize / BaseSize, 2);
 }
 
 /// <summary>
@@ -32,20 +32,33 @@ public static class ChatTypography
 /// </summary>
 public abstract class ScaledObservable : ObservableObject
 {
-    public double S8 => ChatTypography.Scaled(8);
-    public double S9 => ChatTypography.Scaled(9);
-    public double S10 => ChatTypography.Scaled(10);
-    public double S10_5 => ChatTypography.Scaled(10.5);
-    public double S11 => ChatTypography.Scaled(11);
-    public double S11_5 => ChatTypography.Scaled(11.5);
-    public double S12 => ChatTypography.Scaled(12);
-    public double S12_5 => ChatTypography.Scaled(12.5);
-    public double S13 => ChatTypography.Scaled(13);
-    public double S13_5 => ChatTypography.Scaled(13.5);
-    public double S14 => ChatTypography.Scaled(14);
+    private AppSettingsStore? _textSettings;
+    public AppSettingsStore? TextSettings
+    {
+        get => _textSettings;
+        internal set
+        {
+            if (ReferenceEquals(_textSettings, value)) return;
+            _textSettings = value;
+            RaiseTextScale();
+        }
+    }
+    private double Scaled(double size) => ChatTypography.Scaled(size, TextSettings?.ChatFontSize ?? ChatTypography.BaseSize);
+
+    public double S8 => Scaled(8);
+    public double S9 => Scaled(9);
+    public double S10 => Scaled(10);
+    public double S10_5 => Scaled(10.5);
+    public double S11 => Scaled(11);
+    public double S11_5 => Scaled(11.5);
+    public double S12 => Scaled(12);
+    public double S12_5 => Scaled(12.5);
+    public double S13 => Scaled(13);
+    public double S13_5 => Scaled(13.5);
+    public double S14 => Scaled(14);
 
     /// <summary>Re-announces every scaled size, so live x:Bind rows re-measure.</summary>
-    public void RaiseTextScale()
+    public virtual void RaiseTextScale()
     {
         OnPropertyChanged(nameof(S8));
         OnPropertyChanged(nameof(S9));
@@ -331,8 +344,10 @@ public sealed partial class TurnActivityItem : ChatItem
 
     public TurnActivityItem()
     {
-        Steps.CollectionChanged += (_, _) =>
+        Steps.CollectionChanged += (_, e) =>
         {
+            if (e.NewItems is not null)
+                foreach (ChatItem item in e.NewItems) item.TextSettings = TextSettings;
             OnPropertyChanged(nameof(HasSteps));
             OnPropertyChanged(nameof(HeaderText));
         };
@@ -530,6 +545,7 @@ public sealed partial class ExploreGroupStep : ChatItem
 
     public void Add(ToolCallItem tool)
     {
+        tool.TextSettings = TextSettings;
         tool.Group = this;
         Tools.Add(tool);
         tool.PropertyChanged += OnToolChanged;

@@ -19,10 +19,13 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
     private bool _loading;
     private bool _switching;
 
-    public CliEndpointViewModel()
+    private readonly AppSettingsStore _settings;
+
+    public CliEndpointViewModel(AppSettingsStore settings)
     {
+        _settings = settings;
         Reload();
-        AppSettings.Changed += OnSettingsChanged;
+        _settings.Changed += OnSettingsChanged;
     }
 
     public RangeObservableCollection<ProviderChoice> Choices { get; } = [];
@@ -67,7 +70,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
         }
     }
 
-    private ByokProvider? ActiveProvider => AppSettings.FindByok(_chat?.EndpointName);
+    private ByokProvider? ActiveProvider => _settings.FindByok(_chat?.EndpointName);
 
     /// <summary>False while the chat in front runs a turn (a switch restarts its CLI and would cut the turn off), and for a terminal CLI's session, which has no provider of its own to switch.</summary>
     public bool CanSwitch => !_switching && _chat is not { IsBusy: true } and not { IsTerminalSession: true } and not { IsConnecting: true };
@@ -116,16 +119,16 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
                 : $"This chat uses {provider.Name.Trim()}.";
 
     /// <summary>The agent profile rows shown in the chat's dropdown, plus aliases from folded profile names to their row.</summary>
-    public static (List<ProviderChoice> Rows, Dictionary<(string Cli, string Name), ProviderChoice> Aliases) BuildChoices()
+    public (List<ProviderChoice> Rows, Dictionary<(string Cli, string Name), ProviderChoice> Aliases) BuildChoices()
     {
         var wanted = new List<ProviderChoice>();
         var aliases = new Dictionary<(string Cli, string Name), ProviderChoice>();
         foreach (var cli in new[] { "claude", "codex" })
         {
             var label = cli == "codex" ? "Codex" : "Claude";
-            var profiles = AppSettings.ByokProviders.Where(p => p.Supports(cli)).ToList();
+            var profiles = _settings.ByokProviders.Where(p => p.Supports(cli)).ToList();
             var accounts = profiles.Where(p => p.IsAccount).ToList();
-            var defaultEmail = AppSettings.AccountLabel(cli) is { } saved && saved != "Sign-in account"
+            var defaultEmail = _settings.AccountLabel(cli) is { } saved && saved != "Sign-in account"
                 ? saved
                 : accounts.FirstOrDefault(p => p.AccountId.Length == 0)?.Email;
 
@@ -236,7 +239,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
             {
                 await _chat.SetProfileAsync(choice.CliId, choice.Name);
                 if (_chat.CliId == choice.CliId && _chat.EndpointName == choice.Name)
-                    AppSettings.RememberProfile(choice.CliId, choice.Name);
+                    _settings.RememberProfile(choice.CliId, choice.Name);
             }
         }
         finally
@@ -257,7 +260,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
-        AppSettings.Changed -= OnSettingsChanged;
+        _settings.Changed -= OnSettingsChanged;
         if (_chat is not null)
         {
             _chat.PropertyChanged -= OnChatPropertyChanged;

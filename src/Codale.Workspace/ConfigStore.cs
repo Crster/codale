@@ -10,17 +10,17 @@ public sealed record SavedCommand(string Name, string Command, string? Cwd = nul
 /// The workspace's configuration: what used to be files under <c>.codale/</c>, kept in the workspace database so
 /// the project tree stays clean. Plain values by name (<c>config.NAME</c>), with the saved commands on top.
 /// </summary>
-public sealed class ConfigStore(string directory)
+public sealed class ConfigStore(string directory, WorkspaceDatabasePool? databases = null)
 {
     private const string CommandsKey = "commands";
 
-    public string? Get(string name) => WorkspaceDb.Use(directory, db => db.Open("config").Open(name).Read());
+    public string? Get(string name) => (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("config").Open(name).Read());
 
-    public void Set(string name, string value) => WorkspaceDb.Use(directory, db => db.Open("config").Open(name).Write(value));
+    public void Set(string name, string value) => (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("config").Open(name).Write(value));
 
-    public bool Remove(string name) => WorkspaceDb.Use(directory, db => db.Open("config").Open(name).Remove());
+    public bool Remove(string name) => (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("config").Open(name).Remove());
 
-    public IReadOnlyList<string> Names() => WorkspaceDb.Use(directory, db => db.Open("config").Children());
+    public IReadOnlyList<string> Names() => (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("config").Children());
 
     public T? GetJson<T>(string name) => Get(name) is { } json ? JsonSerializer.Deserialize<T>(json) : default;
 
@@ -39,7 +39,7 @@ public sealed class ConfigStore(string directory)
         }
 
         var saved = new SavedCommand(name, command, string.IsNullOrWhiteSpace(cwd) ? null : cwd.Trim());
-        WorkspaceDb.Use(directory, db => db.Batch(() =>
+        (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Batch(() =>
         {
             var node = db.Open("config").Open(CommandsKey);
             var all = (node.ReadJson<List<SavedCommand>>() ?? [])

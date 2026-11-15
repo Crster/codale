@@ -27,7 +27,9 @@ namespace Codale.App.ViewModels;
 public sealed partial class GitViewModel : ObservableObject, IDisposable
 {
     private readonly string _projectPath;
-    private readonly GitRepository _repository;
+    private readonly IGitRepository _repository;
+    private readonly IGitRepositoryFactory _repositories;
+    private readonly SmartExperienceHost _smart;
     private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
     private readonly DispatcherQueueTimer _timer;
     private readonly SemaphoreSlim _refreshing = new(1, 1);
@@ -45,7 +47,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     private async Task GenerateCommitMessageAsync()
     {
         if (IsGeneratingCommitMessage || IsBusy) return;
-        if (SmartExperienceHost.Instance.Status.State != Codale.Smart.SmartState.Ready || !AppSettings.SmartFeatureEnabled("commit"))
+        if (_smart.Instance.Status.State != Codale.Smart.SmartState.Ready || !_smart.Settings.SmartFeatureEnabled("commit"))
         { ActionError = "Choose a General model in Settings > Smart Features before generating a commit message."; return; }
         using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         _smartCommit = cancel;
@@ -56,26 +58,28 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         {
             var snapshot = await _repository.GetStagedDiffAsync(cancel.Token);
             if (string.IsNullOrWhiteSpace(snapshot.Diff)) { ActionError = "Stage changes before generating a commit message."; return; }
-            var result = await SmartExperienceHost.Instance.CommitMessageAsync(new(_projectPath, _projectPath, "commit"), cancel.Token);
+            var result = await _smart.Instance.CommitMessageAsync(new(_projectPath, _projectPath, "commit"), cancel.Token);
             var message = result?.Value;
             if (string.IsNullOrWhiteSpace(message)) { ActionError = "Could not generate a commit message. Try again."; return; }
             var current = await _repository.GetStagedDiffAsync(cancel.Token);
             if (revision != _messageRevision || current.TreeId != snapshot.TreeId)
             { ActionError = "The message or staged changes changed during generation. Generate again."; return; }
-            if (AppSettings.SmartFeatureEnabled("commit")) CommitMessage = message;
+            if (_smart.Settings.SmartFeatureEnabled("commit")) CommitMessage = message;
         }
         catch (OperationCanceledException) { ActionError = "Commit-message generation timed out or was cancelled."; }
         catch (Exception ex) { ActionError = $"Commit-message generation failed: {ex.Message}"; }
         finally { _smartCommit = null; IsGeneratingCommitMessage = false; }
     }
 
-    public GitViewModel(string projectPath)
+    public GitViewModel(string projectPath, IGitRepositoryFactory repositories, SmartExperienceHost smart)
     {
         _projectPath = projectPath;
-        _repository = new GitRepository(projectPath);
+        _repositories = repositories;
+        _smart = smart;
+        _repository = repositories.Create(projectPath);
 
         _timer = _dispatcher.CreateTimer();
-        _timer.Interval = TimeSpan.FromSeconds(AppSettings.GitPollSeconds);
+        _timer.Interval = TimeSpan.FromSeconds(_smart.Settings.GitPollSeconds);
         _timer.Tick += (_, _) => _ = RefreshAsyncSafe();
     }
 
@@ -266,7 +270,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Re-reads the refresh interval from Settings; the Settings window changed it.</summary>
-    public void ApplyPollInterval() => _timer.Interval = TimeSpan.FromSeconds(AppSettings.GitPollSeconds);
+    public void ApplyPollInterval() => _timer.Interval = TimeSpan.FromSeconds(_smart.Settings.GitPollSeconds);
 
     private async Task RefreshAsyncSafe()
     {
@@ -300,7 +304,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
                 .Where(folder => Directory.Exists(Path.Combine(folder, ".git")) || File.Exists(Path.Combine(folder, ".git")))
                 .ToList();
 
-            var snapshots = await Task.WhenAll(folders.Select(folder => new GitRepository(folder).GetSnapshotAsync())).ConfigureAwait(true);
+            var snapshots = await Task.WhenAll(folders.Select(folder => _repositories.Create(folder).GetSnapshotAsync())).ConfigureAwait(true);
             return snapshots;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

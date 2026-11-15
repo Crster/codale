@@ -28,10 +28,10 @@ internal static class TerminalLook
     public static SolidColorBrush Brush(Color color) => new(color);
 
     /// <summary>The terminal font from Settings, for commands and the input.</summary>
-    public static FontFamily MonoFont => new(InstalledFonts.Resolve(AppSettings.TerminalFontFamily, "Cascadia Mono"));
+    public static FontFamily MonoFont(AppSettingsStore settings) => new(InstalledFonts.Resolve(settings.TerminalFontFamily, "Cascadia Mono"));
 
     /// <summary>The short name of the shell commands run under ("pwsh", "powershell", "cmd").</summary>
-    public static string ShellLabel => Path.GetFileNameWithoutExtension(TerminalSession.ResolveShell(AppSettings.TerminalShell));
+    public static string ShellLabel(AppSettingsStore settings) => Path.GetFileNameWithoutExtension(TerminalSession.ResolveShell(settings.TerminalShell));
 
-    public static double MonoSize => Math.Clamp(AppSettings.TerminalFontSize, AppSettings.MinFontSize, AppSettings.MaxFontSize);
+    public static double MonoSize(AppSettingsStore settings) => Math.Clamp(settings.TerminalFontSize, AppSettingsStore.MinFontSize, AppSettingsStore.MaxFontSize);
 }

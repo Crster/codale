@@ -5,22 +5,22 @@ namespace Codale.App.Services;
 
 /// <summary>
 /// The agent endpoint a chat uses: a BYOK provider listed in settings.json
-/// (<see cref="AppSettings.ByokProviders"/>), named by the chat. Claude sessions point
+/// (<see cref="settings.ByokProviders"/>), named by the chat. Claude sessions point
 /// straight at the provider's Anthropic-compatible base URL; Codex sessions at its
 /// OpenAI-compatible one. The key and model names reach the CLI as environment variables.
 /// </summary>
 /// <remarks>
-/// Values are read from <see cref="AppSettings"/> on every call, so an edited provider
+/// Values are read from <see cref="AppSettingsStore"/> on every call, so an edited provider
 /// applies to the next session start without any event wiring. With "" (Default)
 /// there is no endpoint and the CLI runs with its own login.
 /// </remarks>
-public sealed class CliEndpointSettings
+public sealed class CliEndpointSettings(AppSettingsStore settings)
 {
     private static string Clean(string? raw) => string.IsNullOrWhiteSpace(raw) ? "" : raw.Trim();
 
     /// <summary>True when the named provider exists and has the base URL the CLI needs, i.e. sessions should use the endpoint.</summary>
     public bool IsActive(string providerName, bool openAiCompatible = true) =>
-        Clean(openAiCompatible ? AppSettings.FindByok(providerName)?.BaseUrl : AppSettings.FindByok(providerName)?.AnthropicBaseUrl).Length > 0;
+        Clean(openAiCompatible ? settings.FindByok(providerName)?.BaseUrl : settings.FindByok(providerName)?.AnthropicBaseUrl).Length > 0;
 
     /// <summary>
     /// The models the provider offers, default first; empty when the endpoint is off.
@@ -29,7 +29,7 @@ public sealed class CliEndpointSettings
     public IReadOnlyList<AgentModelInfo> Models(string providerName)
     {
         var models = new List<AgentModelInfo>();
-        var active = AppSettings.FindByok(providerName);
+        var active = settings.FindByok(providerName);
         if (Clean(active?.BaseUrl).Length == 0 && Clean(active?.AnthropicBaseUrl).Length == 0)
         {
             return models;
@@ -58,7 +58,7 @@ public sealed class CliEndpointSettings
     /// <exception cref="InvalidOperationException">The provider is OpenAI-only.</exception>
     public IReadOnlyDictionary<string, string>? ClaudeEnvironment(string providerName)
     {
-        var active = AppSettings.FindByok(providerName);
+        var active = settings.FindByok(providerName);
         if (active is null || active.IsAccount)
         {
             return null;
@@ -94,7 +94,7 @@ public sealed class CliEndpointSettings
     /// </summary>
     public IReadOnlyDictionary<string, string>? CodexEnvironment(string providerName)
     {
-        var active = AppSettings.FindByok(providerName);
+        var active = settings.FindByok(providerName);
         if (active is null || active.IsAccount) return null;
         if (Clean(active.BaseUrl) is not { Length: > 0 } baseUrl)
             throw new InvalidOperationException($"Profile {active.Name} needs an OpenAI compatible base URL in Codex CLI settings.");
@@ -119,7 +119,7 @@ public sealed class CliEndpointSettings
     /// </summary>
     public Codale.Agents.Codex.CodexCustomProvider? CodexProvider(string providerName)
     {
-        var active = AppSettings.FindByok(providerName);
+        var active = settings.FindByok(providerName);
         if (active is null || Clean(active.BaseUrl) is not { Length: > 0 } baseUrl)
         {
             return null;
@@ -135,7 +135,7 @@ public sealed class CliEndpointSettings
     /// <summary>A model's published context size, falling back to <see cref="ByokProvider.DefaultContextWindow"/>.</summary>
     public int? ContextWindowFor(string providerName, string? model)
     {
-        var active = AppSettings.FindByok(providerName);
+        var active = settings.FindByok(providerName);
         if (active is null)
         {
             return null;

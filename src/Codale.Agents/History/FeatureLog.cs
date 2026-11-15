@@ -24,7 +24,7 @@ public readonly record struct LogPosition(int Generation, long Offset);
 /// then tell the conversations apart, and finished work from work still under way. Appends and
 /// archiving share one lock, so a summary rotating the log never loses a line written meanwhile.
 /// </remarks>
-public sealed class FeatureLog(string workspaceDirectory, string featureId, string? chatId = null)
+public sealed class FeatureLog(HistoryStore store, string featureId, string? chatId = null)
 {
     private static readonly JsonSerializerOptions ChangeJson = new() { PropertyNameCaseInsensitive = true };
 
@@ -32,7 +32,10 @@ public sealed class FeatureLog(string workspaceDirectory, string featureId, stri
     private static readonly object Gate = new();
 
     private readonly HashSet<string> _tools = new(StringComparer.Ordinal);
-    private readonly HistoryStore _store = new(workspaceDirectory);
+    private readonly HistoryStore _store = store;
+
+    public FeatureLog(string workspaceDirectory, string featureId, string? chatId = null)
+        : this(new HistoryStore(workspaceDirectory), featureId, chatId) { }
 
     /// <summary>The chat this instance writes as; null for a reader.</summary>
     public string? ChatId => chatId;

@@ -11,7 +11,7 @@ namespace Codale.Workspace;
 /// returned by <see cref="Get"/>.
 /// </summary>
 /// <remarks>Layout: <c>env.NAME</c> holds the encrypted value.</remarks>
-public sealed partial class EnvStore(string directory)
+public sealed partial class EnvStore(string directory, WorkspaceDatabasePool? databases = null)
 {
     /// <summary>Protecting swaps the database's master key: one caller at a time.</summary>
     private static readonly object KeyGate = new();
@@ -37,11 +37,11 @@ public sealed partial class EnvStore(string directory)
     public bool Remove(string name)
     {
         Check(name);
-        return WorkspaceDb.Use(directory, db => db.Open("env").Open(name).Remove());
+        return (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("env").Open(name).Remove());
     }
 
     /// <summary>The names of the stored secrets, sorted. Never their values.</summary>
-    public IReadOnlyList<string> Names() => WorkspaceDb.Use(directory, db => db.Open("env").Children());
+    public IReadOnlyList<string> Names() => (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("env").Children());
 
     /// <summary>Adds the <c>NAME=value</c> lines of a <c>.env</c> text; comments, blanks and an <c>export</c> prefix are skipped.</summary>
     /// <returns>The names that were stored.</returns>
@@ -91,7 +91,7 @@ public sealed partial class EnvStore(string directory)
     {
         lock (KeyGate)
         {
-            return WorkspaceDb.Use(directory, db =>
+            return (databases ?? WorkspaceDb.Shared).Use(directory, db =>
             {
                 db.Protect(KeyProvider.Dpapi);
                 return work(db);

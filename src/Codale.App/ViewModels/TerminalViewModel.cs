@@ -50,8 +50,14 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     /// A plain shell tab, or one running a project command - the commands menu opens
     /// the second kind with the command as its first block.
     /// </summary>
-    public TerminalViewModel(string workingDirectory, string? command = null, string? commandName = null, string? cliId = null)
+    public AppSettingsStore Settings => _settings;
+    public CommandHistory History { get; }
+    private readonly AppSettingsStore _settings;
+
+    public TerminalViewModel(AppSettingsStore settings, CommandHistory commandHistory, string workingDirectory, string? command = null, string? commandName = null, string? cliId = null)
     {
+        _settings = settings;
+        History = commandHistory;
         _workingDirectory = workingDirectory;
         CommandText = command;
         CommandName = commandName ?? command;
@@ -139,7 +145,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
             return null;
         }
 
-        CommandHistory.Record(_workingDirectory, Codale.Core.Shell.PromptLine.Command(promptLine), "terminal");
+        History.Record(_workingDirectory, Codale.Core.Shell.PromptLine.Command(promptLine), "terminal");
         return LaunchRewriter?.Invoke(promptLine);
     }
 
@@ -172,7 +178,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     public partial ShellState State { get; private set; }
 
     /// <summary>The shell blocks run under, from Settings.</summary>
-    public string ShellPath => TerminalSession.ResolveShell(ShellPreference ?? AppSettings.TerminalShell);
+    public string ShellPath => TerminalSession.ResolveShell(ShellPreference ?? _settings.TerminalShell);
 
     /// <summary>The shell this tab picked from its input cell ("pwsh", "powershell", "cmd"); null follows Settings.</summary>
     [ObservableProperty]
@@ -231,7 +237,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
 
         if (record)
         {
-            CommandHistory.Record(_workingDirectory, line, "terminal");
+            History.Record(_workingDirectory, line, "terminal");
 
             // The rewriter reads a prompt line, as the screen of a classic shell shows it, so it can
             // tell the folder the command was typed in.
@@ -246,7 +252,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
             }
         }
 
-        var block = new CommandBlockViewModel(line, State);
+        var block = new CommandBlockViewModel(_settings, line, State);
         if (IsSingleBlock)
         {
             // One command per tab: a run again replaces the finished one, and fills the tab.
@@ -259,7 +265,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
         }
 
         AddBlock(block);
-        block.Run(ShellPath, AppSettings.TerminalLoadProfile);
+        block.Run(ShellPath, _settings.TerminalLoadProfile);
         return block;
     }
 
@@ -334,7 +340,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     /// <summary>Keeps the history to the Settings cap by dropping the oldest finished blocks.</summary>
     private void TrimHistory()
     {
-        var cap = AppSettings.TerminalBlockHistory;
+        var cap = _settings.TerminalBlockHistory;
         while (Blocks.Count > cap && Blocks.FirstOrDefault(b => !b.IsRunning) is { } oldest)
         {
             Blocks.Remove(oldest);
@@ -515,7 +521,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
         {
             // A CLI runs wrapped in the shell so .cmd shims resolve; the shell exits with it. The
             // shell comes from Settings, falling back to the automatic probe when missing.
-            var shell = TerminalSession.ResolveShell(AppSettings.TerminalShell);
+            var shell = TerminalSession.ResolveShell(_settings.TerminalShell);
             var command = CommandText is { } line ? TerminalSession.WrapCommand(shell, line, keepShell: !IsCliTerminal) : shell;
 
             // Created on the UI thread, so the session delivers output there.

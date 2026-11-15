@@ -11,7 +11,7 @@ namespace Codale.Git;
 /// large repository is where managed implementations fall down, and git's own
 /// porcelain v2 format is explicitly designed to be parsed by tools.
 /// </remarks>
-public sealed class GitRepository
+public sealed class GitRepository : IGitRepository
 {
     /// <summary>The flags every diff shares; the prefixes are pinned because the parser expects a/ and b/ whatever the user's diff.noprefix says.</summary>
     private static readonly string[] DiffFlags =

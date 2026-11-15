@@ -82,8 +82,8 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
         var prompt = new TextBlock
         {
             Text = "❯",
-            FontFamily = TerminalLook.MonoFont,
-            FontSize = TerminalLook.MonoSize,
+            FontFamily = TerminalLook.MonoFont(Block.Settings),
+            FontSize = TerminalLook.MonoSize(Block.Settings),
             Foreground = TerminalLook.Brush(TerminalLook.Accent),
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -94,8 +94,8 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
         left.Children.Add(_result);
         left.Children.Add(prompt);
 
-        _command.FontFamily = TerminalLook.MonoFont;
-        _command.FontSize = TerminalLook.MonoSize;
+        _command.FontFamily = TerminalLook.MonoFont(Block.Settings);
+        _command.FontSize = TerminalLook.MonoSize(Block.Settings);
         _command.Foreground = TerminalLook.Brush(TerminalLook.Command);
         _command.TextTrimming = TextTrimming.CharacterEllipsis;
         _command.TextWrapping = TextWrapping.NoWrap;
@@ -258,6 +258,7 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
 
         _body.ClearValue(HeightProperty);
         var terminal = new TerminalView();
+        terminal.ApplyAppSettings(Block.Settings);
         terminal.Response += OnTerminalInput;
         terminal.Resized += OnTerminalResized;
         terminal.LinkActivated += OnTerminalLink;
@@ -302,9 +303,9 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
 
     public void ApplyAppSettings()
     {
-        _terminal?.ApplyAppSettings();
-        _command.FontFamily = TerminalLook.MonoFont;
-        _command.FontSize = TerminalLook.MonoSize;
+        _terminal?.ApplyAppSettings(Block.Settings);
+        _command.FontFamily = TerminalLook.MonoFont(Block.Settings);
+        _command.FontSize = TerminalLook.MonoSize(Block.Settings);
         ApplyRows();
     }
 
@@ -347,7 +348,7 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
             return;
         }
 
-        _terminal.BlockRows = fill ? 0 : AppSettings.TerminalBlockLines;
+        _terminal.BlockRows = fill ? 0 : Block.Settings.TerminalBlockLines;
     }
 
     /// <summary>
@@ -514,7 +515,7 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
         _result.Visibility = _result.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
         var started = Block.StartedAt == default ? DateTimeOffset.Now : Block.StartedAt;
-        _right.Text = $"{TerminalLook.ShellLabel}  {started.ToLocalTime():HH:mm:ss}";
+        _right.Text = $"{TerminalLook.ShellLabel(Block.Settings)}  {started.ToLocalTime():HH:mm:ss}";
 
         if (Block.IsRunning)
         {

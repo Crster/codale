@@ -28,10 +28,10 @@ public sealed record CodexSessionOptions
         effort is { Length: > 0 } && AllowedEfforts.Contains(effort) ? effort : null;
 
     /// <summary>Start mode, in Codale's cross-CLI vocabulary; mapped to codex approval/sandbox per turn. Null starts in the CLI default.</summary>
-    public string? PermissionMode { get; init; } = Claude.ClaudeSessionOptions.DefaultPermissionMode;
+    public string? PermissionMode { get; init; } = Codale.Core.Agents.AgentPermissionMode.Default;
 
     /// <summary>The modes the rest of the app may hand us; anything else becomes the default.</summary>
-    public static string ClampPermissionMode(string mode) => Claude.ClaudeSessionOptions.ClampPermissionMode(mode);
+    public static string ClampPermissionMode(string mode) => Codale.Core.Agents.AgentPermissionMode.Normalize(mode);
 
     /// <summary>
     /// Codex runs with no sandbox in every mode. Full never asks; every other mode uses "untrusted",

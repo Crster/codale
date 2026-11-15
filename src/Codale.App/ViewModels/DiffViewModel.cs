@@ -16,9 +16,9 @@ namespace Codale.App.ViewModels;
 /// </remarks>
 public sealed partial class DiffViewModel : ObservableObject
 {
-    private readonly GitRepository _repository;
+    private readonly IGitRepository _repository;
 
-    public DiffViewModel(string projectPath) => _repository = new GitRepository(projectPath);
+    public DiffViewModel(IGitRepository repository) => _repository = repository;
 
     public RangeObservableCollection<FileDiff> Files { get; } = [];
 

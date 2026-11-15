@@ -53,6 +53,11 @@ public static class KeywordHighlight
         typeof(KeywordHighlight),
         new PropertyMetadata(false));
 
+    public static readonly DependencyProperty SyntaxProperty = DependencyProperty.RegisterAttached(
+        "Syntax", typeof(SyntaxSelection), typeof(KeywordHighlight), new PropertyMetadata(null, OnChanged));
+    public static SyntaxSelection? GetSyntax(TextBlock text) => (SyntaxSelection?)text.GetValue(SyntaxProperty);
+    public static void SetSyntax(TextBlock text, SyntaxSelection? value) => text.SetValue(SyntaxProperty, value);
+
     public static string? GetTerms(TextBlock text) => (string?)text.GetValue(TermsProperty);
 
     public static void SetTerms(TextBlock text, string? value) => text.SetValue(TermsProperty, value);
@@ -214,12 +219,12 @@ public static class KeywordHighlight
     /// <summary>One foreground-only highlighter per token colour, from the same tokenizer the editor uses.</summary>
     private static void AddSyntax(TextBlock text, string content)
     {
-        if (!Services.AppSettings.EditorHighlighting || GetPath(text) is not { Length: > 0 } path)
+        if (GetSyntax(text) is not { HighlightingEnabled: true } syntax || GetPath(text) is not { Length: > 0 } path)
         {
             return;
         }
 
-        var languageId = Services.SyntaxSelection.IdFor(path);
+        var languageId = syntax.IdFor(path);
         if (languageId is null)
         {
             return;

@@ -35,13 +35,7 @@ public sealed record ClaudeSessionOptions
     public string? PermissionMode { get; init; } = DefaultPermissionMode;
 
     /// <summary>The mode a fresh session starts in: Automatic.</summary>
-    public const string DefaultPermissionMode = "auto";
-
-    /// <summary>The choices the CLI's --permission-mode flag actually accepts (claude 2.x).</summary>
-    private static readonly HashSet<string> AllowedPermissionModes = new(StringComparer.Ordinal)
-    {
-        "manual", "acceptEdits", "auto", "bypassPermissions", "dontAsk", "plan",
-    };
+    public const string DefaultPermissionMode = Codale.Core.Agents.AgentPermissionMode.Default;
 
     /// <summary>
     /// Permission modes are per-provider dialects: a stored value may predate a mode's
@@ -49,7 +43,7 @@ public sealed record ClaudeSessionOptions
     /// on start rather than tolerate an unknown choice. Anything foreign becomes the default.
     /// </summary>
     public static string ClampPermissionMode(string mode) =>
-        AllowedPermissionModes.Contains(mode) ? mode : DefaultPermissionMode;
+        Codale.Core.Agents.AgentPermissionMode.Normalize(mode);
 
     /// <summary>Fixed id so the transcript file is predictable. Generated when null.</summary>
     public Guid? SessionId { get; init; }

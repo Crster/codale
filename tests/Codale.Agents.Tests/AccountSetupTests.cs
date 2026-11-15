@@ -1,10 +1,38 @@
-using Codale.App.Services;
+using Codale.Agents.Providers;
 using Codale.Core.Agents;
 
 namespace Codale.Agents.Tests;
 
 public sealed class AccountSetupTests
 {
+    [Theory]
+    [InlineData("{\"email\":\"person@example.com\"}")]
+    [InlineData("{\"emailAddress\":\"person@example.com\"}")]
+    public void Claude_status_reads_account_email(string status) =>
+        Assert.Equal("person@example.com", CodaleAccountCli.ReadClaudeEmail(status, "missing-account-home"));
+
+    [Fact]
+    public void Claude_email_falls_back_to_the_selected_accounts_metadata()
+    {
+        var home = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(home);
+        try
+        {
+            File.WriteAllText(Path.Combine(home, ".claude.json"),
+                "{\"oauthAccount\":{\"emailAddress\":\"selected@example.com\"}}");
+            Assert.Equal("selected@example.com", CodaleAccountCli.ReadClaudeEmail("{}", home));
+            Assert.Equal("current@example.com", CodaleAccountCli.ReadClaudeEmail(
+                "{\"email\":\"current@example.com\"}", home));
+            File.WriteAllText(Path.Combine(home, ".claude.json"), "invalid");
+            Assert.Null(CodaleAccountCli.ReadClaudeEmail("{}", home));
+        }
+        finally
+        {
+            File.Delete(Path.Combine(home, ".claude.json"));
+            Directory.Delete(home);
+        }
+    }
+
     [Theory]
     [InlineData("claude")]
     [InlineData("codex")]

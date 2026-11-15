@@ -23,12 +23,12 @@ public static class TaskTools
     /// <param name="runDirectory">What a command's relative working directory resolves against; defaults to the project root.</param>
     /// <param name="server">One of <see cref="CodaleServers"/>: only that server's tools. Null for every tool.</param>
     public static IReadOnlyList<McpTool> Create(
-        ITaskService tasks, string? projectRoot = null, string? runDirectory = null, string? server = null) =>
+        ITaskService tasks, string? projectRoot = null, string? runDirectory = null, string? server = null, IProjectCommandService? commands = null) =>
     [
         .. new[]
         {
             TerminalTools(tasks),
-            string.IsNullOrWhiteSpace(projectRoot) ? [] : CommandTools(tasks, projectRoot, runDirectory ?? projectRoot),
+            string.IsNullOrWhiteSpace(projectRoot) ? [] : CommandTools(tasks, projectRoot, runDirectory ?? projectRoot, commands ?? new ProjectCommandService()),
             string.IsNullOrWhiteSpace(projectRoot) ? [] : WorkspaceTools(projectRoot),
             Panel(tasks),
         }.SelectMany(tools => tools).Where(tool => server is null || CodaleServers.Of(tool.Name) == server),
@@ -149,7 +149,7 @@ public static class TaskTools
             }),
     ];
 
-    private static IReadOnlyList<McpTool> CommandTools(ITaskService tasks, string projectRoot, string runDirectory) =>
+    private static IReadOnlyList<McpTool> CommandTools(ITaskService tasks, string projectRoot, string runDirectory, IProjectCommandService commands) =>
     [
         new McpTool(
             "list_commands",
@@ -159,7 +159,7 @@ public static class TaskTools
             McpTool.Schema(),
             async (_, _) =>
             {
-                var all = CommandCatalog.Discover(projectRoot);
+                var all = commands.Discover(projectRoot);
                 return await McpTool.Text(all.Count == 0
                     ? "No commands saved. Use add_command to save one."
                     : string.Join('\n', all.Select(c =>
@@ -188,7 +188,7 @@ public static class TaskTools
                     lock (CommandsFileLock)
                     {
                         // Calls run concurrently and Add rewrites the whole file: take turns.
-                        saved = CommandCatalog.Add(projectRoot, name, command, cwd);
+                        saved = commands.Add(projectRoot, name, command, cwd);
                     }
 
                     return await McpTool.Text($"Saved \"{saved.Name}\" to {saved.SourcePath}.");
@@ -212,7 +212,7 @@ public static class TaskTools
                 "name"),
             async (a, ct) =>
             {
-                var command = Resolve(CommandCatalog.Discover(projectRoot), a.RequiredString("name"));
+                var command = Resolve(commands.Discover(projectRoot), a.RequiredString("name"));
                 return Format(await Call(() => tasks.RunInTerminalAsync(
                     InDirectory(command, runDirectory), command.Name, a.Int("wait_seconds") ?? 3, ct)));
             }),

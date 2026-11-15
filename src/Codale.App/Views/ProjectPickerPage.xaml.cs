@@ -10,16 +10,28 @@ namespace Codale.App.Views;
 
 public sealed partial class ProjectPickerPage : Page
 {
+    private MainWindow _window = null!;
+
     public ProjectPickerPage()
     {
         InitializeComponent();
 
+    }
+
+    private RecentProjects _recents = null!;
+
+    protected override void OnNavigatedTo(Microsoft.UI.Xaml.Navigation.NavigationEventArgs e)
+    {
+        base.OnNavigatedTo(e);
+        var navigation = (ProjectPickerNavigation)e.Parameter;
+        _recents = navigation.Recents;
+        _window = navigation.Window;
         LoadRecents();
     }
 
     private void LoadRecents()
     {
-        var recents = RecentProjects.Load();
+        var recents = _recents.Load();
         RecentList.ItemsSource = recents;
         var hasRecents = recents.Count > 0;
         RecentList.Visibility = hasRecents ? Visibility.Visible : Visibility.Collapsed;
@@ -37,7 +49,7 @@ public sealed partial class ProjectPickerPage : Page
             picker.FileTypeFilter.Add("*");
 
             // A packaged picker needs to be told which window owns it.
-            if (App.Current.MainWindowHandle is { } hwnd)
+            if (_window.WindowHandle is { } hwnd)
             {
                 WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
             }
@@ -50,7 +62,7 @@ public sealed partial class ProjectPickerPage : Page
 
             // Open in this window: the welcome screen is replaced by the workspace
             // rather than a second window spawning while the picker stays behind.
-            App.Current.OpenProjectInPlace(folder.Path);
+            _window.OpenProject(folder.Path);
         }
         catch (Exception ex)
         {
@@ -79,7 +91,7 @@ public sealed partial class ProjectPickerPage : Page
             return;
         }
 
-        RecentProjects.Clear();
+        _recents.Clear();
         LoadRecents();
     }
 
@@ -98,7 +110,7 @@ public sealed partial class ProjectPickerPage : Page
             return;
         }
 
-        App.Current.OpenProjectInPlace(recent.Path);
+        _window.OpenProject(recent.Path);
     }
 
     private void Fail(string message)

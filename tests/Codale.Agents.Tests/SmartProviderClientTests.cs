@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using Codale.App.Services;
+using Codale.Agents.Providers;
 using Codale.Core.Features;
 
 namespace Codale.Agents.Tests;
@@ -302,7 +302,7 @@ public sealed class SmartProviderClientTests
     }
 
     private static SmartFeatureRouter Router(HttpClient http, SmartProviderClient? general = null, SmartProviderClient? completion = null,
-        SmartProviderClient? embedding = null, SmartProviderClient? decision = null) => new(new Dictionary<string, SmartProviderClient>
+        SmartProviderClient? embedding = null, SmartProviderClient? decision = null) => new(new Dictionary<string, ISmartProviderClient>
     {
         [General] = general ?? new(General, "off", Profile(), "", http),
         [Completion] = completion ?? new(Completion, "off", Profile(), "", http),

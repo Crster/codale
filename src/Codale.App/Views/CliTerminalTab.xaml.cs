@@ -20,9 +20,13 @@ public sealed partial class CliTerminalTab : UserControl, ITerminalHost
     private bool _initialized;
     private bool _subscribed;
 
-    public CliTerminalTab()
+    private readonly AppSettingsStore _settings;
+
+    public CliTerminalTab(AppSettingsStore settings)
     {
+        _settings = settings;
         InitializeComponent();
+        Terminal.ApplyAppSettings(settings);
         Loaded += OnLoaded;
 
         Terminal.Response += (_, text) => _ = _viewModel?.WriteAsync(text);
@@ -83,7 +87,7 @@ public sealed partial class CliTerminalTab : UserControl, ITerminalHost
         Terminal.Close();
     }
 
-    public void ApplyAppSettings() => Terminal.ApplyAppSettings();
+    public void ApplyAppSettings() => Terminal.ApplyAppSettings(_settings);
 
     private void FocusTerminal()
     {

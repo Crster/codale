@@ -193,6 +193,7 @@
                                                                 Text="{x:Bind Code}"
                                                                 views:KeywordHighlight.Lines="{x:Bind MatchLines}"
                                                                 views:KeywordHighlight.Path="{x:Bind FilePath}"
+                                                                views:KeywordHighlight.Syntax="{x:Bind Syntax}"
                                                                 views:KeywordHighlight.Terms="{x:Bind Terms}" />
                                                         </Grid>
                                                     </ScrollViewer>

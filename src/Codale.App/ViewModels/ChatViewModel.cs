@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
@@ -31,6 +31,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
     private readonly string _projectPath;
+    private readonly IAgentSessionFactory _agentSessions;
+    private readonly SmartExperienceHost _smart;
+    private readonly ISmartDecider _decider;
 
     /// <summary>The project this chat works in; relative "@file" mentions resolve under it.</summary>
     public string ProjectPath => _projectPath;
@@ -86,17 +89,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// Plan turns restore the previous permission mode when they finish. The session is
     /// captured with the mode so a session replaced mid-turn is never touched.
     /// </summary>
-    private IAgentSession? _planSession;
-    private string? _planRestoreMode;
-
-    /// <summary>
-    /// The current Ask mode is Auto's, set for one routed question - not a pick of the user's.
-    /// The next prompt hands Auto back even when the end-of-turn restore never ran.
-    /// </summary>
-    private bool _askTurnFromAuto;
-    private string? _planRestoreEffort;
-    private bool _planEffortRaised;
-    private bool _planPromotedFromLite;
+    private readonly TemporaryModeRestore<IAgentSession> _modeRestore = new();
+    private readonly PlanEffortOverride _planEffort = new();
 
     /// <summary>Relative workspace paths for @-references, built on first use per connect.</summary>
     private IReadOnlyList<string>? _workspaceFiles;
@@ -131,7 +125,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// picked by the button that opened the chat ("Claude chat" / "Codex chat").
     /// Terminal-CLI chats are unaffected. Settable until the session connects.
     /// </summary>
-    private string _cliId = AppSettings.DefaultChatCli;
+    private string _cliId = "claude";
 
     public string CliId
     {
@@ -163,14 +157,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        var provider = AppSettings.CliProviderFor(CliId);
+        var provider = _smart.Settings.CliProviderFor(CliId);
         if (!string.Equals(EndpointName, provider, StringComparison.OrdinalIgnoreCase))
         {
             EndpointName = provider;
             OnPropertyChanged(nameof(EndpointName));
         }
 
-        (RequestedModel, RequestedEffort) = TierConfig(AppSettings.DefaultTierFor(CliId));
+        (RequestedModel, RequestedEffort) = TierConfig(_smart.Settings.DefaultTierFor(CliId));
     }
 
     /// <summary>The CLI descriptor behind <see cref="CliId"/>.</summary>
@@ -180,21 +174,31 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>True when this chat's panel session is a Codex CLI session.</summary>
     private bool IsCodexSession => TerminalCli is null && SessionCli.Id == "codex";
 
-    public ChatViewModel(string projectPath, StatusViewModel status, CliEndpointSettings? endpointSettings = null, McpServerSettings? mcpSettings = null)
+    public ChatViewModel(string projectPath, StatusViewModel status, CliEndpointSettings? endpointSettings, McpServerSettings? mcpSettings, IAgentSessionFactory agentSessions, SmartExperienceHost smart, ISmartDecider decider)
     {
+        _agentSessions = agentSessions;
+        _smart = smart;
+        _cliId = smart.Settings.DefaultChatCli;
+        PermissionMode = smart.Settings.DefaultChatMode;
+        _decider = decider;
         _projectPath = projectPath;
         _status = status;
         _endpointSettings = endpointSettings;
         _mcpSettings = mcpSettings;
-        EndpointName = AppSettings.CliProviderFor(CliId);
+        EndpointName = _smart.Settings.CliProviderFor(CliId);
 
         // A new chat starts where the user last left this CLI: the saved tier (resolved
         // to model/effort), or the CLI's own default when nothing has been chosen yet.
-        (RequestedModel, RequestedEffort) = TierConfig(AppSettings.DefaultTierFor(CliId));
+        (RequestedModel, RequestedEffort) = TierConfig(_smart.Settings.DefaultTierFor(CliId));
 
         // The session panel shows its live sections (tasks, changes, subagents) only once
         // there is a conversation; a chat opened empty from history gains one later.
-        Items.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasConversation));
+        Items.CollectionChanged += (_, e) =>
+        {
+            if (e.NewItems is not null)
+                foreach (ChatItem item in e.NewItems) item.TextSettings = _smart.Settings;
+            OnPropertyChanged(nameof(HasConversation));
+        };
 
         _turnTimer = _dispatcher.CreateTimer();
         _turnTimer.Interval = TimeSpan.FromMilliseconds(1000);
@@ -216,7 +220,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 live.LiveMessage = WorkingMessage;
                 if (_preparingTask is { } preparingTask)
                 {
-                    var activity = SmartExperienceHost.Instance.Activities(_projectPath)
+                    var activity = _smart.Instance.Activities(_projectPath)
                         .FirstOrDefault(a => a.Context.ChatId == _chatId && a.StartedAt >= _turnStarted.ToUniversalTime()
                             && a.Context.Task == preparingTask && a.State is "queued" or "exploring" or "finalizing");
                     if (activity is not null)
@@ -253,10 +257,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private void ArmIdleCompaction()
     {
         _idleCompactTimer.Stop();
-        if (AppSettings.IdleCompact && !_compactedSinceLastPrompt &&
-            _status.ContextTokens >= AppSettings.IdleCompactMinTokens)
+        if (_smart.Settings.IdleCompact && !_compactedSinceLastPrompt &&
+            _status.ContextTokens >= _smart.Settings.IdleCompactMinTokens)
         {
-            _idleCompactTimer.Interval = TimeSpan.FromSeconds(AppSettings.IdleCompactSeconds);
+            _idleCompactTimer.Interval = TimeSpan.FromSeconds(_smart.Settings.IdleCompactSeconds);
             _idleCompactTimer.Start();
         }
     }
@@ -265,14 +269,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         // A draft in the composer means the reader is about to send, which reads the warm cache anyway.
         if (_session is null || !IsConnected || IsBusy || Draft.Length > 0 || Attachments.Count > 0 ||
-            !AppSettings.IdleCompact || _compactedSinceLastPrompt || _status.ContextTokens < AppSettings.IdleCompactMinTokens)
+            !_smart.Settings.IdleCompact || _compactedSinceLastPrompt || _status.ContextTokens < _smart.Settings.IdleCompactMinTokens)
         {
             return;
         }
 
         _compactItem = new CompactItem
         {
-            Reason = $"Idle for {AppSettings.IdleCompactSeconds / 60.0:0.#} min",
+            Reason = $"Idle for {_smart.Settings.IdleCompactSeconds / 60.0:0.#} min",
             BeforeTokens = _status.ContextTokens,
         };
         Add(_compactItem);
@@ -1410,7 +1414,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ModeDisplayText))]
-    public partial string PermissionMode { get; set; } = AppSettings.DefaultChatMode;
+    public partial string PermissionMode { get; set; } = "auto";
 
     /// <summary>The mode a fresh chat starts in when Settings does not say otherwise: Auto.</summary>
     public const string DefaultMode = "auto";
@@ -1421,12 +1425,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// the host for approval - and the host denies each one; turns carry the
     /// explain-only instruction (<see cref="UserTurn.AskOnly"/>).
     /// </summary>
-    public const string AskMode = "ask";
+    public const string AskMode = AgentModePolicy.Ask;
 
     public bool IsAskMode => PermissionMode == AskMode;
 
     /// <summary>Full is YOLO: the agent runs unattended, and nothing it does waits for a confirmation.</summary>
-    public bool IsFullMode => PermissionMode is "auto" or "dontAsk" or "bypassPermissions";
+    public bool IsFullMode => AgentModePolicy.IsFullMode(PermissionMode);
 
     /// <summary>
     /// Codale's own automatic mode: the CLI runs with edits accepted and Codale answers its approvals.
@@ -1434,37 +1438,22 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     // NOTE: the CLI's own "auto" classifier is not used. The CLI runs on acceptEdits and Codale
     // answers its approvals: reads and edits pass, shell goes through the host's risk analyzer
     // (safe runs, risky asks), MCP tools through the MCP risk notes (see CliMode).
-    public const string AutomaticMode = "automatic";
+    public const string AutomaticMode = AgentModePolicy.Automatic;
 
     public bool IsAutomaticMode => PermissionMode == AutomaticMode;
 
     /// <summary>Modes only the host knows; the CLI is handed <see cref="CliMode"/> instead.</summary>
-    public static bool IsHostMode(string mode) => mode is AskMode or AutomaticMode;
+    public static bool IsHostMode(string mode) => AgentModePolicy.IsHostMode(mode);
 
     /// <summary>
     /// What to hand the CLI for a host mode: ask and automatic run on "manual", and
     /// Full (stored as "auto" or "dontAsk") on "bypassPermissions" - Claude's own "auto" is a
     /// classifier that can still deny or ask, which Full must never do.
     /// </summary>
-    public static string CliMode(string mode) => ClaudeSessionOptions.ClampPermissionMode(mode switch
-    {
-        AskMode => "manual",
-        // Auto, Ask and Interactive all run the CLI in its ask-everything mode: it has no sandbox
-        // and no opinion of its own, and Codale's ApprovalPolicy answers each request.
-        AutomaticMode => "manual",
-        "auto" or "dontAsk" => "bypassPermissions",
-        _ => mode,
-    });
+    public static string CliMode(string mode) => AgentModePolicy.ToCli(mode);
 
     /// <summary>True when the CLI reporting <paramref name="reported"/> is just the CLI half of host mode <paramref name="hostMode"/>.</summary>
-    private static bool RidesOn(string hostMode, string reported) => hostMode switch
-    {
-        AskMode => reported is "manual" or "default",
-        // A CLI that does not offer its "auto" classifier starts in "default" instead; Auto is the host's routing either way.
-        AutomaticMode => reported is "manual" or "acceptEdits" or "auto" or "default",
-        "auto" or "dontAsk" => reported is "bypassPermissions" or "dontAsk",
-        _ => false,
-    };
+    private static bool RidesOn(string hostMode, string reported) => AgentModePolicy.RepresentsHostMode(hostMode, reported);
 
     /// <summary>The chip label for the raw CLI mode vocabulary.</summary>
     public string ModeDisplayText => ModeDisplay(PermissionMode);
@@ -1499,7 +1488,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // Leaving ask in any direction ends Auto's hold on it.
         if (value != AskMode)
         {
-            _askTurnFromAuto = false;
+            _modeRestore.AskTurnFromAuto = false;
         }
 
         OnPropertyChanged(nameof(IsAskMode));
@@ -1516,10 +1505,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async Task SetPermissionModeAsync(string mode)
     {
-        mode = IsHostMode(mode) ? mode : ClaudeSessionOptions.ClampPermissionMode(mode);
+        mode = IsHostMode(mode) ? mode : AgentPermissionMode.Normalize(mode);
 
         // Any pick is the user's own: picking Ask while Auto had borrowed it makes it stick.
-        _askTurnFromAuto = false;
+        _modeRestore.AskTurnFromAuto = false;
         if (mode == PermissionMode)
         {
             return;
@@ -1567,7 +1556,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         requested is { Length: > 0 } ? requested : null;
 
     /// <summary>Records the user's permission-mode pick as this CLI's new default.</summary>
-    public void RememberModeAsDefault(string mode) => AppSettings.SetDefaultMode(CliId, mode);
+    public void RememberModeAsDefault(string mode) => _smart.Settings.SetDefaultMode(CliId, mode);
 
     /// <summary>Models the session reports, for the session card's picker.</summary>
     public IReadOnlyList<AgentModelInfo> AvailableModels { get; private set; } = [];
@@ -1606,7 +1595,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return (pick ?? models.FirstOrDefault())?.Id;
         }
 
-        var account = AppSettings.FindByok(EndpointName) ?? AppSettings.ByokProviders.FirstOrDefault(p => p.IsAccount && p.CliId == CliId && p.AccountId.Length == 0);
+        var account = _smart.Settings.FindByok(EndpointName) ?? _smart.Settings.ByokProviders.FirstOrDefault(p => p.IsAccount && p.CliId == CliId && p.AccountId.Length == 0);
         var configured = account is { IsAccount: true } ? account.ModelForTier(tier) : null;
         if (!string.IsNullOrWhiteSpace(configured))
         {
@@ -1647,7 +1636,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             // Lite temporarily becomes Flash while planning. Other tiers keep their
             // chosen label during the existing high-effort planning override.
-            var shownEffort = _planEffortRaised && !_planPromotedFromLite ? _planRestoreEffort : RequestedEffort;
+            var shownEffort = _planEffort.ShownEffort(RequestedEffort);
             foreach (var tier in ModelTiers)
             {
                 var (model, effort) = TierConfig(tier);
@@ -1676,7 +1665,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         RequestedModel = model;
         RequestedEffort = effort;
-        AppSettings.SetDefaultTier(CliId, tier);
+        _smart.Settings.SetDefaultTier(CliId, tier);
 
         if (!IsConnected)
         {
@@ -1728,7 +1717,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// Asks the CLI itself for its model list by starting a throwaway session, caches the
     /// answer and returns it. Empty when the CLI is missing, signed out or too old to say.
     /// </summary>
-    public static async Task<IReadOnlyList<AgentModelInfo>> FetchCatalogueAsync(string cliId, string? accountId = null)
+    public static async Task<IReadOnlyList<AgentModelInfo>> FetchCatalogueAsync(IAgentSessionFactory agentSessions, string cliId, string? accountId = null)
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         IAgentSession? session = null;
@@ -1746,9 +1735,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             {
                 [cliId == "codex" ? CodaleAccount.CodexVariable : CodaleAccount.ClaudeVariable] = CodaleAccount.ProfileHome(cliId, accountId),
             };
-            session = cliId == "codex"
-                ? new Codale.Agents.Codex.CodexAgentSession(new Codale.Agents.Codex.CodexSessionOptions { WorkingDirectory = home, Environment = environment })
-                : new ClaudeAgentSession(new ClaudeSessionOptions { WorkingDirectory = home, Environment = environment });
+            session = agentSessions.Create(new AgentSessionRequest
+            {
+                CliId = cliId, WorkingDirectory = home, Environment = environment,
+            });
             await session.StartAsync();
             // StartAsync returns once the CLI answered its handshake; it can still be loading
             // its catalogue, so ask again until it answers instead of giving up on one reply.
@@ -1867,7 +1857,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public string EndpointName { get; private set; } = "";
 
-    private string SelectedProviderName() => AppSettings.FindByok(EndpointName)?.Key ?? "";
+    private string SelectedProviderName() => _smart.Settings.FindByok(EndpointName)?.Key ?? "";
 
     public async Task ConnectAsync()
     {
@@ -1903,11 +1893,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             foreach (var account in accounts)
             {
                 if (account.AccountId.Length == 0) candidates.Add("");
-                else if (AppSettings.ByokProviders.FirstOrDefault(p => p.Supports(cli) && p.IsAccount && p.AccountId == account.AccountId) is { } profile)
+                else if (_smart.Settings.ByokProviders.FirstOrDefault(p => p.Supports(cli) && p.IsAccount && p.AccountId == account.AccountId) is { } profile)
                     candidates.Add(profile.Key);
             }
 
-            candidates.AddRange(AppSettings.ByokProviders.Where(p => p.Supports(cli) && !p.IsAccount).Select(p => p.Key));
+            candidates.AddRange(_smart.Settings.ByokProviders.Where(p => p.Supports(cli) && !p.IsAccount).Select(p => p.Key));
 
             foreach (var name in candidates)
             {
@@ -1968,8 +1958,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // Codale's own account must be signed in before the CLI is started; a provider or an
         // ANTHROPIC_* override brings its own credentials and needs no login.
         var cliId = IsCodexSession ? "codex" : "claude";
-        if (endpointEnv is null && (IsCodexSession || !EnvironmentOverridesEndpoint()) &&
-            !await CodaleAccountCli.IsSignedInAsync(cliId, accountId: AppSettings.FindByok(EndpointName)?.AccountId))
+        if (ConnectPreflight.NeedsAccountCheck(endpointEnv is not null, IsCodexSession, EnvironmentOverridesEndpoint()) &&
+            !await CodaleAccountCli.IsSignedInAsync(cliId, accountId: _smart.Settings.FindByok(EndpointName)?.AccountId))
         {
             // Use whatever else is available before bothering the user.
             if (await TrySwitchToAvailableProfileAsync())
@@ -1985,7 +1975,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        AppSettings.RememberProfile(CliId, EndpointName);
+        _smart.Settings.RememberProfile(CliId, EndpointName);
         _connectedProvider = SelectedProviderName();
         _status.IsCustomProvider = endpointEnv is not null;
         var endpointModels = endpointEnv is not null ? EndpointModels() : [];
@@ -2060,46 +2050,33 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             _status.CliName = cliName;
 
             environment[IsCodexSession ? CodaleAccount.CodexVariable : CodaleAccount.ClaudeVariable] =
-                CodaleAccount.ProfileHome(CliId, AppSettings.FindByok(EndpointName)?.AccountId);
+                CodaleAccount.ProfileHome(CliId, _smart.Settings.FindByok(EndpointName)?.AccountId);
 
-            IAgentSession session = starting = IsCodexSession
-                ? new Codale.Agents.Codex.CodexAgentSession(new Codale.Agents.Codex.CodexSessionOptions
-                {
-                    WorkingDirectory = workingDirectory,
-                    Executable = cliExecutable,
-                    Model = model,
-                    ContextWindow = _endpointSettings?.ContextWindowFor(EndpointName, model),
-                    Effort = effort,
-                    PermissionMode = permissionMode,
-                    McpServers = mcpServers,
-                    Features = _mcpSettings?.CodexFeatures(),
-                    // Read per turn, so a folder added mid-session is writable from the next turn.
-                    AdditionalDirectoriesSource = () => ExtraRoots,
-                    SystemPromptAppend = mcpServers.Count > 0 ? WithMcpDirective("", mcpServers).Trim() : null,
-                    ResumeSessionId = ResumeSessionId,
-                    Environment = environment.Count == 0 ? null : environment,
-                    CustomProvider = _endpointSettings?.CodexProvider(EndpointName),
-                    PromptSuggestions = AppSettings.SuggestNextPrompt,
-                })
-                : new ClaudeAgentSession(new ClaudeSessionOptions
-                {
-                    WorkingDirectory = workingDirectory,
-                    Executable = cliExecutable,
-                    AdditionalDirectories = _connectedFolders,
-                    Model = model,
-                    Effort = effort,
-                    PermissionMode = permissionMode,
-                    // The task server's directive already asks for the step list; saying it twice is paid on every request.
-                    SystemPromptAppend = WithMcpDirective(shellGuard is null ? AlwaysPlanDirective : "", mcpServers).Trim(),
-                    McpServers = mcpServers,
-                    BackgroundShellGuardCommand = shellGuard,
-                    DisallowedTools = JoinTools(shellGuard is not null ? McpServerSettings.NativeTodoTools : null, _mcpSettings?.ClaudeDisallowedTools()),
-                    Chrome = _mcpSettings?.ClaudeChrome(),
-                    PromptSuggestions = AppSettings.SuggestNextPrompt,
-                    SessionId = ResumeSessionId is null ? Guid.NewGuid() : null,
-                    ResumeSessionId = ResumeSessionId,
-                    Environment = environment.Count == 0 ? null : environment,
-                });
+            IAgentSession session = starting = _agentSessions.Create(new AgentSessionRequest
+            {
+                CliId = IsCodexSession ? "codex" : "claude",
+                WorkingDirectory = workingDirectory,
+                Executable = cliExecutable,
+                Model = model,
+                ContextWindow = IsCodexSession ? _endpointSettings?.ContextWindowFor(EndpointName, model) : null,
+                Effort = effort,
+                PermissionMode = permissionMode,
+                McpServers = mcpServers,
+                CodexFeatures = IsCodexSession ? _mcpSettings?.CodexFeatures() : null,
+                AdditionalDirectories = _connectedFolders,
+                AdditionalDirectoriesSource = () => ExtraRoots,
+                SystemPromptAppend = IsCodexSession
+                    ? (mcpServers.Count > 0 ? WithMcpDirective("", mcpServers).Trim() : null)
+                    : WithMcpDirective(shellGuard is null ? AlwaysPlanDirective : "", mcpServers).Trim(),
+                BackgroundShellGuardCommand = shellGuard,
+                DisallowedTools = IsCodexSession ? null : JoinTools(shellGuard is not null ? McpServerSettings.NativeTodoTools : null, _mcpSettings?.ClaudeDisallowedTools()),
+                Chrome = IsCodexSession ? null : _mcpSettings?.ClaudeChrome(),
+                ResumeSessionId = ResumeSessionId,
+                ClaudeSessionId = ResumeSessionId is null ? Guid.NewGuid() : null,
+                Environment = environment.Count == 0 ? null : environment,
+                CodexProvider = IsCodexSession ? _endpointSettings?.CodexProvider(EndpointName) : null,
+                PromptSuggestions = _smart.Settings.SuggestNextPrompt,
+            });
 
             _session = session;
 
@@ -2129,11 +2106,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             // The CLI has no stored conversation for the id (the session died before its first
             // turn was saved, or ran under another provider): start a fresh one instead.
-            var resumeLost = ResumeSessionId is not null &&
-                (ex.Message.Contains("No conversation found with session ID", StringComparison.OrdinalIgnoreCase) ||
-                 ex.Message.Contains("no rollout found", StringComparison.OrdinalIgnoreCase) ||
-                 ex.Message.Contains("thread not found", StringComparison.OrdinalIgnoreCase) ||
-                 (ex.Message.Contains("thread", StringComparison.OrdinalIgnoreCase) && ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase)));
+            var resumeLost = ConnectPreflight.IsResumeLost(ResumeSessionId is not null, ex.Message);
 
             if (!resumeLost)
             {
@@ -2176,14 +2149,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private async Task LoadUsageAsync()
     {
         // The CLI runs under the selected profile's folder; the default folder may hold no login at all.
-        var accountId = AppSettings.FindByok(EndpointName)?.AccountId;
+        var accountId = _smart.Settings.FindByok(EndpointName)?.AccountId;
         var home = CodaleAccount.ProfileHome("claude", accountId);
         if (await ClaudeUsageClient.FetchAsync(home).ConfigureAwait(false) is { } limits)
         {
             _dispatcher.TryEnqueue(() =>
             {
                 // The user switched accounts while the call ran: these windows are the old one's.
-                if ((AppSettings.FindByok(EndpointName)?.AccountId ?? "") == (accountId ?? ""))
+                if ((_smart.Settings.FindByok(EndpointName)?.AccountId ?? "") == (accountId ?? ""))
                 {
                     _status.Apply(limits);
                 }
@@ -2661,7 +2634,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 // The terminal panel cannot read the window from a transcript; it borrows this one.
                 if (!IsCodexSession && turn.ContextWindow is int turnWindow && _status.Model is { Length: > 0 } turnModel && turnModel != StatusViewModel.NotConnected)
                 {
-                    AppSettings.RememberClaudeContextWindow(turnModel, turnWindow);
+                    _smart.Settings.RememberClaudeContextWindow(turnModel, turnWindow);
                 }
 
                 // The context window reading comes from the last assistant message, not
@@ -2680,41 +2653,40 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
                 AbandonPendingApprovals();
 
-                var interrupted = _interruptPending && turn.Subtype == "error_during_execution";
-                var paused = !interrupted && turn.IsError && _autoModeUnavailable;
-                var outcome = turn.Subtype == "success" ? TurnOutcome.Completed
-                    : interrupted || paused ? TurnOutcome.Stopped
-                    : TurnOutcome.Failed;
+                var turnEnd = TurnResolution.Resolve(turn.Subtype, turn.Errors.Count > 0 ? turn.Errors[0] : null, _interruptPending, _autoModeUnavailable);
+                var outcome = turnEnd.Ending switch
+                {
+                    TurnEnding.Completed => TurnOutcome.Completed,
+                    TurnEnding.Stopped => TurnOutcome.Stopped,
+                    _ => TurnOutcome.Failed,
+                };
 
-                if (interrupted)
+                switch (turnEnd.Notice)
                 {
-                    // What an interrupted turn looks like (see interrupt.jsonl) - expected,
-                    // not a failure.
-                    Add(new NoticeItem { Text = "Turn interrupted.", Severity = NoticeSeverity.Info });
-                }
-                else if (paused)
-                {
-                    // Auto mode's safety service is down, not the work: nothing it was asked about
-                    // ran, and the same conversation picks up where it stopped. The CLI's own
-                    // line about it is in the transcript now, so the composer's copy goes.
-                    ComposerNotice = null;
-                    Add(new NoticeItem
-                    {
-                        Text = "Claude paused: auto mode's safety check stopped responding, so the last actions didn't run. " +
-                            "Retry once it's back, or switch to another mode to keep going.",
-                        Severity = NoticeSeverity.Warning,
-                        ActionText = "Retry",
-                        Action = () => IsBusy ? Task.CompletedTask
-                            : SendRoutedAsync("Auto mode's safety check is available again. Continue where you left off.", [], RouteIntent.Act),
-                    });
-                }
-                else if (turn.IsError)
-                {
-                    Add(new NoticeItem
-                    {
-                        Text = turn.Errors is [var reason, ..] ? $"Turn ended: {reason}" : $"Turn ended: {turn.Subtype}",
-                        Severity = NoticeSeverity.Error,
-                    });
+                    case TurnNotice.Interrupted:
+                        // What an interrupted turn looks like (see interrupt.jsonl) - expected,
+                        // not a failure.
+                        Add(new NoticeItem { Text = turnEnd.NoticeText, Severity = NoticeSeverity.Info });
+                        break;
+
+                    case TurnNotice.Paused:
+                        // Auto mode's safety service is down, not the work: nothing it was asked about
+                        // ran, and the same conversation picks up where it stopped. The CLI's own
+                        // line about it is in the transcript now, so the composer's copy goes.
+                        ComposerNotice = null;
+                        Add(new NoticeItem
+                        {
+                            Text = turnEnd.NoticeText,
+                            Severity = NoticeSeverity.Warning,
+                            ActionText = "Retry",
+                            Action = () => IsBusy ? Task.CompletedTask
+                                : SendRoutedAsync("Auto mode's safety check is available again. Continue where you left off.", [], RouteIntent.Act),
+                        });
+                        break;
+
+                    case TurnNotice.Failed:
+                        Add(new NoticeItem { Text = turnEnd.NoticeText, Severity = NoticeSeverity.Error });
+                        break;
                 }
 
                 _interruptPending = false;
@@ -2731,12 +2703,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 }
 
                 // The agent is done and the next move is the reader's.
-                if (!idleCompaction && (outcome is TurnOutcome.Completed or TurnOutcome.Failed || paused))
+                if (!idleCompaction && (outcome is TurnOutcome.Completed or TurnOutcome.Failed || turnEnd.Notice == TurnNotice.Paused))
                 {
                     var answer = Items.OfType<AssistantMessageItem>().LastOrDefault()?.Text;
                     AttentionNeeded?.Invoke(this, outcome == TurnOutcome.Completed
                         ? new AttentionRequest(AttentionKind.TurnFinished, answer is { Length: > 0 } ? Shorten(answer, 140) : "Finished.")
-                        : paused ? new AttentionRequest(AttentionKind.TurnFailed, "Paused: auto mode's safety check isn't responding.")
+                        : turnEnd.Notice == TurnNotice.Paused ? new AttentionRequest(AttentionKind.TurnFailed, "Paused: auto mode's safety check isn't responding.")
                         : new AttentionRequest(AttentionKind.TurnFailed, $"The turn ended with an error ({turn.Errors.FirstOrDefault() ?? turn.Subtype})."));
                 }
                 TurnFinished?.Invoke(this, EventArgs.Empty);
@@ -3561,26 +3533,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private async Task HandleApprovalCoreAsync(ApprovalRequested approval)
     {
-        // Reading a file the user attached is what they asked for, wherever it lives and
-        // in every mode - it is not an excursion outside the workspace.
-        if (IsReadOfAttachedFile(approval))
+        // The order of the first checks lives in ApprovalRouting. Each allow answers yes; the governed
+        // modes consult ApprovalPolicy below; everything else continues to the shell and planning checks.
+        var step = ApprovalRouting.Route(PermissionMode, approval.ToolName,
+            IsReadOfAttachedFile(approval), McpServerSpec.RunsUnasked(_sessionMcpServers, approval.ToolName));
+        if (step is ApprovalStep.AllowAttachedRead or ApprovalStep.AllowUnasked or ApprovalStep.AllowEdit)
         {
-
-            if (_session is { } reading)
-            {
-                await reading.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
-            }
-
-            return;
-        }
-
-        // Codale's own sandboxed tools (explore, the task list...) are essential
-        // and harmless; the CLI still asks for them in plan mode, so the host answers yes
-        // itself in every mode but Manual, where the user wants to see each call.
-        if (PermissionMode is not ("manual" or "default") &&
-            McpServerSpec.RunsUnasked(_sessionMcpServers, approval.ToolName))
-        {
-
             if (_session is { } allowing)
             {
                 await allowing.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
@@ -3589,10 +3547,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        // Ask, Plan, Interactive and Auto are decided here, by what the tool would do. The CLIs run
-        // unsandboxed and hand every approval to Codale, so this is the only gate: reads and read-only
-        // shell run; Ask and Plan refuse writes and unknown shell; Interactive asks for every write;
-        // Auto asks for writes, deletes, dangerous and unknown commands.
         var governed = ApprovalPolicy.Governs(PermissionMode);
         if (governed)
         {
@@ -3617,49 +3571,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             }
         }
 
-        // Interactive and Auto never stop for MCP tools or read-only tools; only edits (Interactive)
-        // and shell (both) can ask.
-        if (!governed && (IsAutomaticMode || PermissionMode is "manual" or "default") &&
-            (approval.ToolName.StartsWith("mcp__", StringComparison.Ordinal) ||
-             approval.ToolName is "Read" or "Glob" or "Grep" or "LS" or "WebSearch" or "WebFetch"))
-        {
-            if (_session is { } reads)
-            {
-                await reads.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
-            }
-
-            return;
-        }
-
-        // In acceptEdits and Auto mode, file edits go through without asking.
-        if (!governed && (PermissionMode == "acceptEdits" || IsAutomaticMode) &&
-            approval.ToolName is "Edit" or "Write" or "MultiEdit" or "NotebookEdit")
-        {
-
-            if (_session is { } editing)
-            {
-                await editing.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
-            }
-
-            return;
-        }
-
-        // Ask mode allows verified reads through the shared inspection fast path below.
-        // Other actions remain subject to Ask enforcement, except shell commands (below).
-        // Questions for the user are conversation, not action, so they still get through.
-        // Looking things up on the web reads, it changes nothing, and it often makes the
-        // answer: ask mode lets it through unasked.
-        if (!governed && IsAskMode && approval.ToolName is "WebSearch" or "WebFetch")
-        {
-
-            if (_session is { } searching)
-            {
-                await searching.RespondToApprovalAsync(approval.RequestId, ApprovalDecision.Allow());
-            }
-
-            return;
-        }
-
         // A shell command that trips no risk rule runs without asking; one that does is shown with
         // why, so the reader decides it knowing what it touches.
         var shellAssessment = ShellApprovalAssessment(approval, out var shellCommand, out var shellHint);
@@ -3678,7 +3589,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         if (!governed && !requiresPlanApproval && PermissionMode is not ("manual" or "default") &&
-            shellAssessment.Risk == ShellRisk.Safe && AppSettings.AutoApproveSafeShell)
+            shellAssessment.Risk == ShellRisk.Safe && _smart.Settings.AutoApproveSafeShell)
         {
 
             if (_session is { } running)
@@ -3781,8 +3692,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // improves a visible confirmation; it never changes automatic approval decisions.
         using var assessmentDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
         if (mcpRisk is null && ToolCallItem.IsShellName(approval.ToolName) &&
-            shellCommand is { Length: > 0 and <= 12000 } && AppSettings.SmartFeatureEnabled("assess") &&
-            (SmartDecider.IsAvailable || SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready))
+            shellCommand is { Length: > 0 and <= 12000 } && _smart.Settings.SmartFeatureEnabled("assess") &&
+            (_decider.IsAvailable || _smart.Instance.Status.State == Codale.Smart.SmartState.Ready))
             _ = EnhanceConfirmationAsync(pending, approvalItem, answered.Task, shellCommand, shellAssessment, assessmentDeadline.Token);
 
         // The turn is blocked on the reader from here: say so, in case they are elsewhere.
@@ -3840,10 +3751,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             // returns to Auto. Other starting modes keep the user's chosen mode.
             // "chosen" is a host mode id; the CLI half goes through CliMode, so Auto
             // ("automatic") lands on the CLI's "auto" and Full on "bypassPermissions".
-            if (_planRestoreMode != AutomaticMode)
+            if (_modeRestore.RestoreMode != AutomaticMode)
             {
-                _planSession = null;
-                _planRestoreMode = null;
+                _modeRestore.Clear();
             }
             PermissionMode = chosen;
             RestorePlanEffort();
@@ -4691,7 +4601,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        var accountChanged = (AppSettings.FindByok(EndpointName)?.AccountId ?? "") != (AppSettings.FindByok(name)?.AccountId ?? "");
+        var accountChanged = (_smart.Settings.FindByok(EndpointName)?.AccountId ?? "") != (_smart.Settings.FindByok(name)?.AccountId ?? "");
         EndpointName = name;
         OnPropertyChanged(nameof(EndpointName));
 
@@ -4740,7 +4650,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (IsConnected)
         {
             var defaultLogin = $"the {ProviderName} login";
-            var targetName = AppSettings.FindByok(EndpointName) is { } profile ? profile.Email ?? profile.Name : defaultLogin;
+            var targetName = _smart.Settings.FindByok(EndpointName) is { } profile ? profile.Email ?? profile.Name : defaultLogin;
             var text = Items.Any(i => i is UserMessageItem or TurnActivityItem)
                 ? $"Switched to {targetName}. The conversation continues."
                 : $"Switched to {targetName}.";
@@ -5360,7 +5270,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public async ValueTask DisposeSessionAsync()
     {
         _briefing?.Cancel();
-        SmartExperienceHost.Instance.CancelOwner(_projectPath, _chatId);
+        _smart.Instance.CancelOwner(_projectPath, _chatId);
         // A tab closed mid-turn would otherwise leave the 500ms timer ticking forever,
         // keeping this view model and its whole transcript rooted.
         _turnTimer.Stop();

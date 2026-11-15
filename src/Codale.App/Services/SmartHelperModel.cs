@@ -8,9 +8,9 @@ namespace Codale.App.Services;
 /// The Smart roles behind Codale's tool-call style helpers: global search (keywords and the judge pass) and auto mode
 /// routing. Each instance names its task, so the router picks Decision when set and General otherwise.
 /// </summary>
-public sealed class SmartHelperModel(string projectPath, string task, TimeSpan timeout) : IHelperModel, ISearchModel
+public sealed class SmartHelperModel(string projectPath, string task, TimeSpan timeout, SmartExperienceHost smart) : IHelperModel, ISearchModel
 {
-    public bool IsAvailable => AppSettings.SmartFeatureEnabled(task) && SmartExperienceHost.Instance.Status.State == SmartState.Ready;
+    public bool IsAvailable => SmartHelperRunner.IsAvailable(smart, task);
 
     public async Task<string> CompleteAsync(string systemPrompt, string prompt, CancellationToken ct = default) =>
         await CompleteAsync(systemPrompt, prompt, 512, ct).ConfigureAwait(false);
@@ -33,17 +33,6 @@ public sealed class SmartHelperModel(string projectPath, string task, TimeSpan t
     void IHelperModel.Prewarm(string systemPrompt, IReadOnlyList<ToolDefinition> tools) { }
     void ISearchModel.Prewarm(string systemPrompt, IReadOnlyList<ToolDefinition> tools) { }
 
-    private async Task<T?> RunAsync<T>(string system, string input, int cap, Func<string, T?> parse, CancellationToken ct) where T : class
-    {
-        if (!IsAvailable) return null;
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(timeout);
-        try
-        {
-            var result = await SmartExperienceHost.Instance.GenerateAsync(new(projectPath, projectPath, task),
-                system, input, cap, parse, background: false, deadline.Token).ConfigureAwait(false);
-            return result?.Value;
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return null; }
-    }
+    private Task<T?> RunAsync<T>(string system, string input, int cap, Func<string, T?> parse, CancellationToken ct) where T : class =>
+        SmartHelperRunner.RunAsync(smart, projectPath, task, timeout, system, input, cap, parse, ct);
 }

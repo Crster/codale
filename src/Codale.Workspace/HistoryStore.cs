@@ -11,7 +11,7 @@ namespace Codale.Workspace;
 /// read it.
 /// </summary>
 /// <remarks>Layout: <c>history.FEATURE.log.OFFSET</c> is the current list, <c>history.FEATURE.arc.N.OFFSET</c> an archive.</remarks>
-public sealed class HistoryStore(string directory)
+public sealed class HistoryStore(string directory, WorkspaceDatabasePool? databases = null)
 {
     public const string Current = "log";
     private const string Archive = "arc";
@@ -25,10 +25,10 @@ public sealed class HistoryStore(string directory)
     private static long SizeOf(string line) => Encoding.UTF8.GetByteCount(line) + 1;
 
     /// <summary>How many times the list has been archived.</summary>
-    public int Generation(string feature) => WorkspaceDb.Use(directory, db => Archives(db, feature).Count);
+    public int Generation(string feature) => (databases ?? WorkspaceDb.Shared).Use(directory, db => Archives(db, feature).Count);
 
     /// <summary>Bytes in the current list.</summary>
-    public long Length(string feature) => WorkspaceDb.Use(directory, db => LengthOf(db, feature));
+    public long Length(string feature) => (databases ?? WorkspaceDb.Shared).Use(directory, db => LengthOf(db, feature));
 
     /// <summary>Kept beside the records so an append does not have to list them to find where it goes.</summary>
     private static DbNode LengthNode(CodaleDb db, string feature) => db.Open("history").Open(feature).Open("length");
@@ -46,7 +46,7 @@ public sealed class HistoryStore(string directory)
                 return;
             }
 
-            WorkspaceDb.Use(directory, db => db.Batch(() =>
+            (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Batch(() =>
             {
                 var at = LengthOf(db, feature);
                 db.Open("history").Open(feature).Open(Current).Open(Offset(at)).Write(line);
@@ -56,7 +56,7 @@ public sealed class HistoryStore(string directory)
     }
 
     /// <summary>Every generation of the history, oldest first, the current one last; each name is passed back to <see cref="Lines"/>.</summary>
-    public IReadOnlyList<string> Generations(string feature) => WorkspaceDb.Use(directory, db =>
+    public IReadOnlyList<string> Generations(string feature) => (databases ?? WorkspaceDb.Shared).Use(directory, db =>
     {
         var names = Archives(db, feature).Select(n => Archive + "." + n).ToList();
         if (db.Open("history").Open(feature).Open(Current).ChildCount() > 0)
@@ -68,7 +68,7 @@ public sealed class HistoryStore(string directory)
     });
 
     /// <summary>The records of a generation from a byte offset on, in order.</summary>
-    public IReadOnlyList<string> Lines(string feature, string generation, long fromOffset = 0) => WorkspaceDb.Use(directory, db =>
+    public IReadOnlyList<string> Lines(string feature, string generation, long fromOffset = 0) => (databases ?? WorkspaceDb.Shared).Use(directory, db =>
     {
         var node = Node(db, feature, generation);
         var lines = new List<string>();
@@ -91,7 +91,7 @@ public sealed class HistoryStore(string directory)
     {
         lock (Gate)
         {
-            WorkspaceDb.Use(directory, db =>
+            (databases ?? WorkspaceDb.Shared).Use(directory, db =>
             {
                 var history = db.Open("history").Open(feature);
                 var current = history.Open(Current);
@@ -133,7 +133,7 @@ public sealed class HistoryStore(string directory)
         lock (Gate)
         {
             Deleted.Add(DeletedKey(feature));
-            WorkspaceDb.Use(directory, db => db.Open("history").Open(feature).Remove());
+            (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("history").Open(feature).Remove());
         }
     }
 

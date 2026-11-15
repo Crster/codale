@@ -47,7 +47,27 @@ public static class CodaleAccountCli
         }
 
         if (cliId == "claude" && ReadLoggedIn(output) == false) return (false, null);
-        return (true, cliId == "codex" ? ReadCodexEmail(cli.Home) : ReadJsonString(output, "email"));
+        return (true, cliId == "codex" ? ReadCodexEmail(cli.Home) : ReadClaudeEmail(output, cli.Home));
+    }
+
+    internal static string? ReadClaudeEmail(string status, string home)
+    {
+        var email = ReadJsonString(status, "email") ?? ReadJsonString(status, "emailAddress");
+        if (email is not null) return email;
+
+        // Claude stores OAuth identity separately from credentials. Keep the lookup
+        // scoped to this account's configuration directory.
+        try
+        {
+            using var config = JsonDocument.Parse(File.ReadAllText(Path.Combine(home, ".claude.json")));
+            return config.RootElement.ValueKind == JsonValueKind.Object
+                && config.RootElement.TryGetProperty("oauthAccount", out var account)
+                    ? ReadJsonString(account.GetRawText(), "emailAddress") : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
     }
 
     internal static bool? ReadLoggedIn(string json)

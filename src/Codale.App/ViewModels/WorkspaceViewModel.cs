@@ -5,6 +5,7 @@ using Codale.Agents;
 using Codale.Agents.Claude;
 using Codale.Agents.History;
 using Codale.App.Services;
+using Codale.Workspace;
 using Codale.Commands;
 using Codale.Core.Agents;
 using Codale.Core.Helper;
@@ -22,32 +23,55 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 {
     private readonly CliEndpointSettings _endpoints;
     private readonly McpServerSettings _mcp;
+    private readonly IAgentSessionFactory _agentSessions;
+    private readonly IGitRepositoryFactory _gitRepositories;
+    private readonly SmartExperienceHost _smart;
+    private readonly ISmartDecider _decider;
+    private readonly IProjectCommandService _commands;
+    private readonly ApplicationDatabase _database;
+    private readonly CommandHistory _commandHistory;
 
 
     /// <summary>The project's features: the history every chat in the window shares.</summary>
     public FeatureService Features { get; }
+    public IWorkspaceData Data { get; }
+    public KeyboardShortcuts Shortcuts { get; }
+    public SyntaxSelection Syntax { get; }
+    public SmartExperienceHost Smart => _smart;
+    public ICliHistoryReaderFactory CliHistory { get; }
 
-    public WorkspaceViewModel(string projectPath)
+    public WorkspaceViewModel(string projectPath, IAgentSessionFactory agentSessions, IGitRepositoryFactory gitRepositories, SmartExperienceHost smart, ISmartDecider decider, IProjectCommandService commands, IWorkspaceDataFactory workspaceData, ICliHistoryReaderFactory cliHistory, ApplicationDatabase database, CommandHistory commandHistory, KeyboardShortcuts shortcuts, SyntaxSelection syntax)
     {
+        _agentSessions = agentSessions;
+        CliHistory = cliHistory;
+        _database = database;
+        Shortcuts = shortcuts;
+        Syntax = syntax;
+        _commandHistory = commandHistory;
+        _gitRepositories = gitRepositories;
+        _smart = smart;
+        _decider = decider;
+        _commands = commands;
         ProjectPath = ProjectPaths.Normalize(projectPath);
         DisplayName = ProjectPaths.DisplayName(ProjectPath);
+        Data = workspaceData.Open(ProjectPath);
 
-        ExtraFolders = new WorkspaceFolders(ProjectPath);
+        ExtraFolders = new WorkspaceFolders(ProjectPath, database);
         Files = new FileTreeViewModel(ProjectPath, ExtraFolders);
-        Git = new GitViewModel(ProjectPath);
-        Features = new FeatureService(ProjectPath);
-        Search = new SearchViewModel(ProjectPath, Features.Knowledge);
-        References = new SearchViewModel(ProjectPath);
-        Diff = new DiffViewModel(ProjectPath);
-        DiffViewer = new DiffViewerViewModel(ProjectPath);
+        Git = new GitViewModel(ProjectPath, gitRepositories, smart);
+        Features = new FeatureService(ProjectPath, smart, Data);
+        Search = new SearchViewModel(ProjectPath, smart, syntax, Features.Knowledge);
+        References = new SearchViewModel(ProjectPath, smart, syntax);
+        Diff = new DiffViewModel(gitRepositories.Create(ProjectPath));
+        DiffViewer = CreateDiffViewer();
         Sessions = new SessionsViewModel(Features);
-        _endpoints = new CliEndpointSettings();
-        _mcp = new McpServerSettings(ProjectPath);
+        _endpoints = new CliEndpointSettings(smart.Settings);
+        _mcp = new McpServerSettings(ProjectPath, database);
         Health = new WorkspaceHealthViewModel(ProjectPath, Features.Knowledge);
-        SmartActivity = new SmartActivityViewModel(ProjectPath);
+        SmartActivity = new SmartActivityViewModel(ProjectPath, smart.Instance);
         SmartActivity.ObserveIndex(Features.Knowledge);
         McpTools = new McpToolsViewModel(_mcp, FolderServers, ProjectPath);
-        CliEndpoint = new CliEndpointViewModel();
+        CliEndpoint = new CliEndpointViewModel(smart.Settings);
         CliEndpoint.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(CliEndpointViewModel.ActiveName))
@@ -67,6 +91,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     }
 
     public string ProjectPath { get; }
+
+    public DiffViewerViewModel CreateDiffViewer() => new(_gitRepositories.Create(ProjectPath));
 
     public string DisplayName { get; }
 
@@ -138,7 +164,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// </summary>
     public ChatViewModel CreateTerminalSession(Codale.Agents.CliDescriptor cli)
     {
-        var session = new ChatViewModel(ProjectPath, new StatusViewModel(), _endpoints, _mcp) { ExtraFolders = ExtraFolders, Terminals = new TerminalSource(this), FolderServers = FolderServers, TerminalCli = cli };
+        var session = new ChatViewModel(ProjectPath, new StatusViewModel(), _endpoints, _mcp, _agentSessions, _smart, _decider) { ExtraFolders = ExtraFolders, Terminals = new TerminalSource(this), FolderServers = FolderServers, TerminalCli = cli };
         TerminalSessions.Add(session);
         return session;
     }
@@ -187,7 +213,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// </summary>
     public TerminalViewModel RunCliTerminal(string command, Codale.Agents.CliDescriptor cli, string directory, ChatViewModel session)
     {
-        var terminal = new TerminalViewModel(directory, command, cli.DisplayName, cli.Id) { AgentSession = session };
+        var terminal = new TerminalViewModel(_smart.Settings, _commandHistory, directory, command, cli.DisplayName, cli.Id) { AgentSession = session };
         terminal.PropertyChanged += OnCommandTerminalPropertyChanged;
         lock (_terminals)
         {
@@ -207,18 +233,18 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>A new conversation with its own status, wired to the workspace's refreshes. Null <paramref name="cliId"/> keeps the default CLI.</summary>
     public ChatViewModel CreateChat(string? cliId = null)
     {
-        var chat = new ChatViewModel(ProjectPath, new StatusViewModel(), _endpoints, _mcp)
+        var chat = new ChatViewModel(ProjectPath, new StatusViewModel(), _endpoints, _mcp, _agentSessions, _smart, _decider)
         {
             Features = Features,
             ExtraFolders = ExtraFolders,
             Terminals = new TerminalSource(this),
             FolderServers = FolderServers,
-            CliId = cliId is { Length: > 0 } ? cliId : AppSettings.DefaultChatCli,
+            CliId = cliId is { Length: > 0 } ? cliId : _smart.Settings.DefaultChatCli,
         };
 
         // Model and effort come from the CLI's saved default pick (or its own default);
         // the mode is the last one the user picked for this CLI.
-        chat.PermissionMode = AppSettings.DefaultModeFor(chat.CliId);
+        chat.PermissionMode = _smart.Settings.DefaultModeFor(chat.CliId);
 
         chat.TurnFinished += OnTurnFinished;
         chat.FilesChanged += OnChatFilesChanged;
@@ -298,7 +324,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// </summary>
     public TerminalViewModel CreateTerminal(string? command = null, string? commandName = null, string? cliId = null)
     {
-        var terminal = new TerminalViewModel(ProjectPath, command, commandName, cliId);
+        var terminal = new TerminalViewModel(_smart.Settings, _commandHistory, ProjectPath, command, commandName, cliId);
         terminal.PropertyChanged += OnCommandTerminalPropertyChanged;
         lock (_terminals)
         {
@@ -426,7 +452,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     }
 
     /// <summary>The commands menu's fresh read of the project's config files.</summary>
-    public IReadOnlyList<ProjectCommand> DiscoverCommands() => CommandCatalog.Discover(ProjectPath);
+    public IReadOnlyList<ProjectCommand> DiscoverCommands() => _commands.Discover(ProjectPath);
 
     /// <summary>Command terminals whose command is still executing; the badge and the menu read this.</summary>
     public IReadOnlyList<TerminalViewModel> RunningCommands =>
@@ -478,7 +504,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             }
         }
 
-        var terminal = new TerminalViewModel(ResolveCommandDirectory(command), command.Command, command.Name);
+        var terminal = new TerminalViewModel(_smart.Settings, _commandHistory, ResolveCommandDirectory(command), command.Command, command.Name);
         terminal.PropertyChanged += OnCommandTerminalPropertyChanged;
         lock (_terminals)
         {
@@ -546,10 +572,10 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// template when there are none). It lives in Codale's data folder, not in the project; the commands
     /// menu reads it back the next time it opens.
     /// </summary>
-    public string EnsureCommandsFile() => CommandCatalog.ConfigOf(ProjectPath).ExportForEditing();
+    public string EnsureCommandsFile() => _commands.ConfigOf(ProjectPath).ExportForEditing();
 
     /// <summary>Where <see cref="EnsureCommandsFile"/> puts the editable copy.</summary>
-    public string CommandsFilePath => CommandCatalog.ConfigOf(ProjectPath).EditablePath;
+    public string CommandsFilePath => _commands.ConfigOf(ProjectPath).EditablePath;
 
     public GitViewModel Git { get; }
 
@@ -673,9 +699,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         if (chat.IsConnected)
         {
             // Settings' CLI provider may have changed since this blank chat connected.
-            await chat.SetEndpointAsync(AppSettings.CliProviderFor(chat.CliId));
+            await chat.SetEndpointAsync(_smart.Settings.CliProviderFor(chat.CliId));
 
-            if (AppSettings.DefaultModeFor(chat.CliId) is { Length: > 0 } mode)
+            if (_smart.Settings.DefaultModeFor(chat.CliId) is { Length: > 0 } mode)
             {
                 await chat.SetPermissionModeAsync(mode);
             }
@@ -683,7 +709,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         else
         {
             chat.ReloadCliDefaults();
-            chat.PermissionMode = AppSettings.DefaultModeFor(chat.CliId);
+            chat.PermissionMode = _smart.Settings.DefaultModeFor(chat.CliId);
         }
     }
 
@@ -770,13 +796,13 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         // Histories are named after their latest prompt: the open chat knows it, else the one it started with.
         var prompt = FindOpenChat(item.SessionId)?.LatestUserPrompt ?? item.Summary.LastPrompt ?? item.Summary.FirstPrompt;
         if (string.IsNullOrWhiteSpace(prompt)) return null;
-        if (AppSettings.SmartFeatureEnabled("title") && SmartExperienceHost.Instance.Status.State == Codale.Smart.SmartState.Ready)
+        if (_smart.Settings.SmartFeatureEnabled("title") && _smart.Instance.Status.State == Codale.Smart.SmartState.Ready)
         {
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
             deadline.CancelAfter(TimeSpan.FromSeconds(8));
             try
             {
-                var named = await SmartExperienceHost.Instance.TitleAsync(new(ProjectPath, ProjectPath, "title"), prompt, deadline.Token);
+                var named = await _smart.Instance.TitleAsync(new(ProjectPath, ProjectPath, "title"), prompt, deadline.Token);
                 if (named?.Value is { Length: > 0 } smart) return smart;
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
@@ -911,7 +937,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     {
         if (sender is ChatViewModel { SessionId: { Length: > 0 } id })
         {
-            using var db = AppDb.Open();
+            using var db = _database.Open();
             var list = db.Open("todos").Open(id);
             db.Batch(() =>
             {
@@ -1023,7 +1049,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
     public async ValueTask DisposeAsync()
     {
-        SmartExperienceHost.Instance.CancelOwner(ProjectPath);
+        _smart.Instance.CancelOwner(ProjectPath);
         Health.Dispose();
         SmartActivity.Dispose();
         CliEndpoint.Dispose();

@@ -9,7 +9,7 @@ namespace Codale.App.ViewModels;
 /// <summary>How much room a command block takes in the notebook terminal.</summary>
 public enum BlockSize
 {
-    /// <summary>Full width, <see cref="AppSettings.TerminalBlockLines"/> lines.</summary>
+    /// <summary>Full width, <see cref="AppSettingsStore.TerminalBlockLines"/> lines.</summary>
     Regular,
 
     /// <summary>The only block of its tab: fills the tab (set when a block was opened in a tab of its own).</summary>
@@ -54,12 +54,15 @@ public sealed partial class CommandBlockViewModel : ObservableObject, IDisposabl
     private short _columns = 120;
     private short _rows;
 
-    public CommandBlockViewModel(string command, ShellState start)
+    public AppSettingsStore Settings { get; }
+
+    public CommandBlockViewModel(AppSettingsStore settings, string command, ShellState start)
     {
         Command = command;
         Start = start;
-        _rows = (short)AppSettings.TerminalBlockLines;
-        Emulator = new TerminalEmulator(_columns, _rows) { ScrollbackLimit = AppSettings.TerminalScrollback };
+        Settings = settings;
+        _rows = (short)settings.TerminalBlockLines;
+        Emulator = new TerminalEmulator(_columns, _rows) { ScrollbackLimit = settings.TerminalScrollback };
 
         // DSR/DA replies go back to the process whether or not a view is showing the block.
         Emulator.Response += reply => _ = _session.WriteAsync(reply);

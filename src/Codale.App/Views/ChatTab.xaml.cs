@@ -50,6 +50,19 @@ public sealed class ToolFileRequestEventArgs(
 /// </summary>
 public sealed partial class ChatTab : UserControl
 {
+    private IWindowOwner? _owner;
+
+    /// <summary>The project window that owns this chat's pickers and attention feedback; forwarded to its session panel.</summary>
+    public IWindowOwner? Owner
+    {
+        get => _owner;
+        set
+        {
+            _owner = value;
+            SessionPanel.Owner = value;
+        }
+    }
+
     private ChatViewModel? _viewModel;
 
     /// <summary>The prompt box: text with attachments, mentions and links held as pills.</summary>
@@ -84,22 +97,11 @@ public sealed partial class ChatTab : UserControl
         foreach (var item in viewModel.Items)
         {
             item.RaiseTextScale();
-            if (item is ToolCallItem { Approval: { } approval })
-            {
-                foreach (var question in approval.Questions)
-                {
-                    question.RaiseTextScale();
-                    foreach (var option in question.Options)
-                    {
-                        option.RaiseTextScale();
-                    }
-                }
-            }
         }
     }
 
     private void ApplyChatTypography() =>
-        FontFamily = new FontFamily(Codale.App.Services.InstalledFonts.Resolve(AppSettings.ChatFontFamily, "Segoe UI"));
+        FontFamily = new FontFamily(Codale.App.Services.InstalledFonts.Resolve(_settings.ChatFontFamily, "Segoe UI"));
 
     /// <summary>The host opens a plan in its own tab, from the plan step's link.</summary>
     public event EventHandler<ToolCallItem>? PlanOpenRequested;
@@ -131,8 +133,13 @@ public sealed partial class ChatTab : UserControl
     /// <summary>Question cards whose visibility is already watched; a card can load more than once.</summary>
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, object> _hookedCards = new();
 
-    public ChatTab()
+    private readonly AppSettingsStore _settings;
+    private readonly KeyboardShortcuts _shortcuts;
+
+    public ChatTab(AppSettingsStore settings, KeyboardShortcuts shortcuts)
     {
+        _settings = settings;
+        _shortcuts = shortcuts;
         InitializeComponent();
 
         DraftBox = new PromptEditor(DraftEditor);
@@ -196,7 +203,7 @@ public sealed partial class ChatTab : UserControl
     /// <summary>Esc twice in quick succession stops the running turn, unless the user turned that off in Settings.</summary>
     private void OnChatKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Handled || e.Key != VirtualKey.Escape || !KeyboardShortcuts.StopOnDoubleEscape)
+        if (e.Handled || e.Key != VirtualKey.Escape || !_shortcuts.StopOnDoubleEscape)
         {
             return;
         }
@@ -1741,7 +1748,7 @@ public sealed partial class ChatTab : UserControl
         }
 
         // A packaged picker needs to be told which window owns it.
-        if (App.Current.MainWindowHandle is { } hwnd)
+        if (Owner?.WindowHandle is { } hwnd)
         {
             WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
         }

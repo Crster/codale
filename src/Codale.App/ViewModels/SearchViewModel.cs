@@ -18,6 +18,7 @@ namespace Codale.App.ViewModels;
 /// </summary>
 public sealed class SearchRangeItem
 {
+    public SyntaxSelection Syntax { get; init; } = null!;
     public string Code { get; init; } = "";
 
     /// <summary>Line numbers down the gutter, one per code line.</summary>
@@ -113,7 +114,7 @@ public sealed class SearchFileItem
         return true;
     }
 
-    public static SearchFileItem From(DiscoveredFile file, string terms) => new()
+    public static SearchFileItem From(DiscoveredFile file, string terms, SyntaxSelection syntax) => new()
     {
         Source = file,
         Terms = terms,
@@ -128,6 +129,7 @@ public sealed class SearchFileItem
         },
         Ranges = file.Ranges.Select(r => new SearchRangeItem
         {
+            Syntax = syntax,
             Code = r.Code,
             Gutter = string.Join("\n", Enumerable.Range(r.StartLine, r.EndLine - r.StartLine + 1)),
             Terms = terms,
@@ -150,6 +152,7 @@ public sealed class SearchFileItem
 public sealed partial class SearchViewModel : ObservableObject
 {
     private readonly SourceIndex _index;
+    private readonly SyntaxSelection _syntax;
     private readonly ProjectKnowledgeIndex? _knowledge;
     private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
 
@@ -157,9 +160,13 @@ public sealed partial class SearchViewModel : ObservableObject
 
     private readonly string _projectPath;
 
-    public SearchViewModel(string projectPath, ProjectKnowledgeIndex? knowledge = null)
+    private readonly SmartExperienceHost _smart;
+
+    public SearchViewModel(string projectPath, SmartExperienceHost smart, SyntaxSelection syntax, ProjectKnowledgeIndex? knowledge = null)
     {
         _knowledge = knowledge;
+        _smart = smart;
+        _syntax = syntax;
         _projectPath = projectPath;
 
         // The scan runs in the background from the moment the project opens, so the
@@ -217,8 +224,8 @@ public sealed partial class SearchViewModel : ObservableObject
             var wantsEditLocation = !keywordOnly && SearchQueryIntent.WantsEditLocation(Query);
             var naturalLanguage = !keywordOnly && SearchQueryIntent.IsNaturalLanguage(Query);
             // Keyword generation and the review pass run on the Decision model, or General when Decision is off.
-            ISearchModel? model = !keywordOnly && AppSettings.SmartFeatureEnabled("keywords")
-                ? new SmartHelperModel(_projectPath, "keywords", TimeSpan.FromSeconds(20)) : null;
+            ISearchModel? model = !keywordOnly && _smart.Settings.SmartFeatureEnabled("keywords")
+                ? new SmartHelperModel(_projectPath, "keywords", TimeSpan.FromSeconds(20), _smart) : null;
 
             Status = "Searching…";
 
@@ -317,7 +324,7 @@ public sealed partial class SearchViewModel : ObservableObject
             var terms = string.Join("\n", file.Keywords.Count > 0 ? file.Keywords : result.Keywords);
             items.Add(current.TryGetValue(file.FilePath, out var existing) && existing.IsSameAs(file, terms)
                 ? existing
-                : SearchFileItem.From(file, terms));
+                : SearchFileItem.From(file, terms, _syntax));
         }
 
         if (items.Count != Files.Count || !items.SequenceEqual(Files))

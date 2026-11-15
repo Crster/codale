@@ -457,6 +457,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
         var header = false;
         var pointers = new List<string>();
         var pointerKeys = new List<string>();
+        var includedEnd = 0;
         bool Excerpt(string rawPath, string hash, int start, int end, string code, int? keyStart = null)
         {
             var path = rawPath.Replace('\\', '/');
@@ -467,22 +468,32 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
                 if (pointers.Count >= MaxPointers || delivered.Contains(pointerKey) || pointerKeys.Contains(pointerKey)) return false;
                 pointers.Add($"- {path}:{start}-{end}");
                 pointerKeys.Add(pointerKey);
+                includedEnd = end;
                 return true;
             }
             // One label for all excerpts: they are already read, so the agent edits from them (read ranges only if its tools demand it).
             var label = header ? "" : "Already read (current):\n";
-            if (!Add([$"source:{rawPath}:{hash}:{keyStart ?? start}"], $"{label}{path}:{start}-{end}\n```\n{code}\n```", MaxContextBytes)) return false;
+            var excerptLines = code.ReplaceLineEndings("\n").Split('\n');
+            var count = excerptLines.Length;
+            while (!Add([$"source:{rawPath}:{hash}:{keyStart ?? start}"], $"{label}{path}:{start}-{start + count - 1}\n```\n{string.Join("\n", excerptLines.Take(count))}\n```", MaxContextBytes))
+            {
+                if (count <= 4) return false;
+                count--;
+            }
             snippets++;
+            includedEnd = start + count - 1;
             header = true;
             return true;
         }
         // A window keeps the key of the ranked chunk it overlaps, so what the conversation already holds is still recognised.
+        var includedWindows = new List<(string Path, int Start, int End)>();
         foreach (var w in windows)
         {
             if (Fresh(w.Path, w.Hash) is null) continue;
             var overlapped = topFiles.SelectMany(f => f).Where(c => c.Path == w.Path)
                 .FirstOrDefault(c => c.StartLine <= w.End && w.Start <= c.StartLine + c.Text.Count(ch => ch == '\n'));
-            Excerpt(w.Path, w.Hash, w.Start, w.End, w.Text, overlapped?.StartLine);
+            if (Excerpt(w.Path, w.Hash, w.Start, w.End, w.Text, overlapped?.StartLine))
+                includedWindows.Add((w.Path, w.Start, includedEnd));
         }
         // The best file gets both its chunks first (the answer is usually one more chunk of the file that ranked first);
         // then every other file's best chunk, then their seconds.
@@ -491,7 +502,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
         {
             if (Fresh(chunk.Path, chunk.Hash) is null) continue;
             var endLine = chunk.StartLine + chunk.Text.Count(c => c == '\n');
-            if (windows.Any(w => w.Path == chunk.Path && w.Start <= endLine && chunk.StartLine <= w.End)) continue;
+            if (includedWindows.Any(w => w.Path == chunk.Path && w.Start <= chunk.StartLine && w.End >= endLine)) continue;
             Excerpt(chunk.Path, chunk.Hash, chunk.StartLine, endLine, chunk.Text);
         }
         if (pointers.Count > 0 && Add(pointerKeys, "Start here (best match first; read these ranges):\n" + string.Join("\n", pointers), MaxContextBytes))

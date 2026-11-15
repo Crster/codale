@@ -16,11 +16,11 @@ using Windows.System;
 namespace Codale.App.Controls;
 
 /// <summary>
-/// The app Settings pane: the app-level preferences (<see cref="AppSettings"/>) in
+/// The app Settings pane: the app-level preferences (<see cref="AppSettingsStore"/>) in
 /// one place - editor and terminal typography, the default shell, chat defaults and
 /// the git refresh pace. It slides in over the right edge of the main window. Every
 /// change is written through at once and applied live to the open project windows
-/// via <see cref="AppSettings.Changed"/>.
+/// via <see cref="_settings.Changed"/>.
 /// </summary>
 public sealed partial class SettingsPanel : UserControl
 {
@@ -36,13 +36,31 @@ public sealed partial class SettingsPanel : UserControl
     /// <summary>The owning window runs interactive sign-in in its workspace terminal.</summary>
     public Func<string, string?, Task>? SignInAsync { get; set; }
 
+    private KeyboardShortcuts _shortcuts = null!;
+    private SyntaxSelection _syntax = null!;
+    private AppSettingsStore _settings = null!;
+    private IWindowOwner _owner = null!;
+    private SmartExperienceHost _smart = null!;
+    private IAgentSessionFactory _agentSessions = null!;
+
     public SettingsPanel()
     {
         InitializeComponent();
-        // Only listen while in the visual tree: the settings event is static and windows come and go.
-        Loaded += (_, _) => { AppSettings.Changed += OnAppSettingsChanged; SmartExperienceHost.Instance.Changed += OnSmartStatusChanged; RefreshSmartStatus(); };
-        Unloaded += (_, _) => { AppSettings.Changed -= OnAppSettingsChanged; SmartExperienceHost.Instance.Changed -= OnSmartStatusChanged; };
+        // Subscribe only while visible in the visual tree; each window uses its composed store.
+        Loaded += (_, _) => { _settings.Changed += OnAppSettingsChanged; _smart.Instance.Changed += OnSmartStatusChanged; RefreshSmartStatus(); RefreshSyntaxSection(); };
+        Unloaded += (_, _) => { _settings.Changed -= OnAppSettingsChanged; _smart.Instance.Changed -= OnSmartStatusChanged;
+            if (_syntaxSubscribed) { _syntax.Store.Changed -= OnSyntaxStoreChanged; _syntaxSubscribed = false; } };
 
+    }
+
+    public void InitializeServices(SmartExperienceHost smart, IAgentSessionFactory agentSessions, AppSettingsStore settings, KeyboardShortcuts shortcuts, SyntaxSelection syntax, IWindowOwner owner)
+    {
+        _owner = owner;
+        _settings = settings;
+        _shortcuts = shortcuts;
+        _syntax = syntax;
+        _smart = smart;
+        _agentSessions = agentSessions;
         Reload();
     }
 
@@ -52,7 +70,7 @@ public sealed partial class SettingsPanel : UserControl
 
     private void OnOpenInstallFolderClick(object sender, RoutedEventArgs e) => OpenFolder(AppContext.BaseDirectory);
 
-    private void OnOpenDataFolderClick(object sender, RoutedEventArgs e) => OpenFolder(AppDb.Folder);
+    private void OnOpenDataFolderClick(object sender, RoutedEventArgs e) => OpenFolder(_settings.DataFolder);
 
     private static void OpenFolder(string path)
     {
@@ -114,7 +132,7 @@ public sealed partial class SettingsPanel : UserControl
     {
         // Use concrete account profiles, as account setup does. Chat aliases can fold a
         // detected account into a default row that no longer carries its credential home.
-        var profiles = AppSettings.ByokProviders;
+        var profiles = _settings.ByokProviders;
         var rows = new List<ProviderChoice>();
         foreach (var cli in new[] { "claude", "codex" })
         {
@@ -126,7 +144,7 @@ public sealed partial class SettingsPanel : UserControl
                 rows.Add(new(profile.Key, label + ": " + (profile.IsAccount ? profile.Email ?? profile.Name : profile.Name),
                     profile.IsAccount ? "Sign-in account" : cli == "codex" ? profile.BaseUrl : profile.AnthropicBaseUrl, cli));
         }
-        var key = string.Join("|", SmartFeatureSettings.Roles.Select(r => AppSettings.SmartProviderFor(r.Id) + ":" + AppSettings.SmartApiProfileFor(r.Id)))
+        var key = string.Join("|", SmartFeatureSettings.Roles.Select(r => _settings.SmartProviderFor(r.Id) + ":" + _settings.SmartApiProfileFor(r.Id)))
             + "#" + string.Join("|", rows.Select(r => r.CliId + r.Name + r.Label + r.Detail))
             + "#" + string.Join("|", profiles.Where(p => p.IsAccount).Select(p => p.Key + ":" + p.AccountId));
         if (_smartRowsKey != key)
@@ -145,7 +163,7 @@ public sealed partial class SettingsPanel : UserControl
         {
             if (!SmartFeatureSettings.RequiresDedicatedModel(id))
             {
-                var flash = SmartExperienceHost.CreateClient(id).DefaultModel;
+                var flash = _smart.CreateClient(id).DefaultModel;
                 box.PlaceholderText = flash.Length > 0 ? $"Flash: {flash}" : "Flash model";
             }
             RestoreSmartModelSelection(id, box);
@@ -156,7 +174,7 @@ public sealed partial class SettingsPanel : UserControl
     private Grid BuildSmartRoleRow((string Id, string Label, string Description, string Placeholder) role,
         IReadOnlyList<ProviderChoice> rows, IReadOnlyList<ByokProvider> profiles, bool first)
     {
-        var provider = AppSettings.SmartProviderFor(role.Id);
+        var provider = _settings.SmartProviderFor(role.Id);
         var row = new Grid
         {
             ColumnSpacing = 8, RowSpacing = 4, Padding = new Thickness(16, 10, 16, 10),
@@ -178,7 +196,7 @@ public sealed partial class SettingsPanel : UserControl
 
         var providers = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Center };
         providers.Items.Add(new ComboBoxItem { Content = "Off", Tag = ("off", "") });
-        var savedProfile = AppSettings.SmartApiProfileFor(role.Id);
+        var savedProfile = _settings.SmartApiProfileFor(role.Id);
         foreach (var choice in rows)
         {
             var isAccount = choice.Detail == "Sign-in account";
@@ -188,7 +206,7 @@ public sealed partial class SettingsPanel : UserControl
         }
         var selectedProfile = savedProfile;
         if (provider is "claude" or "codex")
-            selectedProfile = SmartFeatureSettings.ResolveAccount(profiles, provider, savedProfile, AppSettings.AccountLabel(provider))?.Key ?? savedProfile;
+            selectedProfile = SmartFeatureSettings.ResolveAccount(profiles, provider, savedProfile, _settings.AccountLabel(provider))?.Key ?? savedProfile;
         var current = providers.Items.OfType<ComboBoxItem>().FirstOrDefault(i =>
             i.Tag is (string p, string profile) && p == provider && (provider == "off" || profile == selectedProfile));
         if (current is null && provider != "off")
@@ -204,10 +222,10 @@ public sealed partial class SettingsPanel : UserControl
         {
             if (_loading || providers.SelectedItem is not ComboBoxItem { Tag: ValueTuple<string, string> selection }) return;
             var (selected, profile) = selection;
-            AppSettings.SetSmartProvider(role.Id, selected);
-            AppSettings.SetSmartApiProfile(role.Id, profile);
-            if (selected != "off" && AppSettings.SmartRoleModel(role.Id).Equals("off", StringComparison.OrdinalIgnoreCase))
-                AppSettings.SetSmartRoleModel(role.Id, "default");
+            _settings.SetSmartProvider(role.Id, selected);
+            _settings.SetSmartApiProfile(role.Id, profile);
+            if (selected != "off" && _settings.SmartRoleModel(role.Id).Equals("off", StringComparison.OrdinalIgnoreCase))
+                _settings.SetSmartRoleModel(role.Id, "default");
         };
         Grid.SetRow(providers, 0);
         Grid.SetColumn(providers, 1);
@@ -218,9 +236,9 @@ public sealed partial class SettingsPanel : UserControl
         var model = new ComboBox { IsEditable = true, PlaceholderText = role.Placeholder, HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Center, Tag = role.Id, Visibility = active ? Visibility.Visible : Visibility.Collapsed };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(model, role.Label + " model");
-        model.LostFocus += (_, _) => { if (!_loading && _smartModelBoxes.GetValueOrDefault(role.Id) == model) AppSettings.SetSmartRoleModel(role.Id, model.Text); };
-        model.TextSubmitted += (_, args) => { if (!_loading) AppSettings.SetSmartRoleModel(role.Id, args.Text); };
-        model.SelectionChanged += (_, _) => { if (!_loading && model.SelectedItem is string id) AppSettings.SetSmartRoleModel(role.Id, id); };
+        model.LostFocus += (_, _) => { if (!_loading && _smartModelBoxes.GetValueOrDefault(role.Id) == model) _settings.SetSmartRoleModel(role.Id, model.Text); };
+        model.TextSubmitted += (_, args) => { if (!_loading) _settings.SetSmartRoleModel(role.Id, args.Text); };
+        model.SelectionChanged += (_, _) => { if (!_loading && model.SelectedItem is string id) _settings.SetSmartRoleModel(role.Id, id); };
         // Only problems are spelled out; a working row stays one line.
         var modelStatus = new TextBlock { Visibility = Visibility.Collapsed, Style = (Style)SettingsRootGrid.Resources["RowDesc"] };
         Grid.SetRow(modelStatus, 2); Grid.SetColumn(modelStatus, 1); Grid.SetColumnSpan(modelStatus, 2);
@@ -247,7 +265,7 @@ public sealed partial class SettingsPanel : UserControl
         {
             if (box.FocusState != FocusState.Unfocused || _smartModelBoxes.GetValueOrDefault(id) != box) return;
 
-            var model = AppSettings.SmartRoleModel(id);
+            var model = _settings.SmartRoleModel(id);
             var catalogChoice = box.Items.OfType<string>().FirstOrDefault(item =>
                 string.Equals(item, model, StringComparison.OrdinalIgnoreCase));
             var loading = _loading;
@@ -265,15 +283,15 @@ public sealed partial class SettingsPanel : UserControl
     {
         if (provider == "off" || !SmartFeatureSettings.SupportsProvider(role, provider)) return;
         if (!_loadingSmartModels.Add(box)) return;
-        var profileKey = AppSettings.SmartApiProfileFor(role);
+        var profileKey = _settings.SmartApiProfileFor(role);
         try
         {
-            var client = SmartExperienceHost.CreateClient(role);
+            var client = _smart.CreateClient(role);
             var accountId = client.AccountId;
             var ids = provider is "claude" or "codex"
-                ? (ChatViewModel.KnownCatalogue(provider, accountId) ?? await ChatViewModel.FetchCatalogueAsync(provider, accountId)).Select(m => m.Id).ToArray()
+                ? (ChatViewModel.KnownCatalogue(provider, accountId) ?? await ChatViewModel.FetchCatalogueAsync(_agentSessions, provider, accountId)).Select(m => m.Id).ToArray()
                 : await client.ModelsAsync(CancellationToken.None);
-            if (provider != AppSettings.SmartProviderFor(role) || profileKey != AppSettings.SmartApiProfileFor(role) || !_smartModelBoxes.ContainsValue(box)) return;
+            if (provider != _settings.SmartProviderFor(role) || profileKey != _settings.SmartApiProfileFor(role) || !_smartModelBoxes.ContainsValue(box)) return;
             var current = box.Text;
             var loading = _loading; _loading = true;
             try
@@ -286,7 +304,7 @@ public sealed partial class SettingsPanel : UserControl
                 }
                 // Providers often omit embedding-only models from /models. Keep the configured
                 // value selectable and visible even when the endpoint catalogue does not list it.
-                var configured = AppSettings.SmartRoleModel(role);
+                var configured = _settings.SmartRoleModel(role);
                 if (!string.IsNullOrWhiteSpace(configured) && !box.Items.OfType<string>()
                     .Any(id => string.Equals(id, configured, StringComparison.OrdinalIgnoreCase)))
                     box.Items.Add(configured);
@@ -311,65 +329,65 @@ public sealed partial class SettingsPanel : UserControl
     }
     private void RefreshSmartStatus()
     {
-        var status = SmartExperienceHost.Instance.Status;
+        var status = _smart.Instance.Status;
         var loading = _loading; _loading = true;
         RefreshSmartFeatureRows();
         _loading = loading;
         SmartExperienceStatus.Text = status.Message;
         SmartExperienceStatusPanel.Visibility = status.State == Codale.Smart.SmartState.Error ? Visibility.Visible : Visibility.Collapsed;
     }
-    private void OnSmartExperienceRetry(object sender, RoutedEventArgs e) => SmartExperienceHost.Retry();
+    private void OnSmartExperienceRetry(object sender, RoutedEventArgs e) => _smart.Retry();
 
     /// <summary>Re-reads every setting into the controls; another window may have changed them since.</summary>
     public void Reload()
     {
         _loading = true;
 
-        EditorFontSizeBox.Value = AppSettings.EditorFontSize;
-        EditorTabWidthBox.SelectedIndex = AppSettings.EditorTabWidth switch
+        EditorFontSizeBox.Value = _settings.EditorFontSize;
+        EditorTabWidthBox.SelectedIndex = _settings.EditorTabWidth switch
         {
             2 => 0,
             8 => 2,
             _ => 1,
         };
-        EditorLineNumbersToggle.IsOn = AppSettings.EditorLineNumbers;
-        EditorHighlightingToggle.IsOn = AppSettings.EditorHighlighting;
+        EditorLineNumbersToggle.IsOn = _settings.EditorLineNumbers;
+        EditorHighlightingToggle.IsOn = _settings.EditorHighlighting;
         RefreshSyntaxSection();
-        WordWrapToggle.IsOn = AppSettings.EditorWordWrap;
-        SuggestNextPromptToggle.IsOn = AppSettings.SuggestNextPrompt;
+        WordWrapToggle.IsOn = _settings.EditorWordWrap;
+        SuggestNextPromptToggle.IsOn = _settings.SuggestNextPrompt;
         RefreshSmartStatus();
 
-        ThemeBox.SelectedIndex = AppSettings.Theme switch
+        ThemeBox.SelectedIndex = _settings.Theme switch
         {
             "Light" => 1,
             "System" => 2,
             _ => 0,
         };
 
-        TerminalFontFamilyBox.SelectedIndex = IndexOfFontFamily(AppSettings.TerminalFontFamily);
-        TerminalShellBox.SelectedIndex = AppSettings.TerminalShell switch
+        TerminalFontFamilyBox.SelectedIndex = IndexOfFontFamily(_settings.TerminalFontFamily);
+        TerminalShellBox.SelectedIndex = _settings.TerminalShell switch
         {
             "pwsh" => 1,
             "powershell" => 2,
             "cmd" => 3,
             _ => 0,
         };
-        TerminalFontSizeBox.Value = AppSettings.TerminalFontSize;
-        TerminalScrollbackBox.SelectedIndex = AppSettings.TerminalScrollback switch
+        TerminalFontSizeBox.Value = _settings.TerminalFontSize;
+        TerminalScrollbackBox.SelectedIndex = _settings.TerminalScrollback switch
         {
             <= 1_000 => 0,
             <= 10_000 => 1,
             <= 50_000 => 2,
             _ => 3,
         };
-        TerminalBlockLinesBox.Value = AppSettings.TerminalBlockLines;
-        TerminalBlockHistoryBox.Value = AppSettings.TerminalBlockHistory;
-        TerminalLoadProfileToggle.IsOn = AppSettings.TerminalLoadProfile;
+        TerminalBlockLinesBox.Value = _settings.TerminalBlockLines;
+        TerminalBlockHistoryBox.Value = _settings.TerminalBlockHistory;
+        TerminalLoadProfileToggle.IsOn = _settings.TerminalLoadProfile;
 
-        ChatFontSizeBox.Value = AppSettings.ChatFontSize;
+        ChatFontSizeBox.Value = _settings.ChatFontSize;
         PopulateChatFontFamilies();
 
-        GitPollBox.Value = AppSettings.GitPollSeconds;
+        GitPollBox.Value = _settings.GitPollSeconds;
 
         if (_shortcutRows.Count == 0)
         {
@@ -380,7 +398,7 @@ public sealed partial class SettingsPanel : UserControl
         RefreshShortcutRows();
 
         _providers.Clear();
-        _providers.AddRange(AppSettings.ByokProviders);
+        _providers.AddRange(_settings.ByokProviders);
         BuildProviderEditors();
 
         _loading = false;
@@ -436,7 +454,7 @@ public sealed partial class SettingsPanel : UserControl
             ToolTipService.SetToolTip(reset, "Reset to default");
             reset.Click += (_, _) =>
             {
-                KeyboardShortcuts.Set(action.Id, action.Default);
+                _shortcuts.Set(action.Id, action.Default);
                 ShortcutHint.Text = ShortcutHelp;
                 RefreshShortcutRows();
             };
@@ -468,7 +486,7 @@ public sealed partial class SettingsPanel : UserControl
                 continue;
             }
 
-            var chord = KeyboardShortcuts.Get(action.Id);
+            var chord = _shortcuts.Get(action.Id);
             row.Chord.Content = _recordingId == action.Id ? "Press keys…" : chord.Length == 0 ? "Not set" : chord;
             row.Reset.IsEnabled = chord != action.Default;
         }
@@ -478,7 +496,7 @@ public sealed partial class SettingsPanel : UserControl
     {
         EndRecording();
         _recordingId = id;
-        KeyboardShortcuts.IsRecording = true;
+        _shortcuts.IsRecording = true;
         ShortcutHint.Text = ShortcutHelp;
         RefreshShortcutRows();
         _shortcutRows[id].Chord.Focus(FocusState.Programmatic);
@@ -492,7 +510,7 @@ public sealed partial class SettingsPanel : UserControl
         }
 
         _recordingId = null;
-        KeyboardShortcuts.IsRecording = false;
+        _shortcuts.IsRecording = false;
         ShortcutHint.Text = ShortcutHelp;
         RefreshShortcutRows();
     }
@@ -513,7 +531,7 @@ public sealed partial class SettingsPanel : UserControl
             // Stop chat is the one action Esc can be bound to: pressed twice.
             if (id == KeyboardShortcuts.StopChat)
             {
-                KeyboardShortcuts.Set(id, KeyboardShortcuts.DoubleEscape);
+                _shortcuts.Set(id, KeyboardShortcuts.DoubleEscape);
             }
 
             EndRecording();
@@ -522,7 +540,7 @@ public sealed partial class SettingsPanel : UserControl
 
         if (e.Key is VirtualKey.Back or VirtualKey.Delete && !KeyChord.AnyModifierDown())
         {
-            KeyboardShortcuts.Set(id, "");
+            _shortcuts.Set(id, "");
             EndRecording();
             return;
         }
@@ -545,13 +563,13 @@ public sealed partial class SettingsPanel : UserControl
             return;
         }
 
-        if (KeyboardShortcuts.Owner(chord, id) is { } owner)
+        if (_shortcuts.Owner(chord, id) is { } owner)
         {
             ShortcutHint.Text = $"{chord} is already used by \"{owner.Label}\". Change that one first.";
             return;
         }
 
-        KeyboardShortcuts.Set(id, chord.ToString());
+        _shortcuts.Set(id, chord.ToString());
         EndRecording();
     }
 
@@ -560,7 +578,7 @@ public sealed partial class SettingsPanel : UserControl
         EndRecording();
         foreach (var action in KeyboardShortcuts.Actions)
         {
-            KeyboardShortcuts.Set(action.Id, action.Default);
+            _shortcuts.Set(action.Id, action.Default);
         }
 
         RefreshShortcutRows();
@@ -599,9 +617,13 @@ public sealed partial class SettingsPanel : UserControl
                                 Name = account.Email ?? (account.AccountId == CodaleAccount.UserAccountId ? "Detected CLI account" : "Detected account") };
                             _providers.Add(profile);
                         }
+                        if (account.Email is { Length: > 0 } email
+                            && (profile.Name is "Detected CLI account" or "Detected account" or "Connected account"
+                                || profile.Name == profile.Email))
+                            profile.Name = email;
                         profile.Email = account.Email;
                     }
-                    WriteSettings(() => AppSettings.SetAccountLabel(cli, accounts.FirstOrDefault(a => a.AccountId == "")?.Email));
+                    WriteSettings(() => _settings.SetAccountLabel(cli, accounts.FirstOrDefault(a => a.AccountId == "")?.Email));
                     status.Text = accounts.Count == 0 ? "No accounts detected" : $"{accounts.Count} account{(accounts.Count == 1 ? "" : "s")} detected";
                 }
                 catch (Exception ex) { status.Text = $"Could not detect accounts: {ex.Message}"; }
@@ -652,7 +674,7 @@ public sealed partial class SettingsPanel : UserControl
                 p => CodaleAccountCli.SignOutAsync(cli, accountId: p.AccountId),
                 p => _providers.RemoveAll(candidate => candidate.IsAccount && candidate.CliId == cli && candidate.AccountId == p.AccountId)))
             { status.Text = "Could not sign out. The account was kept; try removing it again."; return; }
-            if (provider.AccountId.Length == 0) WriteSettings(() => AppSettings.SetAccountLabel(cli, null));
+            if (provider.AccountId.Length == 0) WriteSettings(() => _settings.SetAccountLabel(cli, null));
             SaveProviders();
             BuildProviderEditors();
             await RefreshAccountsAsync();
@@ -810,7 +832,7 @@ public sealed partial class SettingsPanel : UserControl
         if (provider.IsAccount)
         {
             var accountModels = ChatViewModel.KnownCatalogue(provider.CliId, provider.AccountId)
-                ?? await ChatViewModel.FetchCatalogueAsync(provider.CliId, provider.AccountId);
+                ?? await ChatViewModel.FetchCatalogueAsync(_agentSessions, provider.CliId, provider.AccountId);
             if (accountModels.Count == 0)
             {
                 SetModelStatus(boxes, "No models reported for this account. Enter a model ID manually.");
@@ -917,7 +939,7 @@ public sealed partial class SettingsPanel : UserControl
     {
         if (!_loading)
         {
-            WriteSettings(() => AppSettings.ByokProviders = _providers);
+            WriteSettings(() => _settings.ByokProviders = _providers);
         }
     }
 
@@ -945,7 +967,7 @@ public sealed partial class SettingsPanel : UserControl
             return;
         }
 
-        var fresh = AppSettings.ByokProviders;
+        var fresh = _settings.ByokProviders;
         if (System.Text.Json.JsonSerializer.Serialize(fresh) == System.Text.Json.JsonSerializer.Serialize(_providers))
         {
             return;
@@ -981,7 +1003,7 @@ public sealed partial class SettingsPanel : UserControl
             ChatFontFamilyBox.Items.Add(new ComboBoxItem { Content = family });
         }
 
-        var stored = AppSettings.ChatFontFamily;
+        var stored = _settings.ChatFontFamily;
         var index = -1;
         for (var i = 0; i < ChatFontFamilyBox.Items.Count; i++)
         {
@@ -1023,7 +1045,7 @@ public sealed partial class SettingsPanel : UserControl
             return;
         }
 
-        AppSettings.EditorFontSize = sender.Value;
+        _settings.EditorFontSize = sender.Value;
     }
 
     private void OnEditorTabWidthChanged(object sender, SelectionChangedEventArgs e)
@@ -1033,7 +1055,7 @@ public sealed partial class SettingsPanel : UserControl
             return;
         }
 
-        AppSettings.EditorTabWidth = EditorTabWidthBox.SelectedIndex switch
+        _settings.EditorTabWidth = EditorTabWidthBox.SelectedIndex switch
         {
             0 => 2,
             2 => 8,
@@ -1045,26 +1067,27 @@ public sealed partial class SettingsPanel : UserControl
     {
         if (!_loading)
         {
-            AppSettings.EditorLineNumbers = EditorLineNumbersToggle.IsOn;
+            _settings.EditorLineNumbers = EditorLineNumbersToggle.IsOn;
         }
     }
 
     // ------------------------------------------------------------------ syntax
 
     private bool _syntaxSubscribed;
+    private void OnSyntaxStoreChanged() => DispatcherQueue.TryEnqueue(() => { if (IsLoaded) RefreshSyntaxSection(); });
 
     /// <summary>Rebuilds the installed-languages list and the override count from the store and settings.</summary>
     private void RefreshSyntaxSection()
     {
-        SyntaxSelection.Start();
+        _syntax.Start();
         if (!_syntaxSubscribed)
         {
             // A grammar installed from the status bar (or by a download finishing) shows up here too.
             _syntaxSubscribed = true;
-            SyntaxService.Store.Changed += () => DispatcherQueue.TryEnqueue(RefreshSyntaxSection);
+            _syntax.Store.Changed += OnSyntaxStoreChanged;
         }
 
-        var all = SyntaxService.Catalog.All;
+        var all = _syntax.Catalog.All;
         var installed = all.Where(l => !l.IsBuiltin).OrderBy(l => l.Name, StringComparer.OrdinalIgnoreCase).ToList();
         SyntaxSummary.Text = $"{all.Count(l => l.IsBuiltin)} built-in languages · {installed.Count} installed";
 
@@ -1093,7 +1116,7 @@ public sealed partial class SettingsPanel : UserControl
             row.Children.Add(export);
 
             var remove = new Button { Content = "Remove", Padding = new Thickness(8, 2, 8, 2), VerticalAlignment = VerticalAlignment.Center };
-            remove.Click += (_, _) => SyntaxService.Store.Remove(language.Id);
+            remove.Click += (_, _) => _syntax.Store.Remove(language.Id);
             Grid.SetColumn(remove, 2);
             row.Children.Add(remove);
 
@@ -1111,7 +1134,7 @@ public sealed partial class SettingsPanel : UserControl
             });
         }
 
-        var overrides = AppSettings.SyntaxOverrides.Count;
+        var overrides = _settings.SyntaxOverrides.Count;
         SyntaxOverridesHint.Text = overrides == 0
             ? "Files you set by hand from the status bar appear here."
             : $"{overrides} file{(overrides == 1 ? "" : "s")} set by hand from the status bar.";
@@ -1120,14 +1143,14 @@ public sealed partial class SettingsPanel : UserControl
 
     private async Task ExportGrammarAsync(LanguageInfo language)
     {
-        if (SyntaxService.Store.Find(language.Id) is not { } entry || SyntaxService.Store.ReadGrammar(entry) is not { } json)
+        if (_syntax.Store.Find(language.Id) is not { } entry || _syntax.Store.ReadGrammar(entry) is not { } json)
         {
             return;
         }
 
         var picker = new Windows.Storage.Pickers.FileSavePicker { SuggestedFileName = $"{language.Id}.tmLanguage" };
         picker.FileTypeChoices.Add("TextMate grammar", [".json"]);
-        if (App.Current.MainWindowHandle is { } hwnd)
+        if (_owner.WindowHandle is { } hwnd)
         {
             WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
         }
@@ -1142,7 +1165,7 @@ public sealed partial class SettingsPanel : UserControl
 
     private void OnSyntaxImportClick(object sender, RoutedEventArgs e)
     {
-        if (App.Current.MainWindowHandle is { } hwnd)
+        if (_owner.WindowHandle is { } hwnd)
         {
             _ = SyntaxDialogs.ImportAsync(XamlRoot, hwnd);
         }
@@ -1150,24 +1173,24 @@ public sealed partial class SettingsPanel : UserControl
 
     private void OnSyntaxClearOverridesClick(object sender, RoutedEventArgs e)
     {
-        AppSettings.SyntaxOverrides = new Dictionary<string, string>();
+        _settings.SyntaxOverrides = new Dictionary<string, string>();
 
         // Open editors re-detect their language; the store event is the one nudge they already listen for.
-        SyntaxService.Store.NotifyChanged();
+        _syntax.Store.NotifyChanged();
     }
 
     private void OnSyntaxOpenFolderClick(object sender, RoutedEventArgs e)
     {
-        SyntaxSelection.Start();
-        Directory.CreateDirectory(SyntaxService.Store.Root);
-        _ = Windows.System.Launcher.LaunchFolderPathAsync(SyntaxService.Store.Root);
+        _syntax.Start();
+        Directory.CreateDirectory(_syntax.Store.Root);
+        _ = Windows.System.Launcher.LaunchFolderPathAsync(_syntax.Store.Root);
     }
 
     private void OnEditorHighlightingToggled(object sender, RoutedEventArgs e)
     {
         if (!_loading)
         {
-            AppSettings.EditorHighlighting = EditorHighlightingToggle.IsOn;
+            _settings.EditorHighlighting = EditorHighlightingToggle.IsOn;
         }
     }
 
@@ -1175,7 +1198,7 @@ public sealed partial class SettingsPanel : UserControl
     {
         if (!_loading)
         {
-            AppSettings.SuggestNextPrompt = SuggestNextPromptToggle.IsOn;
+            _settings.SuggestNextPrompt = SuggestNextPromptToggle.IsOn;
         }
     }
 
@@ -1183,7 +1206,7 @@ public sealed partial class SettingsPanel : UserControl
     {
         if (!_loading)
         {
-            AppSettings.EditorWordWrap = WordWrapToggle.IsOn;
+            _settings.EditorWordWrap = WordWrapToggle.IsOn;
         }
     }
 
@@ -1191,7 +1214,7 @@ public sealed partial class SettingsPanel : UserControl
     {
         if (!_loading)
         {
-            AppSettings.Theme = ThemeBox.SelectedIndex switch
+            _settings.Theme = ThemeBox.SelectedIndex switch
             {
                 1 => "Light",
                 2 => "System",
@@ -1204,7 +1227,7 @@ public sealed partial class SettingsPanel : UserControl
     {
         if (!_loading)
         {
-            AppSettings.TerminalFontFamily =
+            _settings.TerminalFontFamily =
                 (TerminalFontFamilyBox.SelectedItem as ComboBoxItem)?.Content as string ?? "Cascadia Mono";
         }
     }
@@ -1216,14 +1239,14 @@ public sealed partial class SettingsPanel : UserControl
             return;
         }
 
-        AppSettings.ChatFontSize = sender.Value;
+        _settings.ChatFontSize = sender.Value;
     }
 
     private void OnChatFontFamilyChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!_loading)
         {
-            AppSettings.ChatFontFamily =
+            _settings.ChatFontFamily =
                 (ChatFontFamilyBox.SelectedItem as ComboBoxItem)?.Content as string ?? "Segoe UI";
         }
     }
@@ -1235,7 +1258,7 @@ public sealed partial class SettingsPanel : UserControl
             return;
         }
 
-        AppSettings.TerminalShell = TerminalShellBox.SelectedIndex switch
+        _settings.TerminalShell = TerminalShellBox.SelectedIndex switch
         {
             1 => "pwsh",
             2 => "powershell",
@@ -1251,7 +1274,7 @@ public sealed partial class SettingsPanel : UserControl
             return;
         }
 
-        AppSettings.TerminalFontSize = sender.Value;
+        _settings.TerminalFontSize = sender.Value;
     }
 
     private void OnTerminalBlockLinesChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
@@ -1261,7 +1284,7 @@ public sealed partial class SettingsPanel : UserControl
             return;
         }
 
-        AppSettings.TerminalBlockLines = (int)Math.Round(sender.Value);
+        _settings.TerminalBlockLines = (int)Math.Round(sender.Value);
     }
 
     private void OnTerminalBlockHistoryChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
@@ -1271,7 +1294,7 @@ public sealed partial class SettingsPanel : UserControl
             return;
         }
 
-        AppSettings.TerminalBlockHistory = (int)Math.Round(sender.Value);
+        _settings.TerminalBlockHistory = (int)Math.Round(sender.Value);
     }
 
     private void OnTerminalLoadProfileToggled(object sender, RoutedEventArgs e)
@@ -1281,7 +1304,7 @@ public sealed partial class SettingsPanel : UserControl
             return;
         }
 
-        AppSettings.TerminalLoadProfile = TerminalLoadProfileToggle.IsOn;
+        _settings.TerminalLoadProfile = TerminalLoadProfileToggle.IsOn;
     }
 
     private void OnTerminalScrollbackChanged(object sender, SelectionChangedEventArgs e)
@@ -1291,7 +1314,7 @@ public sealed partial class SettingsPanel : UserControl
             return;
         }
 
-        AppSettings.TerminalScrollback = TerminalScrollbackBox.SelectedIndex switch
+        _settings.TerminalScrollback = TerminalScrollbackBox.SelectedIndex switch
         {
             0 => 1_000,
             2 => 50_000,
@@ -1307,6 +1330,6 @@ public sealed partial class SettingsPanel : UserControl
             return;
         }
 
-        AppSettings.GitPollSeconds = (int)Math.Round(sender.Value);
+        _settings.GitPollSeconds = (int)Math.Round(sender.Value);
     }
 }

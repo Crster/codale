@@ -59,7 +59,7 @@ public sealed partial class CodeEditor : UserControl
 
         _highlighter = new SyntaxHighlighter(_model.Buffer);
         _bookmarks = new LineMarkers(_model.Buffer);
-        _model.TabWidth = AppSettings.EditorTabWidth;
+        _model.TabWidth = 4;
 
         _model.Buffer.Changed += OnBufferChanged;
         _model.Buffer.Reloaded += OnBufferReloaded;
@@ -127,12 +127,12 @@ public sealed partial class CodeEditor : UserControl
 
         RegisterPropertyChangedCallback(FontSizeProperty, (_, _) => OnFontMetricsChanged());
 
-        // Settings own the defaults; zoom overrides per tab until the next ApplyAppSettings.
-        _settingsFontSize = Math.Clamp(AppSettings.EditorFontSize, MinFontSize, MaxFontSize);
+        // Settings own the defaults; zoom overrides per tab until the next Applysettings.
+        _settingsFontSize = 13;
         FontSize = _settingsFontSize;
-        ShowLineNumbers = AppSettings.EditorLineNumbers;
-        _highlighter.Enabled = AppSettings.EditorHighlighting;
-        WordWrap = AppSettings.EditorWordWrap;
+        ShowLineNumbers = true;
+        _highlighter.Enabled = true;
+        WordWrap = false;
     }
 
     // ------------------------------------------------------------------ lifetime
@@ -365,22 +365,22 @@ public sealed partial class CodeEditor : UserControl
     /// Applies the Settings values: font size (unless this tab was zoomed away from the last
     /// setting), tab width, line numbers, highlighting and wrap.
     /// </summary>
-    public void ApplyAppSettings()
+    public void ApplyAppSettings(AppSettingsStore settings)
     {
-        var tabWidthChanged = _model.TabWidth != AppSettings.EditorTabWidth;
-        _model.TabWidth = AppSettings.EditorTabWidth;
+        var tabWidthChanged = _model.TabWidth != settings.EditorTabWidth;
+        _model.TabWidth = settings.EditorTabWidth;
 
-        var size = Math.Clamp(AppSettings.EditorFontSize, MinFontSize, MaxFontSize);
+        var size = Math.Clamp(settings.EditorFontSize, MinFontSize, MaxFontSize);
         if (double.IsFinite(FontSize) && Math.Abs(FontSize - _settingsFontSize) < 0.1)
         {
             FontSize = size;
         }
 
         _settingsFontSize = size;
-        var wrapChanged = WordWrap != AppSettings.EditorWordWrap;
-        WordWrap = AppSettings.EditorWordWrap;
-        ShowLineNumbers = AppSettings.EditorLineNumbers;
-        _highlighter.Enabled = AppSettings.EditorHighlighting;
+        var wrapChanged = WordWrap != settings.EditorWordWrap;
+        WordWrap = settings.EditorWordWrap;
+        ShowLineNumbers = settings.EditorLineNumbers;
+        _highlighter.Enabled = settings.EditorHighlighting;
 
         if (tabWidthChanged || wrapChanged)
         {

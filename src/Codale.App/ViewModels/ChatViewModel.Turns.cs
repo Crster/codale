@@ -112,16 +112,9 @@ public sealed partial class ChatViewModel
     /// </summary>
     private async Task<bool> EnterPlanModeAsync()
     {
-        // Planning twice in a row keeps the original tier and restoration effort.
-        if (!_planEffortRaised)
-        {
-            _planPromotedFromLite = CurrentTier == "lite";
-            _planRestoreEffort = RequestedEffort;
-            _planEffortRaised = true;
-        }
-
-        // Lite and Flash share the fast model; their difference is low vs medium effort.
-        var planEffort = _planPromotedFromLite ? TierConfig("flash").Effort : "high";
+        // Lite and Flash share the fast model; their difference is low vs medium effort. Planning
+        // twice in a row keeps the original tier and restoration effort.
+        var planEffort = _planEffort.Enter(CurrentTier, RequestedEffort, TierConfig("flash").Effort);
         RequestedEffort = planEffort;
 
         // Mid-turn there is nothing to restart without killing the running turn: the
@@ -139,8 +132,7 @@ public sealed partial class ChatViewModel
             return false;
         }
 
-        _planSession = session;
-        _planRestoreMode = PermissionMode is { Length: > 0 } mode ? mode : DefaultMode;
+        _modeRestore.Begin(session, PermissionMode, DefaultMode);
 
         bool entered;
         try
@@ -153,8 +145,7 @@ public sealed partial class ChatViewModel
         }
         if (!entered)
         {
-            _planSession = null;
-            _planRestoreMode = null;
+            _modeRestore.Clear();
             RestorePlanEffort();
             ComposerNotice = new NoticeItem
             {
@@ -181,8 +172,7 @@ public sealed partial class ChatViewModel
             return false;
         }
 
-        _planSession = session;
-        _planRestoreMode = PermissionMode is { Length: > 0 } mode ? mode : DefaultMode;
+        _modeRestore.Begin(session, PermissionMode, DefaultMode);
 
         try
         {
@@ -194,7 +184,7 @@ public sealed partial class ChatViewModel
         }
 
         PermissionMode = AskMode;
-        _askTurnFromAuto = _planRestoreMode == AutomaticMode;
+        _modeRestore.AskTurnFromAuto = _modeRestore.RestoreMode == AutomaticMode;
         return true;
     }
 
@@ -205,13 +195,12 @@ public sealed partial class ChatViewModel
     /// </summary>
     private async Task ReturnFromRoutedAskAsync()
     {
-        if (!_askTurnFromAuto || PermissionMode != AskMode)
+        if (!_modeRestore.AskTurnFromAuto || PermissionMode != AskMode)
         {
             return;
         }
 
-        _planSession = null;
-        _planRestoreMode = null;
+        _modeRestore.Clear();
         PermissionMode = AutomaticMode;
 
         if (_session is { } session && IsConnected)
@@ -229,15 +218,12 @@ public sealed partial class ChatViewModel
     /// <summary>Planning is done: restores the original tier's effort without changing saved defaults.</summary>
     private void RestorePlanEffort()
     {
-        if (!_planEffortRaised)
+        if (!_planEffort.IsRaised)
         {
             return;
         }
 
-        var effort = _planRestoreEffort;
-        _planPromotedFromLite = false;
-        _planEffortRaised = false;
-        _planRestoreEffort = null;
+        var effort = _planEffort.Restore();
         RequestedEffort = effort;
 
         if (_session is null || !IsConnected)
@@ -255,37 +241,25 @@ public sealed partial class ChatViewModel
         // A subagent still running means the CLI carries on once it reports, in the same
         // plan: leaving plan mode now makes its ExitPlanMode fail ("not in plan mode") and
         // skips the approval. The turn that finishes the plan restores instead.
-        if (_planSession is not null && HasActiveSubagents)
+        if (_modeRestore.Session is not null && HasActiveSubagents)
         {
             return;
         }
 
         RestorePlanEffort();
 
-        if (_planSession is null)
+        if (_modeRestore.Take(_session, DefaultMode) is not { } pending)
         {
             return;
         }
 
-        if (!ReferenceEquals(_session, _planSession))
-        {
-            _planSession = null;
-            _planRestoreMode = null;
-            return;
-        }
-
-        var session = _planSession;
-        var restore = _planRestoreMode ?? DefaultMode;
-        _planSession = null;
-        _planRestoreMode = null;
-
-        PermissionMode = restore;
+        PermissionMode = pending.Mode;
 
         _ = Task.Run(async () =>
         {
             try
             {
-                await session.TrySetPermissionModeAsync(CliMode(restore));
+                await pending.Session.TrySetPermissionModeAsync(CliMode(pending.Mode));
             }
             catch (Exception)
             {
