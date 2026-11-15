@@ -28,10 +28,10 @@ public sealed class McpServerSettings
     private const string PhoneKey = "mcp.phone.enabled";
 
     /// <summary>The Claude CLI's own browser server (Claude in Chrome), switched by <c>--chrome</c> / <c>--no-chrome</c>.</summary>
-    public const string ClaudeChromeServer = "claude-in-chrome";
+    public const string ClaudeChromeServer = McpToolPolicy.ClaudeChromeServer;
 
     /// <summary>The Claude CLI's own desktop-control server, when the user has one.</summary>
-    public const string ClaudeComputerServer = "computer-use";
+    public const string ClaudeComputerServer = McpToolPolicy.ClaudeComputerServer;
 
     private readonly string _projectPath;
     private readonly ApplicationDatabase _database;
@@ -90,20 +90,9 @@ public sealed class McpServerSettings
     }
 
     /// <summary>Stored values; "1" and "0" are what the old on/off toggles wrote.</summary>
-    internal static AgentToolMode ParseMode(string? stored, AgentToolMode fallback) => stored switch
-    {
-        "allow" or "1" => AgentToolMode.Allow,
-        "cli" => AgentToolMode.CliDefault,
-        "block" or "0" => AgentToolMode.Block,
-        _ => fallback,
-    };
+    internal static AgentToolMode ParseMode(string? stored, AgentToolMode fallback) => McpToolPolicy.ParseMode(stored, fallback);
 
-    internal static string FormatMode(AgentToolMode mode) => mode switch
-    {
-        AgentToolMode.Allow => "allow",
-        AgentToolMode.CliDefault => "cli",
-        _ => "block",
-    };
+    internal static string FormatMode(AgentToolMode mode) => McpToolPolicy.FormatMode(mode);
 
     /// <summary>
     /// The CLI's own browser: on for CLI Default, off for Block, and off for Allow so the agent has one
@@ -114,61 +103,20 @@ public sealed class McpServerSettings
     /// <summary>The CLI's own desktop control, by the same rule as <see cref="NativeBrowser"/>.</summary>
     public bool? NativeComputer() => Native(ComputerMode, ComputerAvailable);
 
-    private static bool? Native(AgentToolMode mode, bool codaleAvailable) => mode switch
-    {
-        AgentToolMode.CliDefault => true,
-        AgentToolMode.Allow when !codaleAvailable => null,
-        _ => false,
-    };
+    private static bool? Native(AgentToolMode mode, bool codaleAvailable) => McpToolPolicy.Native(mode, codaleAvailable);
 
     /// <summary>Claude in Chrome: <c>--chrome</c> / <c>--no-chrome</c>.</summary>
-    public bool? ClaudeChrome() => NativeBrowser();
-
-    /// <summary>Codex's feature flags behind its own browser.</summary>
-    private static readonly string[] CodexBrowserFeatures = ["browser_use", "browser_use_external", "in_app_browser"];
-
-    /// <summary>Codex's feature flag behind its own desktop control.</summary>
-    private const string CodexComputerFeature = "computer_use";
+    public bool? ClaudeChrome() => McpToolPolicy.ClaudeChrome(BrowserMode, BrowserAvailable);
 
     /// <summary>Codex feature flags (<c>-c features.NAME=bool</c>) that carry the Browser Use and Computer Use choices.</summary>
-    public IReadOnlyDictionary<string, bool> CodexFeatures()
-    {
-        var features = new Dictionary<string, bool>(StringComparer.Ordinal);
-        if (NativeBrowser() is { } browser)
-        {
-            foreach (var name in CodexBrowserFeatures)
-            {
-                features[name] = browser;
-            }
-        }
-
-        if (NativeComputer() is { } computer)
-        {
-            features[CodexComputerFeature] = computer;
-        }
-
-        return features;
-    }
+    public IReadOnlyDictionary<string, bool> CodexFeatures() =>
+        McpToolPolicy.CodexFeatures(BrowserMode, BrowserAvailable, ComputerMode, ComputerAvailable);
 
     /// <summary>The Claude CLI's own tools a Block setting takes away (comma-separated), or null.</summary>
-    public string? ClaudeDisallowedTools()
-    {
-        var blocked = new List<string>();
-        if (BrowserMode == AgentToolMode.Block)
-        {
-            blocked.Add($"mcp__{ClaudeChromeServer}");
-        }
-
-        if (ComputerMode == AgentToolMode.Block)
-        {
-            blocked.Add($"mcp__{ClaudeComputerServer}");
-        }
-
-        return blocked.Count == 0 ? null : string.Join(',', blocked);
-    }
+    public string? ClaudeDisallowedTools() => McpToolPolicy.ClaudeDisallowedTools(BrowserMode, ComputerMode);
 
     /// <summary>The three modes in one string, so a session can tell when they changed since it started.</summary>
-    public string ModesKey() => $"{FormatMode(BrowserMode)}|{FormatMode(ComputerMode)}|{FormatMode(PhoneMode)}";
+    public string ModesKey() => McpToolPolicy.ModesKey(BrowserMode, ComputerMode, PhoneMode);
 
     public bool PhoneAvailable => File.Exists(ExePath("Codale.Mcp.Phone"));
 
@@ -840,15 +788,4 @@ public sealed class McpServerSettings
     }
 }
 
-/// <summary>How an agent gets one kind of tool (browser, desktop, phone).</summary>
-public enum AgentToolMode
-{
-    /// <summary>Neither Codale's server nor the CLI's own equivalent.</summary>
-    Block,
 
-    /// <summary>Whatever the CLI itself brings (for Claude's browser: Claude in Chrome); Codale's server stays out.</summary>
-    CliDefault,
-
-    /// <summary>Codale's own MCP server.</summary>
-    Allow,
-}

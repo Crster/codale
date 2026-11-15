@@ -150,6 +150,12 @@ Still open for item 4, and needs decisions:
 
 Behaviour change: an invalid working directory in an agent-run command now runs in the run directory instead of failing. Still open for item 5: the two paths still open their own terminals (`TaskTools` through the task service, the app through `TerminalViewModel`); a single launch workflow would need that unified too. Item 5 stays unchecked.
 
+### MCP tool policy (2026-11-15)
+
+`AgentToolMode` moved to `Codale.Core/Agents`, and `McpToolPolicy` there holds the decisions that follow from the browser, desktop and phone modes: parsing and formatting the stored modes, the CLI's own tool setting (`Native`, `ClaudeChrome`), Codex feature flags, Claude's disallowed tools, and the modes key a session uses to notice a change. `McpServerSettings` delegates to it. `McpToolPolicyTests` (13 cases) pin each decision, including the case where Codale's server is missing. Core (960), MCP (52) and agent (400) suites pass; the app builds clean.
+
+Still open for item 6: the directive text and per-CLI configuration writers (`Directive`, `MergeServers`, `CodexOverrides`, `StageSettings`) and the host executable lookup (`RunnablePath`, `StageRunnable`) still live in `McpServerSettings`. Those need the same treatment: pure configuration builders in Core and an injectable host locator. Item 6 stays unchecked.
+
 ### Store caller migration (2026-11-15)
 
 `FeatureService` now receives the workspace data context and creates `FeatureLog` instances from its history store. `ProjectCommandService` accepts a configuration-store resolver; the application supplies one backed by its workspace data factory. Feature log and saved-command operations therefore use the composed pool instead of creating stores through the static workspace fallback. Tests verify that both workflows persist normally and reject access after their owner is disposed. Standalone and MCP callers retain their existing defaults and process boundaries.

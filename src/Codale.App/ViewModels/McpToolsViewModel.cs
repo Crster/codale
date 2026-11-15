@@ -1,3 +1,4 @@
+using Codale.Core.Agents;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
