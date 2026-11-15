@@ -23,20 +23,18 @@ public sealed class NotebookPanel : Panel
     /// <summary>The height a viewport-filling cell gets: the visible height of the notebook.</summary>
     public double FillHeight
     {
-        get => _fillHeight;
+        get;
         set
         {
-            if (Math.Abs(_fillHeight - value) < 0.5)
+            if (Math.Abs(field - value) < 0.5)
             {
                 return;
             }
 
-            _fillHeight = value;
+            field = value;
             InvalidateMeasure();
         }
-    }
-
-    private double _fillHeight = 400;
+    } = 400;
 
     protected override Size MeasureOverride(Size availableSize)
     {
@@ -52,8 +50,8 @@ public sealed class NotebookPanel : Panel
             }
 
             var fills = child is INotebookCell { FillsViewport: true };
-            child.Measure(new Size(width, fills ? _fillHeight : double.PositiveInfinity));
-            total += fills ? _fillHeight : child.DesiredSize.Height;
+            child.Measure(new Size(width, fills ? FillHeight : double.PositiveInfinity));
+            total += fills ? FillHeight : child.DesiredSize.Height;
         }
 
         return new Size(width, total);
@@ -70,7 +68,7 @@ public sealed class NotebookPanel : Panel
                 continue;
             }
 
-            var height = child is INotebookCell { FillsViewport: true } ? _fillHeight : child.DesiredSize.Height;
+            var height = child is INotebookCell { FillsViewport: true } ? FillHeight : child.DesiredSize.Height;
             child.Arrange(new Rect(0, y, finalSize.Width, height));
             y += height;
         }

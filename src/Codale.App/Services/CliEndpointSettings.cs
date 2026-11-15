@@ -1,4 +1,3 @@
-using Codale.Agents;
 using Codale.Core.Agents;
 
 namespace Codale.App.Services;
@@ -120,12 +119,9 @@ public sealed class CliEndpointSettings(AppSettingsStore settings)
     public Codale.Agents.Codex.CodexCustomProvider? CodexProvider(string providerName)
     {
         var active = settings.FindByok(providerName);
-        if (active is null || Clean(active.BaseUrl) is not { Length: > 0 } baseUrl)
-        {
-            return null;
-        }
-
-        return new Codale.Agents.Codex.CodexCustomProvider(
+        return active is null || Clean(active.BaseUrl) is not { Length: > 0 } baseUrl
+            ? null
+            : new Codale.Agents.Codex.CodexCustomProvider(
             Name: string.IsNullOrWhiteSpace(active.Name) ? "custom" : active.Name.Trim(),
             BaseUrl: baseUrl.TrimEnd('/'),
             EnvKey: "OPENAI_API_KEY",
@@ -136,12 +132,9 @@ public sealed class CliEndpointSettings(AppSettingsStore settings)
     public int? ContextWindowFor(string providerName, string? model)
     {
         var active = settings.FindByok(providerName);
-        if (active is null)
-        {
-            return null;
-        }
-
-        return Clean(model) is { Length: > 0 } id &&
+        return active is null
+            ? null
+            : Clean(model) is { Length: > 0 } id &&
             active.ModelContextWindows is not null &&
             active.ModelContextWindows.TryGetValue(id, out var window) && window > 0
             ? window

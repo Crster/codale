@@ -1,4 +1,5 @@
 using System.Text.Json;
+
 using Codale.Agents.Codex;
 using Codale.Core.Agents;
 
@@ -34,7 +35,9 @@ public sealed class CodexPromptPredictionTests
     private static Task Predict(CodexAgentSession session, string? text = "Run the tests", string source = "turn-1", string thread = "main", string type = "completed") =>
         session.HandleNotificationAsync("thread/prediction/updated", Json(new
         {
-            threadId = thread, sourceTurnId = source, result = new { type, text },
+            threadId = thread,
+            sourceTurnId = source,
+            result = new { type, text },
         }));
 
     private static void Drain(CodexAgentSession session)

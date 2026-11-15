@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using Codale.Agents.Providers;
+
 using Codale.Core.Features;
 
 namespace Codale.Agents.Tests;
@@ -109,7 +109,8 @@ public sealed class SmartProviderClientTests
         var decider = new SmartProviderClient(Decision, "openai", profile, "perplexity/decider", http);
         var answers = await decider.DecideAsync(new { message = "show me how the router works" }, new Dictionary<string, SmartQuestion>
         {
-            ["intent"] = SmartDecisions.IntentQuestion(), ["risk"] = SmartDecisions.RiskQuestion(),
+            ["intent"] = SmartDecisions.IntentQuestion(),
+            ["risk"] = SmartDecisions.RiskQuestion(),
         }, default);
         Assert.Equal("ask", answers["intent"].Choice);
         Assert.Equal(0.84, answers["intent"].Certainty, 2);
@@ -303,12 +304,12 @@ public sealed class SmartProviderClientTests
 
     private static SmartFeatureRouter Router(HttpClient http, SmartProviderClient? general = null, SmartProviderClient? completion = null,
         SmartProviderClient? embedding = null, SmartProviderClient? decision = null) => new(new Dictionary<string, ISmartProviderClient>
-    {
-        [General] = general ?? new(General, "off", Profile(), "", http),
-        [Completion] = completion ?? new(Completion, "off", Profile(), "", http),
-        [Embedding] = embedding ?? new(Embedding, "off", Profile(), "", http),
-        [Decision] = decision ?? new(Decision, "off", Profile(), "", http),
-    });
+        {
+            [General] = general ?? new(General, "off", Profile(), "", http),
+            [Completion] = completion ?? new(Completion, "off", Profile(), "", http),
+            [Embedding] = embedding ?? new(Embedding, "off", Profile(), "", http),
+            [Decision] = decision ?? new(Decision, "off", Profile(), "", http),
+        });
 
     private sealed class Handler(Func<HttpRequestMessage, Task<HttpResponseMessage>> handle) : HttpMessageHandler
     {
@@ -372,7 +373,7 @@ public sealed class SmartProviderClientTests
             return Json("{\"data\":[{\"embedding\":[3,4]}]}");
         }));
         var client = new SmartProviderClient(Embedding, "openai", Profile(), "embedding-model", http);
-        Assert.Equal(new[] { 0.6f, 0.8f }, await client.EmbedAsync("code", default));
+        Assert.Equal(new float[] { 0.6f, 0.8f }, await client.EmbedAsync("code", default));
         var other = Profile(); other.BaseUrl = "https://other.test/v1";
         Assert.NotEqual(client.EmbeddingIdentity, new SmartProviderClient(Embedding, "openai", other, "embedding-model").EmbeddingIdentity);
         // Only the Embedding role embeds, and only on an OpenAI-compatible endpoint.

@@ -12,11 +12,9 @@ namespace Codale.App.ViewModels;
 /// One tab serves every diff request - each click replaces its contents - so reviewing
 /// a working tree of thirty agent-touched files does not bury the tab strip.
 /// </remarks>
-public sealed partial class DiffViewerViewModel : ObservableObject
+public sealed partial class DiffViewerViewModel(IGitRepository repository) : ObservableObject
 {
-    private readonly IGitRepository _repository;
-
-    public DiffViewerViewModel(IGitRepository repository) => _repository = repository;
+    private readonly IGitRepository _repository = repository;
 
     public RangeObservableCollection<FileDiff> Files { get; } = [];
 

@@ -1,4 +1,3 @@
-using Codale.Agents.Providers;
 using Codale.Smart;
 
 namespace Codale.App.Services;

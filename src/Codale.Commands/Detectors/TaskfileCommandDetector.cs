@@ -1,15 +1,14 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using System.Xml.Linq;
+
 using static Codale.Commands.CommandParsing;
 
-namespace Codale.Commands;
+namespace Codale.Commands.Detectors;
 
-internal sealed class TaskfileCommandDetector : IProjectCommandDetector
+internal sealed partial class TaskfileCommandDetector : IProjectCommandDetector
 {
     public string Id => "Taskfile";
-    private static readonly Regex YamlKeyRegex = new(@"^(\s*)([A-Za-z0-9_.:-]+)\s*:", RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"^(\s*)([A-Za-z0-9_.:-]+)\s*:", RegexOptions.CultureInvariant)]
+    private static partial Regex YamlKeyRegex();
 
     public IReadOnlyList<ProjectCommand> Discover(string root)
     {
@@ -32,7 +31,7 @@ internal sealed class TaskfileCommandDetector : IProjectCommandDetector
                 continue;
             }
 
-            var match = YamlKeyRegex.Match(line);
+            var match = YamlKeyRegex().Match(line);
             if (!match.Success)
             {
                 continue;

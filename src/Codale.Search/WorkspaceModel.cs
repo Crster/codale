@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+using Codale.Search.Engine;
+
 namespace Codale.Search;
 
 /// <summary>A learned pair of identifiers: <see cref="Next"/> was written straight after <see cref="Previous"/>, <see cref="Count"/> times.</summary>
@@ -43,25 +45,23 @@ public static class ModelChannels
 /// re-tokenising of an unchanged workspace.
 /// </para>
 /// </remarks>
-public sealed class WorkspaceModel
+/// <param name="path">Where the model is saved and loaded; null keeps it in memory only.</param>
+public sealed class WorkspaceModel(string? path = null)
 {
     private const int FormatVersion = 1;
 
     private readonly Lock _gate = new();
-    private readonly string? _path;
-    private readonly Dictionary<string, Entry> _files = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, int> _termFiles = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, Dictionary<SourceSymbolKind, int>> _symbols = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, Dictionary<string, int>> _next = new(StringComparer.Ordinal);
+    private readonly string? _path = path;
+    private readonly Dictionary<string, Entry> _files = [with(StringComparer.OrdinalIgnoreCase)];
+    private readonly Dictionary<string, int> _termFiles = [with(StringComparer.Ordinal)];
+    private readonly Dictionary<string, Dictionary<SourceSymbolKind, int>> _symbols = [with(StringComparer.OrdinalIgnoreCase)];
+    private readonly Dictionary<string, Dictionary<string, int>> _next = [with(StringComparer.Ordinal)];
 
     // Sorted views for prefix lookups; rebuilt on the next query after a change.
     private string[]? _termIndex;
     private string[]? _symbolIndex;
     private bool _loaded;
     private bool _dirty;
-
-    /// <param name="path">Where the model is saved and loaded; null keeps it in memory only.</param>
-    public WorkspaceModel(string? path = null) => _path = path;
 
     /// <summary>The one copy of each word the model and the index's files share.</summary>
     internal StringPool Pool { get; } = new();
@@ -168,13 +168,10 @@ public sealed class WorkspaceModel
     {
         lock (_gate)
         {
-            if (!_files.TryGetValue(relativePath, out var entry) ||
-                entry.Length != length || entry.LastWriteTicks != lastWriteUtc.Ticks)
-            {
-                return null;
-            }
-
-            return new SourceFile(
+            return !_files.TryGetValue(relativePath, out var entry) ||
+                entry.Length != length || entry.LastWriteTicks != lastWriteUtc.Ticks
+                ? null
+                : new SourceFile(
                 relativePath,
                 fullPath,
                 entry.Length,
@@ -243,12 +240,11 @@ public sealed class WorkspaceModel
                 }
             }
 
-            return scores.Values
+            return [.. scores.Values
                 .OrderByDescending(c => c.Score)
                 .ThenBy(c => c.Text.Length)
                 .Take(max)
-                .Select(c => new WorkspaceSuggestion(c.Text, c.Kind, c.Files))
-                .ToList();
+                .Select(c => new WorkspaceSuggestion(c.Text, c.Kind, c.Files))];
         }
     }
 
@@ -317,14 +313,13 @@ public sealed class WorkspaceModel
             }
         }
 
-        return found.Values
+        return [.. found.Values
             .Where(c => c.Distance > 0)
             .OrderBy(c => c.Distance)
             .ThenByDescending(c => c.Files)
             .ThenBy(c => c.Text.Length)
             .Take(max)
-            .Select(c => new WorkspaceSuggestion(c.Text, c.Kind, c.Files))
-            .ToList();
+            .Select(c => new WorkspaceSuggestion(c.Text, c.Kind, c.Files))];
     }
 
     /// <summary>Edits from <paramref name="a"/> to <paramref name="b"/> (a swap of neighbours counts once), or more than <paramref name="limit"/> once it is sure to exceed it.</summary>
@@ -446,18 +441,18 @@ public sealed class WorkspaceModel
             snapshot = new StoredModel
             {
                 Format = FormatVersion,
-                Files = _files.Values.Select(e => new StoredFile
+                Files = [.. _files.Values.Select(e => new StoredFile
                 {
                     Path = e.Path,
                     Length = e.Length,
                     LastWriteTicks = e.LastWriteTicks,
-                    Channels = new Dictionary<string, int>(ModelChannels.Current),
+                    Channels = [with(ModelChannels.Current)],
                     Terms = e.Terms,
                     Counts = e.Counts,
                     TokenCount = e.TokenCount,
                     Symbols = e.Symbols,
                     Transitions = e.Transitions,
-                }).ToList(),
+                })],
             };
         }
 
@@ -577,7 +572,7 @@ public sealed class WorkspaceModel
                     continue;
                 }
 
-                _next[pair.Previous] = followers = new Dictionary<string, int>(StringComparer.Ordinal);
+                _next[pair.Previous] = followers = [with(StringComparer.Ordinal)];
             }
 
             Adjust(followers, pair.Next, sign * pair.Count);

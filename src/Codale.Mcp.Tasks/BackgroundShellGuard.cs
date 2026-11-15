@@ -36,17 +36,11 @@ public static class BackgroundShellGuard
             return null; // never let a malformed hook payload block real work
         }
 
-        if (toolName.Length == 0 || input.ValueKind != JsonValueKind.Object)
-        {
-            return null;
-        }
-
-        if (!BackgroundTaskDetector.IsBackgroundLaunch(toolName, input))
-        {
-            return null;
-        }
-
-        return new JsonObject
+        return toolName.Length == 0 || input.ValueKind != JsonValueKind.Object
+            ? null
+            : !BackgroundTaskDetector.IsBackgroundLaunch(toolName, input)
+            ? null
+            : new JsonObject
         {
             ["hookSpecificOutput"] = new JsonObject
             {

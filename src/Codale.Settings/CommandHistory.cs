@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 using Codale.Db;
 
 namespace Codale.Settings;
@@ -21,7 +19,7 @@ public sealed class CommandHistory(ApplicationDatabase database)
     /// <summary>Commands kept per project; the least recently used beyond this are dropped.</summary>
     public const int MaxCommandsPerProject = 2000;
 
-    private readonly object Gate = new();
+    private readonly Lock _gate = new();
 
     private sealed record Entry(string Source, int Uses, long LastUsed);
 
@@ -36,7 +34,7 @@ public sealed class CommandHistory(ApplicationDatabase database)
             return;
         }
 
-        lock (Gate)
+        lock (_gate)
         {
             try
             {
@@ -57,7 +55,7 @@ public sealed class CommandHistory(ApplicationDatabase database)
             return [];
         }
 
-        lock (Gate)
+        lock (_gate)
         {
             try
             {
@@ -79,7 +77,7 @@ public sealed class CommandHistory(ApplicationDatabase database)
             return [];
         }
 
-        lock (Gate)
+        lock (_gate)
         {
             try
             {
@@ -123,24 +121,22 @@ public sealed class CommandHistory(ApplicationDatabase database)
     internal IReadOnlyList<string> RecentCommands(string projectPath, int max = 500)
     {
         using var db = database.Open();
-        return Entries(CommandsOf(db, projectPath))
+        return [.. Entries(CommandsOf(db, projectPath))
             .OrderByDescending(x => x.Entry.LastUsed)
             .Take(max)
-            .Select(x => x.Text)
-            .ToList();
+            .Select(x => x.Text)];
     }
 
     /// <summary>The project's commands that begin with <paramref name="prefix"/> (case-insensitively), the most often used first and then the most recent.</summary>
     internal IReadOnlyList<string> CommandsStartingWith(string projectPath, string prefix, int max = 8)
     {
         using var db = database.Open();
-        return Entries(CommandsOf(db, projectPath))
+        return [.. Entries(CommandsOf(db, projectPath))
             .Where(x => x.Text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && x.Text != prefix)
             .OrderByDescending(x => x.Entry.Uses)
             .ThenByDescending(x => x.Entry.LastUsed)
             .Take(max)
-            .Select(x => x.Text)
-            .ToList();
+            .Select(x => x.Text)];
     }
 
     private static IEnumerable<(string Text, Entry Entry)> Entries(DbNode commands)

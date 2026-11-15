@@ -46,16 +46,19 @@ public sealed class NativeRuntime(string nativeDirectory) : ISmartRuntime
 {
     private IntPtr _handle;
     public void Configure(SmartModel model) { }
-    private static bool _resolved;
+    private static bool s_resolved;
     public string Backend { get; private set; } = "CPU";
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int CancelCallback(IntPtr state);
-    [DllImport("codale-smart", CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr smart_open(
+    [DllImport("codale-smart", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr smart_open(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string folder, [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
         int gpu, CancelCallback cancel, IntPtr state, byte[] error, int errorSize);
-    [DllImport("codale-smart", EntryPoint = "smart_generate_v3", CallingConvention = CallingConvention.Cdecl)] private static extern int smart_generate_v3(
+    [DllImport("codale-smart", EntryPoint = "smart_generate_v3", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int smart_generate_v3(
         IntPtr runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string prompt, int maxTokens, float temperature, float topP, uint seed,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string? grammar, byte[]? stops, CancelCallback cancel, IntPtr state, byte[] output, int capacity, byte[] error, int errorSize);
-    [DllImport("codale-smart", CallingConvention = CallingConvention.Cdecl)] private static extern int smart_devices(
+    [DllImport("codale-smart", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int smart_devices(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string folder, byte[] output, int capacity, byte[] error, int errorSize);
     [DllImport("codale-smart", CallingConvention = CallingConvention.Cdecl)] private static extern void smart_close(IntPtr runtime);
 
@@ -65,31 +68,30 @@ public sealed class NativeRuntime(string nativeDirectory) : ISmartRuntime
         Resolve();
         var output = new byte[8192]; var error = new byte[1024];
         int length = smart_devices(nativeDirectory, output, output.Length, error, error.Length);
-        if (length < 0) throw new InvalidOperationException(Text(error));
-        return Encoding.UTF8.GetString(output, 0, length);
+        return length < 0 ? throw new InvalidOperationException(Text(error)) : Encoding.UTF8.GetString(output, 0, length);
     }
     private void Resolve()
     {
-        if (_resolved) return;
+        if (s_resolved) return;
         NativeLibrary.SetDllImportResolver(typeof(NativeRuntime).Assembly, (name, _, _) => name == "codale-smart"
             ? NativeLibrary.Load(Path.Combine(nativeDirectory, "codale-smart.dll")) : IntPtr.Zero);
-        _resolved = true;
+        s_resolved = true;
     }
-    [DllImport("codale-smart", CallingConvention = CallingConvention.Cdecl)] private static extern int smart_token_count(
+    [DllImport("codale-smart", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int smart_token_count(
         IntPtr runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string prompt);
 
     public int CountTokens(string prompt)
     {
-        if (_handle == IntPtr.Zero) throw new InvalidOperationException("Model is not loaded.");
-        return smart_token_count(_handle, prompt);
+        return _handle == IntPtr.Zero ? throw new InvalidOperationException("Model is not loaded.") : smart_token_count(_handle, prompt);
     }
 
     public void Load(string modelPath, bool gpu, CancellationToken ct)
     {
         Resolve();
         ct.ThrowIfCancellationRequested();
-        var error = new byte[1024]; CancelCallback cancel = _ => ct.IsCancellationRequested ? 1 : 0;
-        _handle = smart_open(nativeDirectory, modelPath, gpu ? 1 : 0, cancel, IntPtr.Zero, error, error.Length);
+        var error = new byte[1024]; int Cancel(nint _) => ct.IsCancellationRequested ? 1 : 0;
+        _handle = smart_open(nativeDirectory, modelPath, gpu ? 1 : 0, Cancel, IntPtr.Zero, error, error.Length);
         if (ct.IsCancellationRequested) { Dispose(); ct.ThrowIfCancellationRequested(); }
         if (_handle == IntPtr.Zero) throw new InvalidOperationException(Text(error));
         Backend = gpu ? "GPU" : "CPU";
@@ -108,8 +110,7 @@ public sealed class NativeRuntime(string nativeDirectory) : ISmartRuntime
             grammar, stops, cancel, IntPtr.Zero, output, output.Length, error, error.Length);
         GC.KeepAlive(cancel);
         ct.ThrowIfCancellationRequested();
-        if (length < 0) throw new InvalidOperationException(Text(error));
-        return Encoding.UTF8.GetString(output, 0, length);
+        return length < 0 ? throw new InvalidOperationException(Text(error)) : Encoding.UTF8.GetString(output, 0, length);
     }
     private static string Text(byte[] bytes) => Encoding.UTF8.GetString(bytes).TrimEnd('\0');
     public void Dispose() { if (_handle != IntPtr.Zero) { smart_close(_handle); _handle = IntPtr.Zero; } }

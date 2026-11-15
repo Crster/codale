@@ -1,15 +1,14 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using System.Xml.Linq;
+
 using static Codale.Commands.CommandParsing;
 
-namespace Codale.Commands;
+namespace Codale.Commands.Detectors;
 
-internal sealed class MakefileCommandDetector : IProjectCommandDetector
+internal sealed partial class MakefileCommandDetector : IProjectCommandDetector
 {
     public string Id => "Makefile";
-    private static readonly Regex MakefileTargetRegex = new(@"^([A-Za-z0-9][A-Za-z0-9_.-]*)\s*:(?![=])", RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"^([A-Za-z0-9][A-Za-z0-9_.-]*)\s*:(?![=])", RegexOptions.CultureInvariant)]
+    private static partial Regex MakefileTargetRegex();
 
     public IReadOnlyList<ProjectCommand> Discover(string root)
     {
@@ -23,7 +22,7 @@ internal sealed class MakefileCommandDetector : IProjectCommandDetector
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var line in ReadTextSafe(path).Split('\n'))
         {
-            var match = MakefileTargetRegex.Match(line);
+            var match = MakefileTargetRegex().Match(line);
             if (!match.Success)
             {
                 continue;

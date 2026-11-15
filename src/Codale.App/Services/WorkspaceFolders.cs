@@ -1,7 +1,6 @@
 using System.Text.Json;
 
 using Codale.Core.Projects;
-using Codale.Db;
 
 namespace Codale.App.Services;
 
@@ -12,19 +11,13 @@ namespace Codale.App.Services;
 /// live for this window only and have to be attached again after Codale reopens. A change
 /// reaches a Claude chat on its next turn (the CLI restarts) and a Codex chat on its next turn.
 /// </summary>
-public sealed class WorkspaceFolders
+public sealed class WorkspaceFolders(string projectPath, ApplicationDatabase database)
 {
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private readonly List<string> _folders = [];
 
-    private readonly string _projectPath;
-    private readonly ApplicationDatabase _database;
-
-    public WorkspaceFolders(string projectPath, ApplicationDatabase database)
-    {
-        _projectPath = projectPath;
-        _database = database;
-    }
+    private readonly string _projectPath = projectPath;
+    private readonly ApplicationDatabase _database = database;
 
     public event EventHandler? Changed;
 
@@ -35,7 +28,7 @@ public sealed class WorkspaceFolders
         {
             lock (_gate)
             {
-                return _folders.Where(Directory.Exists).ToList();
+                return [.. _folders.Where(Directory.Exists)];
             }
         }
     }

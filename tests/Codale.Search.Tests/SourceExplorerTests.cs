@@ -1,6 +1,8 @@
+using System.Text.Json;
+
 using Codale.Core.Helper;
 using Codale.Db;
-using System.Text.Json;
+using Codale.Search.Engine;
 
 namespace Codale.Search.Tests;
 
@@ -145,12 +147,7 @@ public sealed class SourceExplorerTests : IDisposable
                 await Gate.Task.WaitAsync(ct);
             }
 
-            if (Throw is not null)
-            {
-                throw Throw();
-            }
-
-            return _calls.Count > 0 ? ToolCall.FromJson(_calls.Dequeue()) : null;
+            return Throw is not null ? throw Throw() : _calls.Count > 0 ? ToolCall.FromJson(_calls.Dequeue()) : null;
         }
     }
 
@@ -163,16 +160,26 @@ public sealed class SourceExplorerTests : IDisposable
     private SourceExplorer Explorer(ISearchModel? model = null) => new(_index, model);
 
     private static string Locations(object[] locations, string relevant = "") =>
-        JsonSerializer.Serialize(new { tool = "pick", arguments = new
+        JsonSerializer.Serialize(new
         {
-            relevant, locations = JsonSerializer.Serialize(locations),
-        }});
+            tool = "pick",
+            arguments = new
+            {
+                relevant,
+                locations = JsonSerializer.Serialize(locations),
+            }
+        });
 
     private static string Locate(object[] locations, string paths = "") =>
-        JsonSerializer.Serialize(new { tool = "locate", arguments = new
+        JsonSerializer.Serialize(new
         {
-            locations = JsonSerializer.Serialize(locations), paths,
-        }});
+            tool = "locate",
+            arguments = new
+            {
+                locations = JsonSerializer.Serialize(locations),
+                paths,
+            }
+        });
 
     [Fact]
     public async Task Typed_words_found_verbatim_lead_over_the_models_keywords()
@@ -261,10 +268,15 @@ public sealed class SourceExplorerTests : IDisposable
     }
 
     private static string Review(object[] results, string paths = "") =>
-        JsonSerializer.Serialize(new { tool = "review", arguments = new
+        JsonSerializer.Serialize(new
         {
-            results = JsonSerializer.Serialize(results), paths,
-        }});
+            tool = "review",
+            arguments = new
+            {
+                results = JsonSerializer.Serialize(results),
+                paths,
+            }
+        });
 
     private async Task<ProjectKnowledgeIndex> KnowledgeAsync(CodaleDb store)
     {
@@ -365,8 +377,13 @@ public sealed class SourceExplorerTests : IDisposable
     {
         Write("web/Sidebar.tsx", "export const Sidebar = () => <aside>BrandBadge</aside>;");
         Write("web/BrandBadge.tsx", "export const BrandBadge = () => <img src='/assets/company.svg' />;");
-        var answer = new { path = "web/BrandBadge.tsx", startLine = 1, endLine = 1,
-            keywords = new[] { "/assets/company.svg" } };
+        var answer = new
+        {
+            path = "web/BrandBadge.tsx",
+            startLine = 1,
+            endLine = 1,
+            keywords = new[] { "/assets/company.svg" }
+        };
         var model = new ScriptedModel(Keywords("Sidebar", "web/Sidebar.tsx"), Pick("1"),
             Locate([answer]), Locate([answer]));
         var result = await new SourceExplorer(_index, model) { MaxRelated = 0 }
@@ -390,7 +407,8 @@ public sealed class SourceExplorerTests : IDisposable
             path = retrieved[0].Path,
             locations = new[] { new { startLine = retrieved[0].StartLine, endLine = retrieved[0].StartLine + 4,
                 keywords = new[] { "Retry", "retry", "Backoff", "backoff" } } },
-        }])) { Gate = gate };
+        }]))
+        { Gate = gate };
         var explorer = new SourceExplorer(_index, model) { Knowledge = knowledge, MaxRelated = 0 };
         var progress = new TaskCompletionSource<DiscoveryResult>();
         explorer.Progress += (_, result) => progress.TrySetResult(result);

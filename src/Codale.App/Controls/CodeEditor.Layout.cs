@@ -1,3 +1,4 @@
+using Codale.App.Controls.Editing;
 using Codale.Core.Syntax;
 using Codale.Editor;
 
@@ -189,12 +190,9 @@ public sealed partial class CodeEditor
 
     private int DesiredWrapCols()
     {
-        if (!WordWrap || ViewportWidth <= 0)
-        {
-            return NoWrap;
-        }
-
-        return Math.Max(8, (int)((ViewportWidth - TextLeft - VBarRestWidth - 12) / Math.Max(1, _charWidth)));
+        return !WordWrap || ViewportWidth <= 0
+            ? NoWrap
+            : Math.Max(8, (int)((ViewportWidth - TextLeft - VBarRestWidth - 12) / Math.Max(1, _charWidth)));
     }
 
     private void EnsureWrap()
@@ -215,7 +213,7 @@ public sealed partial class CodeEditor
         }
 
         var lines = _model.Buffer.Lines;
-        _rowCounts = new List<int>(lines.Count);
+        _rowCounts = [with(lines.Count)];
         foreach (var line in lines)
         {
             _rowCounts.Add(TextUnits.Wrap(line, cols, _model.TabWidth, null));
@@ -541,8 +539,10 @@ public sealed partial class CodeEditor
         }
 
         var text = start == 0 && length == visual.Source.Length ? visual.Source : visual.Source.Substring(start, length);
-        var layout = new CanvasTextLayout(Device, text, _textFormat!, 0f, (float)_lineHeight);
-        layout.Options = Microsoft.Graphics.Canvas.Text.CanvasDrawTextOptions.EnableColorFont;
+        var layout = new CanvasTextLayout(Device, text, _textFormat!, 0f, (float)_lineHeight)
+        {
+            Options = Microsoft.Graphics.Canvas.Text.CanvasDrawTextOptions.EnableColorFont
+        };
 
         if (visual.Tokens is { Length: > 0 } tokens)
         {
@@ -639,14 +639,11 @@ public sealed partial class CodeEditor
 
     private static double CaretX(CanvasTextLayout layout, int index, int length)
     {
-        if (length == 0)
-        {
-            return 0;
-        }
-
-        return index >= length
+        return length == 0
+            ? 0
+            : (double)(index >= length
             ? layout.GetCaretPosition(length - 1, true).X
-            : layout.GetCaretPosition(index, false).X;
+            : layout.GetCaretPosition(index, false).X);
     }
 
     /// <summary>The column nearest an x (from the text origin) on a given row of a line.</summary>
@@ -681,7 +678,7 @@ public sealed partial class CodeEditor
     private DocumentPosition PositionAt(Windows.Foundation.Point point)
     {
         EnsureMetrics();
-        var row = Math.Clamp((int)Math.Floor((point.Y + _scrollY) / _lineHeight), 0, TotalRows - 1);
+        var row = Math.Clamp((int)Math.Floor((point.Y + VerticalScroll) / _lineHeight), 0, TotalRows - 1);
         var (line, rowInLine) = LineOfRow(row);
         return new DocumentPosition(line, ColumnAt(line, rowInLine, point.X - TextLeft + _scrollX));
     }

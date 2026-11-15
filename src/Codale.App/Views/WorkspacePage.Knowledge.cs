@@ -1,8 +1,6 @@
 using System.Collections.ObjectModel;
 
 using Codale.App.Controls;
-using Codale.App.Services;
-using Codale.Workspace;
 
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;

@@ -1,5 +1,6 @@
 using Codale.App.Controls;
 using Codale.App.Services;
+using Codale.App.Themes;
 using Codale.App.ViewModels;
 using Codale.App.Views;
 
@@ -7,7 +8,6 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 
 namespace Codale.App;
@@ -308,12 +308,7 @@ public sealed partial class MainWindow : Window, IWindowOwner
             {
                 UseShellExecute = true,
                 WindowStyle = System.Diagnostics.ProcessWindowStyle.Normal,
-            });
-        if (login is null)
-        {
-            throw new InvalidOperationException("The sign-in console did not start.");
-        }
-
+            }) ?? throw new InvalidOperationException("The sign-in console did not start.");
         await login.WaitForExitAsync();
     }
 

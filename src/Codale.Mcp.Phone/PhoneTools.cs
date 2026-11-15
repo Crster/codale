@@ -116,14 +116,10 @@ internal static partial class PhoneTools
 
                     // adb exits 0 even when the phone refuses, so the outcome is in the text.
                     var text = output.Trim();
-                    if (action != "disconnect" && !text.Contains("Successfully", StringComparison.OrdinalIgnoreCase) && !text.Contains("connected to", StringComparison.OrdinalIgnoreCase)
-                        || text.Contains("cannot connect", StringComparison.OrdinalIgnoreCase) || text.Contains("failed", StringComparison.OrdinalIgnoreCase))
-                    {
-                        throw new McpToolException(text.Length > 0 ? text : "adb gave no answer; check the address and that Wireless debugging is on.");
-                    }
-
-                    return [McpContent.FromText(text.Length > 0 ? text : "Done.")];
-                }),
+                    return action != "disconnect" && !text.Contains("Successfully", StringComparison.OrdinalIgnoreCase) && !text.Contains("connected to", StringComparison.OrdinalIgnoreCase)
+                        || text.Contains("cannot connect", StringComparison.OrdinalIgnoreCase) || text.Contains("failed", StringComparison.OrdinalIgnoreCase)
+                        ? throw new McpToolException(text.Length > 0 ? text : "adb gave no answer; check the address and that Wireless debugging is on.")
+                        : [McpContent.FromText(text.Length > 0 ? text : "Done.")]; }),
 
             new("phone_screenshot",
                 "Capture the Android screen as a PNG. This is how you see the app. ALWAYS take one (or phone_ui_tree) before phone_tap / phone_swipe: coordinates are device pixels on the latest screenshot.",
@@ -132,13 +128,9 @@ internal static partial class PhoneTools
                 {
                     await adb.EnsureAwakeAsync(s, ct);
                     var png = Adb.TrimToPng(await adb.RunBinaryAsync(Adb.ForDevice(s, "exec-out", "screencap", "-p"), ct));
-                    if (png.Length < 8 || png[1] != 0x50)
-                    {
-                        throw new McpToolException("The device returned no screenshot (the screen may be locked or showing a secure window).");
-                    }
-
-                    return [McpContent.FromImage(png)];
-                })),
+                    return png.Length < 8 || png[1] != 0x50
+                        ? throw new McpToolException("The device returned no screenshot (the screen may be locked or showing a secure window).")
+                        : [McpContent.FromImage(png)]; })),
 
             new("phone_ui_tree",
                 "Read the current screen as text: one line per element with its text, content description, resource id and tap center (x,y). Cheaper and more precise than a screenshot for finding what to tap; pair with phone_tap using the center.",
@@ -160,13 +152,9 @@ internal static partial class PhoneTools
                         await Task.Delay(700, ct);
                     }
 
-                    if (!xml.Contains("<hierarchy", StringComparison.Ordinal))
-                    {
-                        throw new McpToolException("The device returned no UI hierarchy (the screen may be off, locked or animating). Try phone_screenshot instead.");
-                    }
-
-                    return [McpContent.FromText(UiTree.Parse(xml))];
-                })),
+                    return !xml.Contains("<hierarchy", StringComparison.Ordinal)
+                        ? throw new McpToolException("The device returned no UI hierarchy (the screen may be off, locked or animating). Try phone_screenshot instead.")
+                        : [McpContent.FromText(UiTree.Parse(xml))]; })),
 
             new("phone_tap", "Tap the screen at a position in device pixels.",
                 McpTool.Schema(With(X, Y), "x", "y"),
@@ -218,18 +206,11 @@ internal static partial class PhoneTools
                     var pkg = RequirePackage(a);
                     await adb.EnsureAwakeAsync(s, ct);
                     var activity = a.String("activity");
-                    if (activity is { Length: > 0 })
-                    {
-                        if (!Regex.IsMatch(activity, @"^[A-Za-z0-9_.$]+$"))
-                        {
-                            throw new McpToolException($"'{activity}' is not an activity name.");
-                        }
-
-                        return await Text(adb.ShellAsync(s, $"am start -n {pkg}/{activity}", ct));
-                    }
-
-                    return await Text(adb.ShellAsync(s, $"monkey -p {pkg} -c android.intent.category.LAUNCHER 1", ct));
-                })),
+                    return activity is { Length: > 0 }
+                        ? !Regex.IsMatch(activity, @"^[A-Za-z0-9_.$]+$")
+                            ? throw new McpToolException($"'{activity}' is not an activity name.")
+                            : await Text(adb.ShellAsync(s, $"am start -n {pkg}/{activity}", ct))
+                        : await Text(adb.ShellAsync(s, $"monkey -p {pkg} -c android.intent.category.LAUNCHER 1", ct)); })),
 
             new("phone_stop_app", "Force-stop an app (cold start on the next launch).",
                 McpTool.Schema(With(Package), "package"),
@@ -350,13 +331,9 @@ internal static partial class PhoneTools
                 OnDevice(adb, async (s, a, ct) =>
                 {
                     var apk = Adb.ConfineToProject(a.RequiredString("apk"));
-                    if (!File.Exists(apk))
-                    {
-                        throw new McpToolException($"No such file: {apk}");
-                    }
-
-                    return await Text(adb.RunAsync(Adb.ForDevice(s, "install", "-r", "-t", apk), ct, TimeSpan.FromMinutes(5)));
-                })),
+                    return !File.Exists(apk)
+                        ? throw new McpToolException($"No such file: {apk}")
+                        : await Text(adb.RunAsync(Adb.ForDevice(s, "install", "-r", "-t", apk), ct, TimeSpan.FromMinutes(5))); })),
 
             new("phone_uninstall", "Uninstall an app (and its data) from the device.",
                 McpTool.Schema(With(Package), "package"),

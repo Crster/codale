@@ -15,24 +15,22 @@ public sealed class CodexSessionHistoryReader(string projectPath, string? home =
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string Path, long Length, DateTime Written), TranscriptSummary?> Cache = new();
 
-    private readonly string _root = Path.Combine(home ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex"), "sessions");
-
     public string CliId => "codex";
 
-    public string? HistorySourcePath => _root;
+    public string HistorySourcePath { get; } = Path.Combine(home ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex"), "sessions");
 
     public bool IsSessionFile(string filePath) =>
-        filePath.StartsWith(_root, StringComparison.OrdinalIgnoreCase) &&
+        filePath.StartsWith(HistorySourcePath, StringComparison.OrdinalIgnoreCase) &&
         filePath.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase);
 
     public IReadOnlyList<TranscriptSummary> ListSessions()
     {
-        if (!Directory.Exists(_root))
+        if (!Directory.Exists(HistorySourcePath))
         {
             return [];
         }
 
-        var files = Directory.EnumerateFiles(_root, "rollout-*.jsonl", SearchOption.AllDirectories)
+        var files = Directory.EnumerateFiles(HistorySourcePath, "rollout-*.jsonl", SearchOption.AllDirectories)
             .Select(f => new FileInfo(f))
             .OrderByDescending(f => f.LastWriteTimeUtc)
             .Take(MaxFiles);
@@ -56,7 +54,7 @@ public sealed class CodexSessionHistoryReader(string projectPath, string? home =
         var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            var index = Path.Combine(Path.GetDirectoryName(_root)!, "session_index.jsonl");
+            var index = Path.Combine(Path.GetDirectoryName(HistorySourcePath)!, "session_index.jsonl");
             if (!File.Exists(index))
             {
                 return names;

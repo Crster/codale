@@ -7,11 +7,9 @@ namespace Codale.Terminal.Tests;
 /// TerminalEmulator, then the buffer dumped as text. This is the diagnostic for
 /// "the terminal renders blank": it splits the problem between emulation and drawing.
 /// </summary>
-public class ConPtyEmulatorHarness
+public class ConPtyEmulatorHarness(ITestOutputHelper output)
 {
-    private readonly ITestOutputHelper _output;
-
-    public ConPtyEmulatorHarness(ITestOutputHelper output) => _output = output;
+    private readonly ITestOutputHelper _output = output;
 
     [Fact]
     public async Task Real_shell_output_populates_the_buffer()
@@ -38,12 +36,12 @@ public class ConPtyEmulatorHarness
         _output.WriteLine($"chunks received: {chunks}, scrollback: {emulator.ScrollbackCount}");
         for (var row = 0; row < emulator.Rows; row++)
         {
-            var line = new string(emulator.GetScreenRow(row).ToArray().Select(c => c.Code).ToArray());
+            var line = new string([.. emulator.GetScreenRow(row).ToArray().Select(c => c.Code)]);
             _output.WriteLine($"{row,2}| {line.Replace("\0", "~")}");
         }
 
         var screenText = string.Join("\n", Enumerable.Range(0, emulator.Rows)
-            .Select(r => new string(emulator.GetScreenRow(r).ToArray().Select(c => c.Code).ToArray())));
+            .Select(r => new string([.. emulator.GetScreenRow(r).ToArray().Select(c => c.Code)])));
 
         Assert.True(chunks > 0, "no output reached the emulator");
         Assert.Contains("exit", screenText, StringComparison.OrdinalIgnoreCase);

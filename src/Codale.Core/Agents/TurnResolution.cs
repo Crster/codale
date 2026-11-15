@@ -41,23 +41,12 @@ public sealed record TurnResolution(TurnEnding Ending, TurnNotice Notice, string
             : interrupted || paused ? TurnEnding.Stopped
             : TurnEnding.Failed;
 
-        if (interrupted)
-        {
-            return new(ending, TurnNotice.Interrupted, "Turn interrupted.");
-        }
-
-        if (paused)
-        {
-            return new(ending, TurnNotice.Paused,
+        return interrupted
+            ? new(ending, TurnNotice.Interrupted, "Turn interrupted.")
+            : paused
+            ? new(ending, TurnNotice.Paused,
                 "Claude paused: auto mode's safety check stopped responding, so the last actions didn't run. " +
-                "Retry once it's back, or switch to another mode to keep going.");
-        }
-
-        if (failed)
-        {
-            return new(ending, TurnNotice.Failed, $"Turn ended: {firstError ?? subtype}");
-        }
-
-        return new(ending, TurnNotice.None, "");
+                "Retry once it's back, or switch to another mode to keep going.")
+            : failed ? new(ending, TurnNotice.Failed, $"Turn ended: {firstError ?? subtype}") : new(ending, TurnNotice.None, "");
     }
 }

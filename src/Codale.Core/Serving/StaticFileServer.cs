@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
@@ -390,7 +389,7 @@ public sealed class StaticFileServer : IDisposable
         }
     }
 
-    private static readonly Dictionary<string, string> s_types = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, string> types = new(StringComparer.OrdinalIgnoreCase)
     {
         [".html"] = "text/html; charset=utf-8",
         [".htm"] = "text/html; charset=utf-8",
@@ -429,7 +428,7 @@ public sealed class StaticFileServer : IDisposable
     };
 
     internal static string ContentType(string path) =>
-        s_types.TryGetValue(Path.GetExtension(path), out var type) ? type : "application/octet-stream";
+        types.TryGetValue(Path.GetExtension(path), out var type) ? type : "application/octet-stream";
 
     public void Dispose()
     {

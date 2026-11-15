@@ -15,8 +15,8 @@ public sealed class HistoryStore(string directory, WorkspaceDatabasePool? databa
 {
     public const string Current = "log";
     private const string Archive = "arc";
-    private static readonly object Gate = new();
-    private static readonly HashSet<string> Deleted = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Lock Gate = new();
+    private static readonly HashSet<string> Deleted = [with(StringComparer.OrdinalIgnoreCase)];
 
     private string DeletedKey(string feature) => Path.GetFullPath(directory) + "|" + feature;
 
@@ -138,10 +138,9 @@ public sealed class HistoryStore(string directory, WorkspaceDatabasePool? databa
     }
 
     private static List<int> Archives(CodaleDb db, string feature) =>
-        db.Open("history").Open(feature).Open(Archive).Children()
+        [.. db.Open("history").Open(feature).Open(Archive).Children()
             .Select(n => int.TryParse(n, out var number) ? number : 0)
-            .Order()
-            .ToList();
+            .Order()];
 
     private static DbNode Node(CodaleDb db, string feature, string generation) =>
         generation == Current

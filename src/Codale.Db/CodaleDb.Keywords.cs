@@ -1,3 +1,6 @@
+using Codale.Db.Engine;
+using Codale.Db.Search;
+
 namespace Codale.Db;
 
 /// <summary>
@@ -6,7 +9,7 @@ namespace Codale.Db;
 /// </summary>
 public sealed partial class CodaleDb
 {
-    private readonly Dictionary<string, KeywordIndex> _keywords = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, KeywordIndex> _keywords = [with(StringComparer.Ordinal)];
 
     private KeywordIndex Keywords(string field)
     {

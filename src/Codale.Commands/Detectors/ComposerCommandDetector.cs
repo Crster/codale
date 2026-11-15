@@ -1,21 +1,20 @@
 using System.Text.Json;
-using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
-using System.Xml.Linq;
+
 using static Codale.Commands.CommandParsing;
 
-namespace Codale.Commands;
+namespace Codale.Commands.Detectors;
 
 internal sealed class ComposerCommandDetector : IProjectCommandDetector
 {
     public string Id => "Composer";
-    private static readonly HashSet<string> ComposerLifecycleHooks = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly HashSet<string> ComposerLifecycleHooks =
+    [
+        with(StringComparer.OrdinalIgnoreCase),
         "pre-install-cmd", "post-install-cmd", "pre-update-cmd", "post-update-cmd",
         "pre-status-cmd", "post-status-cmd", "pre-archive-cmd", "post-archive-cmd",
         "pre-autoload-dump", "post-autoload-dump", "post-root-package-install",
         "post-create-project-cmd", "pre-operations-exec",
-    };
+    ];
 
     public IReadOnlyList<ProjectCommand> Discover(string root)
     {

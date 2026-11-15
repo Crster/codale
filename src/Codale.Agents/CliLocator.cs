@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 namespace Codale.Agents;
 
 /// <summary>
@@ -33,10 +34,10 @@ public sealed record CliDescriptor(
 /// cannot be resolved is still returned (the CLI works), but it runs through cmd.exe,
 /// which mangles quoted JSON and multi-line arguments - see <see cref="IsShim"/>.
 /// </remarks>
-public static class CliLocator
+public static partial class CliLocator
 {
     private static readonly TimeSpan ProbeTtl = TimeSpan.FromSeconds(30);
-    private static readonly Dictionary<string, (string? Path, DateTimeOffset Probed)> ProbeCache = new();
+    private static readonly Dictionary<string, (string? Path, DateTimeOffset Probed)> ProbeCache = [];
 
     /// <summary>The Claude CLI's command name.</summary>
     public const string Executable = "claude";
@@ -48,8 +49,8 @@ public static class CliLocator
     public const string CodexInstallCommand = "npm i -g @openai/codex";
 
     /// <summary>Known common agentic coding CLIs.</summary>
-    public static readonly IReadOnlyList<CliDescriptor> KnownClis = new List<CliDescriptor>
-    {
+    public static readonly IReadOnlyList<CliDescriptor> KnownClis =
+    [
         new("claude", "Claude", "claude", "irm https://claude.ai/install.ps1 | iex", "Anthropic Claude Code CLI"),
         new("agy", "Antigravity", "agy", "npm i -g @google/antigravity", "Google Antigravity CLI"),
         new("gemini", "Gemini", "gemini", null, "Gemini Code Assist CLI"),
@@ -60,18 +61,18 @@ public static class CliLocator
         new("cursor", "Cursor", "cursor", null, "Cursor CLI"),
         new("opencode", "OpenCode", "opencode", "npm i -g opencode-ai", "OpenCode CLI"),
         new("qwen", "Qwen", "qwen", "npm i -g @qwen-code/qwen-code", "Qwen Code CLI"),
-    };
+    ];
 
-    private static readonly System.Text.RegularExpressions.Regex PromptLaunch = new(
-        @"^(?:PS )?[A-Za-z]:\\[^>]*>\s+(?<cmd>[\w.-]+?)(?:\.exe|\.cmd)?(?<rest>(?:\s.*)?)$",
-        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"^(?:PS )?[A-Za-z]:\\[^>]*>\s+(?<cmd>[\w.-]+?)(?:\.exe|\.cmd)?(?<rest>(?:\s.*)?)$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial Regex PromptLaunch();
 
-    private static readonly System.Text.RegularExpressions.Regex ShellPrompt = new(
-        @"^(?:PS )?[A-Za-z]:\\[^>]*>",
-        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"^(?:PS )?[A-Za-z]:\\[^>]*>",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial Regex ShellPrompt();
 
     /// <summary>True when the line starts with a default Windows shell prompt, as opposed to text typed inside a running CLI.</summary>
-    public static bool IsShellPromptLine(string line) => ShellPrompt.IsMatch(line);
+    public static bool IsShellPromptLine(string line) => ShellPrompt().IsMatch(line);
 
     /// <summary>
     /// Recognises a known CLI launched on a line typed at a default Windows shell prompt
@@ -81,7 +82,7 @@ public static class CliLocator
     /// </summary>
     public static (CliDescriptor Cli, string Args)? DetectLaunch(string promptLine)
     {
-        var match = PromptLaunch.Match(promptLine);
+        var match = PromptLaunch().Match(promptLine);
         if (!match.Success)
         {
             return null;
@@ -93,7 +94,7 @@ public static class CliLocator
 
     /// <summary>Detects which known CLIs are installed on this machine.</summary>
     public static IReadOnlyList<CliDescriptor> DetectInstalledClis() =>
-        KnownClis.Where(cli => cli.IsInstalled).ToList();
+        [.. KnownClis.Where(cli => cli.IsInstalled)];
 
     /// <summary>
     /// The CLI that drives the session panel: always Claude. The other known CLIs are only

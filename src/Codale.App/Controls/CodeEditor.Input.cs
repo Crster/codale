@@ -102,40 +102,40 @@ public sealed partial class CodeEditor
             case VirtualKey.Right: _model.MoveHorizontal(back: false, word: ctrl, extend: shift); break;
 
             case VirtualKey.Up or VirtualKey.Down:
-            {
-                var up = key == VirtualKey.Up;
-                if (alt && shift && !ctrl)
                 {
-                    _model.DuplicateLines(down: !up);
-                }
-                else if (alt && !ctrl)
-                {
-                    _model.MoveLines(up);
-                }
-                else if (ctrl && alt)
-                {
-                    AddCaretVertically(up ? -1 : 1);
-                }
-                else if (ctrl)
-                {
-                    ScrollTo(null, _scrollY + (up ? -_lineHeight : _lineHeight), animate: true);
-                    return true;
-                }
-                else
-                {
-                    MoveVertically(up ? -1 : 1, shift);
-                }
+                    var up = key == VirtualKey.Up;
+                    if (alt && shift && !ctrl)
+                    {
+                        _model.DuplicateLines(down: !up);
+                    }
+                    else if (alt && !ctrl)
+                    {
+                        _model.MoveLines(up);
+                    }
+                    else if (ctrl && alt)
+                    {
+                        AddCaretVertically(up ? -1 : 1);
+                    }
+                    else if (ctrl)
+                    {
+                        ScrollTo(null, VerticalScroll + (up ? -_lineHeight : _lineHeight), animate: true);
+                        return true;
+                    }
+                    else
+                    {
+                        MoveVertically(up ? -1 : 1, shift);
+                    }
 
-                break;
-            }
+                    break;
+                }
 
             case VirtualKey.PageUp or VirtualKey.PageDown:
-            {
-                var rows = Math.Max(1, (int)(ViewportHeight / _lineHeight) - 1) * (key == VirtualKey.PageUp ? -1 : 1);
-                ScrollTo(null, _scrollY + rows * _lineHeight, animate: false);
-                MoveVertically(rows, shift);
-                break;
-            }
+                {
+                    var rows = Math.Max(1, (int)(ViewportHeight / _lineHeight) - 1) * (key == VirtualKey.PageUp ? -1 : 1);
+                    ScrollTo(null, VerticalScroll + rows * _lineHeight, animate: false);
+                    MoveVertically(rows, shift);
+                    break;
+                }
 
             case VirtualKey.Home:
                 if (ctrl)
@@ -419,7 +419,7 @@ public sealed partial class CodeEditor
         // Clicks in the gutter: the bookmark strip toggles, the numbers select whole lines.
         if (position.X < GutterWidth)
         {
-            var row = Math.Clamp((int)Math.Floor((position.Y + _scrollY) / _lineHeight), 0, TotalRows - 1);
+            var row = Math.Clamp((int)Math.Floor((position.Y + VerticalScroll) / _lineHeight), 0, TotalRows - 1);
             var (line, _) = LineOfRow(row);
             if (position.X < BookmarkMargin)
             {
@@ -605,7 +605,7 @@ public sealed partial class CodeEditor
         EnsureMetrics();
         _dragMode = DragMode.Column;
         _columnAnchorX = position.X - TextLeft + _scrollX;
-        _columnAnchorRow = Math.Clamp((int)Math.Floor((position.Y + _scrollY) / _lineHeight), 0, TotalRows - 1);
+        _columnAnchorRow = Math.Clamp((int)Math.Floor((position.Y + VerticalScroll) / _lineHeight), 0, TotalRows - 1);
         ExtendDrag(position);
     }
 
@@ -619,45 +619,45 @@ public sealed partial class CodeEditor
                 break;
 
             case DragMode.Words:
-            {
-                var word = _model.RunAt(at);
-                _model.SetSelection(at < _dragOrigin.Start
-                    ? new Selection(_dragOrigin.End, word.Start)
-                    : new Selection(_dragOrigin.Start, DocumentPosition.Max(word.End, _dragOrigin.End)));
-                break;
-            }
-
-            case DragMode.Lines:
-            {
-                var line = _model.LineAt(at.Line);
-                _model.SetSelection(at < _dragOrigin.Start
-                    ? new Selection(_dragOrigin.End, line.Start)
-                    : new Selection(_dragOrigin.Start, DocumentPosition.Max(line.End, _dragOrigin.End)));
-                break;
-            }
-
-            case DragMode.Column:
-            {
-                // A box: the same pixel span on every row between the anchor and the pointer.
-                var row = Math.Clamp((int)Math.Floor((position.Y + _scrollY) / _lineHeight), 0, TotalRows - 1);
-                var x = Math.Max(0, position.X - TextLeft + _scrollX);
-                var list = new List<Selection>();
-                var step = row >= _columnAnchorRow ? 1 : -1;
-                for (var r = _columnAnchorRow; ; r += step)
                 {
-                    var (line, rowInLine) = LineOfRow(r);
-                    var anchor = new DocumentPosition(line, ColumnAt(line, rowInLine, Math.Max(0, _columnAnchorX)));
-                    var caret = new DocumentPosition(line, ColumnAt(line, rowInLine, x));
-                    list.Add(new Selection(anchor, caret, x));
-                    if (r == row)
-                    {
-                        break;
-                    }
+                    var word = _model.RunAt(at);
+                    _model.SetSelection(at < _dragOrigin.Start
+                        ? new Selection(_dragOrigin.End, word.Start)
+                        : new Selection(_dragOrigin.Start, DocumentPosition.Max(word.End, _dragOrigin.End)));
+                    break;
                 }
 
-                _model.SetSelections(list, list.Count - 1);
-                break;
-            }
+            case DragMode.Lines:
+                {
+                    var line = _model.LineAt(at.Line);
+                    _model.SetSelection(at < _dragOrigin.Start
+                        ? new Selection(_dragOrigin.End, line.Start)
+                        : new Selection(_dragOrigin.Start, DocumentPosition.Max(line.End, _dragOrigin.End)));
+                    break;
+                }
+
+            case DragMode.Column:
+                {
+                    // A box: the same pixel span on every row between the anchor and the pointer.
+                    var row = Math.Clamp((int)Math.Floor((position.Y + VerticalScroll) / _lineHeight), 0, TotalRows - 1);
+                    var x = Math.Max(0, position.X - TextLeft + _scrollX);
+                    var list = new List<Selection>();
+                    var step = row >= _columnAnchorRow ? 1 : -1;
+                    for (var r = _columnAnchorRow; ; r += step)
+                    {
+                        var (line, rowInLine) = LineOfRow(r);
+                        var anchor = new DocumentPosition(line, ColumnAt(line, rowInLine, Math.Max(0, _columnAnchorX)));
+                        var caret = new DocumentPosition(line, ColumnAt(line, rowInLine, x));
+                        list.Add(new Selection(anchor, caret, x));
+                        if (r == row)
+                        {
+                            break;
+                        }
+                    }
+
+                    _model.SetSelections(list, list.Count - 1);
+                    break;
+                }
         }
     }
 
@@ -698,11 +698,11 @@ public sealed partial class CodeEditor
         double? x = null;
         if (_dragPoint.Y < 0)
         {
-            y = _scrollY + Step(_dragPoint.Y);
+            y = VerticalScroll + Step(_dragPoint.Y);
         }
         else if (_dragPoint.Y > ViewportHeight)
         {
-            y = _scrollY + Step(_dragPoint.Y - ViewportHeight);
+            y = VerticalScroll + Step(_dragPoint.Y - ViewportHeight);
         }
 
         if (_wrapCols == NoWrap)
@@ -758,13 +758,13 @@ public sealed partial class CodeEditor
         var distance = -delta * 3 * _lineHeight / 120;
         if (notch)
         {
-            var from = double.IsNaN(_targetY) ? _scrollY : _targetY;
+            var from = double.IsNaN(_targetY) ? VerticalScroll : _targetY;
             ScrollTo(null, from + distance, animate: true);
         }
         else
         {
             _targetY = double.NaN;
-            ScrollTo(null, _scrollY + distance, animate: false);
+            ScrollTo(null, VerticalScroll + distance, animate: false);
         }
     }
 

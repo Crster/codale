@@ -1,5 +1,4 @@
 using System.Text;
-using Codale.Smart;
 
 namespace Codale.Smart.Tests;
 

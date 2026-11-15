@@ -4,6 +4,7 @@ using System.Text;
 
 using Codale.Core.Features;
 using Codale.Db;
+using Codale.Db.Search;
 
 namespace Codale.Search;
 
@@ -50,7 +51,7 @@ public sealed partial class ProjectKnowledgeIndex
         _chunkNodes[id] = node;
     }
 
-    private readonly object _idGate = new();
+    private readonly Lock _idGate = new();
     private long _nextId = -1;
     private long _idLimit;
 
@@ -142,11 +143,11 @@ public sealed partial class ProjectKnowledgeIndex
 
     private IReadOnlyList<SourceChunk> SearchSourceMatch(IReadOnlyList<(string Word, bool Prefix)> terms, string worktree, int limit)
     {
-        if (terms.Count == 0) return [];
-        return SourceRoot(worktree).Match(SourceField, Terms(terms), limit)
+        return terms.Count == 0
+            ? []
+            : [.. SourceRoot(worktree).Match(SourceField, Terms(terms), limit)
             .Select(hit => ReadChunk(hit.Node))
-            .OfType<SourceChunk>()
-            .ToList();
+            .OfType<SourceChunk>()];
     }
 
     /// <summary>The chunks with these ids that are still indexed (an id from a search whose file has since been re-indexed is gone).</summary>
@@ -202,23 +203,21 @@ public sealed partial class ProjectKnowledgeIndex
         if (terms.Count == 0) return [];
         // The excluded session's findings are dropped after ranking, so ask for enough to still fill the limit.
         var ask = excludeSessionId is null ? limit : limit + 32;
-        return db.Open("knowledge").Match(KnowledgeField, Terms(terms), ask)
+        return [.. db.Open("knowledge").Match(KnowledgeField, Terms(terms), ask)
             .Select(hit => (hit.Node, Record: hit.Node.ReadJson<KnowledgeRecord>()))
             .Where(x => x.Record is not null && x.Record.SessionId != excludeSessionId)
             .Take(limit)
-            .Select(x => new KnowledgeHit(x.Node.Name, x.Record!.SessionId, x.Record.Provider, x.Record.Worktree, x.Record.Revision, x.Record.Text, x.Record.Refs))
-            .ToList();
+            .Select(x => new KnowledgeHit(x.Node.Name, x.Record!.SessionId, x.Record.Provider, x.Record.Worktree, x.Record.Revision, x.Record.Text, x.Record.Refs))];
     }
 
     /// <summary>The files a session's findings cited, newest finding first.</summary>
     internal IReadOnlyList<SourceReference> SessionReferences(string sessionId) =>
-        db.Open("knowledge").Descendants()
+        [.. db.Open("knowledge").Descendants()
             .Select(node => node.ReadJson<KnowledgeRecord>())
             .Where(record => record is not null && record.SessionId == sessionId)
             .OrderByDescending(record => record!.Seq)
             .SelectMany(record => record!.Refs)
-            .DistinctBy(reference => reference.Path, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+            .DistinctBy(reference => reference.Path, StringComparer.OrdinalIgnoreCase)];
 
     // ---- learned associations
 
@@ -250,34 +249,33 @@ public sealed partial class ProjectKnowledgeIndex
 
             // Bounded memory: the oldest associations of a project go first, in slices so a full project does not rescan on every edit.
             if (bucket.ChildCount() <= MaxLearnedPerProject + 500) return;
-            foreach (var old in bucket.Descendants()
+            foreach (var (node, record) in bucket.Descendants()
                 .Select(n => (Node: n, Record: n.ReadJson<LearnedRecord>()))
                 .OrderByDescending(x => x.Record?.Seq ?? 0)
                 .Skip(MaxLearnedPerProject))
-                old.Node.Remove();
+                node.Remove();
         });
     }
 
     internal IReadOnlyList<(string Path, string Prompt, string Kind)> SearchLearnedEdits(string worktree, string prompt)
     {
         var terms = SearchText.RetrievalQueryTerms(prompt);
-        if (terms.Count == 0) return [];
-        return db.Open("learned").Open(worktree).Match(LearnedField, Terms(terms), 80)
+        return terms.Count == 0
+            ? []
+            : [.. db.Open("learned").Open(worktree).Match(LearnedField, Terms(terms), 80)
             .Select(hit => hit.Node.ReadJson<LearnedRecord>())
             .OfType<LearnedRecord>()
-            .Select(record => (record.Path, record.Prompt, record.Kind))
-            .ToList();
+            .Select(record => (record.Path, record.Prompt, record.Kind))];
     }
 
     /// <summary>Every remembered association of a project, newest first: real usage, as labelled retrieval examples.</summary>
     internal IReadOnlyList<(string Path, string Prompt, string Kind)> LearnedAssociations(string worktree, int limit = 2000) =>
-        db.Open("learned").Open(worktree).Descendants()
+        [.. db.Open("learned").Open(worktree).Descendants()
             .Select(node => node.ReadJson<LearnedRecord>())
             .OfType<LearnedRecord>()
             .OrderByDescending(record => record.Seq)
             .Take(limit)
-            .Select(record => (record.Path, record.Prompt, record.Kind))
-            .ToList();
+            .Select(record => (record.Path, record.Prompt, record.Kind))];
 
     // ---- what each retrieval cost
 

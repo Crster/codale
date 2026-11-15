@@ -209,7 +209,7 @@ public sealed class McpServer(string name, string version, IReadOnlyList<McpTool
             return method switch
             {
                 "initialize" => Result(id, Initialize()),
-                "ping" => Result(id, new JsonObject()),
+                "ping" => Result(id, []),
                 "tools/list" => Result(id, new JsonObject
                 {
                     ["tools"] = new JsonArray(_tools.Values.Select(t => (JsonNode)new JsonObject

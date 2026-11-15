@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 using Codale.Core.Agents;
 
 namespace Codale.App.ViewModels;
@@ -102,7 +100,7 @@ public sealed partial class ChatViewModel
             last++;
         }
 
-        return events.Skip(first).Take(last - first + 1).ToList();
+        return [.. events.Skip(first).Take(last - first + 1)];
     }
 
     /// <summary>The activity block of one turn, built from what its history recorded: its steps, outputs, diffs and time.</summary>

@@ -1,3 +1,5 @@
+using Codale.App.Controls.Editing;
+
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.Graphics.Canvas.Text;
@@ -39,7 +41,7 @@ public sealed partial class CodeEditor
 
     /// <summary>Top of a line's first row in view coordinates; the line past the end is the bottom of the text.</summary>
     private double LineTop(int line) =>
-        (line >= _model.Buffer.LineCount ? TotalRows : FirstRowOf(Math.Max(0, line))) * _lineHeight - _scrollY;
+        (line >= _model.Buffer.LineCount ? TotalRows : FirstRowOf(Math.Max(0, line))) * _lineHeight - VerticalScroll;
 
     private void DrawDiffMarkers(CanvasDrawingSession ds, double viewportHeight)
     {

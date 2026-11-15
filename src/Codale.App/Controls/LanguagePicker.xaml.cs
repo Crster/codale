@@ -1,4 +1,3 @@
-using Codale.App.Services;
 using Codale.Core.Syntax;
 
 using Microsoft.UI.Xaml;
@@ -80,7 +79,7 @@ public sealed partial class LanguagePicker : UserControl
         var q = query.Trim();
         List.ItemsSource = q.Length == 0
             ? _rows
-            : _rows.Where(r => r.Text.Contains(q, StringComparison.OrdinalIgnoreCase) || (r.Id?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
+            : [.. _rows.Where(r => r.Text.Contains(q, StringComparison.OrdinalIgnoreCase) || (r.Id?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false))];
     }
 
     private void OnSearchChanged(object sender, TextChangedEventArgs e) => Filter(SearchBox.Text);

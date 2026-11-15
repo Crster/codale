@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 
 using Microsoft.Extensions.FileSystemGlobbing;
 
-namespace Codale.Search;
+namespace Codale.Search.Engine;
 
 /// <summary>Where a symbol is declared.</summary>
 public sealed record SymbolLocation(SourceFile File, SourceSymbol Symbol);
@@ -56,8 +56,8 @@ public sealed class SourceSnapshot
         BuiltAt = DateTime.UtcNow;
 
         _byPath = new Dictionary<string, int>(files.Count, StringComparer.OrdinalIgnoreCase);
-        _termIds = new Dictionary<string, int>(StringComparer.Ordinal);
-        _definitions = new Dictionary<string, List<SymbolLocation>>(StringComparer.OrdinalIgnoreCase);
+        _termIds = [with(StringComparer.Ordinal)];
+        _definitions = [with(StringComparer.OrdinalIgnoreCase)];
 
         long tokens = 0;
         var terms = new List<string>();
@@ -185,11 +185,10 @@ public sealed class SourceSnapshot
             found.Add(_vocabulary[i]);
         }
 
-        return found
+        return [.. found
             .OrderByDescending(DocumentFrequency)
             .ThenBy(t => t.Length)
-            .Take(max)
-            .ToList();
+            .Take(max)];
     }
 
     /// <summary>Where a name is declared, case-insensitively.</summary>
@@ -282,12 +281,11 @@ public sealed class SourceSnapshot
             }
         }
 
-        return suggestions
+        return [.. suggestions
             .OrderByDescending(s => s.Kind is not null)
             .ThenByDescending(s => s.Files)
             .ThenBy(s => s.Text.Length)
-            .Take(max)
-            .ToList();
+            .Take(max)];
     }
 
     /// <summary>
@@ -447,7 +445,7 @@ public sealed class SourceSnapshot
     public IReadOnlyList<string> FindFiles(string glob, int max = 200)
     {
         var matcher = GlobMatcher(glob);
-        return AllFiles.Where(f => Matches(matcher, f)).Take(max).ToList();
+        return [.. AllFiles.Where(f => Matches(matcher, f)).Take(max)];
     }
 
     /// <summary>A glob without a folder part ("*.cs") matches at any depth.</summary>

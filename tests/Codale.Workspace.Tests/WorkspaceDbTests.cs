@@ -1,5 +1,3 @@
-using Codale.Workspace;
-
 namespace Codale.Workspace.Tests;
 
 public sealed class WorkspaceDbTests : IDisposable
@@ -106,7 +104,7 @@ public sealed class WorkspaceDbTests : IDisposable
         Assert.Equal("s3cret-value-123", env.Get("API_KEY"));
         Assert.Equal(["API_KEY"], env.Names());
         Assert.Equal(["TOKEN"], env.Import("# comment\nexport TOKEN=\"abc\"\nnot valid\n"));
-        Assert.ThrowsAny<ArgumentException>(() => { env.Set("bad name", "x"); });
+        Assert.ThrowsAny<ArgumentException>(() => env.Set("bad name", "x"));
 
         // Wait for the database to let go, then look at the bytes: the secret must not be in them.
         Thread.Sleep(2000);

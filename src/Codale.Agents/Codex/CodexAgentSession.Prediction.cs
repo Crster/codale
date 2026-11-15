@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+
 using Codale.Core.Agents;
 
 namespace Codale.Agents.Codex;
@@ -53,7 +54,8 @@ public sealed partial class CodexAgentSession
                 ["computer_use"] = false,
             },
             AdditionalDirectoriesSource = null,
-        }) { _predictionOnly = true };
+        })
+        { _predictionOnly = true };
         await helper.StartAsync(ct).ConfigureAwait(false);
         await helper.SendAsync(new UserTurn(context), ct).ConfigureAwait(false);
         string? text = null;

@@ -1,8 +1,9 @@
 using System.Collections.ObjectModel;
-using System.Text;
-using Codale.App.Services;
+
 using Codale.Smart;
+
 using CommunityToolkit.Mvvm.ComponentModel;
+
 using Microsoft.UI.Dispatching;
 
 namespace Codale.App.ViewModels;
@@ -60,7 +61,7 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
         if (newest.Context.Task is not ("routing" or "context")) return [newest];
         var routing = all.Where(a => a.Context.Task == "routing").OrderByDescending(a => a.StartedAt).FirstOrDefault();
         var from = routing?.StartedAt ?? newest.StartedAt;
-        return all.Where(a => a.Context.Task is "routing" or "context" && a.StartedAt >= from).OrderBy(a => a.StartedAt).ToList();
+        return [.. all.Where(a => a.Context.Task is "routing" or "context" && a.StartedAt >= from).OrderBy(a => a.StartedAt)];
     }
     private static string Short(string text, int max) { text = text.ReplaceLineEndings(" "); return text.Length <= max ? text : text[..max] + "…"; }
     private static string Seconds(long ms) =>
@@ -169,12 +170,13 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
                     foreach (var old in Runs.Where(x => !rows.Any(y => y.Id == x.Id)).ToArray()) Runs.Remove(old);
                     for (int i = 0; i < rows.Count; i++)
                     {
-                        var row = rows[i];
-                        var item = Runs.FirstOrDefault(x => x.Id == row.Id);
-                        if (item is null) { item = new(row.Id) { IsTask = !row.Id.Contains(':') }; Runs.Insert(i, item); }
+                        var (id, fill) = rows[i];
+                        var item = Runs.FirstOrDefault(x => x.Id == id);
+                        if (item is null) { item = new(id) { IsTask = !id.Contains(':') }; Runs.Insert(i, item); }
                         else if (Runs.IndexOf(item) != i) Runs.Move(Runs.IndexOf(item), i);
-                        row.Fill(item);
-                    }                });
+                        fill(item);
+                    }
+                });
             } while (Volatile.Read(ref _dirty) != 0 && !_disposed);
         }
         finally
@@ -182,7 +184,8 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
             Interlocked.Exchange(ref _refreshing, 0);
             if (Volatile.Read(ref _dirty) != 0 && !_disposed) Refresh();
         }
-    }    public void Dispose()
+    }
+    public void Dispose()
     {
         _disposed = true;
         _smart.Changed -= OnChanged;

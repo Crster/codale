@@ -15,10 +15,10 @@ public static class PowerShellSuggestions
 {
     private const int MaxHistory = 10_000;
 
-    private static readonly object HistoryGate = new();
-    private static IReadOnlyList<string> _history = [];
-    private static DateTime _historyStamp;
-    private static Task? _historyLoad;
+    private static readonly Lock HistoryGate = new();
+    private static IReadOnlyList<string> s_history = [];
+    private static DateTime s_historyStamp;
+    private static Task? s_historyLoad;
 
     /// <summary>Whether <paramref name="shellPath"/> is pwsh or Windows PowerShell.</summary>
     public static bool IsPowerShell(string shellPath)
@@ -49,7 +49,7 @@ public static class PowerShellSuggestions
         IReadOnlyList<string> history;
         lock (HistoryGate)
         {
-            history = _history;
+            history = s_history;
         }
 
         foreach (var command in history)
@@ -152,13 +152,13 @@ public static class PowerShellSuggestions
 
         lock (HistoryGate)
         {
-            if (stamp == _historyStamp || _historyLoad is { IsCompleted: false })
+            if (stamp == s_historyStamp || s_historyLoad is { IsCompleted: false })
             {
                 return;
             }
 
-            _historyStamp = stamp;
-            _historyLoad = Task.Run(LoadHistory);
+            s_historyStamp = stamp;
+            s_historyLoad = Task.Run(LoadHistory);
         }
     }
 
@@ -177,7 +177,7 @@ public static class PowerShellSuggestions
             var history = ParseHistory(lines);
             lock (HistoryGate)
             {
-                _history = history;
+                s_history = history;
             }
         }
         catch (Exception)
@@ -308,12 +308,9 @@ public sealed class PowerShellCompletionHost
             }
 
             _warm = true;
-            if (cancellationToken.IsCancellationRequested || await answer.Task.ConfigureAwait(false) is not { } json)
-            {
-                return null;
-            }
-
-            return Parse(text, json);
+            return cancellationToken.IsCancellationRequested || await answer.Task.ConfigureAwait(false) is not { } json
+                ? null
+                : Parse(text, json);
         }
         finally
         {

@@ -1,3 +1,4 @@
+using Codale.App.Themes;
 using Codale.App.ViewModels;
 using Codale.Core.Agents;
 using Codale.Core.Shell;
@@ -758,7 +759,7 @@ public static class FileIcons
 
     private static readonly Dictionary<string, (string Glyph, Windows.UI.Color Color)> Extensions = BuildExtensions();
 
-    private static readonly Dictionary<Windows.UI.Color, SolidColorBrush> BrushCache = new();
+    private static readonly Dictionary<Windows.UI.Color, SolidColorBrush> BrushCache = [];
 
     private static Dictionary<string, (string, Windows.UI.Color)> BuildExtensions()
     {
@@ -877,12 +878,7 @@ public static class FileIcons
     /// <summary>Returns a Segoe Fluent glyph for a folder, or for a file based on its name and type.</summary>
     public static string NodeGlyph(bool isDirectory, string? name)
     {
-        if (isDirectory)
-        {
-            return FolderGlyph;
-        }
-
-        return !string.IsNullOrEmpty(name) && TryLookup(name, out var icon) ? icon.Glyph : PageGlyph;
+        return isDirectory ? FolderGlyph : !string.IsNullOrEmpty(name) && TryLookup(name, out var icon) ? icon.Glyph : PageGlyph;
     }
 
     public static string FileGlyph(string? name) => NodeGlyph(false, name);

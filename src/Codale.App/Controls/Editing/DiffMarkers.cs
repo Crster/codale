@@ -1,6 +1,6 @@
 using Codale.Git;
 
-namespace Codale.App.Controls;
+namespace Codale.App.Controls.Editing;
 
 public enum EditorDiffKind
 {

@@ -35,12 +35,9 @@ public static class WorkspacePaths
         {
             var full = Trim(Path.GetFullPath(path));
             var rootFull = Trim(Path.GetFullPath(root));
-            if (full.Equals(rootFull, StringComparison.OrdinalIgnoreCase))
-            {
-                return includeRoot;
-            }
-
-            return full.StartsWith(rootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            return full.Equals(rootFull, StringComparison.OrdinalIgnoreCase)
+                ? includeRoot
+                : full.StartsWith(rootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
@@ -54,12 +51,7 @@ public static class WorkspacePaths
     /// </summary>
     public static string? RelativeWithin(string root, string path)
     {
-        if (!IsWithin(path, root))
-        {
-            return null;
-        }
-
-        return Path.GetRelativePath(Path.GetFullPath(root), Path.GetFullPath(path)).Replace('\\', '/');
+        return !IsWithin(path, root) ? null : Path.GetRelativePath(Path.GetFullPath(root), Path.GetFullPath(path)).Replace('\\', '/');
     }
 
     private static string Trim(string path) => path.TrimEnd(Path.DirectorySeparatorChar);

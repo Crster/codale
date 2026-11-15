@@ -1,10 +1,6 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
-using System.Xml.Linq;
 using static Codale.Commands.CommandParsing;
 
-namespace Codale.Commands;
+namespace Codale.Commands.Detectors;
 
 internal sealed class VscodeLaunchCommandDetector : IProjectCommandDetector
 {

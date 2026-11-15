@@ -86,12 +86,9 @@ public sealed record UserTurn(string Text)
     public static string StripHostInstructions(string text)
     {
         text = SessionBriefing.StripContext(text);
-        if (text.StartsWith(AskInstruction, StringComparison.Ordinal))
-        {
-            return text[AskInstruction.Length..];
-        }
-
-        return text.StartsWith(PlanInstruction, StringComparison.Ordinal) ? text[PlanInstruction.Length..] : text;
+        return text.StartsWith(AskInstruction, StringComparison.Ordinal)
+            ? text[AskInstruction.Length..]
+            : text.StartsWith(PlanInstruction, StringComparison.Ordinal) ? text[PlanInstruction.Length..] : text;
     }
 }
 

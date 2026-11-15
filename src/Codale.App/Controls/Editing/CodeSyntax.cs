@@ -1,6 +1,6 @@
 using Codale.Core.Syntax;
 
-namespace Codale.App.Controls;
+namespace Codale.App.Controls.Editing;
 
 /// <summary>
 /// State carried from one line to the next: an open block comment, an unterminated
@@ -84,11 +84,12 @@ public static class CodeTokenizer
         return default;
     }
 
-    private static readonly HashSet<string> BatchKeywords = new(StringComparer.OrdinalIgnoreCase)
-    { "echo", "set", "if", "else", "for", "in", "do", "goto", "call", "exit", "pause", "cd", "chdir",
+    private static readonly HashSet<string> BatchKeywords =
+    [         with(StringComparer.OrdinalIgnoreCase),
+"echo", "set", "if", "else", "for", "in", "do", "goto", "call", "exit", "pause", "cd", "chdir",
          "cls", "del", "erase", "copy", "xcopy", "move", "ren", "rename", "md", "mkdir", "rd", "rmdir",
          "pushd", "popd", "start", "title", "shift", "setlocal", "endlocal", "errorlevel", "exist",
-         "defined", "not", "equ", "neq", "lss", "leq", "gtr", "geq", "type", "find", "findstr", "tasklist" };
+         "defined", "not", "equ", "neq", "lss", "leq", "gtr", "geq", "type", "find", "findstr", "tasklist" ];
 
 
     public static IEnumerable<string> BatchKeywordsOf() => BatchKeywords;

@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 
-using Codale.App.Services;
 using Codale.Core.Tasks;
 using Codale.Terminal;
 
@@ -39,7 +38,6 @@ public enum TerminalActivity
 /// </summary>
 public sealed partial class TerminalViewModel : ObservableObject, IDisposable
 {
-    private readonly string _workingDirectory;
     private TerminalSession? _session;
     private bool _disposed;
     private bool _refreshing;
@@ -50,15 +48,14 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     /// A plain shell tab, or one running a project command - the commands menu opens
     /// the second kind with the command as its first block.
     /// </summary>
-    public AppSettingsStore Settings => _settings;
+    public AppSettingsStore Settings { get; }
     public CommandHistory History { get; }
-    private readonly AppSettingsStore _settings;
 
     public TerminalViewModel(AppSettingsStore settings, CommandHistory commandHistory, string workingDirectory, string? command = null, string? commandName = null, string? cliId = null)
     {
-        _settings = settings;
+        Settings = settings;
         History = commandHistory;
-        _workingDirectory = workingDirectory;
+        HistoryKey = workingDirectory;
         CommandText = command;
         CommandName = commandName ?? command;
         CliId = cliId;
@@ -66,7 +63,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
         // A task (project command) shows as a plain full terminal; only a tab opened as a terminal
         // ("Terminal", "New terminal") is a notebook with an input cell.
         IsSingleBlock = IsCommandTerminal && !IsCliTerminal;
-        State =IsCliTerminal ? new ShellState(workingDirectory, new Dictionary<string, string>()) : ShellState.Initial(workingDirectory);
+        State = IsCliTerminal ? new ShellState(workingDirectory, new Dictionary<string, string>()) : ShellState.Initial(workingDirectory);
 
         // A command tab reads busy from the start: the command launches with the tab.
         if (command is not null)
@@ -75,10 +72,10 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
         }
     }
 
-    private static int _nextId;
+    private static int s_nextId;
 
     /// <summary>The handle the agent's terminal tools use.</summary>
-    public string Id { get; } = "term-" + Interlocked.Increment(ref _nextId);
+    public string Id { get; } = "term-" + Interlocked.Increment(ref s_nextId);
 
     /// <summary>Everything the terminal printed, as plain text, so the agent can read a run's result.</summary>
     public TerminalTranscript Transcript { get; } = new();
@@ -145,7 +142,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
             return null;
         }
 
-        History.Record(_workingDirectory, Codale.Core.Shell.PromptLine.Command(promptLine), "terminal");
+        History.Record(HistoryKey, Codale.Core.Shell.PromptLine.Command(promptLine), "terminal");
         return LaunchRewriter?.Invoke(promptLine);
     }
 
@@ -168,7 +165,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     public bool IsSingleBlock { get; set; }
 
     /// <summary>The folder the tab's command history is kept under (the project, or a command's folder).</summary>
-    public string HistoryKey => _workingDirectory;
+    public string HistoryKey { get; }
 
     /// <summary>The notebook's command blocks, oldest first.</summary>
     public ObservableCollection<CommandBlockViewModel> Blocks { get; } = [];
@@ -178,7 +175,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     public partial ShellState State { get; private set; }
 
     /// <summary>The shell blocks run under, from Settings.</summary>
-    public string ShellPath => TerminalSession.ResolveShell(ShellPreference ?? _settings.TerminalShell);
+    public string ShellPath => TerminalSession.ResolveShell(ShellPreference ?? Settings.TerminalShell);
 
     /// <summary>The shell this tab picked from its input cell ("pwsh", "powershell", "cmd"); null follows Settings.</summary>
     [ObservableProperty]
@@ -237,7 +234,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
 
         if (record)
         {
-            History.Record(_workingDirectory, line, "terminal");
+            History.Record(HistoryKey, line, "terminal");
 
             // The rewriter reads a prompt line, as the screen of a classic shell shows it, so it can
             // tell the folder the command was typed in.
@@ -252,7 +249,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
             }
         }
 
-        var block = new CommandBlockViewModel(_settings, line, State);
+        var block = new CommandBlockViewModel(Settings, line, State);
         if (IsSingleBlock)
         {
             // One command per tab: a run again replaces the finished one, and fills the tab.
@@ -265,7 +262,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
         }
 
         AddBlock(block);
-        block.Run(ShellPath, _settings.TerminalLoadProfile);
+        block.Run(ShellPath, Settings.TerminalLoadProfile);
         return block;
     }
 
@@ -340,7 +337,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     /// <summary>Keeps the history to the Settings cap by dropping the oldest finished blocks.</summary>
     private void TrimHistory()
     {
-        var cap = _settings.TerminalBlockHistory;
+        var cap = Settings.TerminalBlockHistory;
         while (Blocks.Count > cap && Blocks.FirstOrDefault(b => !b.IsRunning) is { } oldest)
         {
             Blocks.Remove(oldest);
@@ -492,7 +489,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
             Cleared?.Invoke(this, EventArgs.Empty);
             if (CommandText is { } command)
             {
-                State = ShellState.Initial(_workingDirectory);
+                State = ShellState.Initial(HistoryKey);
                 RunCommand(command, record: false);
             }
 
@@ -521,7 +518,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
         {
             // A CLI runs wrapped in the shell so .cmd shims resolve; the shell exits with it. The
             // shell comes from Settings, falling back to the automatic probe when missing.
-            var shell = TerminalSession.ResolveShell(_settings.TerminalShell);
+            var shell = TerminalSession.ResolveShell(Settings.TerminalShell);
             var command = CommandText is { } line ? TerminalSession.WrapCommand(shell, line, keepShell: !IsCliTerminal) : shell;
 
             // Created on the UI thread, so the session delivers output there.
@@ -547,7 +544,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
                 Activity = exitCode == 0 ? TerminalActivity.Terminated : TerminalActivity.Error;
                 Exited?.Invoke(this, EventArgs.Empty);
             };
-            session.Start(_workingDirectory, command, _columns, _rows);
+            session.Start(HistoryKey, command, _columns, _rows);
             IsRunning = true;
         }
         catch (Exception ex)
@@ -572,12 +569,9 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
             InputSubmitted?.Invoke(this, EventArgs.Empty);
         }
 
-        if (IsNotebook)
-        {
-            return NewestRunningBlock?.WriteAsync(text) ?? Task.CompletedTask;
-        }
-
-        return _session is { } session && IsRunning ? session.WriteAsync(text) : Task.CompletedTask;
+        return IsNotebook
+            ? NewestRunningBlock?.WriteAsync(text) ?? Task.CompletedTask
+            : _session is { } session && IsRunning ? session.WriteAsync(text) : Task.CompletedTask;
     }
 
     /// <summary>Resizes the pseudoconsole to the view's cell grid (CLI tabs; a block sizes its own).</summary>

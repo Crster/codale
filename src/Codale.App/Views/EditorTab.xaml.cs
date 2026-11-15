@@ -1,7 +1,9 @@
 using Codale.App.Controls;
+using Codale.App.Controls.Editing;
 using Codale.App.Services;
 using Codale.App.ViewModels;
 using Codale.Search;
+using Codale.Search.Engine;
 
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Controls;
@@ -352,14 +354,14 @@ public sealed partial class EditorTab : UserControl
             var last = Math.Max(first, span.End - 1);
             var matches = _bands
                 ? TermOccurrences(_bandQuery, BandLines(), first, last)
-                : FileFocus.Occurrences(_focusQuery, _focusLines, first, last).ToList();
+                : [.. FileFocus.Occurrences(_focusQuery, _focusLines, first, last)];
             hits.AddRange(matches);
             if (_bands)
             {
                 if (matches.Count == 0)
                     rows.Add((first, last));
                 else
-                    rows.AddRange(matches.Select(hit => hit.Item1).Distinct().Select(line => (line, line)));
+                    rows.AddRange(matches.Select(hit => hit.Line).Distinct().Select(line => (line, line)));
             }
         }
         FileEditor.SetResultHighlights(rows.Distinct().ToList(), hits.Distinct().ToList());
@@ -456,7 +458,7 @@ public sealed partial class EditorTab : UserControl
         try
         {
             var chunks = await knowledge.SearchAsync(root, key, "", maxFiles: 4, maxChunksPerFile: 1, ct);
-            _relatedCode = chunks.Select(c => (c.Path, c.Text)).ToList();
+            _relatedCode = [.. chunks.Select(c => (c.Path, c.Text))];
             _relatedKey = key;
             return _relatedCode;
         }
@@ -470,14 +472,11 @@ public sealed partial class EditorTab : UserControl
     /// Names from the project's workspace model, ranked with the word before the cursor. The model loads
     /// with the first scan, so until then there is nothing to offer.
     /// </summary>
-    private IReadOnlyList<Codale.Search.WorkspaceSuggestion> ProjectSuggestions(string prefix, string? previousWord)
+    private IReadOnlyList<Codale.Search.Engine.WorkspaceSuggestion> ProjectSuggestions(string prefix, string? previousWord)
     {
-        if (string.IsNullOrEmpty(ProjectRoot) || !Directory.Exists(ProjectRoot))
-        {
-            return [];
-        }
-
-        return Codale.Search.SourceIndex.For(ProjectRoot).Suggest(prefix, previousWord);
+        return string.IsNullOrEmpty(ProjectRoot) || !Directory.Exists(ProjectRoot)
+            ? []
+            : Codale.Search.Engine.SourceIndex.For(ProjectRoot).Suggest(prefix, previousWord);
     }
 
     // ------------------------------------------------------------------ diff gutter
@@ -607,7 +606,7 @@ public sealed partial class EditorTab : UserControl
     /// </summary>
     public async Task<bool> CheckAndUpdateIfModifiedAsync()
     {
-        if (ViewModel is null || !ViewModel.HasFile || ViewModel.FilePath is not { } path)
+        if (ViewModel is null || !ViewModel.HasFile || ViewModel.FilePath is not { })
         {
             return false;
         }

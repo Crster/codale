@@ -21,8 +21,16 @@ public sealed class CodexApprovalResponseTests
         await using var session = new CodexAgentSession(new CodexSessionOptions { WorkingDirectory = root });
         await session.HandleNotificationAsync("item/started", Serialize(new
         {
-            @params = new { threadId = "main", item = new { id = "edit", type = "fileChange",
-                changes = new[] { new { path, kind = "update", diff = "" } } } },
+            @params = new
+            {
+                threadId = "main",
+                item = new
+                {
+                    id = "edit",
+                    type = "fileChange",
+                    changes = new[] { new { path, kind = "update", diff = "" } }
+                }
+            },
         }));
         while (session.Events.TryRead(out _)) { }
         await session.HandleServerRequestAsync(Serialize(7), "item/fileChange/requestApproval", Serialize(new
@@ -104,7 +112,8 @@ public sealed class CodexApprovalResponseTests
         {
             @params = new
             {
-                threadId = "main", itemId,
+                threadId = "main",
+                itemId,
                 questions = new[] { new { id = "choice", question = "Which option?" } },
             },
         }));

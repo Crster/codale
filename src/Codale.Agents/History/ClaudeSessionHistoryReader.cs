@@ -17,28 +17,27 @@ public sealed class ClaudeSessionHistoryReader(string projectPath, string? home 
 
     // A CLI run in the terminal keeps the default account (see CodaleAccount), not Codale's own,
     // so its transcripts live under ~/.claude (or wherever the user pointed CLAUDE_CONFIG_DIR).
-    private readonly string _directory = Path.Combine(
+
+    public string CliId => "claude";
+
+    public string HistorySourcePath { get; } = Path.Combine(
         home ?? CodaleAccount.UserClaudeHome,
         "projects",
         ProjectPaths.ClaudeHistoryFolderName(projectPath));
 
-    public string CliId => "claude";
-
-    public string? HistorySourcePath => _directory;
-
     public bool IsSessionFile(string filePath) =>
-        filePath.StartsWith(_directory, StringComparison.OrdinalIgnoreCase) &&
+        filePath.StartsWith(HistorySourcePath, StringComparison.OrdinalIgnoreCase) &&
         filePath.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase);
 
     public IReadOnlyList<TranscriptSummary> ListSessions()
     {
-        if (!Directory.Exists(_directory))
+        if (!Directory.Exists(HistorySourcePath))
         {
             return [];
         }
 
         var rows = new List<TranscriptSummary>();
-        foreach (var file in Directory.EnumerateFiles(_directory, "*.jsonl"))
+        foreach (var file in Directory.EnumerateFiles(HistorySourcePath, "*.jsonl"))
         {
             if (Summarize(file) is { UserTurns: > 0 } summary)
             {

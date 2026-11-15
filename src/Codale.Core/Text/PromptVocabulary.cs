@@ -28,8 +28,8 @@ public sealed class PromptVocabulary
     private const int MinWordLength = 3;
     private const int MaxWordLength = 64;
 
-    private readonly Dictionary<string, Entry> _words = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, Dictionary<string, int>> _next = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Entry> _words = [with(StringComparer.Ordinal)];
+    private readonly Dictionary<string, Dictionary<string, int>> _next = [with(StringComparer.Ordinal)];
     private int _seq;
 
     public int Count => _words.Count;
@@ -275,12 +275,7 @@ public sealed class PromptVocabulary
             }
         }
 
-        if (best is null || bestCount < 2 || bestCount * 2 < total || !_words.TryGetValue(best, out var entry))
-        {
-            return null;
-        }
-
-        return entry.Spelling;
+        return best is null || bestCount < 2 || bestCount * 2 < total || !_words.TryGetValue(best, out var entry) ? null : entry.Spelling;
     }
 
     /// <summary>
@@ -334,12 +329,11 @@ public sealed class PromptVocabulary
             }
         }
 
-        return found
+        return [.. found
             .OrderBy(f => f.Distance)
             .ThenByDescending(f => f.Score)
             .Take(max)
-            .Select(f => (f.Text, f.Distance))
-            .ToList();
+            .Select(f => (f.Text, f.Distance))];
     }
 
     /// <summary>Edits between two words (a swap of neighbours counts once), or <paramref name="limit"/> + 1 once it must exceed it.</summary>
@@ -466,7 +460,7 @@ public sealed class PromptVocabulary
         var key = previous.ToLowerInvariant();
         if (!_next.TryGetValue(key, out var followers))
         {
-            _next[key] = followers = new Dictionary<string, int>(StringComparer.Ordinal);
+            _next[key] = followers = [with(StringComparer.Ordinal)];
         }
 
         var next = word.ToLowerInvariant();
@@ -546,7 +540,7 @@ public sealed class PromptVocabulary
 
     private sealed class Entry
     {
-        public Dictionary<string, int> Spellings { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, int> Spellings { get; } = [with(StringComparer.Ordinal)];
         public string Spelling { get; set; } = "";
         public double Weight { get; set; }
         public double Trusted { get; set; }

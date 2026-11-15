@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 
-using Codale.App.Services;
 using Codale.Core.Agents;
 using Codale.Git;
 

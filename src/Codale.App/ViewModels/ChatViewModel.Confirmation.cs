@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Codale.App.Services;
+
 using Codale.Core.Agents;
 using Codale.Core.Helper;
 using Codale.Core.Shell;
@@ -13,7 +13,7 @@ public sealed partial class ChatViewModel
     {
         try
         {
-            var findings = ShellCommandAnalyzer.Analyze(command, _projectPath, ExtraRoots);
+            var findings = ShellCommandAnalyzer.Analyze(command, ProjectPath, ExtraRoots);
             // The Decision model rates the risk in about a second; General (when set) still writes the description.
             using var decisionDeadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
             decisionDeadline.CancelAfter(TimeSpan.FromSeconds(8));
@@ -22,7 +22,7 @@ public sealed partial class ChatViewModel
                 : Task.FromResult<IReadOnlyDictionary<string, SmartDecision>?>(null);
             var described = _smart.Settings.SmartRoleEnabled(SmartFeatureSettings.General)
                 ? _smart.Instance.AssessCommandAsync(
-                    new(_projectPath, _projectPath, "command-confirmation", _chatId, DateTimeOffset.UtcNow.AddSeconds(8)),
+                    new(ProjectPath, ProjectPath, "command-confirmation", _chatId, DateTimeOffset.UtcNow.AddSeconds(8)),
                     command, baseline.FormatAssessment(), ct)
                 : Task.FromResult<Codale.Smart.SmartResult<Codale.Smart.SmartCommandAssessment>?>(null);
             IReadOnlyDictionary<string, SmartDecision>? decision = null;
@@ -42,7 +42,7 @@ public sealed partial class ChatViewModel
         void Apply(string description, string risk, string reason)
         {
             if (ct.IsCancellationRequested || answered.IsCompleted) return;
-            var findings = ShellCommandAnalyzer.Analyze(command, _projectPath, ExtraRoots);
+            var findings = ShellCommandAnalyzer.Analyze(command, ProjectPath, ExtraRoots);
             var call = new ToolCall("assess_command", JsonSerializer.SerializeToElement(new { description, risk, reason }));
             // Reuse the deterministic floor and retain every matched rule's explanation.
             var assessment = ShellCommandAnalyzer.Interpret(call, baseline, findings);

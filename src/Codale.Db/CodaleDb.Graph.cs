@@ -1,3 +1,5 @@
+using Codale.Db.Engine;
+
 namespace Codale.Db;
 
 /// <summary>
@@ -27,8 +29,8 @@ public sealed partial class CodaleDb
         {
             var node = FindNode(from, create: false);
             if (node?.Links is null || !node.Links.Contains((rel, to))) return false;
-            var append = Append(RecordType.Unlink, 0, EncodeStrings(from, rel, to));
-            _dead += append.Size;
+            var (_, _, size) = Append(RecordType.Unlink, 0, EncodeStrings(from, rel, to));
+            _dead += size;
             ApplyUnlink(from, rel, to);
             Committed();
             return true;
@@ -39,7 +41,7 @@ public sealed partial class CodaleDb
     internal IReadOnlyList<DbPath> Links(string from, string? rel)
     {
         _lock.EnterReadLock();
-        try { return LinkTargets(FindNode(from, create: false), rel).Select(DbPath.FromRaw).ToList(); }
+        try { return [.. LinkTargets(FindNode(from, create: false), rel).Select(DbPath.FromRaw)]; }
         finally { _lock.ExitReadLock(); }
     }
 
@@ -67,7 +69,7 @@ public sealed partial class CodaleDb
             Walk(start);
             foreach (var target in LinkTargets(start, null))
                 if (Matches(target, filter) && !found.Contains(target)) found.Add(target);
-            return found.Select(DbPath.FromRaw).ToList();
+            return [.. found.Select(DbPath.FromRaw)];
 
             void Walk(TNode node)
             {

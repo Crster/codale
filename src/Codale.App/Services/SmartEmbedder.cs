@@ -1,6 +1,4 @@
-using Codale.Agents.Providers;
-using Codale.Core.Features;
-using Codale.Db;
+using Codale.Db.Search;
 
 namespace Codale.App.Services;
 

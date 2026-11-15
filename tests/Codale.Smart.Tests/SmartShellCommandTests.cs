@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Text.Json;
-using Codale.Smart;
 
 namespace Codale.Smart.Tests;
 

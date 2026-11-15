@@ -3,7 +3,6 @@ using System.Text;
 
 using Codale.Core.Agents;
 using Codale.Core.Shell;
-using Codale.Core.Tasks;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -43,8 +42,6 @@ public sealed class TaskCall
 /// <summary>One block of a subagent's transcript: a piece of its prose, or a run of tool calls.</summary>
 public sealed class TaskEntry : ObservableObject
 {
-    private string _summary = "";
-
     private TaskEntry()
     {
     }
@@ -62,9 +59,9 @@ public sealed class TaskEntry : ObservableObject
     /// <summary>"Ran 5 commands, searched code, read 7 files" - the run in one line.</summary>
     public string Summary
     {
-        get => _summary;
-        private set => SetProperty(ref _summary, value);
-    }
+        get;
+        private set => SetProperty(ref field, value);
+    } = "";
 
     public void Refresh()
     {
@@ -243,15 +240,13 @@ public sealed partial class RunningTaskItem : ObservableObject
     /// <summary>Ends work Codale runs in-process (an explore); null for tasks stopped another way.</summary>
     public Action? Cancel
     {
-        get => _cancel;
+        get;
         set
         {
-            _cancel = value;
+            field = value;
             OnPropertyChanged(nameof(CanStop));
         }
     }
-
-    private Action? _cancel;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsRunning))]

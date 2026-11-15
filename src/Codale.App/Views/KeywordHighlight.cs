@@ -1,4 +1,5 @@
 using Codale.App.Controls;
+using Codale.App.Controls.Editing;
 using Codale.Core.Syntax;
 
 using Microsoft.UI.Xaml;

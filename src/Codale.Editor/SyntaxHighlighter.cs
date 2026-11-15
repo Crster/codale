@@ -98,9 +98,6 @@ public sealed class SyntaxHighlighter
     private readonly LineTokenizer _tokenize;
     private readonly List<LineTokens?> _lines = [];
     private readonly List<CodeToken> _scratch = [];
-    private int _validUpTo;
-    private string? _languageId;
-    private bool _enabled = true;
 
     public SyntaxHighlighter(TextBuffer buffer, LineTokenizer? tokenizer = null)
     {
@@ -117,42 +114,34 @@ public sealed class SyntaxHighlighter
     /// <summary>Raised when tokens of already-shown lines were replaced; the arguments are the first and last line affected.</summary>
     public event Action<int, int>? TokensChanged;
 
-    public string? LanguageId
-    {
-        get => _languageId;
-        set
+    public string? LanguageId { get; set
         {
-            if (_languageId != value)
+            if (field != value)
             {
-                _languageId = value;
+                field = value;
                 Reset();
             }
-        }
-    }
+        } }
 
-    public bool Enabled
-    {
-        get => _enabled;
-        set
+    public bool Enabled { get; set
         {
-            if (_enabled != value)
+            if (field != value)
             {
-                _enabled = value;
+                field = value;
                 Reset();
             }
-        }
-    }
+        } } = true;
 
     /// <summary>Lines [0, ValidUpTo) carry verified tokens.</summary>
-    public int ValidUpTo => _validUpTo;
+    public int ValidUpTo { get; private set; }
 
-    private bool Active => _enabled && _languageId is not null;
+    private bool Active => Enabled && LanguageId is not null;
 
     /// <summary>Forgets every token (language or theme change, a new document).</summary>
     public void Reset()
     {
         _lines.Clear();
-        _validUpTo = 0;
+        ValidUpTo = 0;
         for (var i = 0; i < _buffer.LineCount; i++)
         {
             _lines.Add(null);
@@ -177,9 +166,9 @@ public sealed class SyntaxHighlighter
             _lines.InsertRange(start + common, Enumerable.Repeat<LineTokens?>(null, added - removed));
         }
 
-        if (_validUpTo > start)
+        if (ValidUpTo > start)
         {
-            _validUpTo = start;
+            ValidUpTo = start;
         }
     }
 
@@ -196,12 +185,7 @@ public sealed class SyntaxHighlighter
 
         var entry = _lines[line];
         var source = _buffer[line];
-        if (entry is not null && (line < _validUpTo || ReferenceEquals(entry.Source, source)))
-        {
-            return entry;
-        }
-
-        return Provisional(line);
+        return entry is not null && (line < ValidUpTo || ReferenceEquals(entry.Source, source)) ? entry : Provisional(line);
     }
 
     /// <summary>
@@ -216,7 +200,7 @@ public sealed class SyntaxHighlighter
         }
 
         targetLine = Math.Min(targetLine, _buffer.LineCount - 1);
-        if (_validUpTo > targetLine)
+        if (ValidUpTo > targetLine)
         {
             return false;
         }
@@ -224,8 +208,8 @@ public sealed class SyntaxHighlighter
         var clock = Stopwatch.StartNew();
         var changedFrom = int.MaxValue;
         var changedTo = -1;
-        var state = _validUpTo > 0 ? _lines[_validUpTo - 1]?.StateOut : null;
-        var line = _validUpTo;
+        var state = ValidUpTo > 0 ? _lines[ValidUpTo - 1]?.StateOut : null;
+        var line = ValidUpTo;
         for (; line <= targetLine; line++)
         {
             var source = _buffer[line];
@@ -259,21 +243,21 @@ public sealed class SyntaxHighlighter
             }
         }
 
-        _validUpTo = line;
+        ValidUpTo = line;
         if (changedTo >= 0)
         {
             TokensChanged?.Invoke(changedFrom, changedTo);
         }
 
-        return _validUpTo <= targetLine;
+        return ValidUpTo <= targetLine;
     }
 
     private LineTokens Provisional(int line)
     {
         // Start from the nearest line above with a trusted end state, or from a blank state a
         // little way up (which recovers from most open constructs within a few lines).
-        var from = Math.Max(_validUpTo, line - ProvisionalLookBack);
-        object? state = from > 0 && from - 1 < _validUpTo ? _lines[from - 1]?.StateOut : null;
+        var from = Math.Max(ValidUpTo, line - ProvisionalLookBack);
+        object? state = from > 0 && from - 1 < ValidUpTo ? _lines[from - 1]?.StateOut : null;
         LineTokens? result = null;
         for (var i = from; i <= line; i++)
         {
@@ -306,18 +290,15 @@ public sealed class SyntaxHighlighter
         bool handled;
         try
         {
-            handled = _tokenize(_languageId!, source, stateIn, _scratch, out stateOut);
+            handled = _tokenize(LanguageId!, source, stateIn, _scratch, out stateOut);
         }
         catch (Exception)
         {
             handled = false;
         }
 
-        if (!handled)
-        {
-            return new LineTokens(source, [], null, null, provisional);
-        }
-
-        return new LineTokens(source, _scratch.ToArray(), stateIn, stateOut, provisional);
+        return !handled
+            ? new LineTokens(source, [], null, null, provisional)
+            : new LineTokens(source, [.. _scratch], stateIn, stateOut, provisional);
     }
 }

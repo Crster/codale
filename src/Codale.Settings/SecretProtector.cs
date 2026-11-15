@@ -22,12 +22,9 @@ internal static class SecretProtector
     /// <summary>Encrypts <paramref name="secret"/>; empty stays empty.</summary>
     public static string Protect(string secret)
     {
-        if (secret.Length == 0 || IsProtected(secret))
-        {
-            return secret;
-        }
-
-        return Prefix + Convert.ToBase64String(Transform(Encoding.UTF8.GetBytes(secret), protect: true));
+        return secret.Length == 0 || IsProtected(secret)
+            ? secret
+            : Prefix + Convert.ToBase64String(Transform(Encoding.UTF8.GetBytes(secret), protect: true));
     }
 
     /// <summary>Reverses <see cref="Protect"/>. A value that is not protected, or a blob from another account or machine, yields "".</summary>

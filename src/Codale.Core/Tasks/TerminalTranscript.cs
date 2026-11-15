@@ -35,7 +35,7 @@ public sealed class TerminalTranscript
     private const int MaxChars = 200_000;
     private const int TrimSlack = MaxChars / 10;
 
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private readonly StringBuilder _buffer = new();
     private long _dropped;
 

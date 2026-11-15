@@ -1,5 +1,3 @@
-using Codale.Agents.Providers;
-
 namespace Codale.App.Services;
 
 public interface ISmartDecider

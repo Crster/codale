@@ -11,15 +11,13 @@ public sealed record CatalogEntry(string Id, string Name, string[] Extensions, s
 /// uses, and what comes back is size-capped and validated before it is stored. A downloaded
 /// grammar is data for the tokenizer, never code.
 /// </summary>
-public sealed class SyntaxCatalogClient
+public sealed class SyntaxCatalogClient(HttpClient? http = null)
 {
     private const string AllowedHost = "raw.githubusercontent.com";
 
     private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromSeconds(30) };
 
-    private readonly HttpClient _http;
-
-    public SyntaxCatalogClient(HttpClient? http = null) => _http = http ?? SharedHttp;
+    private readonly HttpClient _http = http ?? SharedHttp;
 
     /// <summary>The catalog that ships with the app.</summary>
     public static IReadOnlyList<CatalogEntry> Entries { get; } = LoadEntries();
@@ -57,12 +55,9 @@ public sealed class SyntaxCatalogClient
         }
 
         var error = GrammarValidator.Validate(json, out var meta);
-        if (error is not null)
-        {
-            throw new InvalidDataException($"{entry.Name}: {error}");
-        }
-
-        return store.Add(new LanguageEntry
+        return error is not null
+            ? throw new InvalidDataException($"{entry.Name}: {error}")
+            : store.Add(new LanguageEntry
         {
             Id = entry.Id,
             Name = entry.Name,

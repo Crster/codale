@@ -1,10 +1,8 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
 
-using Codale.App.Controls;
 using Codale.App.Services;
 using Codale.App.ViewModels;
-using Codale.Core.Text;
 using Codale.Terminal;
 
 using Microsoft.UI.Input;
@@ -482,12 +480,11 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
     {
         try
         {
-            return new DirectoryInfo(cwd)
+            return [.. new DirectoryInfo(cwd)
                 .EnumerateDirectories()
                 .Where(d => (d.Attributes & (FileAttributes.Hidden | FileAttributes.System)) == 0 && !d.Name.StartsWith('.'))
                 .Select(d => d.FullName)
-                .Order(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+                .Order(StringComparer.OrdinalIgnoreCase)];
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
@@ -819,10 +816,9 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
             return;
         }
 
-        _suggestions = viewModel.History.Suggest(viewModel.HistoryKey, typed)
+        _suggestions = [.. viewModel.History.Suggest(viewModel.HistoryKey, typed)
             .Where(s => !string.Equals(s, typed, StringComparison.Ordinal))
-            .Take(5)
-            .ToList();
+            .Take(5)];
         _suggestionIndex = 0;
         RenderSuggestions();
         RequestGhost(viewModel, typed);

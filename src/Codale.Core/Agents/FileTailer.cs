@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 
 namespace Codale.Core.Agents;
@@ -8,10 +7,10 @@ namespace Codale.Core.Agents;
 /// <see cref="FileShare.ReadWrite"/> so the writer is never blocked, and reads only
 /// the bytes added since the last poll. Chunks arrive on a thread-pool thread.
 /// </summary>
-public sealed class FileTailer : IDisposable
+public sealed class FileTailer(string path, TimeSpan? interval = null) : IDisposable
 {
-    private readonly string _path;
-    private readonly TimeSpan _interval;
+    private readonly string _path = path;
+    private readonly TimeSpan _interval = interval ?? TimeSpan.FromMilliseconds(500);
     private readonly CancellationTokenSource _cts = new();
 
     /// <summary>One read never takes more than this, so a log that grew by gigabytes is delivered over several polls.</summary>
@@ -21,12 +20,6 @@ public sealed class FileTailer : IDisposable
     private readonly Decoder _decoder = Encoding.UTF8.GetDecoder();
     private long _offset;
     private bool _disposed;
-
-    public FileTailer(string path, TimeSpan? interval = null)
-    {
-        _path = path;
-        _interval = interval ?? TimeSpan.FromMilliseconds(500);
-    }
 
     /// <summary>Raised with each newly appended chunk (the whole file first, capped).</summary>
     public event Action<string>? Chunk;

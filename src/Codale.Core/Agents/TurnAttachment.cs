@@ -50,8 +50,9 @@ public sealed record TurnAttachment
 
     private static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
 
-    private static readonly HashSet<string> TextExtensions = new(StringComparer.Ordinal)
-    {
+    private static readonly HashSet<string> TextExtensions =
+    [
+        with(StringComparer.Ordinal),
         ".txt", ".md", ".markdown", ".csv", ".tsv", ".log", ".json", ".jsonc",
         ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
         ".cs", ".csx", ".vb", ".fs", ".fsx", ".cpp", ".cc", ".cxx", ".h", ".hpp",
@@ -61,7 +62,7 @@ public sealed record TurnAttachment
         ".sh", ".bash", ".zsh", ".ps1", ".psm1", ".psd1", ".bat", ".cmd",
         ".diff", ".patch", ".env", ".gitignore", ".gitattributes",
         ".editorconfig", ".dockerfile", ".r", ".dart", ".lua", ".pl", ".scala",
-    };
+    ];
 
     /// <summary>Extensions the attach button's picker offers, in kind order.</summary>
     public static string[] PickerExtensions { get; } = [.. ImageExtensions, ".pdf", .. TextExtensions];

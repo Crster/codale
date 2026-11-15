@@ -76,26 +76,19 @@ public static class HexLayout
 }
 
 /// <summary>One line of the dump: offset, hex bytes and the printable-ASCII column.</summary>
-public sealed class HexRow : INotifyPropertyChanged
+public sealed class HexRow(long offset, byte[] data, int perRow) : INotifyPropertyChanged
 {
-    private static readonly string[] HexPairs = Enumerable.Range(0, 256).Select(i => i.ToString("X2")).ToArray();
+    private static readonly string[] HexPairs = [.. Enumerable.Range(0, 256).Select(i => i.ToString("X2"))];
 
-    private readonly int _perRow;
+    private readonly int _perRow = perRow;
     private long _selStart = -1;
     private long _selEnd = -1;
 
-    public HexRow(long offset, byte[] data, int perRow)
-    {
-        Offset = offset;
-        Data = data;
-        _perRow = perRow;
-    }
-
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public long Offset { get; }
+    public long Offset { get; } = offset;
 
-    public byte[] Data { get; }
+    public byte[] Data { get; } = data;
 
     public string OffsetText => Offset.ToString("X8");
 
@@ -157,12 +150,9 @@ public sealed class HexRow : INotifyPropertyChanged
             }
 
             var rowEnd = Offset + Data.Length - 1;
-            if (_selEnd < Offset || _selStart > rowEnd)
-            {
-                return null;
-            }
-
-            return ((int)(Math.Max(_selStart, Offset) - Offset), (int)(Math.Min(_selEnd, rowEnd) - Offset));
+            return _selEnd < Offset || _selStart > rowEnd
+                ? null
+                : ((int)(Math.Max(_selStart, Offset) - Offset), (int)(Math.Min(_selEnd, rowEnd) - Offset));
         }
     }
 
@@ -199,24 +189,18 @@ public sealed class HexRow : INotifyPropertyChanged
 /// so a file of any size is "loaded" without reading it. Rows are cached (first in, first
 /// out) so selection changes can reach the ones still on screen.
 /// </summary>
-public sealed class HexRowList : IList
+public sealed class HexRowList(HexSource source, int bytesPerRow) : IList
 {
     private const int CacheLimit = 2048;
 
-    private readonly HexSource _source;
+    private readonly HexSource _source = source;
     private readonly Dictionary<int, HexRow> _cache = [];
     private readonly Queue<int> _order = new();
 
     private long _selStart = -1;
     private long _selEnd = -1;
 
-    public HexRowList(HexSource source, int bytesPerRow)
-    {
-        _source = source;
-        BytesPerRow = bytesPerRow;
-    }
-
-    public int BytesPerRow { get; }
+    public int BytesPerRow { get; } = bytesPerRow;
 
     public int Count => (int)Math.Min(int.MaxValue, (_source.Length + BytesPerRow - 1) / BytesPerRow);
 
@@ -434,7 +418,7 @@ public static class HexSearch
 
     private static byte Fold(byte b) => b is >= (byte)'A' and <= (byte)'Z' ? (byte)(b + 32) : b;
 
-    private static byte[] Fold(byte[] bytes) => bytes.Select(Fold).ToArray();
+    private static byte[] Fold(byte[] bytes) => [.. bytes.Select(Fold)];
 
     /// <summary>Parses "DE AD be-ef", "0xDEADBEEF" or "de,ad" into bytes; null when it is not whole hex bytes.</summary>
     public static byte[]? ParseHex(string text)
@@ -504,22 +488,14 @@ public static class HexSignatures
         }
 
         // RIFF and ISO-BMFF carry their real type a few bytes in.
-        if (head.Length >= 12 && head.AsSpan(0, 4).SequenceEqual("RIFF"u8))
-        {
-            return Encoding.ASCII.GetString(head, 8, 4) switch
+        return head.Length >= 12 && head.AsSpan(0, 4).SequenceEqual("RIFF"u8)
+            ? Encoding.ASCII.GetString(head, 8, 4) switch
             {
                 "WAVE" => "WAV audio",
                 "AVI " => "AVI video",
                 "WEBP" => "WebP image",
                 var other => $"RIFF container ({other.Trim()})",
-            };
-        }
-
-        if (head.Length >= 12 && head.AsSpan(4, 4).SequenceEqual("ftyp"u8))
-        {
-            return "MP4 / QuickTime media";
-        }
-
-        return null;
+            }
+            : head.Length >= 12 && head.AsSpan(4, 4).SequenceEqual("ftyp"u8) ? "MP4 / QuickTime media" : null;
     }
 }

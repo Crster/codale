@@ -1,5 +1,8 @@
 using System.Security.Cryptography;
 
+using Codale.Db.Engine;
+using Codale.Db.Search;
+
 namespace Codale.Db;
 
 /// <summary>
@@ -17,8 +20,8 @@ public sealed partial class CodaleDb : IDisposable
 {
     internal const char Sep = '\u001f';
 
-    private static readonly object SharedGate = new();
-    private static readonly Dictionary<string, CodaleDb> Shared = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Lock SharedGate = new();
+    private static readonly Dictionary<string, CodaleDb> Shared = [with(StringComparer.OrdinalIgnoreCase)];
 
     private readonly CodaleDbOptions _options;
     private readonly string _dir;

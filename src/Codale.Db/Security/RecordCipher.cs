@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Codale.Db;
+namespace Codale.Db.Security;
 
 /// <summary>AES-256-GCM sealing of one value. Layout: <c>nonce(12) | tag(16) | ciphertext</c>; the path is authenticated data.</summary>
 internal static class RecordCipher

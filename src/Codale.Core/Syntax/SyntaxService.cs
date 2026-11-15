@@ -7,27 +7,29 @@ namespace Codale.Core.Syntax;
 /// </summary>
 public static class SyntaxService
 {
-    private static readonly object Gate = new();
-    private static SyntaxStore? _store;
-    private static LanguageCatalog? _catalog;
-    private static GrammarTokenizer? _tokenizer;
+    private static readonly Lock Gate = new();
+    private static SyntaxStore? s_store;
+    private static LanguageCatalog? s_catalog;
 
     /// <summary>Points the services at <paramref name="root"/>. Call before first use; later calls replace the services.</summary>
     public static void Initialize(string root)
     {
         lock (Gate)
         {
-            _store = new SyntaxStore(root);
-            _catalog = new LanguageCatalog(_store, GrammarTokenizer.Shared.Builtin);
-            _tokenizer = new GrammarTokenizer(_store, _catalog, GrammarTokenizer.Shared.Builtin);
+            s_store = new SyntaxStore(root);
+            s_catalog = new LanguageCatalog(s_store, GrammarTokenizer.Shared.Builtin);
+            Tokenizer = new GrammarTokenizer(s_store, s_catalog, GrammarTokenizer.Shared.Builtin);
         }
     }
 
-    public static SyntaxStore Store { get { Ensure(); return _store!; } }
+    public static SyntaxStore Store { get { Ensure(); return s_store!; } }
 
-    public static LanguageCatalog Catalog { get { Ensure(); return _catalog!; } }
+    public static LanguageCatalog Catalog { get { Ensure(); return s_catalog!; } }
 
-    public static GrammarTokenizer Tokenizer { get { Ensure(); return _tokenizer!; } }
+    public static GrammarTokenizer Tokenizer { get { Ensure(); return field!; }
+
+        private set;
+    }
 
     public static string DefaultRoot =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale", "syntax");
@@ -36,7 +38,7 @@ public static class SyntaxService
     {
         lock (Gate)
         {
-            if (_store is null)
+            if (s_store is null)
             {
                 Initialize(DefaultRoot);
             }

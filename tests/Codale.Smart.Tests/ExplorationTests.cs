@@ -42,13 +42,13 @@ public sealed class ExplorationTests : IDisposable
         var result = await smart.ExploreContextAsync(Context("context", deadline: DateTimeOffset.UtcNow.AddSeconds(-1)), "loading", "recent",
             [new("model", "GitViewModel.cs", "GenerateCommitMessage")],
             (query, _) => Task.FromResult<IReadOnlyList<SmartCandidate>>([new("view", "Workspace.xaml", "Binding CommitMessage", 12, 12)]));
-        Assert.Equal(new[] { "view", "model" }, result!.Value);
+        Assert.Equal(["view", "model"], result!.Value);
         Assert.Contains("query_index", runtime.Prompts[0].Prompt);
         Assert.DoesNotContain("run_shell", runtime.Prompts[0].Prompt);
         Assert.Contains("Binding CommitMessage", runtime.Prompts[^1].Prompt);
         Assert.Contains("view", runtime.Prompts[^1].Grammar);
         Assert.Contains("model", runtime.Prompts[^1].Grammar);
-        Assert.Equal(new[] { "query_index", "read_index" }, smart.Activities(_root)[0].Tools!.Select(t => t.Tool));
+        Assert.Equal(["query_index", "read_index"], smart.Activities(_root)[0].Tools!.Select(t => t.Tool));
     }
 
     [Fact]
@@ -149,7 +149,7 @@ public sealed class ExplorationTests : IDisposable
         if (!OperatingSystem.IsWindows()) return;
         var directory = Directory.CreateDirectory(Path.Combine(_root, "override")).FullName;
         var result = await new SmartTools().ExecuteAsync(Context(), new("run_shell", new Dictionary<string, string>
-            { ["command"] = "Write-Output (Get-Location).Path; Write-Output ('x' * 50000)", ["cwd"] = directory }), default);
+        { ["command"] = "Write-Output (Get-Location).Path; Write-Output ('x' * 50000)", ["cwd"] = directory }), default);
         Assert.Equal(directory, result.Evidence.Single().Path);
         Assert.Contains(directory, result.Evidence[0].Text); Assert.Contains("truncated", result.Evidence[0].Text);
         Assert.True(Encoding.UTF8.GetByteCount(result.Output) <= SmartTools.OutputBytes);
@@ -208,7 +208,7 @@ public sealed class ExplorationTests : IDisposable
         var file = FileAt("outside.txt", "one\ntwo\nthree\n");
         var tools = new SmartTools();
         var result = await tools.ExecuteAsync(Context(tree: tree), new("read_file", new Dictionary<string, string>
-            { ["path"] = file, ["start_line"] = "2", ["line_count"] = "1" }), default);
+        { ["path"] = file, ["start_line"] = "2", ["line_count"] = "1" }), default);
         Assert.Equal("two\n", result.Evidence.Single().Text.Replace("\r\n", "\n"));
         Assert.Equal(2, result.Evidence[0].StartLine);
         Assert.True(await result.Evidence[0].IsFreshAsync());
@@ -253,7 +253,7 @@ public sealed class ExplorationTests : IDisposable
         using var ct = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         var started = System.Diagnostics.Stopwatch.StartNew();
         var result = await new SmartTools().ExecuteAsync(Context(), new("run_shell", new Dictionary<string, string>
-            { ["command"] = "Write-Output 'started'; powershell -NoProfile -Command Start-Sleep -Seconds 90" }), ct.Token);
+        { ["command"] = "Write-Output 'started'; powershell -NoProfile -Command Start-Sleep -Seconds 90" }), ct.Token);
         Assert.Equal("cancelled", result.State); Assert.Contains("started", result.Evidence.Single().Text);
         Assert.True(started.Elapsed < TimeSpan.FromSeconds(10));
     }
@@ -264,7 +264,7 @@ public sealed class ExplorationTests : IDisposable
         if (!OperatingSystem.IsWindows()) return;
         var progress = new List<string>();
         var result = await new SmartTools(TimeSpan.FromSeconds(2)).ExecuteAsync(Context(), new("run_shell", new Dictionary<string, string>
-            { ["command"] = "Write-Output 'streamed'; Start-Sleep -Seconds 90" }), default, value => progress.Add(value));
+        { ["command"] = "Write-Output 'streamed'; Start-Sleep -Seconds 90" }), default, value => progress.Add(value));
         Assert.Equal("timed out", result.State); Assert.Single(result.Evidence);
         Assert.Contains(progress, text => text.Contains("streamed"));
     }

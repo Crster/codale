@@ -101,13 +101,12 @@ public sealed partial class SmartExperience
                 {
                     // Inserted text keeps its whitespace: it goes in at the caret as is.
                     var value = parse(context.Task is "completion" or "compose-completion" or "shell-completion" ? output :
-                        new SmartConversation("", "", SmartReasoning.Off).FinalVisible(output).Trim());
-                    if (value is null) throw new InvalidDataException("Smart final answer failed validation.");
+                        new SmartConversation("", "", SmartReasoning.Off).FinalVisible(output).Trim()) ?? throw new InvalidDataException("Smart final answer failed validation.");
                     lock (_gate)
                     {
                         if (generation != _generation) throw new OperationCanceledException(linked.Token);
                         activity = activity with { State = "completed" };
-                        return new(value, evidence.DistinctBy(e => e.Key).ToArray(), activity.Id);
+                        return new(value, [.. evidence.DistinctBy(e => e.Key)], activity.Id);
                     }
                 }
                 if (round == limit) throw new InvalidDataException("Tool call limit reached.");
@@ -130,15 +129,18 @@ public sealed partial class SmartExperience
         {
             var cancelled = ct.IsCancellationRequested || _lifetime.IsCancellationRequested ||
                 generation != _generation || (background && _background.IsCancellationRequested);
-            activity = activity with { State = cancelled ? "cancelled" : "error",
-                Error = cancelled ? null : "The AI request timed out. Check the connection and model." };
+            activity = activity with
+            {
+                State = cancelled ? "cancelled" : "error",
+                Error = cancelled ? null : "The AI request timed out. Check the connection and model."
+            };
             if (ct.IsCancellationRequested) throw;
             return null;
         }
         catch (Exception ex) { activity = activity with { State = "error", Error = ex.Message }; return null; }
         finally
         {
-            Publish(activity with { Tools = tools.ToArray(), Evidence = evidence.ToArray(), ElapsedMilliseconds = watch.ElapsedMilliseconds }, linked, true);
+            Publish(activity with { Tools = [.. tools], Evidence = [.. evidence], ElapsedMilliseconds = watch.ElapsedMilliseconds }, linked, true);
             if (entered) inference.Release();
             if (!background) Interlocked.Decrement(ref _interactive);
         }

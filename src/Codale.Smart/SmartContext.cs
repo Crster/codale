@@ -23,6 +23,6 @@ public sealed record SmartContext(string Text, IReadOnlyList<string> Keys, IRead
         }
         if (!string.IsNullOrWhiteSpace(basic) && Encoding.UTF8.GetByteCount(text.ToString()) + Encoding.UTF8.GetByteCount(basic) <= MaxBytes)
         { text.Append(basic); keys.AddRange(basicKeys); }
-        return new(text.ToString().TrimEnd(), keys.Distinct().ToArray(), files.Distinct().ToArray(), snippets, findings);
+        return new(text.ToString().TrimEnd(), [.. keys.Distinct()], [.. files.Distinct()], snippets, findings);
     }
 }

@@ -1,16 +1,17 @@
 using System.Diagnostics;
-using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Codale.Agents;
+
 using Codale.Core.Agents;
 using Codale.Core.Text;
 
 namespace Codale.Agents.Providers;
 
 /// <summary>Text-only requests for one Smart model role, through an installed CLI or the selected API profile.</summary>
-public sealed class SmartProviderClient : ISmartProviderClient
+/// <param name="role">The model role (see <see cref="SmartFeatureSettings.Roles"/>).</param>
+/// <param name="model">The chosen model; empty or "default" uses the profile's Flash model, "off" disables the role.</param>
+public sealed class SmartProviderClient(string role, string provider, ByokProvider? profile, string model, HttpClient? http = null) : ISmartProviderClient
 {
     private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromSeconds(120) };
     /// <summary>
@@ -51,44 +52,38 @@ public sealed class SmartProviderClient : ISmartProviderClient
         "shell-completion" => ShellInsertionPrompt,
         _ => InsertionPrompt,
     };
-    private readonly HttpClient _http;
-    private readonly string _provider;
-    private readonly ByokProvider? _profile;
-    private readonly string _model;
+    private readonly HttpClient _http = http ?? SharedHttp;
+    private readonly ByokProvider? _profile = profile;
+    private readonly string _model = model?.Trim() ?? "";
 
-    /// <param name="role">The model role (see <see cref="SmartFeatureSettings.Roles"/>).</param>
-    /// <param name="model">The chosen model; empty or "default" uses the profile's Flash model, "off" disables the role.</param>
-    public SmartProviderClient(string role, string provider, ByokProvider? profile, string model, HttpClient? http = null)
-    {
-        Role = role;
-        _provider = provider;
-        _profile = profile;
-        _model = model?.Trim() ?? "";
-        _http = http ?? SharedHttp;
-    }
-
-    public string Role { get; }
-    public string Provider => _provider;
+    public string Role { get; } = role;
+    public string Provider { get; } = provider;
 
     /// <summary>Changes whenever the provider, endpoint or model would give a different answer (summary cache key).</summary>
-    public string FeatureIdentity => JsonSerializer.Serialize(new { _provider, Profile = _profile?.Key,
-        _profile?.BaseUrl, _profile?.AnthropicBaseUrl, Model });
+    public string FeatureIdentity => JsonSerializer.Serialize(new
+    {
+        Provider,
+        Profile = _profile?.Key,
+        _profile?.BaseUrl,
+        _profile?.AnthropicBaseUrl,
+        Model
+    });
     public string DefaultModel => _profile?.FlashModel.Trim() ?? "";
     public string Model => _model.Length > 0 && !_model.Equals("default", StringComparison.OrdinalIgnoreCase)
         && !_model.Equals("off", StringComparison.OrdinalIgnoreCase) ? _model
         : SmartFeatureSettings.RequiresDedicatedModel(Role) ? "" : DefaultModel;
     public string ConfigurationKey => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
-        System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { Role, _provider, _profile, _model }))));
-    public string? AccountId => _provider is "claude" or "codex" && _profile is { IsAccount: true } ? _profile.AccountId : null;
-    public bool IsEnabled => _provider != "off"
-        && SmartFeatureSettings.SupportsProvider(Role, _provider)
+        System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { Role, Provider, _profile, _model }))));
+    public string? AccountId => Provider is "claude" or "codex" && _profile is { IsAccount: true } ? _profile.AccountId : null;
+    public bool IsEnabled => Provider != "off"
+        && SmartFeatureSettings.SupportsProvider(Role, Provider)
         && !_model.Equals("off", StringComparison.OrdinalIgnoreCase)
         && (!SmartFeatureSettings.RequiresDedicatedModel(Role) || Model.Length > 0);
 
-    public string? ConfigurationError => _provider switch
+    public string? ConfigurationError => Provider switch
     {
         "off" => null,
-        "claude" or "codex" => CliLocator.Find(_provider) is null ? $"Install and sign in to {_provider} first." : null,
+        "claude" or "codex" => CliLocator.Find(Provider) is null ? $"Install and sign in to {Provider} first." : null,
         _ => _profile is not { IsAccount: false, ApiKey.Length: > 0 } ? "Choose an API endpoint profile with an API key." : null,
     };
 
@@ -98,8 +93,8 @@ public sealed class SmartProviderClient : ISmartProviderClient
         using var request = Request(RequireProfile(), Role == SmartFeatureSettings.Decision ? "models?output_modalities=decisions" : "models");
         request.Method = HttpMethod.Get;
         using var json = await SendAsync(request, ct).ConfigureAwait(false);
-        return json.RootElement.GetProperty("data").EnumerateArray().Select(m => m.GetProperty("id").GetString()!)
-            .Where(m => !string.IsNullOrWhiteSpace(m)).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        return [.. json.RootElement.GetProperty("data").EnumerateArray().Select(m => m.GetProperty("id").GetString()!)
+            .Where(m => !string.IsNullOrWhiteSpace(m)).Order(StringComparer.OrdinalIgnoreCase)];
     }
 
     public async Task<string> CompleteAsync(string task, string system, string input, int tokens, CancellationToken ct)
@@ -108,14 +103,15 @@ public sealed class SmartProviderClient : ISmartProviderClient
         var model = Model;
         if (Role == SmartFeatureSettings.Completion) return await CompleteFimAsync(task, model, input, tokens, ct).ConfigureAwait(false);
         // A chat model standing in for a missing FIM model inserts through an instruction prompt.
-        if (SmartFeatureSettings.IsCompletionTask(task)) return await CompleteInsertionAsync(task, model, input, tokens, ct).ConfigureAwait(false);
-        return await ChatAsync(model, system, input, tokens, ct).ConfigureAwait(false);
+        return SmartFeatureSettings.IsCompletionTask(task)
+            ? await CompleteInsertionAsync(task, model, input, tokens, ct).ConfigureAwait(false)
+            : await ChatAsync(model, system, input, tokens, ct).ConfigureAwait(false);
     }
 
     private async Task<string> ChatAsync(string model, string system, string input, int tokens, CancellationToken ct, bool exact = false)
     {
-        if (_provider is "claude" or "codex") return await CliAsync(model, system, input, ct).ConfigureAwait(false);
-        var anthropic = _provider == "anthropic";
+        if (Provider is "claude" or "codex") return await CliAsync(model, system, input, ct).ConfigureAwait(false);
+        var anthropic = Provider == "anthropic";
         var profile = RequireProfile();
         if (model.Length == 0) throw new InvalidOperationException("Choose a model for this role or set the profile's Flash model.");
         using var request = Request(profile, anthropic ? "messages" : "chat/completions");
@@ -148,9 +144,9 @@ public sealed class SmartProviderClient : ISmartProviderClient
                 code = (close >= 0 ? code[..close] : code).TrimEnd('\r', '\n');
             }
         }
-        if (string.IsNullOrEmpty(code) || code.Contains("```"))
-            throw new InvalidDataException("The completion model did not return plain code. Check the selected model.");
-        return code;
+        return string.IsNullOrEmpty(code) || code.Contains("```")
+            ? throw new InvalidDataException("The completion model did not return plain code. Check the selected model.")
+            : code;
     }
 
     private static readonly JsonSerializerOptions RawText = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
@@ -246,8 +242,7 @@ public sealed class SmartProviderClient : ISmartProviderClient
         var vector = json.RootElement.GetProperty("data")[0].GetProperty("embedding").EnumerateArray().Select(x => x.GetSingle()).ToArray();
         if (vector.Length == 0 || vector.Any(v => !float.IsFinite(v))) throw new InvalidDataException("Invalid embedding vector.");
         var norm = Math.Sqrt(vector.Sum(v => (double)v * v));
-        if (norm <= 0) throw new InvalidDataException("Empty embedding vector.");
-        return vector.Select(v => (float)(v / norm)).ToArray();
+        return norm <= 0 ? throw new InvalidDataException("Empty embedding vector.") : [.. vector.Select(v => (float)(v / norm))];
     }
 
     private ByokProvider RequireProfile() => _profile is { IsAccount: false, ApiKey.Length: > 0 } p ? p
@@ -255,7 +250,7 @@ public sealed class SmartProviderClient : ISmartProviderClient
 
     private HttpRequestMessage Request(ByokProvider profile, string path)
     {
-        var anthropic = _provider == "anthropic";
+        var anthropic = Provider == "anthropic";
         var root = (anthropic ? profile.AnthropicBaseUrl : profile.BaseUrl).TrimEnd('/');
         if (root.Length == 0) throw new InvalidOperationException("The profile does not support this API.");
         if (anthropic && !root.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)) root += "/v1";
@@ -272,13 +267,14 @@ public sealed class SmartProviderClient : ISmartProviderClient
     private async Task<JsonDocument> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode) throw new HttpRequestException($"Smart provider returned HTTP {(int)response.StatusCode}. Check the endpoint, model, and credentials.");
-        return JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
+        return !response.IsSuccessStatusCode
+            ? throw new HttpRequestException($"Smart provider returned HTTP {(int)response.StatusCode}. Check the endpoint, model, and credentials.")
+            : JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
     }
 
     private async Task<string> CliAsync(string model, string system, string input, CancellationToken ct)
     {
-        var executable = CliLocator.Find(_provider) ?? throw new InvalidOperationException($"Install and sign in to {_provider} first.");
+        var executable = CliLocator.Find(Provider) ?? throw new InvalidOperationException($"Install and sign in to {Provider} first.");
         if (CliLocator.IsShim(executable)) throw new InvalidOperationException("Smart features require the native CLI executable; install the native CLI package.");
         var folder = Path.Combine(Path.GetTempPath(), "codale-smart-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
@@ -291,13 +287,13 @@ public sealed class SmartProviderClient : ISmartProviderClient
             using var cancellation = ct.Register(() => { try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { } });
             var stdout = process.StandardOutput.ReadToEndAsync(ct);
             var stderr = process.StandardError.ReadToEndAsync(ct);
-            await process.StandardInput.WriteAsync((_provider == "codex" ? system + "\n\n" : "") + input).ConfigureAwait(false);
+            await process.StandardInput.WriteAsync((Provider == "codex" ? system + "\n\n" : "") + input).ConfigureAwait(false);
             process.StandardInput.Close();
             await process.WaitForExitAsync(ct).ConfigureAwait(false);
             var text = await stdout.ConfigureAwait(false);
             await stderr.ConfigureAwait(false);
-            if (process.ExitCode != 0) throw new InvalidOperationException($"{_provider} exited with code {process.ExitCode}. Check CLI sign-in and model access.");
-            if (_provider == "codex") text = await File.ReadAllTextAsync(output, ct).ConfigureAwait(false);
+            if (process.ExitCode != 0) throw new InvalidOperationException($"{Provider} exited with code {process.ExitCode}. Check CLI sign-in and model access.");
+            if (Provider == "codex") text = await File.ReadAllTextAsync(output, ct).ConfigureAwait(false);
             return string.IsNullOrWhiteSpace(text) ? throw new InvalidDataException("The CLI returned an empty answer.") : text.Trim();
         }
         finally { try { Directory.Delete(folder, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
@@ -305,19 +301,26 @@ public sealed class SmartProviderClient : ISmartProviderClient
 
     internal ProcessStartInfo BuildCliStartInfo(string executable, string folder, string output, string model, string system)
     {
-        var start = new ProcessStartInfo(executable) { WorkingDirectory = folder, UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        start.Environment[_provider == "codex" ? CodaleAccount.CodexVariable : CodaleAccount.ClaudeVariable] =
-            CodaleAccount.ProfileHome(_provider, AccountId);
+        var start = new ProcessStartInfo(executable)
+        {
+            WorkingDirectory = folder,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        start.Environment[Provider == "codex" ? CodaleAccount.CodexVariable : CodaleAccount.ClaudeVariable] =
+            CodaleAccount.ProfileHome(Provider, AccountId);
         void Add(params string[] args) { foreach (var arg in args) start.ArgumentList.Add(arg); }
-        if (_provider == "claude")
+        if (Provider == "claude")
         {
             Add("--print", "--output-format", "text", "--tools", "", "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--no-session-persistence");
             Add("--system-prompt", system);
         }
         else Add("exec", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--output-last-message", output);
         if (model.Length > 0) Add("--model", model);
-        if (_provider == "codex") Add("-");
+        if (Provider == "codex") Add("-");
         return start;
     }
 }

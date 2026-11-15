@@ -1,5 +1,3 @@
-using Codale.Smart;
-
 namespace Codale.Smart.Tests;
 
 public sealed class RemoteExperienceTests
@@ -69,7 +67,7 @@ public sealed class RemoteExperienceTests
         });
         Assert.Equal(SmartIntent.Act, (await smart.ClassifyAsync(Context(), "fix it", null))?.Value);
         Assert.Equal("git status --short", (await smart.ShellCommandAsync(Context(), "show git status", "pwsh"))?.Value);
-        Assert.Equal(new[] { "b", "a" }, (await smart.RankAsync(Context(), "query", [new("a", "a.cs"), new("b", "b.cs")]))?.Value);
+        Assert.Equal(["b", "a"], (await smart.RankAsync(Context(), "query", [new("a", "a.cs"), new("b", "b.cs")]))?.Value);
         Assert.Equal("return true;", await smart.FillInMiddleAsync(Context(), "", "", "a.cs"));
         Assert.Equal(new[] { "routing", "shell", "ranking", "completion" }, features);
         await smart.ConfigureRemoteAsync("test", (_, _, _, _, _) => Task.FromResult("{\"intent\":\"invented\"}"));

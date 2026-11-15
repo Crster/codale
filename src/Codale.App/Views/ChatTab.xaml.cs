@@ -50,15 +50,13 @@ public sealed class ToolFileRequestEventArgs(
 /// </summary>
 public sealed partial class ChatTab : UserControl
 {
-    private IWindowOwner? _owner;
-
     /// <summary>The project window that owns this chat's pickers and attention feedback; forwarded to its session panel.</summary>
     public IWindowOwner? Owner
     {
-        get => _owner;
+        get;
         set
         {
-            _owner = value;
+            field = value;
             SessionPanel.Owner = value;
         }
     }
@@ -66,7 +64,7 @@ public sealed partial class ChatTab : UserControl
     private ChatViewModel? _viewModel;
 
     /// <summary>The prompt box: text with attachments, mentions and links held as pills.</summary>
-    private readonly PromptEditor DraftBox;
+    private readonly PromptEditor _draftBox;
 
     /// <summary>Whether the / and @ suggestion popup is on screen.</summary>
     private bool IsSuggestOpen => SuggestPopup.IsOpen;
@@ -131,7 +129,7 @@ public sealed partial class ChatTab : UserControl
     private bool _followQueued;
 
     /// <summary>Question cards whose visibility is already watched; a card can load more than once.</summary>
-    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, object> _hookedCards = new();
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, object> _hookedCards = [];
 
     private readonly AppSettingsStore _settings;
     private readonly KeyboardShortcuts _shortcuts;
@@ -142,10 +140,10 @@ public sealed partial class ChatTab : UserControl
         _shortcuts = shortcuts;
         InitializeComponent();
 
-        DraftBox = new PromptEditor(DraftEditor);
-        DraftBox.TextChanged += OnDraftTextChanged;
-        DraftBox.SelectionChanged += OnDraftSelectionChanged;
-        DraftBox.PillInvoked += OnComposerPillInvoked;
+        _draftBox = new PromptEditor(DraftEditor);
+        _draftBox.TextChanged += OnDraftTextChanged;
+        _draftBox.SelectionChanged += OnDraftSelectionChanged;
+        _draftBox.PillInvoked += OnComposerPillInvoked;
 
         SessionPanel.FileDiffRequested += (_, path) => ToolFileRequested?.Invoke(this, new ToolFileRequestEventArgs(path, isEdit: true));
         SessionPanel.ArtifactRequested += (_, artifact) => ArtifactRequested?.Invoke(this, artifact);
@@ -160,14 +158,14 @@ public sealed partial class ChatTab : UserControl
         ComposerBorder.SizeChanged += (_, _) => PlaceSuggestions();
         DraftEditor.LostFocus += (_, _) => DispatcherQueue.TryEnqueue(() =>
         {
-            if (DraftBox.FocusState == FocusState.Unfocused)
+            if (_draftBox.FocusState == FocusState.Unfocused)
             {
                 HidePrediction();
             }
 
             // A click on a row keeps focus in the draft (the list never takes it), so
             // losing focus means the user went elsewhere.
-            if (DraftBox.FocusState == FocusState.Unfocused)
+            if (_draftBox.FocusState == FocusState.Unfocused)
             {
                 CloseSuggestions();
             }
@@ -190,10 +188,8 @@ public sealed partial class ChatTab : UserControl
             FollowTranscriptEnd();
         };
         Unloaded += (_, _) =>
-        {
             // A background tab's forever storyboard would still tick every frame.
             StopStopPulse();
-        };
     }
 
     private static readonly TimeSpan DoubleEscapeWindow = TimeSpan.FromMilliseconds(600);
@@ -339,6 +335,7 @@ public sealed partial class ChatTab : UserControl
             _pinnedToBottom = ChatScroller.ScrollableHeight - ChatScroller.VerticalOffset < 40;
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Style", "IDE0060", Justification = "Event handler: the signature is fixed by the event delegate.")]
     private void OnTranscriptSizeChanged(object sender, SizeChangedEventArgs e)
     {
         // Streaming text and finished tool output grow rows without adding items, so follow
@@ -397,8 +394,8 @@ public sealed partial class ChatTab : UserControl
     /// <summary>The feature's whole log, newest page first, read only when asked for: a chat never loads it by itself.</summary>
     private async void OnViewFeatureHistoryClick(object sender, RoutedEventArgs e)
     {
-        const int Page = 150;
-        var count = Page;
+        const int page = 150;
+        var count = page;
 
         var text = new TextBlock { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, FontSize = 12 };
         var more = new HyperlinkButton { Content = "Load earlier", Padding = new Thickness(0), Visibility = Visibility.Collapsed };
@@ -414,7 +411,7 @@ public sealed partial class ChatTab : UserControl
 
         more.Click += (_, _) =>
         {
-            count += Page;
+            count += page;
             Load();
         };
 
@@ -479,9 +476,9 @@ public sealed partial class ChatTab : UserControl
         if (sender is Button { Tag: string prompt } && ViewModel is not null)
         {
             ViewModel.Draft = prompt;
-            DraftBox.Focus(FocusState.Programmatic);
-            DraftBox.SelectionStart = DraftBox.Text.Length;
-            DraftBox.SelectionLength = 0;
+            _draftBox.Focus(FocusState.Programmatic);
+            _draftBox.SelectionStart = _draftBox.Text.Length;
+            _draftBox.SelectionLength = 0;
         }
     }
 
@@ -650,10 +647,7 @@ public sealed partial class ChatTab : UserControl
                 approval.Next();
                 if (sender is FrameworkElement card)
                 {
-                    DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
-                    {
-                        FindPositiveButton(card)?.Focus(FocusState.Programmatic);
-                    });
+                    DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => FindPositiveButton(card)?.Focus(FocusState.Programmatic));
                 }
                 e.Handled = true;
                 break;
@@ -770,7 +764,7 @@ public sealed partial class ChatTab : UserControl
         void FocusIfShown()
         {
             if (card.Visibility != Visibility.Visible ||
-                (DraftBox.FocusState != FocusState.Unfocused && DraftBox.Text.Length > 0))
+                (_draftBox.FocusState != FocusState.Unfocused && _draftBox.Text.Length > 0))
             {
                 return;
             }
@@ -799,10 +793,7 @@ public sealed partial class ChatTab : UserControl
         {
             if (current is Border { Tag: ApprovalRequestItem } card)
             {
-                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
-                {
-                    FindPositiveButton(card)?.Focus(FocusState.Programmatic);
-                });
+                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => FindPositiveButton(card)?.Focus(FocusState.Programmatic));
                 break;
             }
         }
@@ -968,7 +959,7 @@ public sealed partial class ChatTab : UserControl
         if (e.Key is VirtualKey.Tab or VirtualKey.Right && !IsSuggestOpen && ViewModel.AcceptSuggestion())
         {
             e.Handled = true;
-            DraftBox.SelectionStart = DraftBox.Text.Length;
+            _draftBox.SelectionStart = _draftBox.Text.Length;
             return;
         }
 
@@ -981,7 +972,7 @@ public sealed partial class ChatTab : UserControl
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(DraftBox.Text) && ViewModel.DeclineActiveApproval())
+            if (string.IsNullOrWhiteSpace(_draftBox.Text) && ViewModel.DeclineActiveApproval())
             {
                 e.Handled = true;
                 DispatcherQueue.TryEnqueue(FocusDraft);
@@ -1011,7 +1002,7 @@ public sealed partial class ChatTab : UserControl
 
         CloseSuggestions();
 
-        if (string.IsNullOrWhiteSpace(DraftBox.Text) && ViewModel.AcceptActiveApproval())
+        if (string.IsNullOrWhiteSpace(_draftBox.Text) && ViewModel.AcceptActiveApproval())
         {
             DispatcherQueue.TryEnqueue(FocusDraft);
             return;
@@ -1054,7 +1045,7 @@ public sealed partial class ChatTab : UserControl
     /// </summary>
     private void RecordDraftChange()
     {
-        var text = DraftBox.Text;
+        var text = _draftBox.Text;
         if (_restoringDraft || text == _draftLast.Text)
         {
             return;
@@ -1082,7 +1073,7 @@ public sealed partial class ChatTab : UserControl
         _restoringDraft = true;
         try
         {
-            DraftBox.SetText(snapshot.Text, Math.Min(snapshot.Caret, snapshot.Text.Length),
+            _draftBox.SetText(snapshot.Text, Math.Min(snapshot.Caret, snapshot.Text.Length),
                 pill => snapshot.Pills?.Contains(pill.Text) == true);
             _draftLast = snapshot;
             _draftLastChange = default;
@@ -1124,7 +1115,7 @@ public sealed partial class ChatTab : UserControl
     }
 
     private DraftSnapshot CurrentDraft() =>
-        new(DraftBox.Text, DraftBox.SelectionStart, DraftBox.Pills.Select(p => p.Text).ToHashSet(StringComparer.Ordinal));
+        new(_draftBox.Text, _draftBox.SelectionStart, _draftBox.Pills.Select(p => p.Text).ToHashSet(StringComparer.Ordinal));
 
     private void OnDraftTextChanged(object? sender, EventArgs e)
     {
@@ -1148,13 +1139,13 @@ public sealed partial class ChatTab : UserControl
     /// </summary>
     private void ShowViewModelDraft()
     {
-        if (_viewModel is null || DraftBox is null)
+        if (_viewModel is null || _draftBox is null)
         {
             return;
         }
 
         var draft = ViewModel.Draft ?? "";
-        if (draft.Replace("\r\n", "\r").Replace('\n', '\r') == DraftBox.Text)
+        if (draft.Replace("\r\n", "\r").Replace('\n', '\r') == _draftBox.Text)
         {
             return;
         }
@@ -1165,7 +1156,7 @@ public sealed partial class ChatTab : UserControl
         {
             CloseSuggestions();
             var attached = ViewModel.Attachments.Select(a => AttachmentMention(a.Path)).ToHashSet(StringComparer.Ordinal);
-            DraftBox.SetText(draft, draft.Length, pill => attached.Contains(pill.Text));
+            _draftBox.SetText(draft, draft.Length, pill => attached.Contains(pill.Text));
         }
         finally
         {
@@ -1179,7 +1170,7 @@ public sealed partial class ChatTab : UserControl
     }
 
     /// <summary>Attachments the user took out of the text, by mention, so undo can bring them back.</summary>
-    private readonly Dictionary<string, string> _detachedAttachments = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _detachedAttachments = [with(StringComparer.Ordinal)];
 
     /// <summary>Set while <see cref="ReconcileAttachments"/> changes the attachment list to match the text.</summary>
     private bool _reconciling;
@@ -1195,7 +1186,7 @@ public sealed partial class ChatTab : UserControl
             return;
         }
 
-        var mentioned = DraftBox.Pills.Select(p => p.Text).ToHashSet(StringComparer.Ordinal);
+        var mentioned = _draftBox.Pills.Select(p => p.Text).ToHashSet(StringComparer.Ordinal);
         _reconciling = true;
         try
         {
@@ -1245,16 +1236,16 @@ public sealed partial class ChatTab : UserControl
     {
         var mention = AttachmentMention(attachment.Path);
         _detachedAttachments.Remove(mention);
-        if (DraftBox.Pills.Any(p => p.Text == mention))
+        if (_draftBox.Pills.Any(p => p.Text == mention))
         {
             return;
         }
 
         // A restored prompt sets its text before re-adding its attachments: the mention is
         // already there as words, and becomes the pill rather than getting a second one.
-        if (Codale.Core.Text.PromptPills.Find(DraftBox.Text).Any(p => p.Text == mention))
+        if (Codale.Core.Text.PromptPills.Find(_draftBox.Text).Any(p => p.Text == mention))
         {
-            DraftBox.MakePills(p => p.Text == mention);
+            _draftBox.MakePills(p => p.Text == mention);
             return;
         }
 
@@ -1262,6 +1253,7 @@ public sealed partial class ChatTab : UserControl
     }
 
     /// <summary>A click on an attachment pill previews it, as the chips above the box used to.</summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Style", "IDE0060", Justification = "Event handler: the signature is fixed by the event delegate.")]
     private async void OnComposerPillInvoked(object? sender, PromptPill pill)
     {
         var attachment = ViewModel.Attachments.FirstOrDefault(a => AttachmentMention(a.Path) == pill.Text);
@@ -1277,13 +1269,13 @@ public sealed partial class ChatTab : UserControl
         if (_viewModel is null || SuggestPopup is null) return;
         if (_suppressSuggestions)
         {
-            ViewModel.Draft = DraftBox.Text;
+            ViewModel.Draft = _draftBox.Text;
             return;
         }
 
         // The draft stays current at once (Enter sends it); the popup waits for the edit to
         // settle, since one keystroke raises both TextChanged and SelectionChanged.
-        ViewModel.Draft = DraftBox.Text;
+        ViewModel.Draft = _draftBox.Text;
         if (_suggestionRefreshQueued)
         {
             return;
@@ -1310,14 +1302,14 @@ public sealed partial class ChatTab : UserControl
         // open, typing filters the list, and moving off the token closes it.
         if (_suggestArmed)
         {
-            var text = DraftBox.Text;
-            if (ComposerCompletion.FindToken(text, Math.Min(DraftBox.SelectionStart, text.Length)) is null)
+            var text = _draftBox.Text;
+            if (ComposerCompletion.FindToken(text, Math.Min(_draftBox.SelectionStart, text.Length)) is null)
             {
                 CloseSuggestions();
             }
             else
             {
-                ViewModel.UpdateSuggestions(DraftBox.SelectionStart);
+                ViewModel.UpdateSuggestions(_draftBox.SelectionStart);
                 ShowSuggestions();
             }
         }
@@ -1386,7 +1378,7 @@ public sealed partial class ChatTab : UserControl
     }
 
     /// <summary>Transcript items (and finished tool calls) already handed to the predictor.</summary>
-    private readonly HashSet<object> _fedContext = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<object> _fedContext = [with(ReferenceEqualityComparer.Instance)];
 
     private bool _contextDirty = true;
     private long _contextFedAt;
@@ -1493,13 +1485,13 @@ public sealed partial class ChatTab : UserControl
     {
         text = "";
         caret = 0;
-        if (!DraftBox.IsEnabled || DraftBox.FocusState == FocusState.Unfocused || IsSuggestOpen || DraftBox.SelectionLength != 0)
+        if (!_draftBox.IsEnabled || _draftBox.FocusState == FocusState.Unfocused || IsSuggestOpen || _draftBox.SelectionLength != 0)
         {
             return false;
         }
 
-        text = DraftBox.Text;
-        caret = DraftBox.SelectionStart;
+        text = _draftBox.Text;
+        caret = _draftBox.SelectionStart;
         return caret == text.Length || text[caret] is '\r' or '\n';
     }
 
@@ -1523,10 +1515,7 @@ public sealed partial class ChatTab : UserControl
     private void HidePrediction()
     {
         _prediction = null;
-        if (PredictionPanel is not null)
-        {
-            PredictionPanel.Visibility = Visibility.Collapsed;
-        }
+        PredictionPanel?.Visibility = Visibility.Collapsed;
     }
 
     private void AcceptPrediction()
@@ -1537,13 +1526,13 @@ public sealed partial class ChatTab : UserControl
         }
 
         HidePrediction();
-        var text = DraftBox.Text;
+        var text = _draftBox.Text;
         if (prediction.End > text.Length)
         {
             return;
         }
 
-        var caret = DraftBox.SelectionStart;
+        var caret = _draftBox.SelectionStart;
         var updated = text[..prediction.Start] + prediction.Replacement + text[prediction.End..];
         var newCaret = caret + prediction.Replacement.Length - prediction.Length;
         ApplyDraftEdit(new ComposerCompletion.Edit(updated, newCaret));
@@ -1591,7 +1580,7 @@ public sealed partial class ChatTab : UserControl
     /// <summary>Completes the active token, preserving the rest of the prompt.</summary>
     private void ApplySuggestion(SuggestionItem suggestion)
     {
-        var edit = ComposerCompletion.Apply(DraftBox.Text, DraftBox.SelectionStart, suggestion.Insert, suggestion.IsCommand);
+        var edit = ComposerCompletion.Apply(_draftBox.Text, _draftBox.SelectionStart, suggestion.Insert, suggestion.IsCommand);
         ApplyDraftEdit(edit);
         CloseSuggestions();
     }
@@ -1599,10 +1588,10 @@ public sealed partial class ChatTab : UserControl
     /// <summary>A completion edit: the file it inserts is an "@path" mention in text; attachment pills are kept.</summary>
     private void ApplyDraftEdit(ComposerCompletion.Edit edit)
     {
-        var kept = DraftBox.Pills.Select(p => p.Text).ToHashSet(StringComparer.Ordinal);
-        DraftBox.SetText(edit.Text, edit.Caret, pill => kept.Contains(pill.Text));
-        ViewModel.Draft = DraftBox.Text;
-        DraftBox.Focus(FocusState.Programmatic);
+        var kept = _draftBox.Pills.Select(p => p.Text).ToHashSet(StringComparer.Ordinal);
+        _draftBox.SetText(edit.Text, edit.Caret, pill => kept.Contains(pill.Text));
+        ViewModel.Draft = _draftBox.Text;
+        _draftBox.Focus(FocusState.Programmatic);
         RefreshSuggestions();
     }
 
@@ -1649,7 +1638,7 @@ public sealed partial class ChatTab : UserControl
 
         _suggestArmed = true;
         ApplyDraftEdit(ComposerCompletion.InsertTrigger(
-            DraftBox.Text, DraftBox.SelectionStart, DraftBox.SelectionLength, trigger[0]));
+            _draftBox.Text, _draftBox.SelectionStart, _draftBox.SelectionLength, trigger[0]));
     }
 
     /// <summary>Puts the caret at the end of the prompt box; waits for the tab to load when it was only just shown.</summary>
@@ -1665,23 +1654,23 @@ public sealed partial class ChatTab : UserControl
 
         if (IsLoaded)
         {
-            Focus(DraftBox);
+            Focus(_draftBox);
             return;
         }
 
-        RoutedEventHandler? onLoaded = null;
-        onLoaded = (_, _) =>
+        void OnLoaded(object _1, RoutedEventArgs _2)
         {
-            Loaded -= onLoaded;
-            DispatcherQueue.TryEnqueue(() => Focus(DraftBox));
-        };
-        Loaded += onLoaded;
+            Loaded -= OnLoaded;
+            DispatcherQueue.TryEnqueue(() => Focus(_draftBox));
+        }
+
+        Loaded += OnLoaded;
     }
 
     private void OnDraftFocusChanged(object sender, RoutedEventArgs e) =>
         VisualStateManager.GoToState(
             this,
-            DraftBox.FocusState == FocusState.Unfocused ? "ComposerUnfocused" : "ComposerFocused",
+            _draftBox.FocusState == FocusState.Unfocused ? "ComposerUnfocused" : "ComposerFocused",
             useTransitions: false);
 
     /// <summary>
@@ -1691,9 +1680,9 @@ public sealed partial class ChatTab : UserControl
     /// </summary>
     private void OnComposerTapped(object sender, TappedRoutedEventArgs e)
     {
-        if (DraftBox.FocusState == FocusState.Unfocused && DraftBox.IsEnabled)
+        if (_draftBox.FocusState == FocusState.Unfocused && _draftBox.IsEnabled)
         {
-            DraftBox.Focus(FocusState.Pointer);
+            _draftBox.Focus(FocusState.Pointer);
         }
     }
 
@@ -1798,21 +1787,7 @@ public sealed partial class ChatTab : UserControl
         // internals and takes the process down with 0xC000027B, before any managed
         // handler could log it. The next dispatcher pass is past the paste; the async
         // reads below then complete in frames of their own.
-        _ = DispatcherQueue.TryEnqueue(() =>
-        {
-            if (files)
-            {
-                _ = PasteFilesAsync(content);
-            }
-            else if (image)
-            {
-                _ = PasteImageAsync(content);
-            }
-            else
-            {
-                _ = PasteTextAsync(content);
-            }
-        });
+        _ = DispatcherQueue.TryEnqueue(() => _ = files ? PasteFilesAsync(content) : image ? PasteImageAsync(content) : PasteTextAsync(content));
     }
 
     /// <summary>Longest clipboard text, in characters, that goes straight into the composer.</summary>
@@ -1923,16 +1898,16 @@ public sealed partial class ChatTab : UserControl
     {
         var list = mentions.ToList();
         var (text, caret) = Codale.Core.Helper.ComposerMentions.Insert(
-            DraftBox.Text, DraftBox.SelectionStart, DraftBox.SelectionLength, string.Join(" ", list));
+            _draftBox.Text, _draftBox.SelectionStart, _draftBox.SelectionLength, string.Join(" ", list));
         ReplaceDraft(text, caret, asPills ? list : []);
     }
 
     private void InsertAtCaret(string text)
     {
         // Pasted text stays text: only attachments are pills.
-        var start = DraftBox.SelectionStart;
-        var current = DraftBox.Text;
-        ReplaceDraft(current[..start] + text + current[(start + DraftBox.SelectionLength)..], start + text.Length, []);
+        var start = _draftBox.SelectionStart;
+        var current = _draftBox.Text;
+        ReplaceDraft(current[..start] + text + current[(start + _draftBox.SelectionLength)..], start + text.Length, []);
     }
 
     /// <summary>Programmatic draft rewrite for pastes; closes the suggestion popup first and keeps it shut.</summary>
@@ -1942,8 +1917,8 @@ public sealed partial class ChatTab : UserControl
         try
         {
             CloseSuggestions();
-            var kept = DraftBox.Pills.Select(p => p.Text).Concat(newPills).ToHashSet(StringComparer.Ordinal);
-            DraftBox.SetText(text, Math.Clamp(caret, 0, text.Length), pill => kept.Contains(pill.Text));
+            var kept = _draftBox.Pills.Select(p => p.Text).Concat(newPills).ToHashSet(StringComparer.Ordinal);
+            _draftBox.SetText(text, Math.Clamp(caret, 0, text.Length), pill => kept.Contains(pill.Text));
         }
         finally
         {

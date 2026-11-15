@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Codale.Core.Agents;
+
 using Codale.Db;
 
 namespace Codale.Search.Tests;

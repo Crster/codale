@@ -14,24 +14,17 @@ namespace Codale.Core.Syntax;
 /// not thread-safe, so tokenizing is serialized; each line is time-limited so a pathological
 /// regex costs a plain line rather than a frozen editor.
 /// </summary>
-public sealed class GrammarTokenizer
+public sealed class GrammarTokenizer(SyntaxStore store, LanguageCatalog catalog, RegistryOptions builtin)
 {
     private static readonly TimeSpan LineBudget = TimeSpan.FromMilliseconds(20);
 
-    private readonly SyntaxStore _store;
-    private readonly LanguageCatalog _catalog;
-    private readonly RegistryOptions _builtin;
-    private readonly object _gate = new();
-    private readonly Dictionary<string, IGrammar?> _grammars = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SyntaxStore _store = store;
+    private readonly LanguageCatalog _catalog = catalog;
+    private readonly RegistryOptions _builtin = builtin;
+    private readonly Lock _gate = new();
+    private readonly Dictionary<string, IGrammar?> _grammars = [with(StringComparer.OrdinalIgnoreCase)];
     private Registry? _registry;
     private int _version = -1;
-
-    public GrammarTokenizer(SyntaxStore store, LanguageCatalog catalog, RegistryOptions builtin)
-    {
-        _store = store;
-        _catalog = catalog;
-        _builtin = builtin;
-    }
 
     /// <summary>True when a grammar can be loaded for the language id.</summary>
     public bool Supports(string? languageId)
@@ -187,18 +180,11 @@ public sealed class GrammarTokenizer
     }
 
     /// <summary>Resolves a scope name from the installed grammars first, then the shipped ones.</summary>
-    private sealed class Options : IRegistryOptions
+    private sealed class Options(RegistryOptions builtin, SyntaxStore? store, Dictionary<string, string>? extra) : IRegistryOptions
     {
-        private readonly RegistryOptions _builtin;
-        private readonly SyntaxStore? _store;
-        private readonly Dictionary<string, string>? _extra;
-
-        public Options(RegistryOptions builtin, SyntaxStore? store, Dictionary<string, string>? extra)
-        {
-            _builtin = builtin;
-            _store = store;
-            _extra = extra;
-        }
+        private readonly RegistryOptions _builtin = builtin;
+        private readonly SyntaxStore? _store = store;
+        private readonly Dictionary<string, string>? _extra = extra;
 
         public IRawGrammar GetGrammar(string scopeName)
         {

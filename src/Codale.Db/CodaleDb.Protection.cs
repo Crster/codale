@@ -2,6 +2,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
+using Codale.Db.Engine;
+using Codale.Db.Security;
+
 namespace Codale.Db;
 
 /// <summary>Per-value encryption. A random master key is wrapped by a <see cref="KeyProvider"/> and kept in <c>protect.json</c>.</summary>
@@ -67,9 +70,11 @@ public sealed partial class CodaleDb
         try
         {
             var value = FindNode(path, create: false);
-            if (value is not { HasValue: true }) return null;
-            if ((value.ValueFlags & ValueFlags.Protected) == 0) throw new InvalidOperationException("This value was not written with WriteProtect().");
-            return Encoding.UTF8.GetString(RecordCipher.Open(key, path, ReadRaw(value)));
+            return value is not { HasValue: true }
+                ? null
+                : (value.ValueFlags & ValueFlags.Protected) == 0
+                ? throw new InvalidOperationException("This value was not written with WriteProtect().")
+                : Encoding.UTF8.GetString(RecordCipher.Open(key, path, ReadRaw(value)));
         }
         finally { _lock.ExitReadLock(); }
     }

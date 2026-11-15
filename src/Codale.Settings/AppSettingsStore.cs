@@ -1,8 +1,8 @@
-using Codale.Agents.Providers;
 using System.Globalization;
 using System.Text.Json;
 
 using Codale.Agents.Claude;
+using Codale.Agents.Providers;
 
 
 
@@ -24,7 +24,7 @@ namespace Codale.Settings;
 /// already alive when a setting turns. Write failures (read-only folder, file locked by
 /// an editor) are logged and the value stays in effect in memory.
 /// </remarks>
-public sealed class AppSettingsStore : IDisposable
+public sealed class AppSettingsStore(string folder) : IDisposable
 {
     /// <summary>Editor font size bounds; matches the editor's own Ctrl+wheel zoom range.</summary>
     public const double MinFontSize = 8;
@@ -58,20 +58,20 @@ public sealed class AppSettingsStore : IDisposable
 
     // Parsed values by settings key, guarded by FileLock (the file watcher clears them
     // from another thread). A hit is already validated and clamped.
-    private readonly Dictionary<string, object> Cache = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, object> _cache = [with(StringComparer.Ordinal)];
 
     private T Get<T>(string key, Func<T> load) where T : notnull
     {
-        lock (FileLock)
+        lock (_fileLock)
         {
             ObjectDisposedException.ThrowIf(_stopped, this);
-            if (Cache.TryGetValue(key, out var hit))
+            if (_cache.TryGetValue(key, out var hit))
             {
                 return (T)hit;
             }
 
             var value = load();
-            Cache[key] = value;
+            _cache[key] = value;
             return value;
         }
     }
@@ -79,16 +79,16 @@ public sealed class AppSettingsStore : IDisposable
     /// <summary>Persists <paramref name="value"/> (already clamped by the caller), refreshes the cache and tells listeners - unless it is already the current value.</summary>
     private void Set<T>(string key, T value, Func<T, string> format) where T : notnull
     {
-        lock (FileLock)
+        lock (_fileLock)
         {
             ObjectDisposedException.ThrowIf(_stopped, this);
-            if (Cache.TryGetValue(key, out var cached) && EqualityComparer<T>.Default.Equals((T)cached, value))
+            if (_cache.TryGetValue(key, out var cached) && EqualityComparer<T>.Default.Equals((T)cached, value))
             {
                 return;
             }
 
             Write(key, format(value));
-            Cache[key] = value;
+            _cache[key] = value;
         }
 
         OnChanged();
@@ -271,7 +271,7 @@ public sealed class AppSettingsStore : IDisposable
             }
             catch (JsonException)
             {
-                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                return [with(StringComparer.OrdinalIgnoreCase)];
             }
         }
         set => Set(SyntaxOverridesKey, JsonSerializer.Serialize(value), FormatText);
@@ -352,7 +352,7 @@ public sealed class AppSettingsStore : IDisposable
     /// <summary>One-time reset of saved default modes so every CLI starts in Full (YOLO).</summary>
     private void EnsureFullModeMigration()
     {
-        lock (FileLock)
+        lock (_fileLock)
         {
             if (Read("chat.fullModeMigrated", "") == "1")
             {
@@ -362,7 +362,7 @@ public sealed class AppSettingsStore : IDisposable
             foreach (var key in new[] { "chat.defaultMode", DefaultsKey("claude", "mode"), DefaultsKey("codex", "mode") })
             {
                 Write(key, "");
-                Cache.Remove(key);
+                _cache.Remove(key);
             }
 
             Write("chat.fullModeMigrated", "1");
@@ -381,7 +381,7 @@ public sealed class AppSettingsStore : IDisposable
     {
         var key = DefaultsKey(cli, leaf);
         var raw = value is { Length: > 0 } ? value : "";
-        lock (FileLock)
+        lock (_fileLock)
         {
             if (Read(key, "") == raw)
             {
@@ -390,7 +390,7 @@ public sealed class AppSettingsStore : IDisposable
 
             Write(key, raw);
             // ReadDefault answers from the cache, so it must see the new value too.
-            Cache[key] = raw;
+            _cache[key] = raw;
         }
 
         OnChanged();
@@ -439,9 +439,15 @@ public sealed class AppSettingsStore : IDisposable
             if (accounts.FirstOrDefault() is not { } account) continue;
             if (account.AccountId.Length == 0) return (candidate, "");
             var profiles = ByokProviders;
-            var detected = new ByokProvider { Id = Guid.NewGuid().ToString("N"), CliId = candidate,
-                IsAccount = true, AccountId = account.AccountId, Email = account.Email,
-                Name = account.Email ?? "Detected account" };
+            var detected = new ByokProvider
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                CliId = candidate,
+                IsAccount = true,
+                AccountId = account.AccountId,
+                Email = account.Email,
+                Name = account.Email ?? "Detected account"
+            };
             profiles.Add(detected);
             ByokProviders = profiles;
             return (candidate, detected.Key);
@@ -489,7 +495,7 @@ public sealed class AppSettingsStore : IDisposable
 
     private const string ProvidersKey = "byok.providers";
 
-    private readonly JsonSerializerOptions ProviderJson = new()
+    private readonly JsonSerializerOptions _providerJson = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true,
@@ -517,16 +523,16 @@ public sealed class AppSettingsStore : IDisposable
     private string SerializeProviders(IEnumerable<ByokProvider> providers, bool protect) =>
         JsonSerializer.Serialize(
             providers.Select(p => Clone(p, protect ? SecretProtector.Protect(p.ApiKey) : p.ApiKey)).ToList(),
-            ProviderJson);
+            _providerJson);
 
     /// <summary>Drops nameless and duplicate (by trimmed name) entries.</summary>
     private List<ByokProvider> Normalize(IEnumerable<ByokProvider> providers)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        return providers.Where(p => p is not null && !string.IsNullOrWhiteSpace(p.Name) && seen.Add(p.Key)).ToList();
+        return [.. providers.Where(p => p is not null && !string.IsNullOrWhiteSpace(p.Name) && seen.Add(p.Key))];
     }
 
-    /// <summary>The cached providers (decrypted); callers copy before handing them out. Call under <see cref="FileLock"/>.</summary>
+    /// <summary>The cached providers (decrypted); callers copy before handing them out. Call under <see cref="_fileLock"/>.</summary>
     private List<ByokProvider> Providers() => Get(ProvidersKey, LoadProviders);
 
     private List<ByokProvider> LoadProviders() => ParseProviders(Read(ProvidersKey, "[]"));
@@ -539,15 +545,15 @@ public sealed class AppSettingsStore : IDisposable
     {
         get
         {
-            lock (FileLock)
+            lock (_fileLock)
             {
-                return Providers().Select(p => Clone(p)).ToList();
+                return [.. Providers().Select(p => Clone(p))];
             }
         }
         set
         {
             var clean = Normalize(value.Select(p => Clone(p)));
-            lock (FileLock)
+            lock (_fileLock)
             {
                 if (SerializeProviders(clean, protect: false) == SerializeProviders(Providers(), protect: false))
                 {
@@ -555,7 +561,7 @@ public sealed class AppSettingsStore : IDisposable
                 }
 
                 Write(ProvidersKey, SerializeProviders(clean, protect: true));
-                Cache[ProvidersKey] = clean;
+                _cache[ProvidersKey] = clean;
             }
 
             OnChanged();
@@ -566,7 +572,7 @@ public sealed class AppSettingsStore : IDisposable
     {
         try
         {
-            var parsed = Normalize(JsonSerializer.Deserialize<List<ByokProvider>>(json, ProviderJson) ?? []);
+            var parsed = Normalize(JsonSerializer.Deserialize<List<ByokProvider>>(json, _providerJson) ?? []);
             foreach (var provider in parsed)
             {
                 var stored = provider.ApiKey ?? "";
@@ -591,7 +597,7 @@ public sealed class AppSettingsStore : IDisposable
             return null;
         }
 
-        lock (FileLock)
+        lock (_fileLock)
         {
             var found = Providers().FirstOrDefault(p => string.Equals(p.Key, wanted, StringComparison.OrdinalIgnoreCase));
             return found is null ? null : Clone(found);
@@ -606,7 +612,7 @@ public sealed class AppSettingsStore : IDisposable
     public void SetShortcut(string id, string? chord)
     {
         var key = "shortcut." + id;
-        lock (FileLock)
+        lock (_fileLock)
         {
             var values = Values;
             if (chord is null ? !values.Remove(key) : values.TryGetValue(key, out var current) && current == chord)
@@ -644,27 +650,25 @@ public sealed class AppSettingsStore : IDisposable
     /// <c>%LOCALAPPDATA%\Codale\settings.json</c> (redirected into the package folder under MSIX).
     /// </summary>
     public string DataFolder => Path.GetDirectoryName(FilePath)!;
-    private string FilePath { get; }
+    private string FilePath { get; } = Path.Combine(Path.GetFullPath(folder), "settings.json");
 
-    public AppSettingsStore(string folder) => FilePath = Path.Combine(Path.GetFullPath(folder), "settings.json");
-
-    private readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private readonly JsonSerializerOptions _jsonOptions = new() { WriteIndented = true };
 
     /// <summary>Keys whose JSON value is a boolean; everything else numeric is written as a number, the rest as strings.</summary>
-    private readonly HashSet<string> BoolKeys =
+    private readonly HashSet<string> _boolKeys =
     [
         "editor.lineNumbers", "editor.highlighting", "editor.wordWrap", "chat.suggestNextPrompt",
         "tokens.compressShell", "tokens.digest", "tokens.explore", "tokens.readGuard", "tokens.handoffNudge", "tokens.terse",
         "tokens.idleCompact",
     ];
 
-    private readonly HashSet<string> NumberKeys =
+    private readonly HashSet<string> _numberKeys =
     [
         "editor.fontSize", "editor.tabWidth", "terminal.fontSize", "terminal.scrollback", "chat.fontSize", "git.pollSeconds",
         "tokens.autoCompactPercent", "tokens.idleCompactSeconds", "tokens.idleCompactMinTokens",
     ];
 
-    private readonly object FileLock = new();
+    private readonly Lock _fileLock = new();
     private SortedDictionary<string, string>? _values;
     private string _lastWritten = "";
     private Action<Action>? _dispatch;
@@ -675,7 +679,7 @@ public sealed class AppSettingsStore : IDisposable
 
     public void Dispose()
     {
-        lock (FileLock)
+        lock (_fileLock)
         {
             _stopped = true;
             _watcher?.Dispose();
@@ -686,13 +690,13 @@ public sealed class AppSettingsStore : IDisposable
             _dispatch = null;
             _hasThreadAccess = null;
             _values = null;
-            Cache.Clear();
+            _cache.Clear();
         }
     }
 
     private void ScheduleReload()
     {
-        lock (FileLock)
+        lock (_fileLock)
         {
             if (!_stopped) _debounce?.Change(150, Timeout.Infinite);
         }
@@ -702,7 +706,7 @@ public sealed class AppSettingsStore : IDisposable
     {
         get
         {
-            lock (FileLock)
+            lock (_fileLock)
             {
                 ObjectDisposedException.ThrowIf(_stopped, this);
                 if (_values is null)
@@ -761,7 +765,7 @@ public sealed class AppSettingsStore : IDisposable
         catch (Exception)
         {
             // Half-typed JSON mid-edit: keep the current values (or defaults on first load).
-            return _values ?? new SortedDictionary<string, string>(StringComparer.Ordinal);
+            return _values ?? [with(StringComparer.Ordinal)];
         }
     }
 
@@ -838,7 +842,7 @@ public sealed class AppSettingsStore : IDisposable
             return;
         }
 
-        lock (FileLock)
+        lock (_fileLock)
         {
             if (_stopped || text == _lastWritten)
             {
@@ -852,7 +856,7 @@ public sealed class AppSettingsStore : IDisposable
             }
 
             _values = fresh;
-            Cache.Clear();
+            _cache.Clear();
         }
 
         OnChanged();
@@ -861,7 +865,7 @@ public sealed class AppSettingsStore : IDisposable
     private string Read(string name, string fallback)
     {
         // The file watcher swaps and Write mutates the dictionary from other threads.
-        lock (FileLock)
+        lock (_fileLock)
         {
             return Values.TryGetValue(name, out var raw) && raw.Length > 0 ? raw : fallback;
         }
@@ -888,7 +892,7 @@ public sealed class AppSettingsStore : IDisposable
 
     private void Write(string name, string value)
     {
-        lock (FileLock)
+        lock (_fileLock)
         {
             var values = Values;
             values[name] = value;
@@ -933,11 +937,11 @@ public sealed class AppSettingsStore : IDisposable
                 continue;
             }
 
-            root[key] = BoolKeys.Contains(key) ? raw == "1"
-                : NumberKeys.Contains(key) && double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) ? number
+            root[key] = _boolKeys.Contains(key) ? raw == "1"
+                : _numberKeys.Contains(key) && double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) ? number
                 : raw;
         }
 
-        return JsonSerializer.Serialize(root, JsonOptions);
+        return JsonSerializer.Serialize(root, _jsonOptions);
     }
 }

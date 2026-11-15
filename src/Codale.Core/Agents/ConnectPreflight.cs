@@ -21,14 +21,9 @@ public static class ConnectPreflight
     /// <param name="message">The error the CLI reported.</param>
     public static bool IsResumeLost(bool hasResumeId, string message)
     {
-        if (!hasResumeId)
-        {
-            return false;
-        }
-
-        return message.Contains("No conversation found with session ID", StringComparison.OrdinalIgnoreCase) ||
+        return hasResumeId && (message.Contains("No conversation found with session ID", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("no rollout found", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("thread not found", StringComparison.OrdinalIgnoreCase) ||
-            (message.Contains("thread", StringComparison.OrdinalIgnoreCase) && message.Contains("not found", StringComparison.OrdinalIgnoreCase));
+            (message.Contains("thread", StringComparison.OrdinalIgnoreCase) && message.Contains("not found", StringComparison.OrdinalIgnoreCase)));
     }
 }

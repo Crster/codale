@@ -16,25 +16,24 @@ public sealed class ConPtySmokeTests
     private sealed class OutputCollector : IDisposable
     {
         private readonly StringBuilder _text = new();
-        private readonly TerminalSession _session = new();
         private readonly TaskCompletionSource _exited = new();
 
         public OutputCollector(string command)
         {
-            _session.OutputReceived += (_, chunk) => _text.Append(chunk);
-            _session.Exited += (_, _) => _exited.TrySetResult();
-            _session.Start(Path.GetTempPath(), command);
+            Session.OutputReceived += (_, chunk) => _text.Append(chunk);
+            Session.Exited += (_, _) => _exited.TrySetResult();
+            Session.Start(Path.GetTempPath(), command);
         }
 
         public string Text => _text.ToString();
 
         public Task Exited => _exited.Task;
 
-        public TerminalSession Session => _session;
+        public TerminalSession Session { get; } = new();
 
-        public Task WriteAsync(string text) => _session.WriteAsync(text);
+        public Task WriteAsync(string text) => Session.WriteAsync(text);
 
-        public void Dispose() => _session.Dispose();
+        public void Dispose() => Session.Dispose();
     }
 
     [Fact]

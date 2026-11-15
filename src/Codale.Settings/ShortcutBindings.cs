@@ -14,7 +14,7 @@ public sealed class ShortcutBindings : IDisposable
     public ShortcutBindings(AppSettingsStore settings, IReadOnlyList<ShortcutAction> actions, Func<string, string?> normalize)
     {
         _settings = settings;
-        _actions = actions.ToArray();
+        _actions = [.. actions];
         _normalize = normalize;
         settings.Changed += OnSettingsChanged;
     }
@@ -45,7 +45,7 @@ public sealed class ShortcutBindings : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_map is null)
         {
-            _map = new(StringComparer.Ordinal);
+            _map = [with(StringComparer.Ordinal)];
             foreach (var action in _actions)
                 if (Get(action.Id) is { Length: > 0 } value && _normalize(value) is { } key)
                     _map.TryAdd(key, action.Id);

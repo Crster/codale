@@ -11,8 +11,9 @@ namespace Codale.Core.Shell;
 public static partial class ShellCommandClassifier
 {
     // Built-ins that are not programs on PATH, so neither the database nor a PATH lookup finds them.
-    private static readonly HashSet<string> Builtins = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly HashSet<string> Builtins =
+    [
+        with(StringComparer.OrdinalIgnoreCase),
         // cmd
         "assoc", "break", "call", "cd", "chdir", "cls", "color", "copy", "date", "del", "dir", "echo", "endlocal",
         "erase", "for", "ftype", "goto", "md", "mkdir", "mklink", "move", "path", "pause", "popd", "prompt",
@@ -24,16 +25,18 @@ public static partial class ShellCommandClassifier
         "trap", "ulimit", "umask", "unalias", "unset", "wait",
         // PowerShell aliases beyond the classified ones
         "cat", "clear", "cp", "diff", "h", "kill", "ls", "man", "mv", "ps", "r", "rm", "sleep", "sc", "wget", "curl",
-    };
+    ];
 
     // Words a request is written with and a command line almost never is.
-    private static readonly HashSet<string> RequestWords = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly HashSet<string> RequestWords =
+    [
+        with(StringComparer.OrdinalIgnoreCase),
         "the", "all", "every", "my", "me", "please", "how", "what", "which", "whats", "that", "are", "is", "of",
         "with", "from", "into", "than", "larger", "bigger", "smaller", "files", "folders", "lines",
-    };
+    ];
 
-    private static readonly Regex VerbNoun = new(@"^[A-Za-z]+-[A-Za-z][\w-]*$", RegexOptions.Compiled);
+    [GeneratedRegex(@"^[A-Za-z]+-[A-Za-z][\w-]*$", RegexOptions.Compiled)]
+    private static partial Regex VerbNoun();
 
     /// <summary>
     /// True when <paramref name="text"/> reads as a command for PowerShell, cmd or bash: a known
@@ -65,7 +68,7 @@ public static partial class ShellCommandClassifier
 
         // Leading VAR=value (bash), call and dot-source operators (PowerShell, bash's ".").
         var index = 0;
-        while (index < words.Count && AssignmentWord.IsMatch(words[index]) && !words[index].StartsWith('$'))
+        while (index < words.Count && AssignmentWord().IsMatch(words[index]) && !words[index].StartsWith('$'))
         {
             index++;
         }
@@ -98,7 +101,7 @@ public static partial class ShellCommandClassifier
         }
 
         var name = ProgramName(first);
-        var known = IsKnownName(name) || VerbNoun.IsMatch(name) || ResolveExecutable(bare, cwd) is not null;
+        var known = IsKnownName(name) || VerbNoun().IsMatch(name) || ResolveExecutable(bare, cwd) is not null;
         if (!known)
         {
             return false;

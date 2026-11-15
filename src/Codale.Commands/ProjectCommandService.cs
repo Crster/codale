@@ -1,8 +1,4 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
-using System.Xml.Linq;
-
+using Codale.Commands.Detectors;
 using Codale.Workspace;
 
 namespace Codale.Commands;
@@ -30,7 +26,7 @@ public sealed class ProjectCommandService : IProjectCommandService
     private readonly Func<string, ConfigStore> _configFor;
 
     public IReadOnlyList<ProjectCommand> Discover(string projectRoot) =>
-        _detectors.SelectMany(detector => detector.Discover(projectRoot)).ToList();
+        [.. _detectors.SelectMany(detector => detector.Discover(projectRoot))];
 
     /// <summary>
     /// Where the workspace database of a project lives; tests point it at a temporary folder.
@@ -104,14 +100,14 @@ public sealed class ProjectCommandService : IProjectCommandService
         try
         {
             var config = ConfigOf(root);
-            return config.Commands().Select(saved => new ProjectCommand
+            return [.. config.Commands().Select(saved => new ProjectCommand
             {
                 Name = saved.Name,
                 Command = saved.Command,
                 WorkingDirectory = saved.Cwd,
                 Source = CommandSource.Codale,
                 SourcePath = config.EditablePath,
-            }).ToList();
+            })];
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

@@ -1,6 +1,9 @@
 using System.Diagnostics;
+
 using Codale.Core.Projects;
 using Codale.Db;
+using Codale.Db.Search;
+
 using Xunit.Abstractions;
 
 namespace Codale.Search.Tests;

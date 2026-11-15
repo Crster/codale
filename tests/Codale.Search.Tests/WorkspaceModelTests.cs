@@ -1,3 +1,5 @@
+using Codale.Search.Engine;
+
 namespace Codale.Search.Tests;
 
 public sealed class WorkspaceModelTests : IDisposable
@@ -24,7 +26,7 @@ public sealed class WorkspaceModelTests : IDisposable
     }
 
     private static List<(string Text, SourceSymbolKind? Kind, int Files)> Show(WorkspaceModel model, string prefix, string? previous = null) =>
-        model.Suggest(prefix, previous).Select(s => (s.Text, s.Kind, s.Files)).ToList();
+        [.. model.Suggest(prefix, previous).Select(s => (s.Text, s.Kind, s.Files))];
 
     [Fact]
     public void Replacing_or_removing_a_file_leaves_the_same_model_as_building_it_fresh()

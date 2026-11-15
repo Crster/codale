@@ -1,8 +1,8 @@
 using System.Diagnostics;
 
 using Codale.App.Services;
-using Codale.Core.Helper;
 using Codale.Search;
+using Codale.Search.Engine;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -88,7 +88,7 @@ public sealed class SearchFileItem
             }
         }
 
-        return new(FilePath, Ranges.SelectMany(r => r.MatchSpans.Count > 0 ? r.MatchSpans : [r.Span]).ToList(), current, Terms);
+        return new(FilePath, [.. Ranges.SelectMany(r => r.MatchSpans.Count > 0 ? r.MatchSpans : [r.Span])], current, Terms);
     }
 
     /// <summary>True when <paramref name="file"/> would build the very item this is.</summary>
@@ -127,7 +127,7 @@ public sealed class SearchFileItem
             1 => "1 match",
             var n => $"{n} matches",
         },
-        Ranges = file.Ranges.Select(r => new SearchRangeItem
+        Ranges = [.. file.Ranges.Select(r => new SearchRangeItem
         {
             Syntax = syntax,
             Code = r.Code,
@@ -135,13 +135,13 @@ public sealed class SearchFileItem
             Terms = terms,
             MatchLines = string.Join(",", r.MatchLines.Select(n => n - r.StartLine)),
             FilePath = file.FilePath,
-            MatchSpans = r.MatchLines.Select(n => new LineSpan(n, n)).ToList(),
+            MatchSpans = [.. r.MatchLines.Select(n => new LineSpan(n, n))],
 
             // The matched lines, not the context padding around them.
             Span = r.MatchLines.Count > 0
                 ? new LineSpan(r.MatchLines.Min(), r.MatchLines.Max())
                 : new LineSpan(r.StartLine, r.EndLine),
-        }).ToList(),
+        })],
     };
 }
 

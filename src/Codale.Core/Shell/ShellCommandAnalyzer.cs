@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -39,7 +38,7 @@ public sealed record ShellAssessment(string Description, ShellRisk Risk, string 
 /// model's training data was labelled with) matched against the whole command and each segment of it.
 /// "Safe" only means no rule matched; it is the authority, and a model's opinion can only raise it.
 /// </summary>
-public static class ShellCommandAnalyzer
+public static partial class ShellCommandAnalyzer
 {
     private const int MaxCommandChars = 2_000;
     private const int MaxDescriptionChars = 140;
@@ -104,12 +103,13 @@ public static class ShellCommandAnalyzer
 
     private static readonly ConcurrentDictionary<(string Command, string Cwd), ShellAssessment> Cache = new();
 
-    private static readonly Regex AbsolutePath = new(
-        @"(?:^|\s|[""'])((?:[a-zA-Z]:\\|\\\\|/)[^\s""']*|\.\.[\\/][^\s""']*)",
-        RegexOptions.Compiled);
+    [GeneratedRegex(@"(?:^|\s|[""'])((?:[a-zA-Z]:\\|\\\\|/)[^\s""']*|\.\.[\\/][^\s""']*)",
+        RegexOptions.Compiled)]
+    private static partial Regex AbsolutePath();
 
     // /s /q /f /a:h - cmd.exe switches look like one-letter root folders.
-    private static readonly Regex CmdSwitch = new(@"^/(?:[A-Za-z?]|[A-Za-z]:\w+)$", RegexOptions.Compiled);
+    [GeneratedRegex(@"^/(?:[A-Za-z?]|[A-Za-z]:\w+)$", RegexOptions.Compiled)]
+    private static partial Regex CmdSwitch();
 
     /// <summary>Every rule the command matches, most severe first.</summary>
     public static IReadOnlyList<ShellFinding> Analyze(string command, string? cwd = null, IReadOnlyList<string>? extraRoots = null)
@@ -293,16 +293,11 @@ public static class ShellCommandAnalyzer
     private static bool IsMeaningfulHint(string hint, string command)
     {
         var clean = hint.Trim();
-        if (clean.Length == 0 ||
-            string.Equals(clean, command, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(clean, ShellCommandSummary.Summarize(command), StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(clean, ShellCommandSummary.Shorten(command), StringComparison.OrdinalIgnoreCase) ||
-            clean.StartsWith("Runs ", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        return true;
+        return clean.Length != 0 &&
+            !string.Equals(clean, command, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(clean, ShellCommandSummary.Summarize(command), StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(clean, ShellCommandSummary.Shorten(command), StringComparison.OrdinalIgnoreCase) &&
+            !clean.StartsWith("Runs ", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string CleanSentence(string? text, int maxChars)
@@ -390,10 +385,10 @@ public static class ShellCommandAnalyzer
     /// <summary>True when the segment names a path that is not inside <paramref name="cwd"/> or an extra root (or any absolute path when there is no cwd).</summary>
     private static bool IsOutside(string segment, string? cwd, IReadOnlyList<string>? extraRoots = null)
     {
-        foreach (Match match in AbsolutePath.Matches(segment))
+        foreach (Match match in AbsolutePath().Matches(segment))
         {
             var path = match.Groups[1].Value;
-            if (CmdSwitch.IsMatch(path))
+            if (CmdSwitch().IsMatch(path))
             {
                 continue;
             }
@@ -454,25 +449,27 @@ public static class ShellCommandAnalyzer
 }
 
 /// <summary>A command reduced to the programs it runs, for a chat row that should not print a whole script.</summary>
-public static class ShellCommandSummary
+public static partial class ShellCommandSummary
 {
     private const int MaxPrograms = 5;
     private const int MaxSummaryLength = 72;
 
     // Keep the action, but omit project paths, filters and other invocation details.
-    private static readonly HashSet<string> SubcommandPrograms = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "dotnet", "git", "npm", "pnpm", "yarn", "bun", "cargo", "go", "docker", "kubectl",
-    };
+    private static readonly HashSet<string> SubcommandPrograms =
+    [
+with(StringComparer.OrdinalIgnoreCase),         "dotnet", "git", "npm", "pnpm", "yarn", "bun", "cargo", "go", "docker", "kubectl",
+    ];
 
-    private static readonly Regex Assignment = new(@"^(\$env:)?[A-Za-z_][A-Za-z0-9_]*=", RegexOptions.Compiled);
+    [GeneratedRegex(@"^(\$env:)?[A-Za-z_][A-Za-z0-9_]*=", RegexOptions.Compiled)]
+    private static partial Regex Assignment();
 
     /// <summary>
     /// Everyday look-around and file tools: their arguments are paths and flags, so the program
     /// name alone says what the row did, even when the command is not a chain.
     /// </summary>
-    private static readonly HashSet<string> Vocabulary = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly HashSet<string> Vocabulary =
+    [
+        with(StringComparer.OrdinalIgnoreCase),
         // Reading
         "cat", "head", "tail", "less", "more", "bat", "type", "nl", "od", "xxd", "hexdump", "strings",
         // Searching
@@ -492,7 +489,7 @@ public static class ShellCommandSummary
         "Sort-Object", "Format-Table", "ft", "Format-List", "fl", "Out-String", "Write-Output", "Write-Host",
         "Get-FileHash", "Get-Process", "gps", "New-Item", "ni", "Copy-Item", "cpi", "Move-Item", "mi",
         "ConvertFrom-Json", "ConvertTo-Json",
-    };
+    ];
 
     /// <summary>
     /// The short form a row shows: a chain, a script or an everyday tool reads as the programs it
@@ -510,7 +507,7 @@ public static class ShellCommandSummary
         else
         {
             var program = ProgramOf(command);
-            var words = Tokenize(command).SkipWhile(word => Assignment.IsMatch(word)).ToList();
+            var words = Tokenize(command).SkipWhile(word => Assignment().IsMatch(word)).ToList();
             if (SubcommandPrograms.Contains(program) && words.Count > 1 && !words[1].StartsWith('-'))
             {
                 // A script name distinguishes npm run build from npm run test.
@@ -656,74 +653,51 @@ public static class ShellCommandSummary
             return "";
         }
 
-        var args = words.SkipWhile(w => Assignment.IsMatch(w)).Skip(1).ToList();
+        var args = words.SkipWhile(w => Assignment().IsMatch(w)).Skip(1).ToList();
         var nonFlags = args.Where(a => !a.StartsWith('-')).ToList();
         var firstArg = nonFlags.FirstOrDefault() ?? "";
         var lastArg = nonFlags.LastOrDefault() ?? "";
 
-        switch (prog.ToLowerInvariant())
+        return prog.ToLowerInvariant() switch
         {
-            case "cd" or "pushd" or "set-location" or "sl":
-                return firstArg.Length > 0 ? $"Change directory to {ShortTarget(firstArg)}" : "Change working directory";
-            case "grep" or "egrep" or "fgrep" or "rg" or "ag" or "ack" or "select-string" or "sls":
-                return nonFlags.Count switch
-                {
-                    >= 2 => $"Search {ShortTarget(lastArg)} for \"{ShortTarget(nonFlags[0])}\"",
-                    1 => $"Search for \"{ShortTarget(nonFlags[0])}\"",
-                    _ => "Search text in files",
-                };
-            case "find" or "fd" or "get-childitem" or "gci":
-                return firstArg.Length > 0 ? $"Find files in {ShortTarget(firstArg)}" : "List and find files";
-            case "ls" or "dir" or "tree":
-                return firstArg.Length > 0 ? $"List contents of {ShortTarget(firstArg)}" : "List directory contents";
-            case "cat" or "type" or "bat" or "get-content" or "gc":
-                return firstArg.Length > 0 ? $"Read {ShortTarget(firstArg)}" : "Read file contents";
-            case "head":
-                return lastArg.Length > 0 ? $"Read first lines of {ShortTarget(lastArg)}" : "Read first lines of output";
-            case "tail":
-                return lastArg.Length > 0 ? $"Read last lines of {ShortTarget(lastArg)}" : "Read last lines of output";
-            case "sed" or "awk" or "gawk":
-                return nonFlags.Count >= 2 ? $"Extract or transform text in {ShortTarget(lastArg)}" : "Transform text stream";
-            case "wc" or "measure-object" or "measure":
-                return firstArg.Length > 0 ? $"Count lines or items in {ShortTarget(firstArg)}" : "Count lines or items";
-            case "sort" or "sort-object":
-                return "Sort output lines";
-            case "uniq":
-                return "Filter duplicate lines";
-            case "diff" or "cmp":
-                return nonFlags.Count >= 2 ? $"Compare {ShortTarget(nonFlags[0])} and {ShortTarget(nonFlags[1])}" : "Compare files";
-            case "rm" or "del" or "erase" or "rmdir" or "rd" or "remove-item" or "ri":
-                return nonFlags.Count > 0
-                    ? $"Delete {string.Join(", ", nonFlags.Take(3).Select(ShortTarget))}"
-                    : "Delete files or directories";
-            case "mkdir" or "md" or "new-item" or "ni":
-                return firstArg.Length > 0 ? $"Create {ShortTarget(firstArg)}" : "Create directory or file";
-            case "cp" or "copy" or "copy-item" or "cpi":
-                return nonFlags.Count >= 2 ? $"Copy {ShortTarget(nonFlags[0])} to {ShortTarget(lastArg)}" : "Copy files";
-            case "mv" or "move" or "ren" or "move-item" or "mi":
-                return nonFlags.Count >= 2 ? $"Move {ShortTarget(nonFlags[0])} to {ShortTarget(lastArg)}" : "Move or rename files";
-            case "dotnet":
-                return DescribeDotnet(args, nonFlags);
-            case "git":
-                return DescribeGit(args, nonFlags);
-            case "npm" or "pnpm" or "yarn" or "bun":
-                return nonFlags.Count switch
-                {
-                    >= 2 when nonFlags[0].Equals("run", StringComparison.OrdinalIgnoreCase) => $"Run {prog} script '{nonFlags[1]}'",
-                    >= 1 => $"Run {prog} {string.Join(" ", nonFlags.Take(2))}",
-                    _ => $"Run {prog}",
-                };
-            case "python" or "python3" or "py" or "node" or "pwsh" or "powershell" or "bash" or "sh":
-                return firstArg.Length > 0 ? $"Run {prog} on {ShortTarget(firstArg)}" : $"Run {prog} command";
-            case "curl" or "wget" or "invoke-webrequest" or "iwr" or "invoke-restmethod" or "irm":
-                return firstArg.Length > 0 ? $"Fetch {ShortTarget(firstArg)}" : "Make HTTP request";
-            case "taskkill" or "stop-process" or "kill":
-                return "Terminate running process";
-            default:
-                return nonFlags.Count > 0
-                    ? $"Run {prog} on {string.Join(" ", nonFlags.Take(2).Select(ShortTarget))}"
-                    : $"Run {prog}";
-        }
+            "cd" or "pushd" or "set-location" or "sl" => firstArg.Length > 0 ? $"Change directory to {ShortTarget(firstArg)}" : "Change working directory",
+            "grep" or "egrep" or "fgrep" or "rg" or "ag" or "ack" or "select-string" or "sls" => nonFlags.Count switch
+            {
+                >= 2 => $"Search {ShortTarget(lastArg)} for \"{ShortTarget(nonFlags[0])}\"",
+                1 => $"Search for \"{ShortTarget(nonFlags[0])}\"",
+                _ => "Search text in files",
+            },
+            "find" or "fd" or "get-childitem" or "gci" => firstArg.Length > 0 ? $"Find files in {ShortTarget(firstArg)}" : "List and find files",
+            "ls" or "dir" or "tree" => firstArg.Length > 0 ? $"List contents of {ShortTarget(firstArg)}" : "List directory contents",
+            "cat" or "type" or "bat" or "get-content" or "gc" => firstArg.Length > 0 ? $"Read {ShortTarget(firstArg)}" : "Read file contents",
+            "head" => lastArg.Length > 0 ? $"Read first lines of {ShortTarget(lastArg)}" : "Read first lines of output",
+            "tail" => lastArg.Length > 0 ? $"Read last lines of {ShortTarget(lastArg)}" : "Read last lines of output",
+            "sed" or "awk" or "gawk" => nonFlags.Count >= 2 ? $"Extract or transform text in {ShortTarget(lastArg)}" : "Transform text stream",
+            "wc" or "measure-object" or "measure" => firstArg.Length > 0 ? $"Count lines or items in {ShortTarget(firstArg)}" : "Count lines or items",
+            "sort" or "sort-object" => "Sort output lines",
+            "uniq" => "Filter duplicate lines",
+            "diff" or "cmp" => nonFlags.Count >= 2 ? $"Compare {ShortTarget(nonFlags[0])} and {ShortTarget(nonFlags[1])}" : "Compare files",
+            "rm" or "del" or "erase" or "rmdir" or "rd" or "remove-item" or "ri" => nonFlags.Count > 0
+                ? $"Delete {string.Join(", ", nonFlags.Take(3).Select(ShortTarget))}"
+                : "Delete files or directories",
+            "mkdir" or "md" or "new-item" or "ni" => firstArg.Length > 0 ? $"Create {ShortTarget(firstArg)}" : "Create directory or file",
+            "cp" or "copy" or "copy-item" or "cpi" => nonFlags.Count >= 2 ? $"Copy {ShortTarget(nonFlags[0])} to {ShortTarget(lastArg)}" : "Copy files",
+            "mv" or "move" or "ren" or "move-item" or "mi" => nonFlags.Count >= 2 ? $"Move {ShortTarget(nonFlags[0])} to {ShortTarget(lastArg)}" : "Move or rename files",
+            "dotnet" => DescribeDotnet(args, nonFlags),
+            "git" => DescribeGit(args, nonFlags),
+            "npm" or "pnpm" or "yarn" or "bun" => nonFlags.Count switch
+            {
+                >= 2 when nonFlags[0].Equals("run", StringComparison.OrdinalIgnoreCase) => $"Run {prog} script '{nonFlags[1]}'",
+                >= 1 => $"Run {prog} {string.Join(" ", nonFlags.Take(2))}",
+                _ => $"Run {prog}",
+            },
+            "python" or "python3" or "py" or "node" or "pwsh" or "powershell" or "bash" or "sh" => firstArg.Length > 0 ? $"Run {prog} on {ShortTarget(firstArg)}" : $"Run {prog} command",
+            "curl" or "wget" or "invoke-webrequest" or "iwr" or "invoke-restmethod" or "irm" => firstArg.Length > 0 ? $"Fetch {ShortTarget(firstArg)}" : "Make HTTP request",
+            "taskkill" or "stop-process" or "kill" => "Terminate running process",
+            _ => nonFlags.Count > 0
+                ? $"Run {prog} on {string.Join(" ", nonFlags.Take(2).Select(ShortTarget))}"
+                : $"Run {prog}",
+        };
     }
 
     private static string DescribeDotnet(List<string> args, List<string> nonFlags)
@@ -743,7 +717,7 @@ public static class ShellCommandSummary
             "restore" => "Restore NuGet packages",
             "clean" => "Clean build outputs",
             "publish" => "Publish the .NET application",
-            _ => $"Run dotnet { string.Join(" ", args.Take(3)) }",
+            _ => $"Run dotnet {string.Join(" ", args.Take(3))}",
         };
     }
 
@@ -842,7 +816,7 @@ public static class ShellCommandSummary
     {
         foreach (var word in segment.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
         {
-            if (Assignment.IsMatch(word))
+            if (Assignment().IsMatch(word))
             {
                 continue;
             }

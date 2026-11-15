@@ -1,4 +1,3 @@
-using Codale.App.Services;
 using Codale.Core.Tasks;
 using Codale.Terminal;
 

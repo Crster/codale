@@ -1,6 +1,7 @@
 using System.Collections.Specialized;
 using System.Runtime.CompilerServices;
 
+using Codale.App.Themes;
 using Codale.App.ViewModels;
 
 using Microsoft.UI.Xaml;
@@ -19,11 +20,9 @@ namespace Codale.App.Views;
 /// </summary>
 internal sealed class PlanAnnotator
 {
-    private static readonly ConditionalWeakTable<MarkdownView, PlanAnnotator> Attached = new();
+    private static readonly ConditionalWeakTable<MarkdownView, PlanAnnotator> Attached = [];
 
     private readonly MarkdownView _markdown;
-
-    private SessionArtifact? _plan;
 
     /// <summary>The "Annotate" chip shown beside a fresh selection; one at a time.</summary>
     private Flyout? _chip;
@@ -42,23 +41,23 @@ internal sealed class PlanAnnotator
         markdown.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(OnPointerReleased), true);
 
         // A transcript keeps many cards; only those on screen listen to their plan.
-        markdown.Loaded += (_, _) => Subscribe(_plan);
-        markdown.Unloaded += (_, _) => Unsubscribe(_plan);
+        markdown.Loaded += (_, _) => Subscribe(Plan);
+        markdown.Unloaded += (_, _) => Unsubscribe(Plan);
     }
 
     /// <summary>The plan being read; null turns annotating off (e.g. an image artifact).</summary>
     public SessionArtifact? Plan
     {
-        get => _plan;
+        get;
         set
         {
-            if (ReferenceEquals(_plan, value))
+            if (ReferenceEquals(field, value))
             {
                 return;
             }
 
-            Unsubscribe(_plan);
-            _plan = value;
+            Unsubscribe(field);
+            field = value;
             if (_markdown.IsLoaded)
             {
                 Subscribe(value);
@@ -80,10 +79,7 @@ internal sealed class PlanAnnotator
 
     private void Unsubscribe(SessionArtifact? plan)
     {
-        if (plan is not null)
-        {
-            plan.Annotations.CollectionChanged -= OnAnnotationsChanged;
-        }
+        plan?.Annotations.CollectionChanged -= OnAnnotationsChanged;
     }
 
     private void OnAnnotationsChanged(object? sender, NotifyCollectionChangedEventArgs e) => RefreshHighlights();
@@ -91,7 +87,7 @@ internal sealed class PlanAnnotator
     /// <summary>Highlights rebuild the whole view, so they are only pushed when they change.</summary>
     private void RefreshHighlights()
     {
-        var passages = _plan?.Annotations.Select(a => a.Quote).Where(q => q.Length > 0).ToList() ?? [];
+        var passages = Plan?.Annotations.Select(a => a.Quote).Where(q => q.Length > 0).ToList() ?? [];
         if (passages.SequenceEqual(_shownHighlights))
         {
             return;
@@ -101,7 +97,7 @@ internal sealed class PlanAnnotator
         _markdown.SetHighlights(passages);
     }
 
-    private bool CanAnnotate => _plan is { IsImage: false };
+    private bool CanAnnotate => Plan is { IsImage: false };
 
     private void OnPointerReleased(object sender, PointerRoutedEventArgs e)
     {
@@ -213,7 +209,7 @@ internal sealed class PlanAnnotator
 
     private void Prompt(string quote, Windows.Foundation.Point at)
     {
-        var plan = _plan;
+        var plan = Plan;
         if (plan is null)
         {
             return;
@@ -268,8 +264,6 @@ public sealed partial class PlanAnnotationBar : Grid
 {
     private readonly StackPanel _list = new() { Spacing = 6 };
 
-    private SessionArtifact? _plan;
-
     /// <summary>
     /// The reader sent the annotations (already cleared). The text is them as one
     /// revision request; the plan is passed along so the sender knows what is revised.
@@ -283,7 +277,7 @@ public sealed partial class PlanAnnotationBar : Grid
         var send = new Button { Content = "Send to agent", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
         send.Click += (_, _) => Send();
         var clear = new Button { Content = "Clear" };
-        clear.Click += (_, _) => _plan?.Annotations.Clear();
+        clear.Click += (_, _) => Plan?.Annotations.Clear();
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         actions.Children.Add(send);
         actions.Children.Add(clear);
@@ -307,16 +301,16 @@ public sealed partial class PlanAnnotationBar : Grid
     /// <summary>Internal: XAML type info must not reach SessionArtifact, whose members are required.</summary>
     internal SessionArtifact? Plan
     {
-        get => _plan;
+        get;
         set
         {
-            if (ReferenceEquals(_plan, value))
+            if (ReferenceEquals(field, value))
             {
                 return;
             }
 
             Unsubscribe();
-            _plan = value;
+            field = value;
             if (IsLoaded)
             {
                 Subscribe();
@@ -328,10 +322,10 @@ public sealed partial class PlanAnnotationBar : Grid
 
     private void Subscribe()
     {
-        if (_plan is not null)
+        if (Plan is not null)
         {
-            _plan.Annotations.CollectionChanged -= OnAnnotationsChanged;
-            _plan.Annotations.CollectionChanged += OnAnnotationsChanged;
+            Plan.Annotations.CollectionChanged -= OnAnnotationsChanged;
+            Plan.Annotations.CollectionChanged += OnAnnotationsChanged;
         }
 
         Render();
@@ -339,10 +333,7 @@ public sealed partial class PlanAnnotationBar : Grid
 
     private void Unsubscribe()
     {
-        if (_plan is not null)
-        {
-            _plan.Annotations.CollectionChanged -= OnAnnotationsChanged;
-        }
+        Plan?.Annotations.CollectionChanged -= OnAnnotationsChanged;
     }
 
     private void OnAnnotationsChanged(object? sender, NotifyCollectionChangedEventArgs e) => Render();
@@ -350,7 +341,7 @@ public sealed partial class PlanAnnotationBar : Grid
     private void Render()
     {
         _list.Children.Clear();
-        var annotations = _plan?.Annotations.ToList() ?? [];
+        var annotations = Plan?.Annotations.ToList() ?? [];
         Visibility = annotations.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
         foreach (var entry in annotations)
@@ -381,7 +372,7 @@ public sealed partial class PlanAnnotationBar : Grid
                 BorderThickness = new Thickness(0),
             };
             ToolTipService.SetToolTip(remove, "Remove annotation");
-            remove.Click += (_, _) => _plan?.Annotations.Remove(entry);
+            remove.Click += (_, _) => Plan?.Annotations.Remove(entry);
 
             Grid.SetColumn(remove, 1);
             row.Children.Add(text);
@@ -392,13 +383,13 @@ public sealed partial class PlanAnnotationBar : Grid
 
     private void Send()
     {
-        if (_plan is not { Annotations.Count: > 0 } plan)
+        if (Plan is not { Annotations.Count: > 0 } plan)
         {
             return;
         }
 
         var message = plan.RevisionMessage();
-        plan.SentNotes = plan.Annotations.ToList();
+        plan.SentNotes = [.. plan.Annotations];
         plan.Annotations.Clear();
         SendRequested?.Invoke(this, (plan, message));
     }

@@ -16,7 +16,7 @@ public class TerminalEmulatorTests
     private static string LineText(TerminalEmulator emulator, int row)
     {
         var span = emulator.GetScreenRow(row);
-        return new string(span.ToArray().Select(c => c.Code).ToArray()).TrimEnd();
+        return new string([.. span.ToArray().Select(c => c.Code)]).TrimEnd();
     }
 
     private static TerminalCell Cell(TerminalEmulator emulator, int row, int col) => emulator.GetScreenRow(row)[col];
@@ -101,7 +101,7 @@ public class TerminalEmulatorTests
 
         // Oldest surviving line first, contiguous up to the screen.
         var lines = Enumerable.Range(0, emulator.ScrollbackCount)
-            .Select(i => new string(emulator.GetLine(i).ToArray().Select(c => c.Code).ToArray()).TrimEnd())
+            .Select(i => new string([.. emulator.GetLine(i).ToArray().Select(c => c.Code)]).TrimEnd())
             .ToArray();
         var first = int.Parse(lines[0]["line".Length..]);
         Assert.Equal(Enumerable.Range(first, 5).Select(n => $"line{n}"), lines);

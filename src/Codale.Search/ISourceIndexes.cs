@@ -1,4 +1,6 @@
 
+using Codale.Search.Engine;
+
 namespace Codale.Search;
 
 /// <summary>Supplies the source index of a project root. The application uses the shared per-root cache.</summary>

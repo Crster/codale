@@ -1,7 +1,9 @@
-using Codale.Core.Text;
 using Codale.App.Controls;
+using Codale.Core.Text;
+
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+
 using Windows.System;
 using Windows.UI;
 

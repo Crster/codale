@@ -63,7 +63,7 @@ public sealed partial class ChatViewModel
             quick.CancelAfter(TimeSpan.FromSeconds(shifted ? 6 : 4));
             if (!shifted)
             {
-                var intent = await _smart.Instance.ClassifyAsync(new(_projectPath, _projectPath, "routing", _chatId, deadline),
+                var intent = await _smart.Instance.ClassifyAsync(new(ProjectPath, ProjectPath, "routing", _chatId, deadline),
                     text, LastRoutingReply, quick.Token).WaitAsync(quick.Token);
                 return intent?.Value is { } selected ? (MessageRouting.Reconcile(local, selected switch
                 {
@@ -76,7 +76,7 @@ public sealed partial class ChatViewModel
             // Recent sessions only: the list is the model's prompt, and a far-off session is rarely the right one.
             var sessions = Features!.List().OrderByDescending(f => f.Id == FeatureId).ThenByDescending(f => f.UpdatedAt)
                 .Take(MaxRoutedSessions).ToList();
-            var helper = new SmartHelperModel(_projectPath, "routing", TimeSpan.FromSeconds(6), _smart);
+            var helper = new SmartHelperModel(ProjectPath, "routing", TimeSpan.FromSeconds(6), _smart);
             var call = await helper.CallToolAsync(FeatureRouting.SystemPrompt,
                 FeatureRouting.BuildConversation(text, sessions, FeatureId, LastRoutingReply), [FeatureRouting.RouteTool(sessions)], quick.Token);
             if (call is null) return (fallback, null);
@@ -206,7 +206,7 @@ public sealed partial class ChatViewModel
         try
         {
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            var named = await _smart.Instance.TitleAsync(new(_projectPath, _projectPath, "title", _chatId), prompt, deadline.Token);
+            var named = await _smart.Instance.TitleAsync(new(ProjectPath, ProjectPath, "title", _chatId), prompt, deadline.Token);
             if (named?.Value is not { Length: > 0 } title) return;
             _dispatcher.TryEnqueue(() =>
             {
@@ -220,4 +220,3 @@ public sealed partial class ChatViewModel
         catch (InvalidOperationException) { }
     }
 }
-

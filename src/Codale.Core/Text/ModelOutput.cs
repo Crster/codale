@@ -72,29 +72,29 @@ public static partial class ModelOutput
     /// </summary>
     private static string FinalChannel(string text)
     {
-        const string Channel = "<|channel|>";
-        const string Message = "<|message|>";
+        const string channelTag = "<|channel|>";
+        const string messageTag = "<|message|>";
 
         var opening = text.TrimStart();
-        if (!opening.StartsWith(Channel, StringComparison.Ordinal) && !opening.StartsWith("<|start|>", StringComparison.Ordinal))
+        if (!opening.StartsWith(channelTag, StringComparison.Ordinal) && !opening.StartsWith("<|start|>", StringComparison.Ordinal))
         {
             return text;
         }
 
-        var channel = text.LastIndexOf(Channel, StringComparison.Ordinal);
+        var channel = text.LastIndexOf(channelTag, StringComparison.Ordinal);
         if (channel < 0)
         {
             return text;
         }
 
-        var message = text.IndexOf(Message, channel, StringComparison.Ordinal);
+        var message = text.IndexOf(messageTag, channel, StringComparison.Ordinal);
         if (message < 0)
         {
             return text;
         }
 
-        var name = text[(channel + Channel.Length)..message].Trim();
-        return name.StartsWith("analysis", StringComparison.OrdinalIgnoreCase) ? "" : text[(message + Message.Length)..];
+        var name = text[(channel + channelTag.Length)..message].Trim();
+        return name.StartsWith("analysis", StringComparison.OrdinalIgnoreCase) ? "" : text[(message + messageTag.Length)..];
     }
 
     private static string StripLeadingReasoning(string text, bool orphanClose)

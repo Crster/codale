@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -9,9 +8,8 @@ using Codale.Agents;
 using Codale.Agents.Claude;
 using Codale.App.Services;
 using Codale.Core.Agents;
-using Codale.Core.Shell;
-using Codale.Core.Features;
 using Codale.Core.Helper;
+using Codale.Core.Shell;
 using Codale.Core.Tasks;
 using Codale.Core.Text;
 
@@ -30,14 +28,12 @@ namespace Codale.App.ViewModels;
 public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
-    private readonly string _projectPath;
     private readonly IAgentSessionFactory _agentSessions;
     private readonly SmartExperienceHost _smart;
     private readonly ISmartDecider _decider;
 
     /// <summary>The project this chat works in; relative "@file" mentions resolve under it.</summary>
-    public string ProjectPath => _projectPath;
-    private readonly StatusViewModel _status;
+    public string ProjectPath { get; }
 
     private IAgentSession? _session;
     private AssistantMessageItem? _streaming;
@@ -152,7 +148,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public void ReloadCliDefaults()
     {
-        if (IsConnected || _connecting)
+        if (IsConnected || IsConnecting)
         {
             return;
         }
@@ -181,8 +177,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _cliId = smart.Settings.DefaultChatCli;
         PermissionMode = smart.Settings.DefaultChatMode;
         _decider = decider;
-        _projectPath = projectPath;
-        _status = status;
+        ProjectPath = projectPath;
+        Status = status;
         _endpointSettings = endpointSettings;
         _mcpSettings = mcpSettings;
         EndpointName = _smart.Settings.CliProviderFor(CliId);
@@ -220,7 +216,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 live.LiveMessage = WorkingMessage;
                 if (_preparingTask is { } preparingTask)
                 {
-                    var activity = _smart.Instance.Activities(_projectPath)
+                    var activity = _smart.Instance.Activities(ProjectPath)
                         .FirstOrDefault(a => a.Context.ChatId == _chatId && a.StartedAt >= _turnStarted.ToUniversalTime()
                             && a.Context.Task == preparingTask && a.State is "queued" or "exploring" or "finalizing");
                     if (activity is not null)
@@ -258,7 +254,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         _idleCompactTimer.Stop();
         if (_smart.Settings.IdleCompact && !_compactedSinceLastPrompt &&
-            _status.ContextTokens >= _smart.Settings.IdleCompactMinTokens)
+            Status.ContextTokens >= _smart.Settings.IdleCompactMinTokens)
         {
             _idleCompactTimer.Interval = TimeSpan.FromSeconds(_smart.Settings.IdleCompactSeconds);
             _idleCompactTimer.Start();
@@ -269,7 +265,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         // A draft in the composer means the reader is about to send, which reads the warm cache anyway.
         if (_session is null || !IsConnected || IsBusy || Draft.Length > 0 || Attachments.Count > 0 ||
-            !_smart.Settings.IdleCompact || _compactedSinceLastPrompt || _status.ContextTokens < _smart.Settings.IdleCompactMinTokens)
+            !_smart.Settings.IdleCompact || _compactedSinceLastPrompt || Status.ContextTokens < _smart.Settings.IdleCompactMinTokens)
         {
             return;
         }
@@ -277,7 +273,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _compactItem = new CompactItem
         {
             Reason = $"Idle for {_smart.Settings.IdleCompactSeconds / 60.0:0.#} min",
-            BeforeTokens = _status.ContextTokens,
+            BeforeTokens = Status.ContextTokens,
         };
         Add(_compactItem);
 
@@ -325,7 +321,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public ObservableCollection<ChatItem> Items { get; } = [];
 
     /// <summary>This conversation's own status: model, context, cost and the files it changed.</summary>
-    public StatusViewModel Status => _status;
+    public StatusViewModel Status { get; }
 
     /// <summary>
     /// A name for the conversation's tab: the history entry's title. Null until the chat
@@ -481,31 +477,31 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>The workspace's localhost folder servers, started from the Agent tools flyout.</summary>
     public Codale.Core.Serving.FolderServerHost? FolderServers { get; init; }
 
-    private string? _lastUserPrompt;
-
     /// <summary>The most recent user prompt in this chat.</summary>
-    public string? LastUserPrompt =>
-        _lastUserPrompt ?? Items.OfType<UserMessageItem>().LastOrDefault(m => !string.IsNullOrWhiteSpace(m.Text))?.Text;
+    public string? LastUserPrompt { get =>
+        field ?? Items.OfType<UserMessageItem>().LastOrDefault(m => !string.IsNullOrWhiteSpace(m.Text))?.Text; private set;
+    }
 
     /// <summary>The pipe and secret Codale's workspace MCP servers use to reach this chat, created on first use.</summary>
-    private (string Pipe, string Token)? EnsureTaskHost(string workingDirectory)
+    private (string Pipe, string Token)? EnsureTaskHost()
     {
         if (_taskPipe is null)
         {
-            _taskPipe = new TaskPipeServer(new LocalTaskService(Terminals));
-
-            // An agent CLI in a terminal reports its task list and artifacts here (see ServersForTerminalCli).
-            _taskPipe.PanelPublished = (kind, input) => _dispatcher.TryEnqueue(() =>
+            _taskPipe = new TaskPipeServer(new LocalTaskService(Terminals))
             {
-                if (kind == "todos")
-                {
-                    ApplyTodos(input);
-                }
-                else if (kind == "artifact")
-                {
-                    RecordAgentArtifact(input);
-                }
-            });
+                // An agent CLI in a terminal reports its task list and artifacts here (see ServersForTerminalCli).
+                PanelPublished = (kind, input) => _dispatcher.TryEnqueue(() =>
+                    {
+                        if (kind == "todos")
+                        {
+                            ApplyTodos(input);
+                        }
+                        else if (kind == "artifact")
+                        {
+                            RecordAgentArtifact(input);
+                        }
+                    })
+            };
             _taskPipe.Start();
         }
 
@@ -524,9 +520,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         var servers = WithBrowserControl(_mcpSettings.Servers());
-        var workingDirectory = _projectPath;
+        var workingDirectory = ProjectPath;
         if (_mcpSettings.TasksAvailable &&
-            EnsureTaskHost(workingDirectory) is { } host &&
+            EnsureTaskHost() is { } host &&
             _mcpSettings.TaskServerSpecs(host.Pipe, host.Token, workingDirectory, pushToPanel: true) is { Count: > 0 } tasks)
         {
             servers = [.. servers, .. tasks];
@@ -675,12 +671,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         try
         {
             var root = Path.Combine(Path.GetTempPath(), "claude");
-            if (taskId.Length == 0 || taskId.IndexOfAny(['/', '\\', '.']) >= 0 || !Directory.Exists(root))
-            {
-                return null;
-            }
-
-            return Directory.EnumerateFiles(root, taskId + ".output", SearchOption.AllDirectories)
+            return taskId.Length == 0 || taskId.IndexOfAny(['/', '\\', '.']) >= 0 || !Directory.Exists(root)
+                ? null
+                : Directory.EnumerateFiles(root, taskId + ".output", SearchOption.AllDirectories)
                 .Where(f => Path.GetFileName(Path.GetDirectoryName(f)) == "tasks")
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .FirstOrDefault();
@@ -771,9 +764,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             owner.AppendOutput(shown + "\n");
             owner.CompleteCall(completed.ToolUseId, shown, completed.IsError);
         }
-        else if (owner is not null)
+        else
         {
-            owner.CompleteCall(completed.ToolUseId, null, completed.IsError);
+            owner?.CompleteCall(completed.ToolUseId, null, completed.IsError);
         }
 
         if (_tasksByToolUse.TryGetValue(completed.ToolUseId, out var task))
@@ -1699,7 +1692,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// instead of after the CLI has connected and answered; the live answer then replaces
     /// it only if it differs. Also feeds the settings page's tier-model pickers.
     /// </summary>
-    private static readonly Dictionary<string, IReadOnlyList<AgentModelInfo>> CachedModels = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, IReadOnlyList<AgentModelInfo>> CachedModels = [with(StringComparer.Ordinal)];
 
     /// <summary>The catalogue <paramref name="cliId"/> reported this run, or null before its first chat connected.</summary>
     public static IReadOnlyList<AgentModelInfo>? KnownCatalogue(string cliId, string? accountId = null) =>
@@ -1737,7 +1730,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             };
             session = agentSessions.Create(new AgentSessionRequest
             {
-                CliId = cliId, WorkingDirectory = home, Environment = environment,
+                CliId = cliId,
+                WorkingDirectory = home,
+                Environment = environment,
             });
             await session.StartAsync();
             // StartAsync returns once the CLI answered its handshake; it can still be loading
@@ -1844,9 +1839,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         "When a request needs tools, first break it into 2-6 short, concrete steps, e.g. for \"commit all " +
         "changes\": \"Check git status\", \"Draft the commit message\", \"Commit the changes\". Requests that need no tools need no list.";
 
-    /// <summary>True while <see cref="ConnectAsync"/> runs; a second call would spawn a second CLI and orphan the first.</summary>
-    private bool _connecting;
-    public bool IsConnecting => _connecting;
+    public bool IsConnecting { get; private set; }
 
     /// <summary>The BYOK provider the live session was spawned with ("" for Default); null before the first connect.</summary>
     private string? _connectedProvider;
@@ -1861,12 +1854,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     public async Task ConnectAsync()
     {
-        if (_connecting || (IsConnected && _session is not null))
+        if (IsConnecting || (IsConnected && _session is not null))
         {
             return;
         }
 
-        _connecting = true;
+        IsConnecting = true;
         OnPropertyChanged(nameof(IsConnecting));
         try
         {
@@ -1874,7 +1867,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
         finally
         {
-            _connecting = false;
+            IsConnecting = false;
             OnPropertyChanged(nameof(IsConnecting));
         }
     }
@@ -1977,7 +1970,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         _smart.Settings.RememberProfile(CliId, EndpointName);
         _connectedProvider = SelectedProviderName();
-        _status.IsCustomProvider = endpointEnv is not null;
+        Status.IsCustomProvider = endpointEnv is not null;
         var endpointModels = endpointEnv is not null ? EndpointModels() : [];
         if (endpointModels.Count > 0)
         {
@@ -2012,14 +2005,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         IAgentSession? starting = null;
         try
         {
-            var workingDirectory = _projectPath;
+            var workingDirectory = ProjectPath;
             IReadOnlyList<McpServerSpec> mcpServers = _mcpSettings is null ? [] : await Task.Run(_mcpSettings.Servers);
 
             // Long-running commands go through Codale's own task server; only when it
             // shipped are the agent's background shells refused (there'd be no other way).
             string? shellGuard = null;
             var environment = endpointEnv is null ? new Dictionary<string, string>() : new Dictionary<string, string>(endpointEnv);
-            var tasksHost = _mcpSettings is { TasksAvailable: true } ? EnsureTaskHost(workingDirectory) : null;
+            var tasksHost = _mcpSettings is { TasksAvailable: true } ? EnsureTaskHost() : null;
             if (tasksHost is { } host &&
                 _mcpSettings?.TaskServerSpecs(host.Pipe, host.Token, workingDirectory) is { Count: > 0 } taskServers)
             {
@@ -2040,14 +2033,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             var activeCli = SessionCli;
             var cliExecutable = activeCli.ResolvedPath ?? activeCli.Executable;
             var cliName = $"{activeCli.DisplayName} CLI";
-            if (_status.CliName != cliName)
+            if (Status.CliName != cliName)
             {
                 // Context and subscription windows belong to the CLI that reported them;
                 // switching Claude <-> Codex must not carry the other one's readings over.
-                _status.ResetCliReadings();
+                Status.ResetCliReadings();
             }
 
-            _status.CliName = cliName;
+            Status.CliName = cliName;
 
             environment[IsCodexSession ? CodaleAccount.CodexVariable : CodaleAccount.ClaudeVariable] =
                 CodaleAccount.ProfileHome(CliId, _smart.Settings.FindByok(EndpointName)?.AccountId);
@@ -2087,19 +2080,19 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             SessionStateChanged?.Invoke(this, EventArgs.Empty);
 
-            RunInBackground(() => PumpAsync(session), "event pump");
-            RunInBackground(() => PollTasksAsync(session), "task poll");
+            RunInBackground(() => PumpAsync(session));
+            RunInBackground(() => PollTasksAsync(session));
 
             // Usage otherwise arrives only with a turn's rate_limit_event; a BYOK endpoint or
             // an inherited ANTHROPIC_* override has no Claude subscription behind it.
             // ANTHROPIC_* / Bedrock / Vertex variables redirect the Claude CLI only; Codex is
             // overridden solely by its own configured provider (endpointEnv).
             var overrideCli = endpointEnv is not null || (!IsCodexSession && EnvironmentOverridesEndpoint());
-            _status.IsOverrideCli = overrideCli;
+            Status.IsOverrideCli = overrideCli;
             // The usage endpoint is Claude's; Codex reports its own windows through its session.
             if (!overrideCli && !IsCodexSession)
             {
-                RunInBackground(LoadUsageAsync, "usage fetch");
+                RunInBackground(LoadUsageAsync);
             }
         }
         catch (Exception ex)
@@ -2135,7 +2128,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             if (resumeLost)
             {
                 ResumeSessionId = null;
-                _deliveredContext.Clear();
                 Add(new NoticeItem { Text = "The previous CLI conversation could not be resumed; started a new one.", Severity = NoticeSeverity.Info });
                 await ConnectCoreAsync();
             }
@@ -2158,14 +2150,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 // The user switched accounts while the call ran: these windows are the old one's.
                 if ((_smart.Settings.FindByok(EndpointName)?.AccountId ?? "") == (accountId ?? ""))
                 {
-                    _status.Apply(limits);
+                    Status.Apply(limits);
                 }
             });
         }
     }
 
     /// <summary>Starts long-lived work off the UI thread; a failure is logged, never left unobserved.</summary>
-    private static void RunInBackground(Func<Task> work, string what)
+    private static void RunInBackground(Func<Task> work)
     {
         _ = Task.Run(async () =>
         {
@@ -2352,10 +2344,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             case SessionInitialized init:
                 BindHistoryProvider();
-                _status.Model = init.Model;
+                Status.Model = init.Model;
                 if (init.ContextWindow is int contextWindow && contextWindow > 0)
                 {
-                    _status.ContextWindow = contextWindow;
+                    Status.ContextWindow = contextWindow;
                 }
 
                 // Ask and automatic are the host's, riding on the CLI's manual and auto:
@@ -2541,7 +2533,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                         var resolved = change with { FilePath = ResolvePath(change.FilePath) };
                         TrackPlanFile(resolved);
 
-                        _status.RecordFileChange(resolved, diff);
+                        Status.RecordFileChange(resolved, diff);
                         IndexWrittenFile(resolved.FilePath);
                         FilesChanged?.Invoke(this, EventArgs.Empty);
                     }
@@ -2584,11 +2576,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             case RateLimitUpdated limits:
-                _status.Apply(limits.Limits);
+                Status.Apply(limits.Limits);
                 break;
 
             case SessionTokensUpdated tokens:
-                _status.SessionTokens = tokens.Total;
+                Status.SessionTokens = tokens.Total;
                 break;
 
             case UsageUpdated usage:
@@ -2608,13 +2600,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
                 // Mid-turn context readings (one after every model
                 // call), so the meter moves while the turn runs, not just when it lands.
-                _status.Apply(usage.Usage);
+                Status.Apply(usage.Usage);
 
                 // The CLI's own window size, only when the provider settings publish none
                 // for this model: a configured size is the better-informed number.
-                if (usage.ContextWindow is int reportedWindow && _status.ContextWindow <= 0)
+                if (usage.ContextWindow is int reportedWindow && Status.ContextWindow <= 0)
                 {
-                    _status.ContextWindow = reportedWindow;
+                    Status.ContextWindow = reportedWindow;
                 }
                 break;
 
@@ -2624,15 +2616,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 SetActivity(null, toolUseId: null);
 
                 RestoreAfterPlanTurn();
-                _status.Apply(turn);
+                Status.Apply(turn);
 
-                if (!IsCodexSession && !_status.IsOverrideCli)
+                if (!IsCodexSession && !Status.IsOverrideCli)
                 {
-                    RunInBackground(LoadUsageAsync, "usage fetch");
+                    RunInBackground(LoadUsageAsync);
                 }
 
                 // The terminal panel cannot read the window from a transcript; it borrows this one.
-                if (!IsCodexSession && turn.ContextWindow is int turnWindow && _status.Model is { Length: > 0 } turnModel && turnModel != StatusViewModel.NotConnected)
+                if (!IsCodexSession && turn.ContextWindow is int turnWindow && Status.Model is { Length: > 0 } turnModel && turnModel != StatusViewModel.NotConnected)
                 {
                     _smart.Settings.RememberClaudeContextWindow(turnModel, turnWindow);
                 }
@@ -2643,12 +2635,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 // the meter climb toward full no matter how much context was really left.
                 if (_lastMessageUsage is { } last)
                 {
-                    _status.Apply(last);
+                    Status.Apply(last);
                 }
                 else if (turn.Usage is { } usage)
                 {
                     // No message seen this turn; an inflated reading beats none.
-                    _status.Apply(usage);
+                    Status.Apply(usage);
                 }
 
                 AbandonPendingApprovals();
@@ -2816,7 +2808,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 _streaming = null;
                 ShowTodos([]);
                 Artifacts.Clear();
-                _status.ClearSessionChanges();
+                Status.ClearSessionChanges();
                 break;
 
             case ConversationCompacted compacted:
@@ -2825,11 +2817,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 // otherwise be re-applied at turn end and the meter would never drop.
                 _lastMessageUsage = null;
                 _compactedSinceLastPrompt = true;
-                ContextCompacted();
                 _idleCompactTimer.Stop();
                 if (compacted.PostTokens is { } post and > 0)
                 {
-                    _status.Apply(new UsageSnapshot { InputTokens = (int)Math.Min(post, int.MaxValue) });
+                    Status.Apply(new UsageSnapshot { InputTokens = (int)Math.Min(post, int.MaxValue) });
                 }
 
                 var compactItem = _compactItem;
@@ -2872,7 +2863,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private static string? TaskParameterId(string toolName, JsonElement input)
+    private static string? TaskParameterId(JsonElement input)
     {
         return BackgroundTaskDetector.ShellIdOf(input);
     }
@@ -2880,12 +2871,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Finds the task owned or referenced by a history entry.</summary>
     public RunningTaskItem? TaskForCall(ToolCallItem call)
     {
-        if (call.ParameterTaskId is { } id)
-        {
-            return RunningTasks.FirstOrDefault(t => t.RuntimeId == id || t.ShellId == id);
-        }
-
-        return _tasksByToolUse.GetValueOrDefault(call.ToolUseId)
+        return call.ParameterTaskId is { } id
+            ? RunningTasks.FirstOrDefault(t => t.RuntimeId == id || t.ShellId == id)
+            : _tasksByToolUse.GetValueOrDefault(call.ToolUseId)
             ?? RunningTasks.FirstOrDefault(t => t.ToolUseId == call.ToolUseId);
     }
 
@@ -2911,7 +2899,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             ToolUseId = toolUseId,
             ToolName = toolName,
             Input = input.ValueKind == JsonValueKind.Undefined ? default : input.Clone(),
-            ParameterTaskId = TaskParameterId(toolName, input),
+            ParameterTaskId = TaskParameterId(input),
             Summary = ToolCallItem.Describe(toolName, input),
             Command = ToolCallItem.CommandInput(toolName, input) ?? "",
             PlanText = plan,
@@ -2954,7 +2942,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
                 case ToolCallItem previous when ToolKinds.IsExplore(previous.Kind) && !previous.IsAwaitingApproval:
                     var merged = new ExploreGroupStep { Timestamp = previous.Timestamp };
-                    steps[steps.Count - 1] = merged;
+                    steps[^1] = merged;
                     merged.Add(previous);
                     merged.Add(item);
                     return;
@@ -3010,7 +2998,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        ShowTodos(Todos.Select(t => t.IsDone ? t : t with { Status = TodoStatus.Completed }).ToList());
+        ShowTodos([.. Todos.Select(t => t.IsDone ? t : t with { Status = TodoStatus.Completed })]);
         UpdateTodoStep();
     }
 
@@ -3019,7 +3007,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         try
         {
-            return Path.IsPathRooted(path) ? path : Path.GetFullPath(Path.Combine(_projectPath, path));
+            return Path.IsPathRooted(path) ? path : Path.GetFullPath(Path.Combine(ProjectPath, path));
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
@@ -3190,7 +3178,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             ? "Browser screenshot"
             : "Image";
 
-        _ = SaveImageArtifactsAsync(call, title, images.ToList());
+        _ = SaveImageArtifactsAsync(call, title, [.. images]);
     }
 
     /// <summary>Decodes and writes the images off the UI thread (a full-page screenshot is megabytes), then lists them.</summary>
@@ -3461,10 +3449,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return new ShellAssessment("", ShellRisk.Caution, "");
         }
 
-        var assessment = ShellCommandAnalyzer.Assess(command, _projectPath, hint, ExtraRoots);
+        var assessment = ShellCommandAnalyzer.Assess(command, ProjectPath, hint, ExtraRoots);
         if (assessment.Risk == ShellRisk.Safe)
         {
-            var kind = ShellCommandClassifier.Classify(command, _projectPath, ExtraRoots);
+            var kind = ShellCommandClassifier.Classify(command, ProjectPath, ExtraRoots);
             if (kind.Class is ShellClass.Write or ShellClass.Delete or ShellClass.Unknown)
             {
                 assessment = assessment with { Risk = ShellRisk.Caution, Reason = kind.Reason };
@@ -3521,7 +3509,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     };
 
     /// <summary>Files the user attached this session (picked ones live anywhere on disk); the agent may read them.</summary>
-    private readonly HashSet<string> _attachedPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _attachedPaths = [with(StringComparer.OrdinalIgnoreCase)];
 
     private bool IsReadOfAttachedFile(ApprovalRequested approval) =>
         approval.ToolName == "Read" &&
@@ -3552,7 +3540,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             var policyCommand = ToolCallItem.CommandInput(approval.ToolName, approval.Input);
             var plan = ApprovalPolicy.Decide(PermissionMode, approval.ToolName, policyCommand, approval.Input,
-                _projectPath, ExtraRoots, McpRiskNote(approval.ToolName) is not null);
+                ProjectPath, ExtraRoots, McpRiskNote(approval.ToolName) is not null);
             if (plan.Verdict != ApprovalVerdict.Ask)
             {
                 if (plan.Verdict == ApprovalVerdict.Deny && _toolCalls.TryGetValue(approval.ToolUseId ?? "", out var blocked))
@@ -3680,11 +3668,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             Risk = shellAssessment.Risk,
             RiskNote = mcpRisk is { } noted ? noted.Effect : ToolCallItem.IsShellName(approval.ToolName) ? shellAssessment.FormatRiskNote() : "",
             Questions = ApprovalRequestItem.ParseQuestions(approval.Input),
-            Suggestions = approval.Suggestions
+            Suggestions = [.. approval.Suggestions
                 .Where(s => !string.Equals(s.Type, "addRules", StringComparison.OrdinalIgnoreCase) &&
                             !string.Equals(s.Type, "addRule", StringComparison.OrdinalIgnoreCase))
-                .Select(s => new SuggestionOption { RequestId = approval.RequestId, Suggestion = s })
-                .ToArray(),
+                .Select(s => new SuggestionOption { RequestId = approval.RequestId, Suggestion = s })],
         };
         pending.Approval = approvalItem;
 
@@ -3921,7 +3908,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             {
                 IReadOnlyList<PlanAnnotation> notes = plan.SentNotes is { Count: > 0 } sent
                     ? sent
-                    : plan.Annotations.ToList();
+                    : [.. plan.Annotations];
                 _pendingRevision = (plan, plan.Markdown, notes);
                 _revisionTurn = IsBusy && _activeTurn is not null ? _activeTurn : null;
             }
@@ -3967,9 +3954,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // Auth method → OAuth" rather than repeating the question.
         if (_toolCalls.Values.FirstOrDefault(c => ReferenceEquals(c.Approval, approval)) is { } call)
         {
-            call.AskedAnswers = approval.Questions
-                .Select(q => new AskedQuestion(q.Header, q.Text, q.IsAnswered ? string.Join(", ", q.Answers) : null))
-                .ToList();
+            call.AskedAnswers = [.. approval.Questions.Select(q => new AskedQuestion(q.Header, q.Text, q.IsAnswered ? string.Join(", ", q.Answers) : null))];
             call.AnswerSummary = string.Join("  ·  ", approval.Questions
                 .Where(q => q.IsAnswered)
                 .Select(q => $"{(q.HasHeader ? q.Header : Shorten(q.Text, 48))} → {string.Join(", ", q.Answers)}"));
@@ -4009,8 +3994,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return null;
         }
 
-        var node = JsonNode.Parse(input.GetRawText()) as JsonObject;
-        if (node is null)
+        if (JsonNode.Parse(input.GetRawText()) is not JsonObject node)
         {
             return null;
         }
@@ -4066,7 +4050,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // A mid-turn message belongs to the running prompt; only a fresh one starts a new segment.
         if (!IsBusy)
         {
-            _status.BeginPrompt();
+            Status.BeginPrompt();
 
             // Every fresh prompt in Auto is read on its own: an ask turn Auto routed
             // earlier that never handed the mode back is undone before this one goes out.
@@ -4116,30 +4100,30 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             async Task RouteAndSendAsync()
             {
-            // The auto mode enhancer (ChatViewModel.Routing.cs): the mode for the turn, and whether the prompt belongs to another session.
-            var decision = MessageRouting.RouteWithoutModel(text);
-            var routingClock = System.Diagnostics.Stopwatch.StartNew();
-            TopicRedirect? redirect = null;
-            try
-            {
-                (decision, redirect) = await RouteSmartAsync(text, attachments.Count > 0, shown, routing.Token, preparationDeadline);
-            }
-            catch (OperationCanceledException) { if (stopped.IsCancellationRequested) return; }
-            finally
-            {
-                routingClock.Stop();
-                Add(new NoticeItem { Text = $"Auto Mode · {routingClock.Elapsed.TotalSeconds:0.00}s · {(stopped.IsCancellationRequested ? "Stopped" : redirect is not null ? "Suggested another session" : decision.Intent.ToString())}" });
-                _briefing = null;
-            }
-            if (stopped.IsCancellationRequested) return;
-            // Held back, not sent: the prompt returns to the composer while the user picks its session.
-            if (redirect is not null) { OfferRedirect(redirect); return; }
-            if (!IsAutomaticMode)
-            {
-                await SendTurnAsync(text, attachments, planOnly: PermissionMode == "plan", askOnly: IsAskMode, preparation.Token, preparationDeadline);
-                return;
-            }
-            await SendRoutedAsync(text, attachments, decision.Intent, preparation.Token, preparationDeadline);
+                // The auto mode enhancer (ChatViewModel.Routing.cs): the mode for the turn, and whether the prompt belongs to another session.
+                var decision = MessageRouting.RouteWithoutModel(text);
+                var routingClock = System.Diagnostics.Stopwatch.StartNew();
+                TopicRedirect? redirect = null;
+                try
+                {
+                    (decision, redirect) = await RouteSmartAsync(text, attachments.Count > 0, shown, routing.Token, preparationDeadline);
+                }
+                catch (OperationCanceledException) { if (stopped.IsCancellationRequested) return; }
+                finally
+                {
+                    routingClock.Stop();
+                    Add(new NoticeItem { Text = $"Auto Mode · {routingClock.Elapsed.TotalSeconds:0.00}s · {(stopped.IsCancellationRequested ? "Stopped" : redirect is not null ? "Suggested another session" : decision.Intent.ToString())}" });
+                    _briefing = null;
+                }
+                if (stopped.IsCancellationRequested) return;
+                // Held back, not sent: the prompt returns to the composer while the user picks its session.
+                if (redirect is not null) { OfferRedirect(redirect); return; }
+                if (!IsAutomaticMode)
+                {
+                    await SendTurnAsync(text, attachments, planOnly: PermissionMode == "plan", askOnly: IsAskMode, preparation.Token);
+                    return;
+                }
+                await SendRoutedAsync(text, attachments, decision.Intent, preparation.Token);
             }
         }
         await SendTurnAsync(text, attachments, planOnly, askOnly: IsAskMode && !planOnly);
@@ -4149,7 +4133,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// Sends a message the router already read: a plan turn, an explain-only turn, or
     /// a plain one - each in its own mode for the turn, back to Automatic after.
     /// </summary>
-    public async Task SendRoutedAsync(string text, IReadOnlyList<TurnAttachment> attachments, RouteIntent intent, CancellationToken preparationToken = default, DateTimeOffset? preparationDeadline = null)
+    public async Task SendRoutedAsync(string text, IReadOnlyList<TurnAttachment> attachments, RouteIntent intent, CancellationToken preparationToken = default)
     {
         if (_session is null || !IsConnected)
         {
@@ -4158,15 +4142,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        await SendRoutedCoreAsync(text, attachments, intent, preparationToken, preparationDeadline);
+        await SendRoutedCoreAsync(text, attachments, intent, preparationToken);
     }
 
-    private async Task SendRoutedCoreAsync(string text, IReadOnlyList<TurnAttachment> attachments, RouteIntent intent, CancellationToken preparationToken, DateTimeOffset? preparationDeadline)
+    private async Task SendRoutedCoreAsync(string text, IReadOnlyList<TurnAttachment> attachments, RouteIntent intent, CancellationToken preparationToken)
     {
         switch (intent)
         {
             case RouteIntent.Plan:
-                await SendTurnAsync(text, attachments, planOnly: true, askOnly: false, preparationToken, preparationDeadline);
+                await SendTurnAsync(text, attachments, planOnly: true, askOnly: false, preparationToken);
                 break;
 
             case RouteIntent.Ask:
@@ -4175,11 +4159,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     return;
                 }
 
-                await SendTurnAsync(text, attachments, planOnly: false, askOnly: true, preparationToken, preparationDeadline);
+                await SendTurnAsync(text, attachments, planOnly: false, askOnly: true, preparationToken);
                 break;
 
             default:
-                await SendTurnAsync(text, attachments, planOnly: false, askOnly: false, preparationToken, preparationDeadline);
+                await SendTurnAsync(text, attachments, planOnly: false, askOnly: false, preparationToken);
                 break;
         }
     }
@@ -4202,7 +4186,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private async Task SendTurnAsync(string text, IReadOnlyList<TurnAttachment> attachments, bool planOnly, bool askOnly, CancellationToken preparationToken = default, DateTimeOffset? preparationDeadline = null)
+    private async Task SendTurnAsync(string text, IReadOnlyList<TurnAttachment> attachments, bool planOnly, bool askOnly, CancellationToken preparationToken = default)
     {
         _idleCompactTimer.Stop();
         var compact = IsCompactCommand(text);
@@ -4254,7 +4238,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         var pre = _preShown;
         _preShown = null;
-        var composerAttachments = pre?.Composer ?? Attachments.ToList();
+        var composerAttachments = pre?.Composer ?? [.. Attachments];
         Draft = "";
         NextPromptSuggestion = null;
         Attachments.Clear();
@@ -4262,7 +4246,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // Retrieval can take many seconds before BeginTurn runs; without a message the
         // status capsule would show only its dot. BeginTurn replaces this with a phrase.
         IsBusy = true;
-        _lastUserPrompt = text;
+        LastUserPrompt = text;
         var sent = pre?.Item ?? new UserMessageItem { Text = text, Attachments = attachments };
         sent.SentAsPlan = planOnly;
         var silent = compact && _idleCompacting;
@@ -4280,14 +4264,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         Add(contextStatus);
 
         if (!compact) RecordUserTurn(text);
-        if (compact) ForgetDeliveredContext();
 
         // Both providers retrieve local project references before each prompt. Slash commands
         // retain their provider syntax and do not carry a context prefix.
-        RetrievalResult? retrieved;
+        if (!compact) MarkNewTopic(text, sent);
         try
         {
-            retrieved = await RetrieveProjectContextAsync(text, compact ? null : sent, preparationToken, preparationDeadline);
+            preparationToken.ThrowIfCancellationRequested();
         }
         catch (OperationCanceledException)
         {
@@ -4328,7 +4311,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            var context = retrieved is { Text.Length: > 0 } ? SessionBriefing.ContextBlock(retrieved.Text, _deliveredContext.Count == 0) : null;
+            string? context = null;
             if (!compact && _handoffContext is not null)
             {
                 context = context is null ? TakeHandoffContext() : TakeHandoffContext() + "\n\n" + context;
@@ -4346,7 +4329,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             else
             {
                 await session.SendAsync(new UserTurn(text) { Attachments = attachments, PlanOnly = planOnly, AskOnly = askOnly, ContextPrefix = context });
-                if (ReferenceEquals(session, _session)) ContextDelivered(retrieved);
             }
         }
         catch (Exception ex)
@@ -4391,21 +4373,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         turn.Steps.Add(sent);
 
-        RetrievalResult? retrieved;
-        try
-        {
-            retrieved = await RetrieveProjectContextAsync(text, sent);
-        }
-        catch (OperationCanceledException)
-        {
-            if (ReferenceEquals(session, _session))
-            {
-                turn.Steps.Remove(sent);
-                Draft = text;
-            }
-
-            return;
-        }
+        MarkNewTopic(text, sent);
         if (!ReferenceEquals(session, _session)) return;
         // A turn may finish while the lookup runs. Send as a fresh turn in that case,
         // preserving its mode and session rather than leaving a new prompt looking idle.
@@ -4415,13 +4383,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             await SendTurnAsync(text, attachments, planOnly: false, askOnly: IsAskMode);
             return;
         }
-        _lastUserPrompt = text;
+        LastUserPrompt = text;
         RecordUserTurn(text, steer: true);
         try
         {
-            await session.SendAsync(new UserTurn(text) { Attachments = attachments,
-                ContextPrefix = retrieved is { Text.Length: > 0 } ? SessionBriefing.ContextBlock(retrieved.Text, _deliveredContext.Count == 0) : null });
-            if (ReferenceEquals(session, _session)) ContextDelivered(retrieved);
+            await session.SendAsync(new UserTurn(text)
+            {
+                Attachments = attachments,
+            });
         }
         catch (Exception ex)
         {
@@ -4533,7 +4502,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 _liveEffort = effort;
                 if (_endpointSettings?.ContextWindowFor(EndpointName, model) is { } window && window > 0)
                 {
-                    _status.ContextWindow = window;
+                    Status.ContextWindow = window;
                 }
             }
 
@@ -4572,7 +4541,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async Task SetProfileAsync(string cli, string name)
     {
-        if (IsBusy || IsTerminalSession || _connecting) return;
+        if (IsBusy || IsTerminalSession || IsConnecting) return;
         if (cli == CliId) { await SetEndpointAsync(name); return; }
         CaptureHandoff();
         await DisposeSessionAsync();
@@ -4594,7 +4563,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     public async Task SetEndpointAsync(string name)
     {
-        if (_connecting || IsTerminalSession) return;
+        if (IsConnecting || IsTerminalSession) return;
         name = name.Trim();
         if (string.Equals(EndpointName, name, StringComparison.OrdinalIgnoreCase) || IsBusy)
         {
@@ -4610,16 +4579,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             CaptureHandoff();
             await DisposeSessionAsync();
             // The previous account's subscription windows are not this one's.
-            _status.ResetCliReadings();
+            Status.ResetCliReadings();
             IsConnected = false;
             EndTurn(TurnOutcome.Stopped);
             _streaming = null;
             ResumeSessionId = null;
         }
 
-        if (!IsConnected || _session is null || _connecting)
+        if (!IsConnected || _session is null || IsConnecting)
         {
-            if (!IsConnected && !_connecting)
+            if (!IsConnected && !IsConnecting)
             {
                 RequestedModel = null;
                 AvailableModels = [];
@@ -4842,13 +4811,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _loadingWorkspaceFiles = true;
         try
         {
-            var root = _projectPath;
+            var root = ProjectPath;
             var files = await Task.Run(() => WorkspaceFileIndex.Enumerate(root));
 
-            if (_workspaceFiles is null)
-            {
-                _workspaceFiles = files;
-            }
+            _workspaceFiles ??= files;
         }
         catch (Exception)
         {
@@ -4928,7 +4894,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private void ShowTodos(IReadOnlyList<TodoItem> todos)
     {
         Todos.ReplaceAll(todos);
-        OpenTodos.ReplaceAll(todos.Where(t => !t.IsDone).ToList());
+        OpenTodos.ReplaceAll([.. todos.Where(t => !t.IsDone)]);
 
         TasksDone = todos.Count(t => t.IsDone);
         TasksTotal = todos.Count;
@@ -4961,9 +4927,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         Title = null;
         ShowTodos([]);
         Artifacts.Clear();
-        _status.ClearSessionChanges();
+        Status.ClearSessionChanges();
         _messageTokens.Clear();
-        _status.SessionTokens = 0;
+        Status.SessionTokens = 0;
         ResumeSessionId = null;
         ClearFeature();
     }
@@ -5006,7 +4972,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     private void CountMessageTokens(string messageId, UsageSnapshot usage)
     {
-        if (!_status.IsOverrideCli || IsCodexSession)
+        if (!Status.IsOverrideCli || IsCodexSession)
         {
             return;
         }
@@ -5015,7 +4981,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (usage.TotalTokens > counted)
         {
             _messageTokens[messageId] = usage.TotalTokens;
-            _status.SessionTokens += usage.TotalTokens - counted;
+            Status.SessionTokens += usage.TotalTokens - counted;
         }
     }
 
@@ -5030,7 +4996,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (done.ParentToolUseId is null && done.Usage is { } usage)
         {
             _lastMessageUsage = usage;
-            _status.Apply(usage);
+            Status.Apply(usage);
         }
 
         // A message that was only a tool call has no text worth a bubble.
@@ -5270,7 +5236,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public async ValueTask DisposeSessionAsync()
     {
         _briefing?.Cancel();
-        _smart.Instance.CancelOwner(_projectPath, _chatId);
+        _smart.Instance.CancelOwner(ProjectPath, _chatId);
         // A tab closed mid-turn would otherwise leave the 500ms timer ticking forever,
         // keeping this view model and its whole transcript rooted.
         _turnTimer.Stop();

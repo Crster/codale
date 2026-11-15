@@ -4,6 +4,7 @@ using System.Runtime.Intrinsics;
 using System.Text;
 
 using Codale.Core.Features;
+using Codale.Db.Engine;
 
 namespace Codale.Db;
 

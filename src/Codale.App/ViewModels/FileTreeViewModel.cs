@@ -1,7 +1,7 @@
-using Codale.Core.Projects;
 using System.Collections.ObjectModel;
 
 using Codale.App.Services;
+using Codale.Core.Projects;
 using Codale.Git;
 
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -18,10 +18,10 @@ public sealed partial class FileNode : ObservableObject
     /// Only git's own store is hidden. Everything else - node_modules, bin, obj - is
     /// shown, faded when .gitignore covers it; loading on expand keeps big ones cheap.
     /// </summary>
-    internal static readonly HashSet<string> Skip = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".git",
-    };
+    internal static readonly HashSet<string> Skip =
+    [
+with(StringComparer.OrdinalIgnoreCase),         ".git",
+    ];
 
     /// <summary>
     /// WinUI's bound-mode TreeView draws the expander chevron only when a node already
@@ -183,7 +183,7 @@ public sealed partial class FileNode : ObservableObject
 
     /// <summary>One directory read, in display order: folders first, then files.</summary>
     internal static List<FileNode> EnumerateChildren(string fullPath) =>
-        EnumerateEntries(fullPath).Select(Create).ToList();
+        [.. EnumerateEntries(fullPath).Select(Create)];
 
     internal static FileNode Create((string Path, bool IsDirectory) entry) =>
         entry.IsDirectory ? ForDirectory(entry.Path) : ForFile(entry.Path);
@@ -271,15 +271,12 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
         _extraFolders = extraFolders;
         SyncWorkspaceFolders();
 
-        if (extraFolders is not null)
-        {
-            extraFolders.Changed += (_, _) =>
+        extraFolders?.Changed += (_, _) =>
             {
                 SyncWorkspaceFolders();
                 SyncWatchers();
                 RefreshSearch();
             };
-        }
 
         SyncWatchers();
     }
@@ -498,13 +495,12 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
             }
         }
 
-        return matches
+        return [.. matches
             .OrderBy(m => m.Rank)
             .ThenBy(m => Path.GetFileName(m.Path), StringComparer.OrdinalIgnoreCase)
             .ThenBy(m => m.Path, StringComparer.OrdinalIgnoreCase)
             .Take(MaxSearchResults)
-            .Select(m => (m.Path, m.Directory))
-            .ToList();
+            .Select(m => (m.Path, m.Directory))];
     }
 
     /// <summary>Every pattern character appears in the text, in order, not necessarily adjacent; used on file names only. '?' matches any single character.</summary>
@@ -564,13 +560,8 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
 
     private static bool IsIgnoredDirectory(string fullPath, GitStatusMap? map, string? mapRoot)
     {
-        if (map is null || mapRoot is null ||
-            !WorkspacePaths.IsWithin(fullPath, mapRoot, includeRoot: false))
-        {
-            return false;
-        }
-
-        return map.Classify(Path.GetRelativePath(mapRoot, fullPath).Replace('\\', '/')).Ignored;
+        return map is not null && mapRoot is not null &&
+            WorkspacePaths.IsWithin(fullPath, mapRoot, includeRoot: false) && map.Classify(Path.GetRelativePath(mapRoot, fullPath).Replace('\\', '/')).Ignored;
     }
 
     /// <summary>
@@ -983,13 +974,10 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
     /// <summary>The git state of one file from the last snapshot, or null when clean or outside the repository.</summary>
     public GitChangeKind? GitStatusOf(string fullPath)
     {
-        if (_lastMap is not { } map || _lastMapRoot is not { } root ||
-            !WorkspacePaths.IsWithin(fullPath, root, includeRoot: false))
-        {
-            return null;
-        }
-
-        return map.Classify(Path.GetRelativePath(root, fullPath).Replace('\\', '/')).Status;
+        return _lastMap is not { } map || _lastMapRoot is not { } root ||
+            !WorkspacePaths.IsWithin(fullPath, root, includeRoot: false)
+            ? null
+            : map.Classify(Path.GetRelativePath(root, fullPath).Replace('\\', '/')).Status;
     }
 
     /// <summary>Re-applies the last snapshot, after lazily loading more of the tree.</summary>
@@ -1095,12 +1083,9 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
     /// <summary>The same order the directory listing starts in: folders first, then by name.</summary>
     private static bool ComesBefore(FileNode left, FileNode right)
     {
-        if (left.IsDirectory != right.IsDirectory)
-        {
-            return left.IsDirectory;
-        }
-
-        return string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase) < 0;
+        return left.IsDirectory != right.IsDirectory
+            ? left.IsDirectory
+            : string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase) < 0;
     }
 
     /// <summary>
@@ -1199,11 +1184,6 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
         }
 
         var relative = Path.GetRelativePath(repositoryRoot, node.FullPath).Replace('\\', '/');
-        if (map.Classify(relative).Status != GitChangeKind.Deleted)
-        {
-            return false;
-        }
-
-        return node.IsDirectory ? !Directory.Exists(node.FullPath) : !File.Exists(node.FullPath);
+        return map.Classify(relative).Status == GitChangeKind.Deleted && (node.IsDirectory ? !Directory.Exists(node.FullPath) : !File.Exists(node.FullPath));
     }
 }

@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 
 using Codale.Core.Projects;
 
-namespace Codale.Search;
+namespace Codale.Search.Engine;
 
 public sealed record SourceIndexOptions
 {
@@ -58,11 +58,10 @@ public sealed class SourceIndex : IDisposable
     private static readonly ConcurrentDictionary<string, (SourceIndex Index, long Used)> Shared =
         new(StringComparer.OrdinalIgnoreCase);
 
-    private static long _useClock;
+    private static long s_useClock;
 
     private readonly Lock _gate = new();
     private readonly SourceIndexOptions _options;
-    private readonly WorkspaceModel _model;
 
     /// <summary>Files found binary, by size and write time, so a refresh does not read them again.</summary>
     private readonly ConcurrentDictionary<string, (long Length, DateTime Written)> _binary = new(StringComparer.OrdinalIgnoreCase);
@@ -78,7 +77,7 @@ public sealed class SourceIndex : IDisposable
     {
         Root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         _options = options ?? new SourceIndexOptions();
-        _model = new WorkspaceModel(_options.ModelPath);
+        Model = new WorkspaceModel(_options.ModelPath);
     }
 
     /// <summary>
@@ -89,7 +88,7 @@ public sealed class SourceIndex : IDisposable
     public static SourceIndex For(string root)
     {
         var key = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
-        var used = Interlocked.Increment(ref _useClock);
+        var used = Interlocked.Increment(ref s_useClock);
         var entry = Shared.AddOrUpdate(key, k => (new SourceIndex(k, new SourceIndexOptions { ModelPath = ModelPathFor(k) }), used), (_, e) => (e.Index, used));
 
         if (Shared.Count > MaxShared)
@@ -124,7 +123,7 @@ public sealed class SourceIndex : IDisposable
     public event Action? StateChanged;
 
     /// <summary>The workspace model: learned from this project's files and kept current as they change.</summary>
-    public WorkspaceModel Model => _model;
+    public WorkspaceModel Model { get; }
 
     /// <summary>
     /// The names to offer at the cursor: the model's suggestions for <paramref name="prefix"/>, ranked with the
@@ -133,7 +132,7 @@ public sealed class SourceIndex : IDisposable
     public IReadOnlyList<WorkspaceSuggestion> Suggest(string prefix, string? previousWord = null)
     {
         Warm();
-        return _model.Suggest(prefix, previousWord);
+        return Model.Suggest(prefix, previousWord);
     }
 
     /// <summary>Starts the scan now if one is due, without waiting for it. Cheap to call often.</summary>
@@ -220,7 +219,7 @@ public sealed class SourceIndex : IDisposable
     private async Task<SourceSnapshot> BuildCoreAsync()
     {
         EnsureWatcher();
-        _model.Load();
+        Model.Load();
 
         var version = Interlocked.Read(ref _version);
         var reloadAll = Interlocked.Exchange(ref _reloadAll, 0) == 1;
@@ -280,7 +279,7 @@ public sealed class SourceIndex : IDisposable
             }
 
             // Stored by the workspace model and unchanged since: its statistics stand, nothing is read.
-            if (!reloadAll && _model.Rehydrate(relative, full, info.Length, info.LastWriteTimeUtc) is { } stored)
+            if (!reloadAll && Model.Rehydrate(relative, full, info.Length, info.LastWriteTimeUtc) is { } stored)
             {
                 files[i] = stored;
                 return;
@@ -303,21 +302,21 @@ public sealed class SourceIndex : IDisposable
         {
             if (!file.IsLarge)
             {
-                _model.Put(file);
+                Model.Put(file);
             }
         }
 
         var kept = new HashSet<string>(indexed.Where(f => !f.IsLarge).Select(f => f.RelativePath), StringComparer.OrdinalIgnoreCase);
-        foreach (var gone in _model.Paths().Where(p => !kept.Contains(p)))
+        foreach (var gone in Model.Paths().Where(p => !kept.Contains(p)))
         {
-            _model.Remove(gone);
+            Model.Remove(gone);
         }
 
         // The first scan is saved at once, so a restart finds the model. After that a burst of edits is
         // folded into one write: the model is rewritten whole, and rewriting it per saved file is megabytes of disk.
         if (previous is null)
         {
-            _model.Save();
+            Model.Save();
         }
         else
         {
@@ -347,7 +346,7 @@ public sealed class SourceIndex : IDisposable
                     _saveTimer = null;
                 }
 
-                _model.Save();
+                Model.Save();
             }, null, SaveDelayMs, Timeout.Infinite);
         }
     }
@@ -370,7 +369,7 @@ public sealed class SourceIndex : IDisposable
             return null;
         }
 
-        var pool = _model.Pool;
+        var pool = Model.Pool;
         var (keys, counts, total) = SourceTokens.Count(text, pool);
         var symbols = SourceSymbols.Extract(text, pool);
         var transitions = SourceTokens.Transitions(text, pool);
@@ -482,6 +481,6 @@ public sealed class SourceIndex : IDisposable
             _saveTimer = null;
         }
 
-        _model.Save();
+        Model.Save();
     }
 }

@@ -1,9 +1,9 @@
-using Codale.Core.Agents;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 
 using Codale.App.Services;
+using Codale.Core.Agents;
 using Codale.Core.Serving;
 using Codale.Core.Tasks;
 

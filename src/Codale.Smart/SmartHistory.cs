@@ -7,7 +7,7 @@ public sealed class SmartHistory(string directory)
 {
     public const int MaxRuns = 10;
     public const long MaxBytes = 1024 * 1024;
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private string Folder(string project) => Path.Combine(directory, SummaryCache.Hash(Path.GetFullPath(project).ToUpperInvariant()));
 
     public void Save(SmartActivity activity)

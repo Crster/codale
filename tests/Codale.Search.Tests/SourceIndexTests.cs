@@ -1,5 +1,7 @@
 using System.Text.RegularExpressions;
 
+using Codale.Search.Engine;
+
 namespace Codale.Search.Tests;
 
 /// <summary>

@@ -1,10 +1,6 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
-using System.Xml.Linq;
 using static Codale.Commands.CommandParsing;
 
-namespace Codale.Commands;
+namespace Codale.Commands.Detectors;
 
 internal sealed class GoCommandDetector : IProjectCommandDetector
 {
@@ -12,12 +8,9 @@ internal sealed class GoCommandDetector : IProjectCommandDetector
     public IReadOnlyList<ProjectCommand> Discover(string root)
     {
         var path = Path.Combine(root, "go.mod");
-        if (!File.Exists(path))
-        {
-            return [];
-        }
-
-        return PresetCommands(CommandSource.Go, path,
+        return !File.Exists(path)
+            ? []
+            : (IReadOnlyList<ProjectCommand>)PresetCommands(CommandSource.Go, path,
             ("run", "go run ."),
             ("build", "go build ./..."),
             ("test", "go test ./..."));

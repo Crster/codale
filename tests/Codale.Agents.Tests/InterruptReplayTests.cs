@@ -49,8 +49,6 @@ public sealed class InterruptReplayTests
     private static IReadOnlyList<AgentEvent> Replay(string fixtureName)
     {
         var parser = new Codale.Agents.Claude.ClaudeStreamParser();
-        return File.ReadLines(Fixtures.Path(fixtureName))
-            .SelectMany(parser.Parse)
-            .ToList();
+        return [.. File.ReadLines(Fixtures.Path(fixtureName)).SelectMany(parser.Parse)];
     }
 }

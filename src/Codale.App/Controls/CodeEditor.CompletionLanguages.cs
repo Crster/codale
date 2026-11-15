@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-using Codale.Core.Syntax;
+using Codale.App.Controls.Editing;
 
 namespace Codale.App.Controls;
 
@@ -22,16 +22,16 @@ public sealed partial class CodeEditor
     [GeneratedRegex(@"\$?[A-Za-z_]\w*")]
     private static partial Regex PhpWordRegex();
 
-    private bool IsCss => _languageId is "css" or "scss" or "less";
+    private bool IsCss => languageId is "css" or "scss" or "less";
 
-    private bool IsJson => _languageId is "json" or "jsonc";
+    private bool IsJson => languageId is "json" or "jsonc";
 
-    private bool IsBatch => _languageId is "bat";
+    private bool IsBatch => languageId is "bat";
 
-    private Regex? DocWordRegex() => IsCss ? CssWordRegex() : _languageId is "php" ? PhpWordRegex() : null;
+    private Regex? DocWordRegex() => IsCss ? CssWordRegex() : languageId is "php" ? PhpWordRegex() : null;
 
     /// <summary>Characters, beyond letters and digits, that belong inside a name in this language.</summary>
-    private bool IsExtraNameChar(char ch) => IsMarkup ? ch is '-' or ':' or '.' : IsCss ? ch == '-' : _languageId is "php" && ch == '$';
+    private bool IsExtraNameChar(char ch) => IsMarkup ? ch is '-' or ':' or '.' : IsCss ? ch == '-' : languageId is "php" && ch == '$';
 
     /// <summary>Fills the per-language name sets (_docAttrs doubles as JSON keys and batch variables).</summary>
     private void CollectLanguageNames(string text)
@@ -97,11 +97,11 @@ public sealed partial class CodeEditor
     private int CssDepth(int start)
     {
         var depth = 0;
-        var first = Math.Max(0, _caret.Line - 400);
-        for (var l = first; l <= _caret.Line && l < _doc.LineCount; l++)
+        var first = Math.Max(0, caret.Line - 400);
+        for (var l = first; l <= caret.Line && l < doc.LineCount; l++)
         {
-            var text = _doc.GetLine(l);
-            var end = l == _caret.Line ? Math.Min(start, text.Length) : text.Length;
+            var text = doc.GetLine(l);
+            var end = l == caret.Line ? Math.Min(start, text.Length) : text.Length;
             for (var i = 0; i < end; i++)
             {
                 if (text[i] == '{')

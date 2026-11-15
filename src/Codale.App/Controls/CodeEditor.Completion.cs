@@ -1,8 +1,10 @@
 using System.Text.RegularExpressions;
 
+using Codale.App.Controls.Editing;
 using Codale.Core.Syntax;
 using Codale.Editor;
 using Codale.Search;
+using Codale.Search.Engine;
 
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -59,10 +61,10 @@ public sealed partial class CodeEditor
     [GeneratedRegex(@"\s([A-Za-z_@:][\w:.-]*)\s*=")]
     private static partial Regex AttributeRegex();
 
-    private readonly HashSet<string> _docTags = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _docAttrs = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _docTags = [with(StringComparer.Ordinal)];
+    private readonly HashSet<string> _docAttrs = [with(StringComparer.Ordinal)];
 
-    private bool IsMarkup => _languageId is "html" or "xml" or "xsl" or "vue" or "svelte";
+    private bool IsMarkup => languageId is "html" or "xml" or "xsl" or "vue" or "svelte";
 
     /// <summary>Tag when the caret names an element (just after '&lt;' or '&lt;/'), Attribute inside an open tag, else null.</summary>
     private static CompletionKind? MarkupContext(string line, int start)
@@ -92,7 +94,7 @@ public sealed partial class CodeEditor
         "rel", "required", "role", "rowspan", "selected", "src", "srcset", "style", "tabindex", "target", "title", "type", "value", "width", "height",
     ];
 
-    private readonly Dictionary<string, (CompletionKind Kind, int Count)> _docWords = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (CompletionKind Kind, int Count)> _docWords = [with(StringComparer.Ordinal)];
     private bool _docWordsDirty = true;
     private DateTime _docWordsBuiltUtc = DateTime.MinValue;
 
@@ -141,7 +143,6 @@ public sealed partial class CodeEditor
         }
 
         LostFocus += (_, _) =>
-        {
             // Clicking an entry moves focus onto the list for a moment; only close when it really left.
             DispatcherQueue.TryEnqueue(() =>
             {
@@ -150,13 +151,12 @@ public sealed partial class CodeEditor
                     CloseCompletion();
                 }
             });
-        };
         ScrollChanged += (_, _) => CloseCompletion();
     }
 
-    private TextBuffer _doc => _model.Buffer;
+    private TextBuffer doc => _model.Buffer;
 
-    private DocumentPosition _caret => _model.Primary.Caret;
+    private DocumentPosition caret => _model.Primary.Caret;
 
     private static bool IsWordChar(char c) => TextUnits.IsWordChar(c);
 
@@ -191,7 +191,7 @@ public sealed partial class CodeEditor
         var list = new List<(string, CompletionKind)>();
 
 
-        if (_languageId is not null && ExtraKeywords.TryGetValue(KeywordKey(_languageId), out var extra))
+        if (languageId is not null && ExtraKeywords.TryGetValue(KeywordKey(languageId), out var extra))
         {
             foreach (var word in extra)
             {
@@ -199,7 +199,7 @@ public sealed partial class CodeEditor
             }
         }
 
-        if (_languageId is not null && StandardNames.TryGetValue(_languageId, out var standard))
+        if (languageId is not null && StandardNames.TryGetValue(languageId, out var standard))
         {
             foreach (var word in standard)
             {
@@ -226,7 +226,7 @@ public sealed partial class CodeEditor
             return;
         }
 
-        var big = _doc.CharCount > LargeDocumentChars;
+        var big = doc.CharCount > LargeDocumentChars;
         if (big && (DateTime.UtcNow - _docWordsBuiltUtc).TotalMilliseconds < 1500 && _docWords.Count > 0)
         {
             return;
@@ -239,7 +239,7 @@ public sealed partial class CodeEditor
         _docAttrs.Clear();
 
         // A large file is scanned around the caret only; the words in use nearby are the ones worth offering.
-        var text = big ? WindowText(_caret.Line, 4000) : _doc.GetText();
+        var text = big ? WindowText(caret.Line, 4000) : doc.GetText();
         if (IsMarkup)
         {
             foreach (Match m in TagRegex().Matches(text))
@@ -329,14 +329,14 @@ public sealed partial class CodeEditor
     /// <summary>Re-evaluates the list for the word before the caret; closes it when nothing fits.</summary>
     private void UpdateCompletion(bool manual = false)
     {
-        if (HasSelection || _caret.Line >= _doc.LineCount)
+        if (HasSelection || caret.Line >= doc.LineCount)
         {
             CloseCompletion();
             return;
         }
 
-        var line = _doc.GetLine(_caret.Line);
-        var start = _caret.Col;
+        var line = doc.GetLine(caret.Line);
+        var start = caret.Col;
         while (start > 0 && IsWordChar(line[start - 1]))
         {
             start--;
@@ -350,7 +350,7 @@ public sealed partial class CodeEditor
             start--;
         }
 
-        var prefix = line[start.._caret.Col];
+        var prefix = line[start..caret.Col];
         if ((prefix.Length == 0 && !manual) || (prefix.Length > 0 && char.IsDigit(prefix[0])))
         {
             CloseCompletion();
@@ -358,7 +358,7 @@ public sealed partial class CodeEditor
         }
 
         // Nothing to suggest inside a comment or a string.
-        if (_caret.Col > 0 && _highlighter.Get(_caret.Line).KindAt(_caret.Col - 1) is CodeTokenKind.Comment or CodeTokenKind.String)
+        if (caret.Col > 0 && _highlighter.Get(caret.Line).KindAt(caret.Col - 1) is CodeTokenKind.Comment or CodeTokenKind.String)
         {
             CloseCompletion();
             return;
@@ -392,7 +392,7 @@ public sealed partial class CodeEditor
         if (markup && MarkupContext(line, start) is { } place)
         {
             var isTag = place == CompletionKind.Tag;
-            var builtIn = _languageId is "xml" or "xsl" ? Array.Empty<string>() : isTag ? HtmlTags : HtmlAttributes;
+            var builtIn = languageId is "xml" or "xsl" ? [] : isTag ? HtmlTags : HtmlAttributes;
             foreach (var word in isTag ? _docTags : _docAttrs)
             {
                 Offer(word, place);
@@ -508,7 +508,7 @@ public sealed partial class CodeEditor
 
     private void ShowItems(Dictionary<string, CompletionItem> found, int start)
     {
-        var prefix = _doc.GetLine(_caret.Line)[start.._caret.Col];
+        var prefix = doc.GetLine(caret.Line)[start..caret.Col];
         var items = found.Values
             .OrderBy(i => i.Score)
             // Among equal matches the project model's order stands (what the code learned to write here); local words by length.
@@ -527,7 +527,7 @@ public sealed partial class CodeEditor
         }
 
         _completionItems = items;
-        _completionLine = _caret.Line;
+        _completionLine = caret.Line;
         _completionStartCol = start;
         ShowCompletion();
     }
@@ -630,8 +630,8 @@ public sealed partial class CodeEditor
         var text = _completionItems[index].Text;
         CloseCompletion();
 
-        var from = new DocumentPosition(_completionLine, Math.Min(_completionStartCol, _caret.Col));
-        _model.ReplaceRange(from, _caret, text);
+        var from = new DocumentPosition(_completionLine, Math.Min(_completionStartCol, caret.Col));
+        _model.ReplaceRange(from, caret, text);
     }
 
     private void OnCompletionItemClick(object sender, ItemClickEventArgs e)
@@ -693,7 +693,7 @@ public sealed partial class CodeEditor
     private string WindowText(int line, int radius)
     {
         var first = Math.Max(0, line - radius);
-        var last = Math.Min(_doc.LineCount - 1, line + radius);
-        return string.Join('\n', _doc.Lines.Skip(first).Take(last - first + 1));
+        var last = Math.Min(doc.LineCount - 1, line + radius);
+        return string.Join('\n', doc.Lines.Skip(first).Take(last - first + 1));
     }
 }

@@ -42,7 +42,6 @@ static class FimCases
     public static bool Passes(Case c, string raw)
     {
         var line = Normalize(Shown(c, raw));
-        if (line.Length == 0) return false;
-        return c.Accepted.Any(a => line == Normalize(a) || line.TrimEnd(';') == Normalize(a).TrimEnd(';'));
+        return line.Length != 0 && c.Accepted.Any(a => line == Normalize(a) || line.TrimEnd(';') == Normalize(a).TrimEnd(';'));
     }
 }

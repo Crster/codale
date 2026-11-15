@@ -214,6 +214,30 @@ Automated validation: every library test project passes (Core 1,004; Agents 406;
 
 Manual Windows checks remain open and need a person at the app: live chat scaling, shortcut recording, grammar changes, close and cancel, launcher-only close, project switching, and external settings edits. Item 10 stays unchecked until they are done.
 
+### Build warnings and suggestions cleanup (2026-11-15, in progress)
+
+Build: the whole solution builds with 0 errors and 0 warnings. Whitespace and import ordering were applied across the solution, and the safe style fixes (unnecessary usings, collection initialisers, expression bodies, pattern simplifications) and the mechanical analyzer fixes were applied. Three fixer changes that broke the build were reverted by hand (nullable history-path properties, a conditional collection expression, and a span held across an await). The smoke harness no longer copies Core's `FimText` source, which removes the duplicate-type warning.
+
+Remaining suggestions (from `dotnet format`, which reports more than the build): IDE1006 naming (318), SYSLIB1045 generated regex (78), SYSLIB1054 LibraryImport (39), CA1822 static members (39), IDE0130 namespace mismatch (36), CA1859/CA1861/CA1826/CA1068 (88), IDE0060 unused parameters (12 sites, two are event-handler signatures that cannot change), and assorted CA/IDE items. `ChatViewModel.RetrieveProjectContextAsync` has an unused `preparationDeadline` threaded through several methods because its enrichment body is disabled; that is a design decision, not a mechanical fix.
+
+Test status after the cleanup: Core 1,004, Agents 406, Smart 163, Search 340, Terminal 78, Git 73, Db 53, Commands 55, Mcp 52, Editor 32, Settings 8, Workspace 8 — all pass.
+
+### Warning and suggestion cleanup, round 2 (2026-11-15)
+
+Decisions applied: the dead retrieval path in the chat view model was deleted, and the new-topic marker it used to set now comes from `MarkNewTopic`, so the transcript still marks topic changes. The event-handler `sender` warnings are suppressed with a justification. Naming was applied with a Roslyn rename tool (outside the repository), which renamed 158 symbols and left the draft field to a manual rename. Namespaces now match folders for the 36 mismatched files; the editor folder is `Controls/Editing` because a `CodeEditor` folder would collide with the `CodeEditor` class.
+
+Build: 0 errors and 0 warnings. Tests: Core 1,004; Agents 406; Smart 163; Search 340; Terminal 78; Git 73; Db 53; Commands 55; Mcp 52; Editor 32; Settings 8; Workspace 8, all passing. One Search test failed once during a back-to-back run and passed on three reruns; it has not been reproduced.
+
+Remaining suggestions from `dotnet format` (about 380): SYSLIB1045 generated regex (78), SYSLIB1054 LibraryImport (39), CA1822 static members (39), CA1859 (34), CA1861 constant arrays (22), CA1826 indexers (15), CA1068 cancellation token order (12), IDE0060 unused parameters (10: two event handlers suppressed, the rest are the `BuildSeed`, shell classifier and smart retrieval defects listed below), IDE0046 and other small style items, IDE1006 naming (8), and CA rules with no automatic fix. The suspected defects, which need a decision before the parameters are removed: `FeatureBrief.BuildSeed` never uses the explored files it is given; `ShellCommandClassifier` ignores its subcommand and bash-mode inputs (security-sensitive); `ProjectKnowledgeIndex.RetrieveSmartAsync` ignores its deadline and intent.
+
+### Regex and interop rewrites (2026-11-15)
+
+Regex: the 31 static regex fields are now `[GeneratedRegex]` partial members, and their call sites use the generated members. Build: 0 errors, 0 warnings. All twelve test projects pass.
+
+Still open: 44 inline `Regex.*` calls with literal patterns (SYSLIB1045) and 3 test-only `new Regex(...)` sites. Each needs a generated member with a name chosen for its context.
+
+Interop (SYSLIB1054, 39 sites) is not rewritten. `LibraryImport` cannot marshal several declarations as they stand: `Native.cs` passes an `EnumWindowsProc` delegate and a `StringBuilder`; `NativeRuntime.cs` uses the cdecl calling convention; some declarations rely on the default ANSI character set, and `bool` parameters need explicit marshalling. Those changes change native-call behaviour and need a Windows run to verify, so they are a separate reviewed change.
+
 ### Store caller migration (2026-11-15)
 
 `FeatureService` now receives the workspace data context and creates `FeatureLog` instances from its history store. `ProjectCommandService` accepts a configuration-store resolver; the application supplies one backed by its workspace data factory. Feature log and saved-command operations therefore use the composed pool instead of creating stores through the static workspace fallback. Tests verify that both workflows persist normally and reject access after their owner is disposed. Standalone and MCP callers retain their existing defaults and process boundaries.

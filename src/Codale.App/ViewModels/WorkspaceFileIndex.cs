@@ -9,8 +9,9 @@ namespace Codale.App.ViewModels;
 public static class WorkspaceFileIndex
 {
     /// <summary>Directories that never belong in a mention list.</summary>
-    private static readonly HashSet<string> SkippedDirectories = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly HashSet<string> SkippedDirectories =
+    [
+        with(StringComparer.OrdinalIgnoreCase),
         ".git",
         ".vs",
         ".idea",
@@ -26,7 +27,7 @@ public static class WorkspaceFileIndex
         ".pytest_cache",
         ".venv",
         "venv",
-    };
+    ];
 
     private const int MaxFiles = 2000;
     private const int MaxDepth = 12;

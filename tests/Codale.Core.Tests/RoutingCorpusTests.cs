@@ -1,5 +1,7 @@
 using System.Text.Json;
+
 using Codale.Core.Helper;
+
 using Xunit.Abstractions;
 
 namespace Codale.Core.Tests;
@@ -67,12 +69,12 @@ public sealed class RoutingCorpusTests(ITestOutputHelper output)
     [Fact]
     public void Local_routing_sends_big_or_unclear_work_to_plan_questions_to_ask_and_leaves_changes_alone()
     {
-        var score = Score("corpus", Load(CorpusPath()));
+        var (accuracy, interrupted, planRecall, askRecall) = Score("corpus", Load(CorpusPath()));
         // Floors: raise as routing improves, never lower to make a change pass.
-        Assert.True(score.Interrupted <= 0.03, $"plain changes interrupted: {score.Interrupted:P1}");
-        Assert.True(score.PlanRecall >= 0.80, $"plan recall: {score.PlanRecall:P0}");
-        Assert.True(score.AskRecall >= 0.85, $"ask recall: {score.AskRecall:P0}");
-        Assert.True(score.Accuracy >= 0.90, $"accuracy: {score.Accuracy:P0}");
+        Assert.True(interrupted <= 0.03, $"plain changes interrupted: {interrupted:P1}");
+        Assert.True(planRecall >= 0.80, $"plan recall: {planRecall:P0}");
+        Assert.True(askRecall >= 0.85, $"ask recall: {askRecall:P0}");
+        Assert.True(accuracy >= 0.90, $"accuracy: {accuracy:P0}");
     }
 
     [Fact]
@@ -80,7 +82,7 @@ public sealed class RoutingCorpusTests(ITestOutputHelper output)
     {
         var path = Environment.GetEnvironmentVariable("CODALE_ROUTING_CORPUS");
         if (string.IsNullOrWhiteSpace(path)) return;
-        var score = Score("your corpus", Load(path));
-        Assert.True(score.Interrupted <= 0.05, $"plain changes interrupted: {score.Interrupted:P1}");
+        var (_, interrupted, _, _) = Score("your corpus", Load(path));
+        Assert.True(interrupted <= 0.05, $"plain changes interrupted: {interrupted:P1}");
     }
 }

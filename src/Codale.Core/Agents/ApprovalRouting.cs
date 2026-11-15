@@ -41,21 +41,10 @@ public static class ApprovalRouting
             return ApprovalStep.AllowAttachedRead;
         }
 
-        if (permissionMode is not ("manual" or "default") && runsUnasked)
-        {
-            return ApprovalStep.AllowUnasked;
-        }
-
-        if (ApprovalPolicy.Governs(permissionMode))
-        {
-            return ApprovalStep.ConsultPolicy;
-        }
-
-        if (permissionMode == "acceptEdits" && EditTools.Contains(toolName))
-        {
-            return ApprovalStep.AllowEdit;
-        }
-
-        return ApprovalStep.Continue;
+        return permissionMode is not ("manual" or "default") && runsUnasked
+            ? ApprovalStep.AllowUnasked
+            : ApprovalPolicy.Governs(permissionMode)
+            ? ApprovalStep.ConsultPolicy
+            : permissionMode == "acceptEdits" && EditTools.Contains(toolName) ? ApprovalStep.AllowEdit : ApprovalStep.Continue;
     }
 }

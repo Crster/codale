@@ -49,7 +49,7 @@ public sealed class MemoryStore(string directory, WorkspaceDatabasePool? databas
 
     /// <summary>Every note, newest first.</summary>
     public IReadOnlyList<MemoryNote> List() => (databases ?? WorkspaceDb.Shared).Use(directory, db =>
-        (IReadOnlyList<MemoryNote>)Everything(db).OrderByDescending(n => n.SavedAt).ToList());
+        (IReadOnlyList<MemoryNote>)[.. Everything(db).OrderByDescending(n => n.SavedAt)]);
 
     /// <summary>The notes that best answer <paramref name="query"/>, best first; empty when none relate to it.</summary>
     public IReadOnlyList<MemoryNote> Search(string query, int limit = 5) => (databases ?? WorkspaceDb.Shared).Use(directory, db =>
@@ -80,7 +80,7 @@ public sealed class MemoryStore(string directory, WorkspaceDatabasePool? databas
                 : (note, hit.Score);
         }
 
-        return (IReadOnlyList<MemoryNote>)scores.Values.OrderByDescending(s => s.Score).Take(limit).Select(s => s.Note).ToList();
+        return (IReadOnlyList<MemoryNote>)[.. scores.Values.OrderByDescending(s => s.Score).Take(limit).Select(s => s.Note)];
     });
 
     private static IEnumerable<MemoryNote> Everything(Codale.Db.CodaleDb db)

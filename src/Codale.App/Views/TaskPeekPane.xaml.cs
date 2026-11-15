@@ -1,10 +1,8 @@
 using System.ComponentModel;
 using System.Text.RegularExpressions;
 
-using Codale.App.Services;
 using Codale.App.ViewModels;
 using Codale.Core.Agents;
-using Codale.Core.Helper;
 using Codale.Core.Shell;
 
 using Microsoft.UI.Dispatching;
@@ -26,7 +24,6 @@ public sealed partial class TaskPeekPane : UserControl
     private const int MaxDisplayChars = 40_000;
 
     private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
-    private RunningTaskItem? _task;
     private FileTailer? _tailer;
     private string? _cwd;
     private IReadOnlyList<string> _extraRoots = [];
@@ -51,20 +48,20 @@ public sealed partial class TaskPeekPane : UserControl
 
     private void OnOpenInTabClick(object sender, RoutedEventArgs e)
     {
-        if (_task is { } task)
+        if (Task is { } task)
         {
             OpenInTabRequested?.Invoke(this, task);
         }
     }
 
-    public RunningTaskItem? Task => _task;
+    public RunningTaskItem? Task { get; private set; }
 
     public void Show(RunningTaskItem task, string? cwd, IReadOnlyList<string> extraRoots)
     {
         Detach();
         _cwd = cwd;
-        _extraRoots = extraRoots.ToArray();
-        _task = task;
+        _extraRoots = [.. extraRoots];
+        Task = task;
         task.IsPeeked = true;
         task.PropertyChanged += OnTaskChanged;
 
@@ -134,22 +131,22 @@ public sealed partial class TaskPeekPane : UserControl
     {
         _cwd = null;
         _extraRoots = [];
-        if (_task is not null)
+        if (Task is not null)
         {
-            _task.IsPeeked = false;
-            _task.PropertyChanged -= OnTaskChanged;
+            Task.IsPeeked = false;
+            Task.PropertyChanged -= OnTaskChanged;
         }
 
         Transcript.Changed -= OnTranscriptChanged;
         Transcript.Detach();
         _tailer?.Dispose();
         _tailer = null;
-        _task = null;
+        Task = null;
     }
 
     private void StartTailing()
     {
-        if (_task is not { IsShell: true, OutputPath: { Length: > 0 } path } task || _tailer is not null)
+        if (Task is not { IsShell: true, OutputPath: { Length: > 0 } path } task || _tailer is not null)
         {
             return;
         }
@@ -178,10 +175,10 @@ public sealed partial class TaskPeekPane : UserControl
                     StartTailing();
                     break;
                 case nameof(RunningTaskItem.Header):
-                    if (_task is not null)
+                    if (Task is not null)
                     {
-                        ShowDetails(_task);
-                                    }
+                        ShowDetails(Task);
+                    }
 
                     Refresh(stickToEnd: false);
                     break;
@@ -192,10 +189,10 @@ public sealed partial class TaskPeekPane : UserControl
                 case nameof(RunningTaskItem.Risk):
                 case nameof(RunningTaskItem.RiskReason):
                 case nameof(RunningTaskItem.DisplayTitle):
-                    if (_task is not null)
+                    if (Task is not null)
                     {
-                        TitleText.Text = _task.DisplayTitle;
-                        ShowDetails(_task);
+                        TitleText.Text = Task.DisplayTitle;
+                        ShowDetails(Task);
                     }
 
                     break;
@@ -209,19 +206,19 @@ public sealed partial class TaskPeekPane : UserControl
 
     private void Refresh(bool stickToEnd)
     {
-        if (_task is null)
+        if (Task is null)
         {
             return;
         }
 
-        if (!_task.IsShell)
+        if (!Task.IsShell)
         {
             UpdateStatus();
             return;
         }
 
         var follow = stickToEnd || LogScroll.VerticalOffset >= LogScroll.ScrollableHeight - 24;
-        RenderLog(_task);
+        RenderLog(Task);
         UpdateStatus();
 
         if (follow)
@@ -323,22 +320,7 @@ public sealed partial class TaskPeekPane : UserControl
             return OkBrush;
         }
 
-        if (ErrorWord().IsMatch(line))
-        {
-            return ErrorBrush;
-        }
-
-        if (WarnWord().IsMatch(line))
-        {
-            return WarnBrush;
-        }
-
-        if (OkWord().IsMatch(line))
-        {
-            return OkBrush;
-        }
-
-        return PlainBrush;
+        return ErrorWord().IsMatch(line) ? ErrorBrush : WarnWord().IsMatch(line) ? WarnBrush : OkWord().IsMatch(line) ? OkBrush : PlainBrush;
     }
 
     private static void Add(InlineCollection inlines, string text, Brush brush, bool bold = false)
@@ -354,32 +336,32 @@ public sealed partial class TaskPeekPane : UserControl
 
     private void UpdateStatus()
     {
-        if (_task is null)
+        if (Task is null)
         {
             return;
         }
 
-        var waiting = _task.IsShell && _task.Output.Length == 0 && _task.IsRunning
-            ? _task.OutputPath is null && _task.RuntimeId is null ? " · no output file reported" : " · waiting for output"
+        var waiting = Task.IsShell && Task.Output.Length == 0 && Task.IsRunning
+            ? Task.OutputPath is null && Task.RuntimeId is null ? " · no output file reported" : " · waiting for output"
             : "";
-        var termination = !_task.IsShell ? ""
-            : _task.IsStopping ? " · stopping…"
-            : _task.CanStop ? " · still running, Stop to terminate"
-            : _task.IsRunning ? _task.Pid is { } pid ? $" · pid {pid}, can't be stopped from here" : " · can't be stopped from here"
+        var termination = !Task.IsShell ? ""
+            : Task.IsStopping ? " · stopping…"
+            : Task.CanStop ? " · still running, Stop to terminate"
+            : Task.IsRunning ? Task.Pid is { } pid ? $" · pid {pid}, can't be stopped from here" : " · can't be stopped from here"
             : " · nothing left to terminate";
-        StatusText.Text = _task.StatusLabel + termination + waiting;
-        RunningDot.Visibility = _task.IsRunning ? Visibility.Visible : Visibility.Collapsed;
-        StopButton.Visibility = _task.CanStop ? Visibility.Visible : Visibility.Collapsed;
-        Pulse.SetIsActive(RunningDot, _task.IsRunning);
+        StatusText.Text = Task.StatusLabel + termination + waiting;
+        RunningDot.Visibility = Task.IsRunning ? Visibility.Visible : Visibility.Collapsed;
+        StopButton.Visibility = Task.CanStop ? Visibility.Visible : Visibility.Collapsed;
+        Pulse.SetIsActive(RunningDot, Task.IsRunning);
     }
 
     public event EventHandler<RunningTaskItem>? StopRequested;
 
     private void OnStopClick(object sender, RoutedEventArgs e)
     {
-        if (_task is not null)
+        if (Task is not null)
         {
-            StopRequested?.Invoke(this, _task);
+            StopRequested?.Invoke(this, Task);
         }
     }
 

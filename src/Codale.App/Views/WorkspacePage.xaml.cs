@@ -1,15 +1,14 @@
-using Codale.Core.Projects;
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Text;
 
 using Codale.Agents;
-using Codale.Agents.Claude;
 using Codale.App.Controls;
 using Codale.App.Services;
+using Codale.App.Themes;
 using Codale.App.ViewModels;
 using Codale.Commands;
 using Codale.Core.Agents;
+using Codale.Core.Projects;
 using Codale.Core.Syntax;
 using Codale.Git;
 
@@ -69,10 +68,7 @@ public sealed partial class WorkspacePage : Page
         InitializeComponent();
         InitializeTabGroups();
         Loaded += (_, _) => MarkdownView.FileLinkClicked += OnMarkdownFileLink;
-        Unloaded += (_, _) =>
-        {
-            MarkdownView.FileLinkClicked -= OnMarkdownFileLink;
-        };
+        Unloaded += (_, _) => MarkdownView.FileLinkClicked -= OnMarkdownFileLink;
     }
 
     public WorkspaceViewModel ViewModel { get; private set; } = null!;
@@ -152,11 +148,8 @@ public sealed partial class WorkspacePage : Page
         {
             ViewModel.PropertyChanged -= OnWorkspacePropertyChanged;
             ViewModel.ChatActivationRequested -= OnChatActivationRequested;
-            if (_planWatchedChat is not null)
-            {
-                _planWatchedChat.PlanReplaced -= OnPlanReplaced;
-                _planWatchedChat = null;
-            }
+            _planWatchedChat?.PlanReplaced -= OnPlanReplaced;
+            _planWatchedChat = null;
 
             foreach (var entry in _chatTabs)
             {
@@ -197,9 +190,9 @@ public sealed partial class WorkspacePage : Page
 
     private void RefreshSmartStatus()
     {
-        var status = ViewModel.Smart.Status.Snapshot();
-        SmartStatusText.Text = status.Text;
-        SmartStatusHost.Visibility = status.Visible ? Visibility.Visible : Visibility.Collapsed;
+        var (text, _, visible) = ViewModel.Smart.Status.Snapshot();
+        SmartStatusText.Text = text;
+        SmartStatusHost.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>
@@ -408,9 +401,9 @@ public sealed partial class WorkspacePage : Page
     {
         if (cliId is null)
         {
-            var profile = await ViewModel.Smart.Settings.ResolveChatProfileAsync();
-            ViewModel.Smart.Settings.SetCliProvider(profile.Cli, profile.Provider);
-            cliId = profile.Cli;
+            var (chatCli, provider) = await ViewModel.Smart.Settings.ResolveChatProfileAsync();
+            ViewModel.Smart.Settings.SetCliProvider(chatCli, provider);
+            cliId = chatCli;
         }
         var cli = CliLocator.KnownClis.First(known => known.Id == cliId);
         if (CliLocator.Find(cliId) is not null)
@@ -943,12 +936,7 @@ public sealed partial class WorkspacePage : Page
         // Called for every line submitted at a shell prompt. A CLI launch is taken out of this shell
         // and run in a dedicated tab (the returned empty line clears what was typed); its exit is
         // tracked there, so any other line is simply run as typed.
-        if (!TryOpenCliTab(promptLine, TerminalTabInFront()))
-        {
-            return null;
-        }
-
-        return "";
+        return !TryOpenCliTab(promptLine, TerminalTabInFront()) ? null : "";
     }
 
     /// <summary>
@@ -1219,9 +1207,13 @@ public sealed partial class WorkspacePage : Page
                 {
                 }
             };
-            _searchTabItem = new TabViewItem { Header = "Search", IsClosable = true };
-            _searchTabItem.IconSource = new FontIconSource { Glyph = "\uE721" };
-            _searchTabItem.Content = _searchTab;
+            _searchTabItem = new TabViewItem
+            {
+                Header = "Search",
+                IsClosable = true,
+                IconSource = new FontIconSource { Glyph = "\uE721" },
+                Content = _searchTab
+            };
             AddTab(_searchTabItem);
             UpdateEmptyState();
         }
@@ -1253,8 +1245,12 @@ public sealed partial class WorkspacePage : Page
             FallbackValue = "Diff",
         });
 
-        _diffTabItem = new TabViewItem { IsClosable = true, Header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { icon, name } } };
-        _diffTabItem.Content = _diffTab;
+        _diffTabItem = new TabViewItem
+        {
+            IsClosable = true,
+            Header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { icon, name } },
+            Content = _diffTab
+        };
         AddTab(_diffTabItem);
         UpdateEmptyState();
     }
@@ -1435,7 +1431,7 @@ public sealed partial class WorkspacePage : Page
                     : $"line {line}";
 
             var spans = lineRanges is { Count: > 0 }
-                ? lineRanges.Select(range => new Codale.Search.LineSpan(range.Start, range.End)).ToList()
+                ? [.. lineRanges.Select(range => new Codale.Search.LineSpan(range.Start, range.End))]
                 : new List<Codale.Search.LineSpan> { new(line, end) };
             if (spans.Count > 1)
             {
@@ -1456,7 +1452,7 @@ public sealed partial class WorkspacePage : Page
     }
 
     private static readonly HashSet<string> SkippedFolders =
-        new(StringComparer.OrdinalIgnoreCase) { ".git", "node_modules", "bin", "obj", ".vs" };
+        [with(StringComparer.OrdinalIgnoreCase), ".git", "node_modules", "bin", "obj", ".vs"];
 
     /// <summary>
     /// A relative path whose folders differ from the project's - or a bare file name -
@@ -1629,10 +1625,7 @@ public sealed partial class WorkspacePage : Page
         // from; switching to another chat's plan re-aims the subscription.
         if (!ReferenceEquals(_planWatchedChat, ViewModel.Chat))
         {
-            if (_planWatchedChat is not null)
-            {
-                _planWatchedChat.PlanReplaced -= OnPlanReplaced;
-            }
+            _planWatchedChat?.PlanReplaced -= OnPlanReplaced;
 
             _planWatchedChat = ViewModel.Chat;
             _planWatchedChat.PlanReplaced += OnPlanReplaced;
@@ -1915,10 +1908,7 @@ public sealed partial class WorkspacePage : Page
         // A save changes the working tree, so git re-colours the file tree now rather than on the next poll.
         editor.Saved += (_, _) => _ = ViewModel.Git.RefreshAsync();
         var tab = new EditorTab(ViewModel.Smart, ViewModel.Syntax) { ProjectRoot = ViewModel.ProjectPath, Knowledge = ViewModel.Features.Knowledge, Owner = _window }.WithViewModel(editor);
-        tab.FindReferencesRequested += (_, text) =>
-        {
-            ShowReferences(text);
-        };
+        tab.FindReferencesRequested += (_, text) => ShowReferences(text);
         return tab;
     }
 
@@ -1926,8 +1916,11 @@ public sealed partial class WorkspacePage : Page
     private EditorTabEntry AdoptEditorTab(EditorTab tab, bool isPreview)
     {
         tab.ViewModel.IsPreview = isPreview;
-        var item = new TabViewItem { IsClosable = true };
-        item.Content = tab;
+        var item = new TabViewItem
+        {
+            IsClosable = true,
+            Content = tab
+        };
         item.DoubleTapped += OnEditorTabDoubleTapped;
         item.PointerPressed += (_, _) => _ = tab.CheckAndUpdateIfModifiedAsync();
         item.GotFocus += (_, _) => _ = tab.CheckAndUpdateIfModifiedAsync();
@@ -2149,11 +2142,8 @@ public sealed partial class WorkspacePage : Page
         {
             _artifactTab = null;
             _artifactTabItem = null;
-            if (_planWatchedChat is not null)
-            {
-                _planWatchedChat.PlanReplaced -= OnPlanReplaced;
-                _planWatchedChat = null;
-            }
+            _planWatchedChat?.PlanReplaced -= OnPlanReplaced;
+            _planWatchedChat = null;
         }
         else if (_terminalTabs.FirstOrDefault(t => ReferenceEquals(t.Item, args.Item)) is { } terminalEntry)
         {
@@ -2225,7 +2215,7 @@ public sealed partial class WorkspacePage : Page
 
     private void OnOpenServedClick(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is ServedFolderItem item)
+        if (sender is FrameworkElement { DataContext: ServedFolderItem item })
         {
             McpToolsViewModel.OpenUrl(item.Url);
         }
@@ -2233,7 +2223,7 @@ public sealed partial class WorkspacePage : Page
 
     private void OnCopyServedClick(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is ServedFolderItem item)
+        if (sender is FrameworkElement { DataContext: ServedFolderItem item })
         {
             McpToolsViewModel.CopyUrl(item.Url);
         }
@@ -2241,7 +2231,7 @@ public sealed partial class WorkspacePage : Page
 
     private void OnStopServedClick(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is ServedFolderItem item)
+        if (sender is FrameworkElement { DataContext: ServedFolderItem item })
         {
             ViewModel?.McpTools.StopServing(item.Id);
         }
@@ -2388,7 +2378,7 @@ public sealed partial class WorkspacePage : Page
 
     private void OnRunningCommandClick(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.Tag is TerminalViewModel terminal)
+        if (sender is FrameworkElement { Tag: TerminalViewModel terminal })
         {
             RevealTerminal(terminal);
         }
@@ -2396,7 +2386,7 @@ public sealed partial class WorkspacePage : Page
 
     private void OnCommandItemClick(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.Tag is ProjectCommand command)
+        if (sender is FrameworkElement { Tag: ProjectCommand command })
         {
             OpenCommandTab(command);
         }
@@ -2407,7 +2397,7 @@ public sealed partial class WorkspacePage : Page
 
     private void OnEditSourceFileClick(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.Tag is string path)
+        if (sender is FrameworkElement { Tag: string path })
         {
             ShowFile(path);
         }
@@ -3011,12 +3001,9 @@ public sealed partial class WorkspacePage : Page
         var selected = ViewModel.Files.IsSearching
             ? (FileFilterResults.SelectedItem as FileSearchHit)?.Node
             : FileTree.SelectedItem as FileNode;
-        if (selected is null || selected.IsPlaceholder || selected.IsDraft)
-        {
-            return ViewModel.Files.Root;
-        }
-
-        return selected.IsDirectory
+        return selected is null || selected.IsPlaceholder || selected.IsDraft
+            ? ViewModel.Files.Root
+            : selected.IsDirectory
             ? selected
             : ViewModel.Files.RevealPath(Path.GetDirectoryName(selected.FullPath)!) ?? ViewModel.Files.Root;
     }
@@ -3302,7 +3289,7 @@ public sealed partial class WorkspacePage : Page
             menu.Items.Add(MenuAction("Explore", () => ExploreFolder(node.FullPath)));
         }
 
-        menu.Items.Add(MenuAction("Copy full path",() => CopyText(node.FullPath)));
+        menu.Items.Add(MenuAction("Copy full path", () => CopyText(node.FullPath)));
         menu.Items.Add(MenuAction("Copy relative path", () => CopyText(isRoot ? "." : RelativeToProject(node.FullPath))));
 
         if (!isRoot)
@@ -3605,12 +3592,7 @@ public sealed partial class WorkspacePage : Page
 
     private static string? NameProblem(string name)
     {
-        if (name is "." or ".." || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-        {
-            return $"\"{name}\" is not a valid name.";
-        }
-
-        return null;
+        return name is "." or ".." || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ? $"\"{name}\" is not a valid name." : null;
     }
 
     private async Task CreateEntryAsync(FileNode parent, string name, bool file)
@@ -3791,10 +3773,7 @@ public sealed partial class WorkspacePage : Page
 
         if (node.IsDirectory)
         {
-            if (container is not null)
-            {
-                container.IsExpanded = !container.IsExpanded;
-            }
+            container?.IsExpanded = !container.IsExpanded;
         }
         else
         {

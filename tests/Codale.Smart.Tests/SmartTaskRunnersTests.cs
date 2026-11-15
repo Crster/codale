@@ -1,5 +1,3 @@
-using Codale.Smart;
-
 namespace Codale.Smart.Tests;
 
 public sealed class SmartTaskRunnersTests
@@ -25,12 +23,7 @@ public sealed class SmartTaskRunnersTests
                 await Task.Delay(Timeout.Infinite, ct);
             }
 
-            if (Answer is null)
-            {
-                return null;
-            }
-
-            return new SmartResult<T>(parse(Answer), [], "activity");
+            return Answer is null ? null : new SmartResult<T>(parse(Answer), [], "activity");
         }
     }
 
@@ -67,8 +60,8 @@ public sealed class SmartTaskRunnersTests
             "system", "input", 128, text => text, CancellationToken.None);
 
         Assert.Equal("keywords", result);
-        var call = Assert.Single(host.Calls);
-        Assert.Equal(("/project", "keywords", 128, false), (call.Context.Project, call.Context.Task, call.Cap, call.Background));
+        var (context, cap, background) = Assert.Single(host.Calls);
+        Assert.Equal(("/project", "keywords", 128, false), (context.Project, context.Task, cap, background));
     }
 
     [Fact]

@@ -11,14 +11,14 @@ public sealed partial class ChatViewModel
     private Task _browserViewportRestore = Task.CompletedTask;
 
     private IReadOnlyList<McpServerSpec> WithBrowserControl(IReadOnlyList<McpServerSpec> servers) =>
-        servers.Select(server => server.Name == McpServerSettings.BrowserName
+        [.. servers.Select(server => server.Name == McpServerSettings.BrowserName
             ? server with
             {
                 Env = new Dictionary<string, string>(server.Env ?? new Dictionary<string, string>())
                 {
                     [BrowserViewportControl.EnvironmentKey] = _browserControlPipe,
                 },
-            } : server).ToArray();
+            } : server)];
 
     private void TrackBrowserViewport(AgentEvent e)
     {

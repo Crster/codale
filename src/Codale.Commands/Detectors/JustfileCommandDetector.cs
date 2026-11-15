@@ -1,15 +1,14 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using System.Xml.Linq;
+
 using static Codale.Commands.CommandParsing;
 
-namespace Codale.Commands;
+namespace Codale.Commands.Detectors;
 
-internal sealed class JustfileCommandDetector : IProjectCommandDetector
+internal sealed partial class JustfileCommandDetector : IProjectCommandDetector
 {
     public string Id => "Justfile";
-    private static readonly Regex JustRecipeRegex = new(@"^@?([A-Za-z][A-Za-z0-9_-]*)(?:\s+[^:]*)?\s*:(?![=])", RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"^@?([A-Za-z][A-Za-z0-9_-]*)(?:\s+[^:]*)?\s*:(?![=])", RegexOptions.CultureInvariant)]
+    private static partial Regex JustRecipeRegex();
 
     public IReadOnlyList<ProjectCommand> Discover(string root)
     {
@@ -23,7 +22,7 @@ internal sealed class JustfileCommandDetector : IProjectCommandDetector
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var line in ReadTextSafe(path).Split('\n'))
         {
-            var match = JustRecipeRegex.Match(line);
+            var match = JustRecipeRegex().Match(line);
             if (!match.Success)
             {
                 continue;

@@ -98,7 +98,7 @@ public static class TextBaseline
                 .ToList();
             if (visible.Count == 0) return;
             var baseline = visible.Max(item => item.Baseline);
-            foreach (var item in visible) item.Shift.Y = baseline - item.Baseline;
+            foreach (var (_, shift, entryBaseline) in visible) shift.Y = baseline - entryBaseline;
         }
 
         private bool IsVisible(DependencyObject element)

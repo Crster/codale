@@ -1,3 +1,5 @@
+using Codale.Search.Engine;
+
 namespace Codale.Search.Tests;
 
 /// <summary>The ghost-text header: the project's own types the file uses, with their members, so "_board." is not a guess.</summary>

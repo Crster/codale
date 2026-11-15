@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Codale.Db;
+namespace Codale.Db.Security;
 
 /// <summary>
 /// Protects the database's random 256-bit master key at rest. The master key is generated once, wrapped by
@@ -51,14 +51,12 @@ internal sealed class DpapiKeyProvider : KeyProvider
 
     internal override byte[] Wrap(byte[] masterKey, byte[] salt)
     {
-        if (!OperatingSystem.IsWindows()) throw Unsupported();
-        return ProtectedData.Protect(masterKey, salt, DataProtectionScope.CurrentUser);
+        return !OperatingSystem.IsWindows() ? throw Unsupported() : ProtectedData.Protect(masterKey, salt, DataProtectionScope.CurrentUser);
     }
 
     internal override byte[] Unwrap(byte[] wrapped, byte[] salt)
     {
-        if (!OperatingSystem.IsWindows()) throw Unsupported();
-        return ProtectedData.Unprotect(wrapped, salt, DataProtectionScope.CurrentUser);
+        return !OperatingSystem.IsWindows() ? throw Unsupported() : ProtectedData.Unprotect(wrapped, salt, DataProtectionScope.CurrentUser);
     }
 
     private static PlatformNotSupportedException Unsupported() => new("DPAPI protection needs Windows; use a passphrase or PEM key instead.");

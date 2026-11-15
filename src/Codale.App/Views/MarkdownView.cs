@@ -1,7 +1,6 @@
-using Codale.App.Services;
+using Codale.App.Themes;
 using Codale.App.ViewModels;
 using Codale.Core.Markdown;
-using Codale.Core.Text;
 
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Text;
@@ -1038,11 +1037,6 @@ public sealed class MarkdownView : StackPanel
     /// where it does not - the fallbacks read on dark and light alike.</summary>
     private static Brush ThemeBrush(string key, byte r, byte g, byte b)
     {
-        if (ChatPaletteTheme.TryGetBrush(key, out var brush))
-        {
-            return brush;
-        }
-
-        return new SolidColorBrush(Color.FromArgb(255, r, g, b));
+        return ChatPaletteTheme.TryGetBrush(key, out var brush) ? brush : new SolidColorBrush(Color.FromArgb(255, r, g, b));
     }
 }

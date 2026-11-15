@@ -59,12 +59,9 @@ public static class ClaudeUsageClient
 
         var (fiveHour, fiveHourReset) = Window(root, "five_hour");
         var (sevenDay, sevenDayReset) = Window(root, "seven_day");
-        if (fiveHour is null && sevenDay is null)
-        {
-            return null;
-        }
-
-        return new RateLimitSnapshot
+        return fiveHour is null && sevenDay is null
+            ? null
+            : new RateLimitSnapshot
         {
             FiveHourUtilization = fiveHour,
             FiveHourResetsAt = fiveHourReset,

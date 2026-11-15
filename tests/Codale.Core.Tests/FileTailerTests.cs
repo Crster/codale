@@ -20,7 +20,7 @@ public sealed class FileTailerTests : IDisposable
     public void A_large_append_is_delivered_in_capped_chunks_without_loss()
     {
         var total = FileTailer.MaxChunkBytes * 2 + 123;
-        File.WriteAllBytes(_path, Enumerable.Repeat((byte)'a', total).ToArray());
+        File.WriteAllBytes(_path, [.. Enumerable.Repeat((byte)'a', total)]);
         using var tailer = new FileTailer(_path);
 
         var chunks = new List<string>();

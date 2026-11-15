@@ -67,7 +67,10 @@ public sealed class PresentationSettingsTests
         second.Start();
         first.Store.Add(new Codale.Core.Syntax.LanguageEntry
         {
-            Id = "owned-language", Name = "Owned", ScopeName = "source.owned", Extensions = ["ownedfixture"],
+            Id = "owned-language",
+            Name = "Owned",
+            ScopeName = "source.owned",
+            Extensions = ["ownedfixture"],
         }, "{\"scopeName\":\"source.owned\",\"patterns\":[]}");
         var file = Path.Combine(root, "file.ownedfixture");
         Assert.Equal("owned-language", first.IdFor(file));

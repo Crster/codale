@@ -1,4 +1,4 @@
-namespace Codale.Db;
+namespace Codale.Db.Engine;
 
 internal static class ValueFlags
 {
@@ -11,16 +11,10 @@ internal static class ValueFlags
 /// Everything a node can carry is a field here rather than an object hanging off it: with tens of thousands of
 /// nodes, each extra object (and its header) is what the database's memory is made of.
 /// </summary>
-internal sealed class TNode
+internal sealed class TNode(string name, TNode? parent)
 {
-    public TNode(string name, TNode? parent)
-    {
-        Name = name;
-        Parent = parent;
-    }
-
-    public readonly string Name;
-    public readonly TNode? Parent;
+    public readonly string Name = name;
+    public readonly TNode? Parent = parent;
     public Dictionary<string, TNode>? Children;
 
     // The value: where its Put record sits in the log. Segment ids start at 1, so 0 means "no value".

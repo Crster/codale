@@ -1,6 +1,5 @@
 using System.Net;
 using System.Security.Cryptography;
-using Codale.Smart;
 
 namespace Codale.Smart.Tests;
 

@@ -17,7 +17,7 @@ internal sealed class FeatureActivity
 
     private readonly ConcurrentDictionary<string, FeatureChat> _chats = new(StringComparer.Ordinal);
     private readonly Lock _summaryLock = new();
-    private readonly HashSet<string> _summarizing = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _summarizing = [with(StringComparer.Ordinal)];
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _summaryGates = new(StringComparer.Ordinal);
 
     /// <summary>Serializes manual rebuilds with automatic summaries across project windows.</summary>
@@ -38,7 +38,7 @@ internal sealed class FeatureActivity
     }
 
     /// <summary>Summaries asked for while one was running, with whether any of those asks was forced.</summary>
-    private readonly Dictionary<string, bool> _summaryAgain = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, bool> _summaryAgain = [with(StringComparer.Ordinal)];
 
     public static FeatureActivity For(string projectPath) =>
         Projects.GetOrAdd(ProjectPaths.RepositoryIdentity(projectPath), _ => new FeatureActivity());
@@ -53,11 +53,10 @@ internal sealed class FeatureActivity
 
     /// <summary>The chats on <paramref name="featureId"/> other than <paramref name="chatId"/>, busy ones first.</summary>
     public IReadOnlyList<FeatureChat> OthersOn(string featureId, string? chatId) =>
-        _chats.Values
+        [.. _chats.Values
             .Where(c => c.FeatureId == featureId && c.ChatId != chatId)
             .OrderByDescending(c => c.IsBusy)
-            .ThenBy(c => c.Title, StringComparer.CurrentCultureIgnoreCase)
-            .ToList();
+            .ThenBy(c => c.Title, StringComparer.CurrentCultureIgnoreCase)];
 
     /// <summary>The chats on <paramref name="featureId"/> with a turn in flight.</summary>
     public IReadOnlySet<string> RunningOn(string featureId) =>

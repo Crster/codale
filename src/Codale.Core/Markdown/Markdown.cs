@@ -384,9 +384,7 @@ public static class MarkdownParser
         IReadOnlyList<IReadOnlyList<MarkdownInline>> Cells(string line)
         {
             var cells = SplitRow(line);
-            return Enumerable.Range(0, width)
-                .Select(c => c < cells.Count ? ParseInlines(cells[c].Trim()) : [])
-                .ToList();
+            return [.. Enumerable.Range(0, width).Select(c => c < cells.Count ? ParseInlines(cells[c].Trim()) : [])];
         }
 
         var header = Cells(lines[i]);
@@ -552,12 +550,7 @@ public static class MarkdownParser
 
         // A backtick fence's info string cannot itself hold backticks (CommonMark);
         // treating that as prose avoids swallowing half a document on a stray ```.
-        if (open == '`' && info.Contains('`'))
-        {
-            return null;
-        }
-
-        return (open, info.Length > 0 ? info : null);
+        return open == '`' && info.Contains('`') ? null : (open, info.Length > 0 ? info : null);
     }
 
     private static bool ClosingFence(string line, char character)
@@ -773,12 +766,7 @@ public static class MarkdownParser
         var label = text[(start + 1)..labelEnd];
         var url = text[(labelEnd + 2)..urlEnd].Trim();
 
-        if (url.Length == 0 || url.Any(char.IsWhiteSpace))
-        {
-            return null;
-        }
-
-        return (label, url, urlEnd + 1);
+        return url.Length == 0 || url.Any(char.IsWhiteSpace) ? null : (label, url, urlEnd + 1);
     }
 
     /// <summary>Named and numeric entities; an unknown spelling keeps its ampersand.</summary>
@@ -821,13 +809,10 @@ public static class MarkdownParser
             return (CodePoint(hex), semicolon + 1);
         }
 
-        if (name.StartsWith('#') &&
-            int.TryParse(name[1..], System.Globalization.NumberStyles.None, null, out var num))
-        {
-            return (CodePoint(num), semicolon + 1);
-        }
-
-        return null;
+        return name.StartsWith('#') &&
+            int.TryParse(name[1..], System.Globalization.NumberStyles.None, null, out var num)
+            ? (CodePoint(num), semicolon + 1)
+            : null;
     }
 
     /// <summary>

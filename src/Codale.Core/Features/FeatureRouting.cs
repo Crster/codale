@@ -157,15 +157,12 @@ public static class FeatureRouting
                 : new FeatureDecision(route, FeatureAction.Create, NewNames: names);
         }
 
-        if (features.FirstOrDefault(f => string.Equals(f.Id, feature, StringComparison.Ordinal)) is { } target &&
-            target.Id != currentId)
-        {
-            return pinned
+        return features.FirstOrDefault(f => string.Equals(f.Id, feature, StringComparison.Ordinal)) is { } target &&
+            target.Id != currentId
+            ? pinned
                 ? new FeatureDecision(route, FeatureAction.Stay)
-                : new FeatureDecision(route, FeatureAction.Switch, target.Id);
-        }
-
-        return new FeatureDecision(route, FeatureAction.Stay);
+                : new FeatureDecision(route, FeatureAction.Switch, target.Id)
+            : new FeatureDecision(route, FeatureAction.Stay);
     }
 
     /// <summary>The names for a new feature: the model's, cleaned; the prompt's gist when it gave none. Only a project with no features takes several.</summary>

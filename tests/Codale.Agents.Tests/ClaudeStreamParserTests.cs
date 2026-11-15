@@ -13,9 +13,7 @@ public sealed class ClaudeStreamParserTests
     private static IReadOnlyList<AgentEvent> Replay(string fixtureName)
     {
         var parser = new ClaudeStreamParser();
-        return File.ReadLines(Fixtures.Path(fixtureName))
-            .SelectMany(parser.Parse)
-            .ToList();
+        return [.. File.ReadLines(Fixtures.Path(fixtureName)).SelectMany(parser.Parse)];
     }
 
     [Fact]

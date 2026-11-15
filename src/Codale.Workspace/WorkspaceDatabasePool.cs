@@ -5,21 +5,21 @@ namespace Codale.Workspace;
 /// <summary>Owns short-lived database pins for a group of workspace stores.</summary>
 public sealed class WorkspaceDatabasePool : IDisposable
 {
-    private readonly TimeSpan IdleClose = TimeSpan.FromMilliseconds(300);
-    private readonly TimeSpan MaxHold = TimeSpan.FromSeconds(1.5);
-    private readonly TimeSpan LockWait = TimeSpan.FromSeconds(5);
-    private readonly object Gate = new();
-    private readonly Dictionary<string, Pin> Pins = new(StringComparer.OrdinalIgnoreCase);
+    private readonly TimeSpan _idleClose = TimeSpan.FromMilliseconds(300);
+    private readonly TimeSpan _maxHold = TimeSpan.FromSeconds(1.5);
+    private readonly TimeSpan _lockWait = TimeSpan.FromSeconds(5);
+    private readonly Lock _gate = new();
+    private readonly Dictionary<string, Pin> _pins = [with(StringComparer.OrdinalIgnoreCase)];
 
     private bool _disposed;
 
     public void Dispose()
     {
-        lock (Gate)
+        lock (_gate)
         {
             if (_disposed) return;
             _disposed = true;
-            foreach (var key in Pins.Keys.ToArray()) Release(key);
+            foreach (var key in _pins.Keys.ToArray()) Release(key);
         }
     }
 
@@ -41,24 +41,24 @@ public sealed class WorkspaceDatabasePool : IDisposable
     {
         var key = Path.GetFullPath(directory);
         CodaleDb lease;
-        lock (Gate)
+        lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (!Pins.TryGetValue(key, out var pin))
+            if (!_pins.TryGetValue(key, out var pin))
             {
-                Pins[key] = pin = new Pin();
+                _pins[key] = pin = new Pin();
             }
 
-            var options = new CodaleDbOptions { LockTimeout = LockWait };
+            var options = new CodaleDbOptions { LockTimeout = _lockWait };
             if (pin.Db is null)
             {
                 pin.Db = CodaleDb.Acquire(key, options);
                 pin.Since = DateTime.UtcNow;
-                pin.Timer = new Timer(_ => Release(key, pin), null, IdleClose, Timeout.InfiniteTimeSpan);
+                pin.Timer = new Timer(_ => Release(key, pin), null, _idleClose, Timeout.InfiniteTimeSpan);
             }
-            else if (DateTime.UtcNow - pin.Since < MaxHold)
+            else if (DateTime.UtcNow - pin.Since < _maxHold)
             {
-                pin.Timer!.Change(IdleClose, Timeout.InfiniteTimeSpan);
+                pin.Timer!.Change(_idleClose, Timeout.InfiniteTimeSpan);
             }
 
             lease = CodaleDb.Acquire(key, options);
@@ -76,14 +76,14 @@ public sealed class WorkspaceDatabasePool : IDisposable
 
     private void Release(string key, Pin? expected = null)
     {
-        lock (Gate)
+        lock (_gate)
         {
-            if (!Pins.TryGetValue(key, out var pin) || (expected is not null && !ReferenceEquals(pin, expected)))
+            if (!_pins.TryGetValue(key, out var pin) || (expected is not null && !ReferenceEquals(pin, expected)))
             {
                 return;
             }
 
-            Pins.Remove(key);
+            _pins.Remove(key);
             pin.Timer?.Dispose();
             pin.Db?.Dispose();
         }

@@ -18,10 +18,10 @@ public sealed record CodexSessionOptions
     public string? Effort { get; init; }
 
     /// <summary>The efforts turn/start accepts; codex has no "max".</summary>
-    private static readonly HashSet<string> AllowedEfforts = new(StringComparer.Ordinal)
-    {
-        "low", "medium", "high", "xhigh",
-    };
+    private static readonly HashSet<string> AllowedEfforts =
+    [
+with(StringComparer.Ordinal),         "low", "medium", "high", "xhigh",
+    ];
 
     /// <summary>Anything foreign falls back to the model's own default, matching the Claude driver's clamping.</summary>
     public static string? ClampEffort(string? effort) =>

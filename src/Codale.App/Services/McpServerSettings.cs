@@ -1,6 +1,5 @@
 using Codale.Core.Agents;
 using Codale.Mcp;
-using Codale.Db;
 
 namespace Codale.App.Services;
 
@@ -13,7 +12,7 @@ namespace Codale.App.Services;
 /// act on real hardware, so they are per project and default to Block. Like <see cref="CliEndpointSettings"/>
 /// the values are re-read on every access, so a change applies to the next session start.
 /// </summary>
-public sealed class McpServerSettings
+public sealed class McpServerSettings(string projectPath, ApplicationDatabase database, string? baseDirectory = null)
 {
     // Named for what they do, so an agent reading its tool list knows each server's purpose.
     public const string BrowserName = "browser-use";
@@ -21,7 +20,7 @@ public sealed class McpServerSettings
     public const string PhoneName = "phone-use";
 
     /// <summary>Server names Codale owns in a CLI's config (stale ones are dropped on rewrite), besides <c>codale-*</c>.</summary>
-    private static readonly HashSet<string> OwnedNames = new(StringComparer.Ordinal) { BrowserName, ComputerName, PhoneName };
+    private static readonly HashSet<string> OwnedNames = [with(StringComparer.Ordinal), BrowserName, ComputerName, PhoneName];
 
     private const string BrowserKey = "mcp.browser.enabled";
     private const string ComputerKey = "mcp.computer.enabled";
@@ -33,16 +32,9 @@ public sealed class McpServerSettings
     /// <summary>The Claude CLI's own desktop-control server, when the user has one.</summary>
     public const string ClaudeComputerServer = McpToolPolicy.ClaudeComputerServer;
 
-    private readonly string _projectPath;
-    private readonly ApplicationDatabase _database;
-    private readonly McpHostExecutables _hosts;
-
-    public McpServerSettings(string projectPath, ApplicationDatabase database, string? baseDirectory = null)
-    {
-        _projectPath = projectPath;
-        _database = database;
-        _hosts = new McpHostExecutables(baseDirectory ?? AppContext.BaseDirectory, StagingRoot());
-    }
+    private readonly string _projectPath = projectPath;
+    private readonly ApplicationDatabase _database = database;
+    private readonly McpHostExecutables _hosts = new(baseDirectory ?? AppContext.BaseDirectory, StagingRoot());
 
     /// <summary>Allow unless the user changed it; a global preference.</summary>
     public AgentToolMode BrowserMode
@@ -277,22 +269,18 @@ public sealed class McpServerSettings
         })];
 
     /// <summary>Arguments that run a CLI's housekeeping (setup, updates, its own MCP management) rather than a session.</summary>
-    private static readonly HashSet<string> NonSessionArgs = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly HashSet<string> NonSessionArgs =
+    [
+        with(StringComparer.OrdinalIgnoreCase),
         "mcp", "config", "update", "upgrade", "doctor", "install", "migrate-installer", "setup-token", "plugin", "plugins",
         "agents", "models", "changelog", "help", "login", "logout", "auth", "extensions",
         "-v", "--version", "-h", "--help", "--mcp-config", "--additional-mcp-config",
-    };
+    ];
 
     /// <summary>True when the prompt line starts an agent CLI session: a known CLI, plain arguments, no housekeeping subcommand.</summary>
     public static bool IsSessionLaunch(string promptLine)
     {
-        if (Codale.Agents.CliLocator.DetectLaunch(promptLine) is not (_, var rest))
-        {
-            return false;
-        }
-
-        return rest.IndexOfAny(['|', ';', '&', '<', '>', '`', '$']) < 0 &&
+        return Codale.Agents.CliLocator.DetectLaunch(promptLine) is (_, var rest) && rest.IndexOfAny(['|', ';', '&', '<', '>', '`', '$']) < 0 &&
             !rest.Split(' ', StringSplitOptions.RemoveEmptyEntries).Any(NonSessionArgs.Contains);
     }
 
@@ -493,7 +481,7 @@ public sealed class McpServerSettings
                     {
                         CommentHandling = System.Text.Json.JsonCommentHandling.Skip,
                         AllowTrailingCommas = true,
-                    }) as System.Text.Json.Nodes.JsonObject ?? new();
+                    }) as System.Text.Json.Nodes.JsonObject ?? [];
                 }
                 catch (System.Text.Json.JsonException)
                 {
@@ -503,7 +491,7 @@ public sealed class McpServerSettings
             }
             else
             {
-                doc = new();
+                doc = [];
             }
 
             McpFileMerge.Apply(doc, servers, format, OwnedNames);
@@ -566,5 +554,3 @@ public sealed class McpServerSettings
     /// </summary>
     private static string StagingRoot() => Path.Combine(CodaleDataRoot(), "mcp");
 }
-
-

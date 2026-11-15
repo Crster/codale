@@ -3,23 +3,23 @@ using System.Text.RegularExpressions;
 
 namespace Codale.Smart;
 
-public sealed partial class SmartExperience : ISmartExperience, IAsyncDisposable
+public sealed partial class SmartExperience(Func<ISmartRuntime> factory, Func<SmartModel, IProgress<double>, CancellationToken, Task<string>> install, string? historyDirectory = null) : ISmartExperience, IAsyncDisposable
 {
-    private readonly Func<ISmartRuntime> _factory;
-    private readonly Func<SmartModel, IProgress<double>, CancellationToken, Task<string>> _install;
+    private readonly Func<ISmartRuntime> _factory = factory;
+    private readonly Func<SmartModel, IProgress<double>, CancellationToken, Task<string>> _install = install;
     private SmartModel _model = SmartModels.Default;
     public SmartModel Model { get { lock (_gate) return _model; } }
     private readonly SemaphoreSlim _inference = new(1, 1), _lifecycle = new(1, 1);
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private CancellationTokenSource _lifetime = new(), _background = new();
     private ISmartRuntime? _runtime;
     private int _interactive;
     private long _generation;
     private readonly SmartTools _tools = new();
-    private readonly SmartHistory? _history;
+    private readonly SmartHistory? _history = historyDirectory is null ? null : new(historyDirectory);
     private readonly Dictionary<string, (SmartActivity Activity, CancellationTokenSource Cancellation)> _active = [];
     private readonly Dictionary<string, SmartActivity> _recent = [];
-    private readonly Dictionary<string, IReadOnlyList<SmartActivity>> _loadedHistory = new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+    private readonly Dictionary<string, IReadOnlyList<SmartActivity>> _loadedHistory = [with(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)];
     private volatile bool _thinking;
     /// <summary>The user's reasoning setting. Each task maps it to a <see cref="SmartReasoning"/> level (see <see cref="ReasoningFor"/>).</summary>
     public bool Thinking { get => _thinking; set => _thinking = value; }
@@ -55,14 +55,13 @@ public sealed partial class SmartExperience : ISmartExperience, IAsyncDisposable
     /// <summary>Provider-backed service; never installs or loads a native model.</summary>
     public SmartExperience(string? historyDirectory = null)
         : this(() => throw new InvalidOperationException("No native runtime configured."),
-            (_, _, _) => throw new InvalidOperationException("No native model installer configured."), historyDirectory) { }
+            (_, _, _) => throw new InvalidOperationException("No native model installer configured."), historyDirectory)
+    { }
 
     public SmartExperience(string modelDirectory, string nativeDirectory, string? historyDirectory = null)
         : this(() => new NativeRuntime(nativeDirectory), (model, progress, ct) => new ModelInstaller(modelDirectory, model).EnsureAsync(progress, ct), historyDirectory) { }
     public SmartExperience(Func<ISmartRuntime> factory, Func<IProgress<double>, CancellationToken, Task<string>> install, string? historyDirectory = null)
         : this(factory, (_, progress, ct) => install(progress, ct), historyDirectory) { }
-    public SmartExperience(Func<ISmartRuntime> factory, Func<SmartModel, IProgress<double>, CancellationToken, Task<string>> install, string? historyDirectory = null)
-    { _factory = factory; _install = install; _history = historyDirectory is null ? null : new(historyDirectory); }
 
     public IReadOnlyList<SmartActivity> Activities(string project)
     {
@@ -70,16 +69,16 @@ public sealed partial class SmartExperience : ISmartExperience, IAsyncDisposable
         {
             var key = Path.GetFullPath(project);
             if (!_loadedHistory.TryGetValue(key, out var history)) _loadedHistory[key] = history = _history?.Read(project) ?? [];
-            return _active.Values.Select(r => r.Activity).Concat(_recent.Values).Concat(history)
-                .Where(a => SamePath(a.Context.Project, project)).DistinctBy(a => a.Id).OrderByDescending(a => a.StartedAt).Take(SmartHistory.MaxRuns).ToArray();
+            return [.. _active.Values.Select(r => r.Activity).Concat(_recent.Values).Concat(history)
+                .Where(a => SamePath(a.Context.Project, project)).DistinctBy(a => a.Id).OrderByDescending(a => a.StartedAt).Take(SmartHistory.MaxRuns)];
         }
     }
     private static bool SamePath(string a, string b) => string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     public void CancelOwner(string project, string? chatId = null)
     {
         lock (_gate)
-            foreach (var run in _active.Values.Where(r => SamePath(r.Activity.Context.Project, project) && (chatId is null || r.Activity.Context.ChatId == chatId)))
-                run.Cancellation.Cancel();
+            foreach (var (activity, cancellation) in _active.Values.Where(r => SamePath(r.Activity.Context.Project, project) && (chatId is null || r.Activity.Context.ChatId == chatId)))
+                cancellation.Cancel();
     }
     private void Publish(SmartActivity activity, CancellationTokenSource cancellation, bool finished = false)
     {
@@ -106,10 +105,10 @@ public sealed partial class SmartExperience : ISmartExperience, IAsyncDisposable
             .Select(e => (Evidence: e, Score: terms.Count(t => (e.Path + " " + e.Command + " " + e.Text).Contains(t, StringComparison.OrdinalIgnoreCase))))
             .Where(e => e.Score > 0).OrderByDescending(e => e.Score).ThenByDescending(e => e.Evidence.ObservedAt);
         var result = new List<SmartEvidence>();
-        foreach (var item in candidates)
+        foreach (var (evidence, score) in candidates)
         {
             ct.ThrowIfCancellationRequested();
-            if (await SmartTools.FreshAsync(item.Evidence, ct).ConfigureAwait(false)) result.Add(item.Evidence);
+            if (await SmartTools.FreshAsync(evidence, ct).ConfigureAwait(false)) result.Add(evidence);
             if (result.Count == 12) break;
         }
         return result;
@@ -240,7 +239,7 @@ public sealed partial class SmartExperience : ISmartExperience, IAsyncDisposable
                 activity = activity with { State = explore ? "exploring" : "finalizing" }; Publish(activity, linked);
                 int toolLimit = background ? 2 : 8;
                 int explorationTokens = background ? 384 : 2048;
-                var conversation = SmartConversation.Create(model, system + (explore ? "\nUse the fewest tools needed to inspect relevant context. " +
+                var conversation = SmartConversation.Create(system + (explore ? "\nUse the fewest tools needed to inspect relevant context. " +
                     "Once you have enough evidence, stop calling tools and give the requested answer. Do not read the same content repeatedly. " +
                     $"You have at most {toolLimit} tool calls. Do not repeat commands that may have side effects.\n" : "\n") +
                     "Project: " + SmartConversation.Escape(context.Project) + "\nWorking directory: " + SmartConversation.Escape(context.WorkingDirectory) +
@@ -266,7 +265,7 @@ public sealed partial class SmartExperience : ISmartExperience, IAsyncDisposable
                         if (++parseFailures > 2) break;
                         conversation.Add(response, [SmartConversation.Result(new { error = ex.Message + " Use <tool_call>\n<function=name>\n<parameter=key>\nvalue\n</parameter>\n</function>\n</tool_call>" })]);
                         tools.Add(new("parse", "", context.WorkingDirectory, DateTimeOffset.UtcNow, ex.Message, State: "error"));
-                        activity = activity with { Tools = tools.ToArray() }; Publish(activity, linked);
+                        activity = activity with { Tools = [.. tools] }; Publish(activity, linked);
                         continue;
                     }
                     if (requested.Count == 0)
@@ -283,14 +282,14 @@ public sealed partial class SmartExperience : ISmartExperience, IAsyncDisposable
                         var directory = context.WorkingDirectory;
                         try { if (call.Name == "run_shell") directory = SmartTools.Resolve(context, call.Arguments.GetValueOrDefault("cwd")); } catch (ArgumentException) { }
                         var entry = new SmartToolActivity(call.Name, SmartConversation.Clip(JsonSerializer.Serialize(call.Arguments)), directory, DateTimeOffset.UtcNow);
-                        tools.Add(entry); activity = activity with { Tools = tools.ToArray() }; Publish(activity, linked);
+                        tools.Add(entry); activity = activity with { Tools = [.. tools] }; Publish(activity, linked);
                         SmartToolOutcome outcome;
                         try
                         {
                             outcome = contextTool is not null ? await contextTool(call, exploration.Token).ConfigureAwait(false) : await _tools.ExecuteAsync(context, call, exploration.Token, output =>
                             {
                                 tools[^1] = entry with { Output = output, ElapsedMilliseconds = toolWatch.ElapsedMilliseconds };
-                                activity = activity with { Tools = tools.ToArray() }; Publish(activity, linked);
+                                activity = activity with { Tools = [.. tools] }; Publish(activity, linked);
                             }, readOnly: background).ConfigureAwait(false);
                         }
                         catch (OperationCanceledException)
@@ -301,7 +300,7 @@ public sealed partial class SmartExperience : ISmartExperience, IAsyncDisposable
                         }
                         results.Add(outcome.Output); evidence.AddRange(outcome.Evidence);
                         tools[^1] = entry with { Output = outcome.Output, ExitCode = outcome.ExitCode, State = outcome.State, ElapsedMilliseconds = toolWatch.ElapsedMilliseconds };
-                        activity = activity with { Tools = tools.ToArray(), Evidence = evidence.ToArray() }; Publish(activity, linked);
+                        activity = activity with { Tools = [.. tools], Evidence = [.. evidence] }; Publish(activity, linked);
                         linked.Token.ThrowIfCancellationRequested();
                         if (exploration.IsCancellationRequested) break;
                     }
@@ -318,7 +317,7 @@ public sealed partial class SmartExperience : ISmartExperience, IAsyncDisposable
                     {
                         if (generation != _generation) throw new OperationCanceledException(linked.Token);
                         activity = activity with { State = "completed" };
-                        return new(draft, evidence.DistinctBy(e => e.Key).ToArray(), activity.Id);
+                        return new(draft, [.. evidence.DistinctBy(e => e.Key)], activity.Id);
                     }
                 }
                 if (explore && !hasDraft && grammar is not null && !exploration.IsCancellationRequested)
@@ -345,13 +344,12 @@ public sealed partial class SmartExperience : ISmartExperience, IAsyncDisposable
                 }
                 var output = await Task.Run(() => _runtime.Generate(finalPrompt, cap, linked.Token, grammar, Options()), linked.Token).ConfigureAwait(false);
                 linked.Token.ThrowIfCancellationRequested();
-                var value = parse(conversation.FinalVisible(output));
-                if (value is null) throw new InvalidDataException("Smart final answer failed validation.");
+                var value = parse(conversation.FinalVisible(output)) ?? throw new InvalidDataException("Smart final answer failed validation.");
                 lock (_gate)
                 {
                     if (generation != _generation) throw new OperationCanceledException(linked.Token);
                     activity = activity with { State = "completed" };
-                    return new(value, evidence.DistinctBy(e => e.Key).ToArray(), activity.Id);
+                    return new(value, [.. evidence.DistinctBy(e => e.Key)], activity.Id);
                 }
             }
             catch (OperationCanceledException)
@@ -363,7 +361,7 @@ public sealed partial class SmartExperience : ISmartExperience, IAsyncDisposable
             catch (Exception ex) { activity = activity with { State = "error", Error = ex.Message }; return null; }
             finally
             {
-                Publish(activity with { Tools = tools.ToArray(), Evidence = evidence.ToArray(), ElapsedMilliseconds = watch.ElapsedMilliseconds }, linked, finished: true);
+                Publish(activity with { Tools = [.. tools], Evidence = [.. evidence], ElapsedMilliseconds = watch.ElapsedMilliseconds }, linked, finished: true);
                 if (entered) _inference.Release(); if (!background) Interlocked.Decrement(ref _interactive);
             }
         }
@@ -538,9 +536,9 @@ public sealed partial class SmartExperience : ISmartExperience, IAsyncDisposable
                 }
                 return new(SmartConversation.Result(new { candidates = bounded }), []);
             }
-            if (call.Name == "read_index" && call.Arguments.Count == 1 && call.Arguments.TryGetValue("id", out var id) && known.TryGetValue(id, out var item))
-                return new(SmartConversation.Result(item), []);
-            return new(SmartConversation.Result(new { error = "Invalid tool or arguments." }), [], State: "error");
+            return call.Name == "read_index" && call.Arguments.Count == 1 && call.Arguments.TryGetValue("id", out var id) && known.TryGetValue(id, out var item)
+                ? new(SmartConversation.Result(item), [])
+                : new(SmartConversation.Result(new { error = "Invalid tool or arguments." }), [], State: "error");
         }
         IReadOnlyList<string>? Parse(string text)
         {
@@ -552,13 +550,12 @@ public sealed partial class SmartExperience : ISmartExperience, IAsyncDisposable
             {
                 var start = text.IndexOf('[');
                 if (start < 0) return null;
-                raw = Regex.Matches(text[start..], "\"((?:[^\"\\\\]|\\\\.)*)\"").Select(m =>
+                raw = [.. Regex.Matches(text[start..], "\"((?:[^\"\\\\]|\\\\.)*)\"").Select(m =>
                 {
                     try { return JsonSerializer.Deserialize<string>(m.Value) ?? ""; } catch (JsonException) { return ""; }
-                }).ToArray();
+                })];
             }
-            if (raw is null) return null;
-            return raw.Where(known.ContainsKey).Distinct(StringComparer.Ordinal).Take(12).ToArray();
+            return raw is null ? null : [.. raw.Where(known.ContainsKey).Distinct(StringComparer.Ordinal).Take(12)];
         }
         return RunAsync<IReadOnlyList<string>>(context with { Task = "context" },
             "Select relevant indexed source for the user's request. Review the supplied candidates, query the index for related UI, bindings, callers or implementation when useful, and inspect candidate excerpts. " +
@@ -599,8 +596,9 @@ public sealed partial class SmartExperience : ISmartExperience, IAsyncDisposable
     public static string? ParseCommitMessage(string? text)
     {
         var message = text?.Trim().Replace("\r\n", "\n", StringComparison.Ordinal);
-        if (string.IsNullOrEmpty(message)) return null;
-        return Regex.IsMatch(message, @"\A(?:feat|fix|refactor|docs|test|build|ci|chore|perf|style|revert)(?:\([a-zA-Z0-9_./-]+\))?!?: [^\s][^\r\n]*\z", RegexOptions.CultureInvariant)
+        return string.IsNullOrEmpty(message)
+            ? null
+            : Regex.IsMatch(message, @"\A(?:feat|fix|refactor|docs|test|build|ci|chore|perf|style|revert)(?:\([a-zA-Z0-9_./-]+\))?!?: [^\s][^\r\n]*\z", RegexOptions.CultureInvariant)
             ? message : null;
     }
     /// <summary>

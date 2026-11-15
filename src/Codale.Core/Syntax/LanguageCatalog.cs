@@ -9,7 +9,7 @@ namespace Codale.Core.Syntax;
 /// in the <see cref="SyntaxStore"/>. An installed language wins over a built-in one with the same
 /// id or extension, which is how a downloaded or generated grammar replaces a shipped one.
 /// </summary>
-public sealed class LanguageCatalog
+public sealed class LanguageCatalog(SyntaxStore store, RegistryOptions builtin)
 {
     // Extensions the shipped grammars do not claim but that the editor has always coloured.
     private static readonly (string Extension, string LanguageId)[] ExtraExtensions =
@@ -20,17 +20,11 @@ public sealed class LanguageCatalog
         ("jsonc", "json"), ("mjs", "javascript"), ("cjs", "javascript"),
     ];
 
-    private readonly SyntaxStore _store;
-    private readonly RegistryOptions _builtin;
-    private readonly object _gate = new();
+    private readonly SyntaxStore _store = store;
+    private readonly RegistryOptions _builtin = builtin;
+    private readonly Lock _gate = new();
     private List<LanguageInfo> _all = [];
     private int _version = -1;
-
-    public LanguageCatalog(SyntaxStore store, RegistryOptions builtin)
-    {
-        _store = store;
-        _builtin = builtin;
-    }
 
     /// <summary>All languages, installed ones first so they win every lookup tier.</summary>
     public IReadOnlyList<LanguageInfo> All
@@ -169,7 +163,7 @@ public sealed class LanguageCatalog
 
         foreach (var bundled in BundledGrammars.Languages.Where(b => !installedIds.Contains(b.Id) && list.All(l => l.Id != b.Id)))
         {
-            list.Add(bundled with { Extensions = bundled.Extensions.Where(e => !shadowed.Contains(e)).ToArray() });
+            list.Add(bundled with { Extensions = [.. bundled.Extensions.Where(e => !shadowed.Contains(e))] });
         }
 
         return list;

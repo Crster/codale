@@ -29,13 +29,16 @@ public sealed class BrowserViewportTests
         var port = FreePort();
         await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
         {
-            Channel = "msedge", Headless = true, Args = [$"--remote-debugging-port={port}"],
+            Channel = "msedge",
+            Headless = true,
+            Args = [$"--remote-debugging-port={port}"],
         });
         var context = await browser.NewContextAsync(new BrowserNewContextOptions { ViewportSize = ViewportSize.NoViewport });
         var page = await context.NewPageAsync();
         await page.RouteAsync("http://viewport.test/**", route => route.FulfillAsync(new RouteFulfillOptions
         {
-            ContentType = "text/html", Body = "<h1>Viewport restoration</h1><button>Ready</button>",
+            ContentType = "text/html",
+            Body = "<h1>Viewport restoration</h1><button>Ready</button>",
         }));
 
         await using var session = new BrowserSession { DebuggingPort = port };

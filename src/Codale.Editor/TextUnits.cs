@@ -221,17 +221,11 @@ public static class TextUnits
         }
 
         var value = rune.Value;
-        if (value < 0x20)
-        {
-            return 0;
-        }
-
-        if (value < 0x1100)
-        {
-            return cluster.Length > 1 && cluster.Contains('️') ? 2 : 1;
-        }
-
-        return IsWide(value) || cluster.Length > 2 || cluster.Contains('️') ? 2 : 1;
+        return value < 0x20
+            ? 0
+            : value < 0x1100
+            ? cluster.Length > 1 && cluster.Contains('️') ? 2 : 1
+            : IsWide(value) || cluster.Length > 2 || cluster.Contains('️') ? 2 : 1;
     }
 
     private static bool IsWide(int cp) =>

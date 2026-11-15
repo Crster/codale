@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 
 using Codale.Agents.Claude;
@@ -29,9 +28,9 @@ public sealed class FeatureLog(HistoryStore store, string featureId, string? cha
     private static readonly JsonSerializerOptions ChangeJson = new() { PropertyNameCaseInsensitive = true };
 
     /// <summary>One gate for every log: a position is read as a pair of values that must not change between them.</summary>
-    private static readonly object Gate = new();
+    private static readonly Lock Gate = new();
 
-    private readonly HashSet<string> _tools = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _tools = [with(StringComparer.Ordinal)];
     private readonly HistoryStore _store = store;
 
     public FeatureLog(string workspaceDirectory, string featureId, string? chatId = null)

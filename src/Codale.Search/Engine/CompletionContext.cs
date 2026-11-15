@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.RegularExpressions;
 
+using Codale.Search.Engine;
+
 namespace Codale.Search;
 
 /// <summary>
@@ -80,7 +82,7 @@ public static partial class CompletionContext
             var lines = all.Where(l => WordRegex().Matches(l).Any(m => wanted.Contains(m.Value))).Take(RelatedLines).ToList();
             if (lines.Count == 0)
             {
-                lines = all.Take(RelatedLines).ToList();
+                lines = [.. all.Take(RelatedLines)];
             }
 
             if (lines.Count == 0)

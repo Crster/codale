@@ -1,4 +1,4 @@
-namespace Codale.Db;
+namespace Codale.Db.Engine;
 
 internal static class Crc32
 {

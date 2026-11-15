@@ -3,7 +3,6 @@ using System.ComponentModel;
 using Codale.App.Controls;
 using Codale.App.Services;
 using Codale.App.ViewModels;
-using Codale.Core.Text;
 
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -42,7 +41,6 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
     private readonly Border _body = new() { MinHeight = 0 };
     private readonly Button _stopButton;
     private readonly DispatcherQueueTimer _clock;
-    private TerminalView? _terminal;
     private double _lastBodyHeight;
     private bool _pointerOver;
     private bool _closed;
@@ -219,23 +217,17 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
     public event EventHandler? LayoutChanged;
 
     /// <summary>Highlights the prompt line while the notebook's input targets this block.</summary>
-    public bool IsSelected
-    {
-        get => _isSelected;
-        set
+    public bool IsSelected { get; set
         {
-            if (_isSelected != value)
+            if (field != value)
             {
-                _isSelected = value;
+                field = value;
                 UpdateChrome();
             }
-        }
-    }
-
-    private bool _isSelected;
+        } }
 
     /// <summary>The live output view, while the block is realized.</summary>
-    public TerminalView? Terminal => _terminal;
+    public TerminalView? Terminal { get; private set; }
 
     /// <summary>
     /// Builds (true) or releases (false) the output view. Released, the body keeps its last height so
@@ -243,14 +235,14 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
     /// </summary>
     public void Realize(bool realize)
     {
-        if (_closed || realize == (_terminal is not null))
+        if (_closed || realize == (Terminal is not null))
         {
             return;
         }
 
         if (!realize)
         {
-            _lastBodyHeight = _terminal!.ActualHeight;
+            _lastBodyHeight = Terminal!.ActualHeight;
             DetachTerminal();
             _body.Height = FillsViewport ? double.NaN : _lastBodyHeight;
             return;
@@ -264,7 +256,7 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
         terminal.LinkActivated += OnTerminalLink;
         terminal.BlockHeightChanged += OnTerminalHeightChanged;
         terminal.ContextRequested += OnTerminalContextRequested;
-        _terminal = terminal;
+        Terminal = terminal;
         ApplyRows();
         terminal.ShowCursor = Block.IsRunning;
         terminal.Attach(Block.Emulator);
@@ -273,7 +265,7 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
 
     private void DetachTerminal()
     {
-        if (_terminal is not { } terminal)
+        if (Terminal is not { } terminal)
         {
             return;
         }
@@ -285,7 +277,7 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
         terminal.ContextRequested -= OnTerminalContextRequested;
         _body.Child = null;
         terminal.Close();
-        _terminal = null;
+        Terminal = null;
     }
 
     /// <summary>Sends the keyboard to the running command's output.</summary>
@@ -298,12 +290,12 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
         }
 
         Realize(true);
-        _terminal?.Focus(FocusState.Programmatic);
+        Terminal?.Focus(FocusState.Programmatic);
     }
 
     public void ApplyAppSettings()
     {
-        _terminal?.ApplyAppSettings(Block.Settings);
+        Terminal?.ApplyAppSettings(Block.Settings);
         _command.FontFamily = TerminalLook.MonoFont(Block.Settings);
         _command.FontSize = TerminalLook.MonoSize(Block.Settings);
         ApplyRows();
@@ -343,12 +335,12 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
     {
         var fill = FillsViewport;
         _root.RowDefinitions[1].Height = fill ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
-        if (_terminal is null)
+        if (Terminal is null)
         {
             return;
         }
 
-        _terminal.BlockRows = fill ? 0 : Block.Settings.TerminalBlockLines;
+        Terminal.BlockRows = fill ? 0 : Block.Settings.TerminalBlockLines;
     }
 
     /// <summary>
@@ -419,10 +411,7 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
                 break;
             case nameof(CommandBlockViewModel.Status):
                 UpdateStatus();
-                if (_terminal is not null)
-                {
-                    _terminal.ShowCursor = Block.IsRunning;
-                }
+                Terminal?.ShowCursor = Block.IsRunning;
 
                 break;
         }
@@ -438,7 +427,7 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
 
     private void OnTerminalContextRequested(UIElement sender, ContextRequestedEventArgs args)
     {
-        if (_terminal is { } terminal)
+        if (Terminal is { } terminal)
         {
             TerminalContextMenu.Show(terminal, args);
         }
@@ -480,10 +469,10 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
 
     private void UpdateChrome()
     {
-        var showActions = _pointerOver || _isSelected || IsDocked;
+        var showActions = _pointerOver || IsSelected || IsDocked;
         _actions.Opacity = showActions ? 1 : 0;
         _actions.IsHitTestVisible = showActions;
-        _header.Background = TerminalLook.Brush(_isSelected ? TerminalLook.Selected
+        _header.Background = TerminalLook.Brush(IsSelected ? TerminalLook.Selected
             : _pointerOver ? TerminalLook.Hover
             : TerminalLook.Background);
     }
@@ -569,7 +558,7 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
     /// </summary>
     internal static Brush ThemeBrush(FrameworkElement element, string key)
     {
-        var themes = element.ActualTheme == ElementTheme.Dark ? new[] { "Dark", "Default" } : new[] { "Light" };
+        var themes = element.ActualTheme == ElementTheme.Dark ? new[] { "Dark", "Default" } : ["Light"];
         return FindThemed(Application.Current.Resources, key, themes) as Brush ?? Resource(key);
     }
 

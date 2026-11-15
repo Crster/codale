@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+
 using Codale.Core.Agents;
 
 namespace Codale.Core.Tests;

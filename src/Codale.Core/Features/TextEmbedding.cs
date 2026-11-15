@@ -100,20 +100,13 @@ public static class VectorMath
 /// Chunk vectors of one worktree and model, packed as int8 rows in one array: no object per row,
 /// ~256 bytes a chunk, and a scan of 10k chunks takes about a millisecond.
 /// </summary>
-public sealed class QuantizedMatrix
+public sealed class QuantizedMatrix(long[] ids, sbyte[] data, int dimension)
 {
     public static readonly QuantizedMatrix Empty = new([], [], 0);
 
-    private readonly long[] _ids;
-    private readonly sbyte[] _data;
-    private readonly int _dimension;
-
-    public QuantizedMatrix(long[] ids, sbyte[] data, int dimension)
-    {
-        _ids = ids;
-        _data = data;
-        _dimension = dimension;
-    }
+    private readonly long[] _ids = ids;
+    private readonly sbyte[] _data = data;
+    private readonly int _dimension = dimension;
 
     public int Count => _ids.Length;
 

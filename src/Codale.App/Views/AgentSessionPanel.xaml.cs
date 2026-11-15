@@ -2,11 +2,8 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 
 using Codale.Agents;
-using Codale.Agents.Claude;
-using Codale.App.Controls;
 using Codale.App.Services;
 using Codale.App.ViewModels;
-using Codale.Core.Agents;
 
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -23,8 +20,6 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     /// <summary>The project window that owns this view's pickers and attention feedback.</summary>
     public IWindowOwner? Owner { get; set; }
 
-    private ChatViewModel? _session;
-    private WorkspaceViewModel? _workspace;
     private int _todoCountSeen;
 
     public AgentSessionPanel()
@@ -40,25 +35,25 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     /// <summary>The session (chat or agent terminal session) this panel displays.</summary>
     public ChatViewModel? Session
     {
-        get => _session;
+        get;
         set
         {
-            if (ReferenceEquals(_session, value))
+            if (ReferenceEquals(field, value))
             {
                 return;
             }
 
-            if (_session is not null)
+            if (field is not null)
             {
-                Detach(_session);
+                Detach(field);
             }
 
-            _session = value;
+            field = value;
             _todoCountSeen = 0;
 
-            if (_session is not null)
+            if (field is not null)
             {
-                Attach(_session);
+                Attach(field);
                 OpenTodosOnFirstGoals();
             }
 
@@ -70,25 +65,19 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     /// <summary>The parent workspace view model.</summary>
     public WorkspaceViewModel? Workspace
     {
-        get => _workspace;
+        get;
         set
         {
-            if (ReferenceEquals(_workspace, value))
+            if (ReferenceEquals(field, value))
             {
                 return;
             }
 
-            if (_workspace is not null)
-            {
-                _workspace.PropertyChanged -= OnWorkspacePropertyChanged;
-            }
+            field?.PropertyChanged -= OnWorkspacePropertyChanged;
 
-            _workspace = value;
+            field = value;
 
-            if (_workspace is not null)
-            {
-                _workspace.PropertyChanged += OnWorkspacePropertyChanged;
-            }
+            field?.PropertyChanged += OnWorkspacePropertyChanged;
 
             NotifySessionProperties();
         }
@@ -254,16 +243,16 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
         // Unloaded detached everything (a tab switch unloads the panel): listen again and
         // catch up on what changed meanwhile, or the live sections stay as they were.
-        if (_session is not null)
+        if (Session is not null)
         {
-            Detach(_session);
-            Attach(_session);
+            Detach(Session);
+            Attach(Session);
         }
 
-        if (_workspace is not null)
+        if (Workspace is not null)
         {
-            _workspace.PropertyChanged -= OnWorkspacePropertyChanged;
-            _workspace.PropertyChanged += OnWorkspacePropertyChanged;
+            Workspace.PropertyChanged -= OnWorkspacePropertyChanged;
+            Workspace.PropertyChanged += OnWorkspacePropertyChanged;
         }
 
         NotifySessionProperties();
@@ -278,7 +267,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void OnElapsedTick(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args)
     {
-        foreach (var task in _session?.RunningTasks.Where(t => t.IsRunning).ToList() ?? [])
+        foreach (var task in Session?.RunningTasks.Where(t => t.IsRunning).ToList() ?? [])
         {
             task.RefreshElapsed();
         }
@@ -287,15 +276,12 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         _elapsedTimer?.Stop();
-        if (_session is not null)
+        if (Session is not null)
         {
-            Detach(_session);
+            Detach(Session);
         }
 
-        if (_workspace is not null)
-        {
-            _workspace.PropertyChanged -= OnWorkspacePropertyChanged;
-        }
+        Workspace?.PropertyChanged -= OnWorkspacePropertyChanged;
     }
 
     private async void OnUpdateCliClick(object sender, RoutedEventArgs e)
@@ -591,4 +577,3 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     #endregion
 
 }
-

@@ -1,6 +1,3 @@
-using Codale.App.ViewModels;
-
-using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
 namespace Codale.App.Views;
@@ -183,22 +180,13 @@ public sealed partial class WorkspacePage : IQuickSearchSource
 
     private string TabGlyph(TabViewItem item)
     {
-        if (_chatTabs.Any(t => ReferenceEquals(t.Item, item)))
-        {
-            return "";
-        }
-
-        if (_terminalTabs.Any(t => ReferenceEquals(t.Item, item)))
-        {
-            return "";
-        }
-
-        if (_editorTabs.FirstOrDefault(t => ReferenceEquals(t.Item, item)) is { } editor)
-        {
-            return FileIcons.NodeGlyph(false, editor.Tab.ViewModel.FileName ?? "");
-        }
-
-        return "";
+        return _chatTabs.Any(t => ReferenceEquals(t.Item, item))
+            ? ""
+            : _terminalTabs.Any(t => ReferenceEquals(t.Item, item))
+            ? ""
+            : _editorTabs.FirstOrDefault(t => ReferenceEquals(t.Item, item)) is { } editor
+            ? FileIcons.NodeGlyph(false, editor.Tab.ViewModel.FileName ?? "")
+            : "";
     }
 
     /// <summary>The words on a tab: a plain header, or the first text inside a composed one.</summary>

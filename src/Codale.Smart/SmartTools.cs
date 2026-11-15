@@ -16,7 +16,7 @@ internal sealed class SmartTools(TimeSpan? commandTimeout = null)
     private static object Schema(string name, string description, object properties, string[] required) =>
         new { name, description, parameters = new { type = "object", properties, required, additionalProperties = false } };
     internal static readonly object[] Definitions =
-    {
+    [
         Schema("list_directory", "List files and directories; path defaults to the working directory.", new { path = new { type = "string" } }, []),
         Schema("search_files", "Find file paths matching a name, substring or glob. Set content=true to search literal file contents. Bounded results; narrow the path if truncated.",
             new { path = new { type = "string" }, pattern = new { type = "string" }, content = new { type = "boolean" } }, ["pattern"]),
@@ -24,7 +24,7 @@ internal sealed class SmartTools(TimeSpan? commandTimeout = null)
         { path = new { type = "string" }, start_line = new { type = "integer" }, line_count = new { type = "integer" } }, ["path"]),
         Schema("run_shell", "Execute a noninteractive shell command. Default cwd is the active worktree. Commands may change files. Maximum 60 seconds and bounded output.",
             new { command = new { type = "string" }, cwd = new { type = "string" } }, ["command"])
-    };
+    ];
     /// <summary>Unattended (background) work only reads: it is prompted by file contents nobody reviewed, so it never gets run_shell.</summary>
     internal static readonly object[] ReadOnlyDefinitions = Definitions[..3];
     internal static object[] For(bool background) => background ? ReadOnlyDefinitions : Definitions;
@@ -177,10 +177,15 @@ internal sealed class SmartTools(TimeSpan? commandTimeout = null)
     {
         var info = new ProcessStartInfo
         {
-            FileName = OperatingSystem.IsWindows() ? "powershell.exe" : "/bin/sh", WorkingDirectory = cwd,
-            UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true,
-            RedirectStandardOutput = true, RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
+            FileName = OperatingSystem.IsWindows() ? "powershell.exe" : "/bin/sh",
+            WorkingDirectory = cwd,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
         };
         if (OperatingSystem.IsWindows())
         {

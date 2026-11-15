@@ -34,20 +34,20 @@ public static class CodaleAccountCli
     /// </summary>
     public static async Task<(bool SignedIn, string? Email)> GetAccountAsync(string cliId, CancellationToken ct = default, string? accountId = null)
     {
-        var cli = Describe(cliId, accountId);
-        if (!Directory.Exists(cli.Home) || CliLocator.Find(cli.Executable) is not { } path)
+        var (executable, variable, home, statusArgs, _, _) = Describe(cliId, accountId);
+        if (!Directory.Exists(home) || CliLocator.Find(executable) is not { } path)
         {
             return (false, null);
         }
 
-        var (exitCode, output) = await RunAsync(path, cli.StatusArgs, cli.Variable, cli.Home, ct).ConfigureAwait(false);
+        var (exitCode, output) = await RunAsync(path, statusArgs, variable, home, ct).ConfigureAwait(false);
         if (exitCode != 0)
         {
             return (false, null);
         }
 
         if (cliId == "claude" && ReadLoggedIn(output) == false) return (false, null);
-        return (true, cliId == "codex" ? ReadCodexEmail(cli.Home) : ReadClaudeEmail(output, cli.Home));
+        return (true, cliId == "codex" ? ReadCodexEmail(home) : ReadClaudeEmail(output, home));
     }
 
     internal static string? ReadClaudeEmail(string status, string home)
@@ -85,10 +85,10 @@ public static class CodaleAccountCli
     {
         var results = await Task.WhenAll(CodaleAccount.AccountIds(cliId).Select(async id =>
         {
-            var status = await GetAccountAsync(cliId, ct, id).ConfigureAwait(false);
-            return status.SignedIn ? new DetectedCliAccount(id, status.Email) : null;
+            var (signedIn, email) = await GetAccountAsync(cliId, ct, id).ConfigureAwait(false);
+            return signedIn ? new DetectedCliAccount(id, email) : null;
         })).ConfigureAwait(false);
-        return results.OfType<DetectedCliAccount>().ToArray();
+        return [.. results.OfType<DetectedCliAccount>()];
     }
 
     private static string? ReadCodexEmail(string home)
@@ -134,9 +134,9 @@ public static class CodaleAccountCli
     /// <summary>Removes the stored login; true when the CLI reports success.</summary>
     public static async Task<bool> SignOutAsync(string cliId, CancellationToken ct = default, string? accountId = null)
     {
-        var cli = Describe(cliId, accountId);
-        return CliLocator.Find(cli.Executable) is { } path
-            && (await RunAsync(path, cli.LogoutArgs, cli.Variable, cli.Home, ct).ConfigureAwait(false)).ExitCode == 0;
+        var (executable, variable, home, _, logoutArgs, _) = Describe(cliId, accountId);
+        return CliLocator.Find(executable) is { } path
+            && (await RunAsync(path, logoutArgs, variable, home, ct).ConfigureAwait(false)).ExitCode == 0;
     }
 
     /// <summary>
@@ -145,8 +145,8 @@ public static class CodaleAccountCli
     /// </summary>
     public static string LoginCommand(string cliId, string? accountId = null)
     {
-        var cli = Describe(cliId, accountId);
-        return $"cmd /c \"set {cli.Variable}={cli.Home}&& {cli.Executable} {cli.LoginArgs}\"";
+        var (executable, variable, home, _, _, loginArgs) = Describe(cliId, accountId);
+        return $"cmd /c \"set {variable}={home}&& {executable} {loginArgs}\"";
     }
 
     private static async Task<(int ExitCode, string Output)> RunAsync(string executable, string arguments, string variable, string home, CancellationToken ct)

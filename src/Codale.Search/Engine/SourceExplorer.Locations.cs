@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 
 using Codale.Core.Helper;
+using Codale.Search.Engine;
 
 namespace Codale.Search;
 
@@ -64,15 +65,15 @@ public sealed partial class SourceExplorer
                 AppendLocationSource(source, evidence, file, terms);
             }
             var prompt = $"Question: {query}\nChoose the exact source rows to edit.\n\n{source}\nProject files:\n" +
-                CodeDiscovery.BuildFileList(snapshot.Files.Select(f => f.RelativePath).ToList());
+                CodeDiscovery.BuildFileList([.. snapshot.Files.Select(f => f.RelativePath)]);
             var answer = await AskAsync(LocateSystemPrompt, prompt, LocateTool, budget).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
             if (answer is null) break;
             if (RefineLocations(snapshot, answer, round, evidence) is { } exact) return exact;
-            pending = CodeDiscovery.SplitList(answer.GetString("paths")).Concat(LocationPaths(answer))
+            pending = [.. CodeDiscovery.SplitList(answer.GetString("paths")).Concat(LocationPaths(answer))
                 .Select(snapshot.Find).OfType<SourceFile>()
                 .Where(f => !evidence.ContainsKey(f.RelativePath))
-                .DistinctBy(f => f.RelativePath, StringComparer.OrdinalIgnoreCase).Take(MaxPicked).ToList();
+                .DistinctBy(f => f.RelativePath, StringComparer.OrdinalIgnoreCase).Take(MaxPicked)];
         }
 
         // No precise answer: continue exploration instead of labelling keyword
@@ -85,10 +86,11 @@ public sealed partial class SourceExplorer
         try
         {
             using var json = JsonDocument.Parse(call.GetString("locations") ?? "[]");
-            if (json.RootElement.ValueKind != JsonValueKind.Array) return [];
-            return json.RootElement.EnumerateArray().Take(16)
+            return json.RootElement.ValueKind != JsonValueKind.Array
+                ? []
+                : [.. json.RootElement.EnumerateArray().Take(16)
                 .Where(x => x.ValueKind == JsonValueKind.Object && x.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String)
-                .Select(x => x.GetProperty("path").GetString()!).ToList();
+                .Select(x => x.GetProperty("path").GetString()!)];
         }
         catch (JsonException) { return []; }
     }

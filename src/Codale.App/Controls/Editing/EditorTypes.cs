@@ -1,4 +1,4 @@
-namespace Codale.App.Controls;
+namespace Codale.App.Controls.Editing;
 
 /// <summary>
 /// Where the caret is, in the shape the status readout consumes: the line 0-based,

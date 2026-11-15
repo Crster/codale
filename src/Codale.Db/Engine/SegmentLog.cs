@@ -4,7 +4,7 @@ using System.Globalization;
 
 using Microsoft.Win32.SafeHandles;
 
-namespace Codale.Db;
+namespace Codale.Db.Engine;
 
 internal enum RecordType : byte
 {
@@ -28,24 +28,18 @@ internal delegate void ReplayHandler(int segment, long offset, int size, RecordT
 /// itself and length counts type + flags + body. Writes go straight to the OS (no user-space buffer),
 /// so a read through the same handle always sees them; durability is a separate <see cref="Sync"/>.
 /// </summary>
-internal sealed class SegmentLog : IDisposable
+internal sealed class SegmentLog(string directory, long segmentBytes) : IDisposable
 {
     public const int HeaderSize = 10;
     private const int MaxRecord = 1 << 30;
 
-    private readonly string _dir;
-    private readonly long _segmentBytes;
+    private readonly string _dir = directory;
+    private readonly long _segmentBytes = segmentBytes;
     private readonly Dictionary<int, SafeFileHandle> _handles = [];
     private readonly Dictionary<int, long> _lengths = [];
     private int _active;
     private long _tail;
     private bool _dirty;
-
-    public SegmentLog(string directory, long segmentBytes)
-    {
-        _dir = directory;
-        _segmentBytes = segmentBytes;
-    }
 
     public long TotalBytes { get; private set; }
 

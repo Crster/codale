@@ -1,6 +1,6 @@
+using Codale.Core.Browser;
 using Codale.Mcp;
 using Codale.Mcp.Browser;
-using Codale.Core.Browser;
 
 await using var browser = new BrowserSession();
 await using var viewportControl = Environment.GetEnvironmentVariable(BrowserViewportControl.EnvironmentKey) is { Length: > 0 } pipe

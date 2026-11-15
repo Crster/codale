@@ -1,4 +1,5 @@
 using System.Text.Json;
+
 using Codale.Agents.Codex;
 using Codale.Core.Agents;
 
@@ -112,7 +113,10 @@ public sealed class CodexPlanModeTests
 
     private static CodexAgentSession Create(string mode) => new(new CodexSessionOptions
     {
-        WorkingDirectory = ".", Model = "test-model", Effort = "high", PermissionMode = mode,
+        WorkingDirectory = ".",
+        Model = "test-model",
+        Effort = "high",
+        PermissionMode = mode,
     });
 
     private static JsonElement Plan(string text) => JsonSerializer.SerializeToElement(new

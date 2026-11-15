@@ -19,7 +19,7 @@ public sealed class SyntaxStore
         PropertyNameCaseInsensitive = true,
     };
 
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private List<LanguageEntry> _languages = [];
 
     public SyntaxStore(string root)
@@ -42,7 +42,7 @@ public sealed class SyntaxStore
 
     public IReadOnlyList<LanguageEntry> Languages
     {
-        get { lock (_gate) { return _languages.ToArray(); } }
+        get { lock (_gate) { return [.. _languages]; } }
     }
 
     public string GrammarPath(LanguageEntry entry) => Path.Combine(GrammarsDir, entry.GrammarFile);
@@ -156,9 +156,7 @@ public sealed class SyntaxStore
             }
 
             var list = JsonSerializer.Deserialize<List<LanguageEntry>>(File.ReadAllText(ManifestPath), Json) ?? [];
-            _languages = list
-                .Where(l => l.Id.Length > 0 && l.GrammarFile.Length > 0 && File.Exists(GrammarPath(l)))
-                .ToList();
+            _languages = [.. list.Where(l => l.Id.Length > 0 && l.GrammarFile.Length > 0 && File.Exists(GrammarPath(l)))];
         }
         catch (Exception)
         {
@@ -196,11 +194,10 @@ public sealed class SyntaxStore
     }
 
     private static string[] Normalize(IEnumerable<string> extensions) =>
-        extensions
+        [.. extensions
             .Select(e => e.Trim().TrimStart('.').ToLowerInvariant())
             .Where(e => e.Length > 0)
-            .Distinct()
-            .ToArray();
+            .Distinct()];
 
     internal static string Slug(string text)
     {

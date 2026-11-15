@@ -1,3 +1,4 @@
+using Codale.App.Themes;
 using Codale.App.ViewModels;
 
 using Microsoft.UI.Xaml;
@@ -97,10 +98,7 @@ public sealed partial class ArtifactTab : UserControl
 
     public void Show(SessionArtifact artifact)
     {
-        if (Artifact is not null)
-        {
-            Artifact.PropertyChanged -= OnArtifactChanged;
-        }
+        Artifact?.PropertyChanged -= OnArtifactChanged;
 
         // Annotations live on the plan, so switching plans keeps each one's notes.
         Artifact = artifact;

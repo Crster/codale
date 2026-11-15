@@ -1,7 +1,9 @@
 using System.Text;
+
 using Codale.Core.Agents;
 using Codale.Core.Features;
 using Codale.Db;
+using Codale.Search.Engine;
 
 namespace Codale.Search.Tests;
 
@@ -100,7 +102,7 @@ public sealed class ProjectKnowledgeTests : IDisposable
         await _index.RefreshAsync(Root);
         var result = _index.Search(Root, "RefreshToken RotateCredential");
         var boosted = _index.Retrieve(Root, "RefreshToken RotateCredential", "", new HashSet<string>(),
-            workingSet: Enumerable.Range(0, 8).Select(i => $"Old{i}.cs").ToList());
+            workingSet: [.. Enumerable.Range(0, 8).Select(i => $"Old{i}.cs")]);
         Assert.Equal("Auth.cs", boosted.Files[0]);
         // Only the newest edits keep a seat on recency alone; the older ones need relevance.
         Assert.True(boosted.Files.Count(f => f.StartsWith("Old")) <= 2, string.Join(", ", boosted.Files));
@@ -395,7 +397,7 @@ public sealed class ProjectKnowledgeTests : IDisposable
         _index.RecordLearned("s", Root, "a.tsx", "rotate the owner picker", LearnedKind.Read);
         _index.RecordLearned("s", Root, "b.tsx", "rotate the owner picker", LearnedKind.Open);
         _index.RecordLearned("s", Root, "c.tsx", "rotate the owner picker", LearnedKind.Edit);
-        Assert.Equal(["c.tsx", "b.tsx", "a.tsx"], _index.Search(Root, "rotate owner picker").Select(c => c.Path).ToArray());
+        Assert.Equal(["c.tsx", "b.tsx", "a.tsx"], [.. _index.Search(Root, "rotate owner picker").Select(c => c.Path)]);
     }
 
     [Fact]
@@ -410,7 +412,7 @@ public sealed class ProjectKnowledgeTests : IDisposable
         Assert.Contains("Index.cs:1-", result.Text);
         Assert.Contains("private const int MaxFiles = 6;", result.Text);
         Assert.DoesNotContain("const (", result.Text);
-        Assert.Equal(new[] { "MaxFiles", "rank_ids", "RankAsync" }, ProjectKnowledgeIndex.Identifiers("Change MaxFiles and rank_ids in RankAsync, not the plain words"));
+        Assert.Equal(["MaxFiles", "rank_ids", "RankAsync"], ProjectKnowledgeIndex.Identifiers("Change MaxFiles and rank_ids in RankAsync, not the plain words"));
         Assert.Empty(ProjectKnowledgeIndex.Identifiers("Change the default value of files"));
     }
 

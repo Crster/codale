@@ -1,7 +1,9 @@
-using System.Diagnostics;
+using System.Text.RegularExpressions;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+
 using Codale.Core.Features;
 using Codale.Core.Projects;
 using Codale.Db;
@@ -36,18 +38,18 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
     private const double DocWeight = 0.5;
     private const double SymbolBonus = 0.03;
     private static readonly string[] DocOrTestTerms = ["doc", "readme", "markdown", "md", "test", "spec", "changelog", "licen"];
-    private static readonly System.Text.RegularExpressions.Regex LicensePattern = new(
-        @"(^|[\\/])(licen[cs]e|copying|notice|ofl|third[-_]party[-_]notices?)(\.[a-z]+)?$",
-        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+    [GeneratedRegex(@"(^|[\\/])(licen[cs]e|copying|notice|ofl|third[-_]party[-_]notices?)(\.[a-z]+)?$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled)]
+    private static partial Regex LicensePattern();
     /// <summary>Instruction files every CLI already loads into the conversation: repeating them is waste.</summary>
-    private static readonly System.Text.RegularExpressions.Regex AgentInstructions = new(
-        @"(^|[\\/])(CLAUDE|AGENTS|GEMINI)(\.local)?\.md$",
-        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+    [GeneratedRegex(@"(^|[\\/])(CLAUDE|AGENTS|GEMINI)(\.local)?\.md$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled)]
+    private static partial Regex AgentInstructions();
     private readonly ConcurrentDictionary<string, string> _embedded = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Cancelled on dispose, so a closing window never keeps indexing.</summary>
     private readonly CancellationTokenSource _stopping = new();
-    private readonly object _gate = new();
-    private readonly Dictionary<string, Task> _refreshes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Lock _gate = new();
+    private readonly Dictionary<string, Task> _refreshes = [with(StringComparer.OrdinalIgnoreCase)];
     private readonly ConcurrentDictionary<string, DateTime> _snapshots = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, SourceFile> _indexedFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string> _revisions = new(StringComparer.OrdinalIgnoreCase);
@@ -78,11 +80,11 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
             if (_refreshes.TryGetValue(worktree, out var running) && !running.IsCompleted) return running;
             // Every search, ghost-text lookup and chat turn asks for a refresh; one that just finished is still current,
             // and the file watcher marks the scan stale on a real change. Rescanning on each ask is CPU spent for nothing.
-            if (_lastRefresh.TryGetValue(worktree, out var finished) && Environment.TickCount64 - finished < RefreshCooldownMs
+            return _lastRefresh.TryGetValue(worktree, out var finished) && Environment.TickCount64 - finished < RefreshCooldownMs
                 && _sources.For(worktree).IsUpToDate
-                && _revisions.TryGetValue(worktree, out var knownRevision) && knownRevision == Revision(worktree))
-                return Task.CompletedTask;
-            return _refreshes[worktree] = Task.Run(async () =>
+                && _revisions.TryGetValue(worktree, out var knownRevision) && knownRevision == Revision(worktree)
+                ? Task.CompletedTask
+                : (_refreshes[worktree] = Task.Run(async () =>
             {
                 Interlocked.Increment(ref _indexing);
                 // Indexing is background work: it yields to the UI and to the agents the user is waiting on.
@@ -156,7 +158,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
                     Interlocked.Decrement(ref _indexing);
                     IndexingChanged?.Invoke();
                 }
-            });
+            }));
         }
     }
 
@@ -226,7 +228,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
             var topic = string.Join(' ', terms);
             var similar = ChunkRoot(worktree).Query(topic, 40)
                 .Select(hit => (Id: ChunkId(hit.Node), hit.Score, hit.Node)).ToList();
-            foreach (var near in similar) RememberChunk(near.Id, near.Node);
+            foreach (var (id, score, node) in similar) RememberChunk(id, node);
             if (similar.Count > 0)
             {
                 // Relative cut: keep near-best neighbours only, so unrelated files never ride in on noise.
@@ -267,11 +269,11 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
         {
             var key = path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
             if (working.Count == MaxWorkingSet) break;
-            if (AgentInstructions.IsMatch(key) || !working.TryAdd(key, working.Count)) continue;
+            if (AgentInstructions().IsMatch(key) || !working.TryAdd(key, working.Count)) continue;
             foreach (var chunk in SourceChunksForPath(worktree, key)) scores.TryAdd(chunk.Id, 0);
         }
 
-        var chunks = SourceChunks(scores.Keys.ToList()).ToDictionary(c => c.Id);
+        var chunks = SourceChunks([.. scores.Keys]).ToDictionary(c => c.Id);
         // A specific word such as "minimap" should outweigh generic matches for "game" or
         // "unit". Count candidate files, not overlapping chunks, so long files get no bonus.
         var chunkTerms = chunks.Values.ToDictionary(c => c.Id,
@@ -308,7 +310,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
         var wantsDocs = terms.Any(t => DocOrTestTerms.Any(d => t.StartsWith(d, StringComparison.Ordinal)));
         if (!wantsDocs)
             foreach (var chunk in chunks.Values)
-                if (CodeDiscovery.IsTestOrDoc(chunk.Path) || LicensePattern.IsMatch(chunk.Path)) scores[chunk.Id] *= DocWeight;
+                if (CodeDiscovery.IsTestOrDoc(chunk.Path) || LicensePattern().IsMatch(chunk.Path)) scores[chunk.Id] *= DocWeight;
 
         var fresh = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         var floorScore = scores.Count == 0 ? 0 : scores.Values.Max() * 0.34;
@@ -335,7 +337,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
         IReadOnlyList<string>? workingSet = null, IReadOnlyList<string>? preferredChunkIds = null, bool pointersOnly = false,
         IReadOnlyList<SourceChunk>? discoveredChunks = null)
     {
-        const int MaxPointers = 6;
+        const int maxPointers = 6;
         var timer = Stopwatch.StartNew();
         worktree = ProjectPaths.Normalize(worktree);
         Warm(worktree);
@@ -362,15 +364,15 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
         if ((stale || ranked.Count == 0) && CaughtUp(worktree))
             ranked = Search(worktree, prompt, recent, MaxFiles + 2, 3, workingSet, out _);
         if (discoveredChunks is not null)
-            ranked = discoveredChunks.Where(c => c.Worktree == worktree && ReadSource(worktree, c.Path) is { } source && Hash(source) == c.Hash)
-                .Concat(ranked).DistinctBy(c => c.Id).ToList();
+            ranked = [.. discoveredChunks.Where(c => c.Worktree == worktree && ReadSource(worktree, c.Path) is { } source && Hash(source) == c.Hash)
+                .Concat(ranked).DistinctBy(c => c.Id)];
         if (preferredChunkIds is not null)
         {
             var order = preferredChunkIds.Select((id, i) => (id, i)).ToDictionary(x => x.id, x => x.i);
-            ranked = ranked.OrderBy(c => order.GetValueOrDefault(c.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), int.MaxValue)).ToList();
+            ranked = [.. ranked.OrderBy(c => order.GetValueOrDefault(c.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), int.MaxValue))];
         }
         // The CLI already loaded its instruction files into the conversation.
-        var topFiles = ranked.Where(c => !AgentInstructions.IsMatch(c.Path))
+        var topFiles = ranked.Where(c => !AgentInstructions().IsMatch(c.Path))
             .GroupBy(c => c.Path, StringComparer.OrdinalIgnoreCase).Take(MaxFiles).ToList();
         string? Fresh(string path, string hash) => ReadSource(worktree, path) is { } content && Hash(content) == hash ? content : null;
 
@@ -467,7 +469,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
             {
                 // A starting point, not the code: the agent reads the range with its own tools.
                 var pointerKey = $"source:{rawPath}:{hash}:{keyStart ?? start}";
-                if (pointers.Count >= MaxPointers || delivered.Contains(pointerKey) || pointerKeys.Contains(pointerKey)) return false;
+                if (pointers.Count >= maxPointers || delivered.Contains(pointerKey) || pointerKeys.Contains(pointerKey)) return false;
                 pointers.Add($"- {path}:{start}-{end}");
                 pointerKeys.Add(pointerKey);
                 includedEnd = end;
@@ -519,13 +521,14 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
     }
 
 
-    private static readonly System.Text.RegularExpressions.Regex IdentifierPattern = new(@"[A-Za-z_][A-Za-z0-9_]{3,}", System.Text.RegularExpressions.RegexOptions.Compiled);
+    [GeneratedRegex(@"[A-Za-z_][A-Za-z0-9_]{3,}", System.Text.RegularExpressions.RegexOptions.Compiled)]
+    private static partial Regex IdentifierPattern();
 
     /// <summary>Code-like names in a prompt (camelCase, PascalCase with an inner capital, snake_case), in order, at most four.</summary>
     public static IReadOnlyList<string> Identifiers(string prompt) =>
-        IdentifierPattern.Matches(prompt).Select(m => m.Value)
+        [.. IdentifierPattern().Matches(prompt).Select(m => m.Value)
             .Where(v => v.Contains('_') || (v.Any(char.IsLower) && v.Skip(1).Any(char.IsUpper)))
-            .Distinct(StringComparer.Ordinal).Take(4).ToList();
+            .Distinct(StringComparer.Ordinal).Take(4)];
 
     /// <summary>The line that defines <paramref name="name"/> if there is one, else the first that mentions it as a whole word; -1 when absent.</summary>
     private static int LineOf(string[] lines, string name)
@@ -569,8 +572,8 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
             var stems = SearchText.Tokens(declaration.Name).Select(SearchText.Stem).ToList();
             found.Add((declaration.Name, i + 1, terms.Any(t => t.Length >= 3 && stems.Any(s => s.StartsWith(t, StringComparison.Ordinal)))));
         }
-        return found.OrderByDescending(f => f.Match).ThenBy(f => f.Line).Take(4)
-            .OrderBy(f => f.Line).Select(f => $"{f.Name} (L{f.Line})").ToList();
+        return [.. found.OrderByDescending(f => f.Match).ThenBy(f => f.Line).Take(4)
+            .OrderBy(f => f.Line).Select(f => $"{f.Name} (L{f.Line})")];
     }
 
     public static string Hash(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
@@ -667,7 +670,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
     public void Dispose()
     {
         Task[] running;
-        lock (_gate) { _disposed = true; running = _refreshes.Values.Concat(_summaryTasks.Values).ToArray(); }
+        lock (_gate) { _disposed = true; running = [.. _refreshes.Values, .. _summaryTasks.Values]; }
         _stopping.Cancel();
         try { Task.WhenAll(running).GetAwaiter().GetResult(); }
         catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"Project indexing stopped: {ex.Message}"); }

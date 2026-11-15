@@ -20,9 +20,8 @@ public sealed partial class SessionFileChange : ObservableObject
     public required string Path { get; init; }
 
     // The name and folder split lives on ToolFileRef; built once, since the panel reads these on every row bind.
-    private ToolFileRef? _fileRef;
 
-    private ToolFileRef FileRef => _fileRef ??= new ToolFileRef { Path = Path, IsEdit = true };
+    private ToolFileRef FileRef => field ??= new ToolFileRef { Path = Path, IsEdit = true };
 
     public string Name => FileRef.Name;
 
@@ -150,12 +149,9 @@ public sealed partial class SessionFileChange : ObservableObject
     /// </summary>
     public FileDiff CumulativeDiff()
     {
-        if (_baselineKnown && CurrentContent() is var (exists, content) && (exists || Kind == FileChangeKind.Delete))
-        {
-            return TextDiff.Compute(Path, _baseline, exists ? content : null);
-        }
-
-        return TextDiff.Concat(Path, _editDiffs);
+        return _baselineKnown && CurrentContent() is var (exists, content) && (exists || Kind == FileChangeKind.Delete)
+            ? TextDiff.Compute(Path, _baseline, exists ? content : null)
+            : TextDiff.Concat(Path, _editDiffs);
     }
 
     /// <summary>What the file holds now: the disk wins (it has every later edit), the last report is the fallback.</summary>

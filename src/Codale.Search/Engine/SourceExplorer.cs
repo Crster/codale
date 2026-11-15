@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 
 using Codale.Core.Helper;
 using Codale.Core.Text;
+using Codale.Search.Engine;
 
 namespace Codale.Search;
 
@@ -25,7 +26,8 @@ namespace Codale.Search;
 /// tokens that start like it; and nothing outside the project or matching a secrets
 /// pattern is ever indexed, so it cannot reach the model's prompt.
 /// </remarks>
-public sealed partial class SourceExplorer
+/// <param name="model">The background-task model, or null for the ranked pass alone.</param>
+public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? model)
 {
     public const int DefaultMaxRounds = 3;
 
@@ -43,15 +45,8 @@ public sealed partial class SourceExplorer
     private const double K1 = 1.2;
     private const double B = 0.75;
 
-    private readonly SourceIndex _index;
-    private readonly ISearchModel? _model;
-
-    /// <param name="model">The background-task model, or null for the ranked pass alone.</param>
-    public SourceExplorer(SourceIndex index, ISearchModel? model)
-    {
-        _index = index;
-        _model = model;
-    }
+    private readonly SourceIndex _index = index;
+    private readonly ISearchModel? _model = model;
 
     public ProjectKnowledgeIndex? Knowledge { get; init; }
 
@@ -180,19 +175,19 @@ public sealed partial class SourceExplorer
             if (retrieved.Count > 0)
             {
                 enriched = true;
-                instant = retrieved.Concat(instant.Where(c => retrieved.All(r => r.File != c.File))).ToList();
+                instant = [.. retrieved, .. instant.Where(c => retrieved.All(r => r.File != c.File))];
             }
         }
 
         if (literal?.PhraseFiles is { Count: > 0 } literalFiles)
         {
             // The typed text found verbatim outranks anything semantically near it.
-            instant = instant.OrderBy(r => literalFiles.Contains(snapshot.IdOf(r.File)) ? 0 : 1).ToList();
+            instant = [.. instant.OrderBy(r => literalFiles.Contains(snapshot.IdOf(r.File)) ? 0 : 1)];
         }
 
         void Report(DiscoveryResult result) =>
             Progress?.Invoke(this, literal is null ? result : WithLiteralFirst(snapshot, result, literal));
-        var provisional = Build(snapshot, instant.Take(_model is null ? MaxRankedResults : MaxProvisional).ToList(), question,
+        var provisional = Build(snapshot, [.. instant.Take(_model is null ? MaxRankedResults : MaxProvisional)], question,
             confirmed: false, round: 0, isFinal: _model is null, setup);
         Report(provisional);
 
@@ -203,7 +198,7 @@ public sealed partial class SourceExplorer
             // the ones that do not answer, and marks the exact rows and words.
             Report(provisional with { Round = 1 });
             var (reviewed, answered) = await ReviewRetrievedAsync(snapshot, query, provisional,
-                instant.Take(MaxCandidates).ToList(), question, setup, budget.Token, ct).ConfigureAwait(false);
+                [.. instant.Take(MaxCandidates)], question, setup, budget.Token, ct).ConfigureAwait(false);
             if (reviewed is not null) return reviewed;
             // An unavailable provider leaves the retrieved results usable; one that
             // found nothing to keep gets a keyword exploration instead.
@@ -212,7 +207,7 @@ public sealed partial class SourceExplorer
 
         var call = _model is null ? null : await AskAsync(
             CodeDiscovery.KeywordSystemPrompt,
-            CodeDiscovery.BuildKeywordPrompt(query, snapshot.AllFiles.Where(f => !CodeDiscovery.IsNoisePath(f)).ToList(), snapshot.TypesNamedApart()),
+            CodeDiscovery.BuildKeywordPrompt(query, [.. snapshot.AllFiles.Where(f => !CodeDiscovery.IsNoisePath(f))], snapshot.TypesNamedApart()),
             CodeDiscovery.KeywordsTool, budget.Token).ConfigureAwait(false);
         ct.ThrowIfCancellationRequested();
         if (call is null)
@@ -230,7 +225,7 @@ public sealed partial class SourceExplorer
         {
             keywords = CodeDiscovery.IsShortCompleteThought(query)
                 ? [query.Trim()]
-                : questionTerms.Select(t => t.Text).ToList();
+                : [.. questionTerms.Select(t => t.Text)];
         }
 
         var tried = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -254,7 +249,7 @@ public sealed partial class SourceExplorer
             // the text it quotes, which the user asked for as written.
             // When the question is a short complete thought (like "run build"), do not split it into loose words.
             var tieBreakers = CodeDiscovery.IsShortCompleteThought(query)
-                ? Enumerable.Empty<ExploreTerm>()
+                ? []
                 : questionTerms
                     .Where(q => !q.Exact && !fresh.Contains(q.Text, StringComparer.OrdinalIgnoreCase))
                     .Select(q => q with { Weight = q.Weight * 0.3 });
@@ -278,13 +273,13 @@ public sealed partial class SourceExplorer
 
             if (candidates.Count == 0)
             {
-                call = await AskAsync(CodeDiscovery.JudgeSystemPrompt, BuildJudgePrompt(query, fresh, candidates, terms) + "\nProject files:\n" + CodeDiscovery.BuildFileList(snapshot.Files.Select(f => f.RelativePath).ToList()),
+                call = await AskAsync(CodeDiscovery.JudgeSystemPrompt, BuildJudgePrompt(query, fresh, candidates, terms) + "\nProject files:\n" + CodeDiscovery.BuildFileList([.. snapshot.Files.Select(f => f.RelativePath)]),
                     CodeDiscovery.JudgeTool, budget.Token).ConfigureAwait(false);
                 ct.ThrowIfCancellationRequested();
                 if (call is not null && await FinishSelectionAsync(snapshot, query, call, candidates, terms, round, setup, budget.Token, ct)
                         .ConfigureAwait(false) is { } corrected)
                     return corrected;
-                keywords = CodeDiscovery.SplitList(call?.GetString("keywords")).ToList();
+                keywords = [.. CodeDiscovery.SplitList(call?.GetString("keywords"))];
                 continue;
             }
 
@@ -292,10 +287,10 @@ public sealed partial class SourceExplorer
             // best current idea, and it still carries the instant files that hold up.
             (best, bestTerms) = (candidates, terms);
 
-            latest = Build(snapshot, candidates.Take(MaxProvisional).ToList(), terms, confirmed: false, round, isFinal: false, setup);
+            latest = Build(snapshot, [.. candidates.Take(MaxProvisional)], terms, confirmed: false, round, isFinal: false, setup);
             Report(latest);
 
-            call = await AskAsync(CodeDiscovery.JudgeSystemPrompt, BuildJudgePrompt(query, fresh, candidates, terms) + "\nProject files:\n" + CodeDiscovery.BuildFileList(snapshot.Files.Select(f => f.RelativePath).ToList()),
+            call = await AskAsync(CodeDiscovery.JudgeSystemPrompt, BuildJudgePrompt(query, fresh, candidates, terms) + "\nProject files:\n" + CodeDiscovery.BuildFileList([.. snapshot.Files.Select(f => f.RelativePath)]),
                 CodeDiscovery.JudgeTool, budget.Token).ConfigureAwait(false);
             if (call is null)
             {
@@ -313,7 +308,7 @@ public sealed partial class SourceExplorer
                 rejected.Add(candidate.File.RelativePath);
             }
 
-            keywords = CodeDiscovery.SplitList(call.GetString("keywords")).ToList();
+            keywords = [.. CodeDiscovery.SplitList(call.GetString("keywords"))];
         }
 
         // No confirmation: the best ranked guess is still better than nothing.
@@ -321,14 +316,14 @@ public sealed partial class SourceExplorer
         // still the best guess, turned-down files included.
         return allTerms.Count == 0
             ? latest with { IsFinal = true }
-            : Build(snapshot, best.Take(MaxUnconfirmed).ToList(), bestTerms, confirmed: false, latest.Round, isFinal: true, setup);
+            : Build(snapshot, [.. best.Take(MaxUnconfirmed)], bestTerms, confirmed: false, latest.Round, isFinal: true, setup);
     }
 
     private static List<Ranked> Pick(ToolCall? call, IReadOnlyList<Ranked> candidates) =>
-        Regex.Matches(call?.GetString("relevant") ?? "", @"\d+")
+        [.. Regex.Matches(call?.GetString("relevant") ?? "", @"\d+")
             .Select(m => int.TryParse(m.Value, out var n) ? n - 1 : -1)
             .Where(i => i >= 0 && i < candidates.Count).Distinct().Take(MaxPicked)
-            .Select(i => candidates[i]).ToList();
+            .Select(i => candidates[i])];
 
     /// <summary>Only real indexed paths and literal source matches can become model highlights.</summary>
     private static DiscoveryResult? RefineLocations(SourceSnapshot snapshot, ToolCall call, int round,
@@ -373,19 +368,25 @@ public sealed partial class SourceExplorer
                 if (matches.Count == 0 || (evidence is not null &&
                     (end - start >= MaxRangeLines || Enumerable.Range(start, end - start + 1)
                         .Any(n => !evidence[source.RelativePath].Contains(n))))) continue;
-                keywords = keywords.Where(k => matches.Any(n => lines[n - 1].Contains(k, StringComparison.OrdinalIgnoreCase))).ToList();
+                keywords = [.. keywords.Where(k => matches.Any(n => lines[n - 1].Contains(k, StringComparison.OrdinalIgnoreCase)))];
                 var ranges = CodeDiscovery.Slice(lines, matches.ToDictionary(n => n, _ => 100));
                 files.Add(new DiscoveredFile
                 {
-                    FilePath = source.FullPath, RelativePath = source.RelativePath,
-                    Confirmed = true, Keywords = keywords, MatchCount = matches.Count, Ranges = ranges,
+                    FilePath = source.FullPath,
+                    RelativePath = source.RelativePath,
+                    Confirmed = true,
+                    Keywords = keywords,
+                    MatchCount = matches.Count,
+                    Ranges = ranges,
                 });
                 if (files.Count == MaxPicked) break;
             }
             return files.Count == 0 ? null : new DiscoveryResult
             {
-                Files = files, Keywords = files.SelectMany(f => f.Keywords).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-                Round = round, IsFinal = true,
+                Files = files,
+                Keywords = [.. files.SelectMany(f => f.Keywords).Distinct(StringComparer.OrdinalIgnoreCase)],
+                Round = round,
+                IsFinal = true,
             };
         }
         catch (JsonException) { return null; }
@@ -548,7 +549,8 @@ public sealed partial class SourceExplorer
 
     private const int MaxPhraseCandidates = 5_000;
 
-    private static readonly Regex PhraseWord = new(@"\w+", RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"\w+", RegexOptions.CultureInvariant)]
+    private static partial Regex PhraseWord();
 
     /// <summary>
     /// A quoted phrase: its words find the files that could hold it, and only the files
@@ -564,7 +566,7 @@ public sealed partial class SourceExplorer
         var last = 0;
         var complete = true;
 
-        foreach (Match match in PhraseWord.Matches(text))
+        foreach (Match match in PhraseWord().Matches(text))
         {
             // A word the index never keeps (one letter, a number) is matched by the regex alone.
             var word = match.Value.ToLowerInvariant();
@@ -585,7 +587,7 @@ public sealed partial class SourceExplorer
         }
 
         spelled.Append(text, last, text.Length - last);
-        words = words.Distinct().ToList();
+        words = [.. words.Distinct()];
 
         var keys = words.Select(w => (w, 1.0 / Math.Max(1, words.Count))).ToList();
         var forms = new List<string> { text, spelled.ToString() };
@@ -742,7 +744,7 @@ public sealed partial class SourceExplorer
     {
         var parts = terms
             .Where(t => !t.Term.Bonus && t.Keys.Count > 0)
-            .Select(t => (Key: t.Keys.MaxBy(k => k.Factor).Key, t.Weight))
+            .Select(t => (t.Keys.MaxBy(k => k.Factor).Key, t.Weight))
             .Where(p => p.Key.Length >= 3)
             .DistinctBy(p => p.Key)
             .ToList();
@@ -828,7 +830,7 @@ public sealed partial class SourceExplorer
     // ---------------------------------------------------------------- ranking
 
     /// <summary>A file in the running, and why: the terms it matched, or the file it is related to.</summary>
-    internal sealed class Ranked(SourceFile file)
+    internal sealed partial class Ranked(SourceFile file)
     {
         public SourceFile File { get; } = file;
         public int? SemanticLine { get; set; }
@@ -973,7 +975,7 @@ public sealed partial class SourceExplorer
                     continue;
                 }
 
-                var lift = CodeDiscovery.SetupFile.IsMatch(name) ? 1.0 : CodeDiscovery.EntryFile.IsMatch(name) ? 0.75 : 0;
+                var lift = CodeDiscovery.SetupFile().IsMatch(name) ? 1.0 : CodeDiscovery.EntryFile().IsMatch(name) ? 0.75 : 0;
                 if (lift > 0 && onlySetup)
                 {
                     At(id).Score += unit * (lift + (2 - depth) * 0.1);
@@ -1025,7 +1027,7 @@ public sealed partial class SourceExplorer
         // Relative, not absolute: what counts as weak depends on how good the best is. A
         // single-term search is a references lookup, where every user counts.
         var floor = ordered.Count == 0 ? 0 : ordered[0].Score * (terms.Count(t => !t.Term.Bonus) <= 1 ? 0.05 : 0.25);
-        return ordered.Where(r => r.Score >= floor).ToList();
+        return [.. ordered.Where(r => r.Score >= floor)];
     }
 
     // ---------------------------------------------------------------- related source
@@ -1065,7 +1067,7 @@ public sealed partial class SourceExplorer
             // Outgoing: what the shown code calls or constructs, declared elsewhere. Only from
             // code - "Windows" in a README or "Debug" in a script is prose, not a reference.
             var used = !IsCode(seed.File.RelativePath) ? [] : shown.Ranges
-                .SelectMany(r => Identifier.Matches(r.Code).Select(m => m.Value))
+                .SelectMany(r => Identifier().Matches(r.Code).Select(m => m.Value))
                 .Where(n => n.Length >= 4 && !ownNames.Contains(n))
                 .Distinct(StringComparer.Ordinal);
 
@@ -1142,10 +1144,11 @@ public sealed partial class SourceExplorer
 
         var ordered = related.Values.OrderByDescending(r => r.Score).ThenBy(r => r.File.RelativePath, StringComparer.OrdinalIgnoreCase).ToList();
         var floor = ordered.Count == 0 ? 0 : ordered[0].Score * 0.3;
-        return ordered.Where(r => r.Score >= floor).Take(MaxRelated).ToList();
+        return [.. ordered.Where(r => r.Score >= floor).Take(MaxRelated)];
     }
 
-    private static readonly Regex Identifier = new(@"\b[A-Za-z_][A-Za-z0-9_]*\b", RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"\b[A-Za-z_][A-Za-z0-9_]*\b", RegexOptions.CultureInvariant)]
+    private static partial Regex Identifier();
 
     /// <summary>
     /// Whether a name the seed uses really points at this declaration. A type is its own
@@ -1155,21 +1158,17 @@ public sealed partial class SourceExplorer
     /// </summary>
     private static bool IsReference(SymbolLocation definition, HashSet<string> seedTokens)
     {
-        if (definition.Symbol.Kind == SourceSymbolKind.Type)
-        {
-            return true;
-        }
-
-        return SourceTokens.Of(definition.Symbol.Name).Count >= 3 &&
+        return definition.Symbol.Kind == SourceSymbolKind.Type || SourceTokens.Of(definition.Symbol.Name).Count >= 3 &&
                definition.File.Symbols.Any(s => s.Kind == SourceSymbolKind.Type && seedTokens.Contains(s.Name.ToLowerInvariant()));
     }
 
-    private static readonly HashSet<string> CodeExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly HashSet<string> CodeExtensions =
+    [
+        with(StringComparer.OrdinalIgnoreCase),
         ".cs", ".fs", ".vb", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte", ".py", ".go", ".rs",
         ".java", ".kt", ".kts", ".scala", ".swift", ".m", ".mm", ".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".rb",
         ".php", ".dart", ".lua", ".ex", ".exs", ".razor", ".cshtml",
-    };
+    ];
 
     internal static bool IsCode(string path) => CodeExtensions.Contains(Path.GetExtension(path));
 
@@ -1192,13 +1191,13 @@ public sealed partial class SourceExplorer
         var highlights = terms.Where(t => t.Weight >= 0.5 && !t.Term.Bonus).Select(t => t.Term.Text).ToList();
         if (highlights.Count == 0)
         {
-            highlights = terms.Where(t => !t.Term.Bonus).Select(t => t.Term.Text).ToList();
+            highlights = [.. terms.Where(t => !t.Term.Bonus).Select(t => t.Term.Text)];
         }
 
         return new DiscoveryResult
         {
             Files = [.. seeds.Select(s => s.File), .. related],
-            Keywords = highlights.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            Keywords = [.. highlights.Distinct(StringComparer.OrdinalIgnoreCase)],
             Round = round,
             IsFinal = isFinal,
         };
@@ -1214,21 +1213,11 @@ public sealed partial class SourceExplorer
         }
 
         var weights = LineWeights(ranked.File, lines, terms, setup, ranked.UsesName);
-        IReadOnlyList<DiscoveredRange> ranges;
-
-        if (weights.Count == 0 && ranked.SemanticLine is { } semanticLine)
-        {
-            ranges = [DeclarationRange(lines, semanticLine)];
-        }
-        else if (ranked.Anchor is { } anchor && anchor.Line <= lines.Length)
-        {
-            ranges = [DeclarationRange(lines, anchor.Line)];
-        }
-        else
-        {
-            ranges = Widen(lines, CodeDiscovery.Slice(lines, weights), ranked.File.Symbols);
-        }
-
+        IReadOnlyList<DiscoveredRange> ranges = weights.Count == 0 && ranked.SemanticLine is { } semanticLine
+            ? [DeclarationRange(lines, semanticLine)]
+            : ranked.Anchor is { } anchor && anchor.Line <= lines.Length
+                ? [DeclarationRange(lines, anchor.Line)]
+                : Widen(lines, CodeDiscovery.Slice(lines, weights), ranked.File.Symbols);
         return new DiscoveredFile
         {
             FilePath = ranked.File.FullPath,
@@ -1247,8 +1236,8 @@ public sealed partial class SourceExplorer
     internal static Dictionary<int, int> LineWeights(SourceFile file, string[] lines, IReadOnlyList<ResolvedTerm> terms, bool setup, string? usesName = null)
     {
         var declarations = file.Symbols.Select(s => s.Line).ToHashSet();
-        var setupFile = setup && (CodeDiscovery.SetupFile.IsMatch(Path.GetFileName(file.RelativePath)) ||
-                                  CodeDiscovery.EntryFile.IsMatch(Path.GetFileName(file.RelativePath)));
+        var setupFile = setup && (CodeDiscovery.SetupFile().IsMatch(Path.GetFileName(file.RelativePath)) ||
+                                  CodeDiscovery.EntryFile().IsMatch(Path.GetFileName(file.RelativePath)));
         var uses = usesName is null ? null : new Regex(@"\b" + Regex.Escape(usesName) + @"\b", RegexOptions.CultureInvariant);
         var weights = new Dictionary<int, int>();
 
@@ -1285,7 +1274,7 @@ public sealed partial class SourceExplorer
                 weight *= 1.6;
             }
 
-            if (setupFile && CodeDiscovery.SetupLine.IsMatch(line))
+            if (setupFile && CodeDiscovery.SetupLine().IsMatch(line))
             {
                 weight = Math.Max(weight, 3);
             }

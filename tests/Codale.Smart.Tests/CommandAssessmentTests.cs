@@ -36,7 +36,7 @@ public sealed class CommandAssessmentTests
     }
 
     [Theory]
-    [InlineData("{}")] 
+    [InlineData("{}")]
     [InlineData("not JSON")]
     [InlineData("{\"description\":\"Delete files\",\"risk\":\"low\",\"reason\":\"workspace\"}")]
     [InlineData("{\"description\":\"\",\"risk\":\"safe\",\"reason\":\"workspace\"}")]
@@ -50,9 +50,9 @@ public sealed class CommandAssessmentTests
     public void Oversized_or_empty_explanations_are_rejected()
     {
         Assert.Null(SmartExperience.ParseCommandAssessment(JsonSerializer.Serialize(new
-            { description = new string('x', 141), risk = "safe", reason = "Reads files" })));
+        { description = new string('x', 141), risk = "safe", reason = "Reads files" })));
         Assert.Null(SmartExperience.ParseCommandAssessment(JsonSerializer.Serialize(new
-            { description = "Read files", risk = "safe", reason = " " })));
+        { description = "Read files", risk = "safe", reason = " " })));
     }
 
     [Fact]

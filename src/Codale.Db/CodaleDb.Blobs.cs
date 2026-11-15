@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
 
+using Codale.Db.Engine;
+
 namespace Codale.Db;
 
 /// <summary>Blobs: binary values stored Brotli-compressed, with their original length in front.</summary>
@@ -25,9 +27,9 @@ public sealed partial class CodaleDb
             if ((value.ValueFlags & ValueFlags.Blob) == 0) throw new InvalidOperationException("This value was not written with WriteBlob().");
             var raw = ReadRaw(value);
             var output = new byte[BinaryPrimitives.ReadInt32LittleEndian(raw)];
-            if (!BrotliDecoder.TryDecompress(raw.AsSpan(4), output, out var written) || written != output.Length)
-                throw new InvalidDataException("Blob is corrupt.");
-            return output;
+            return !BrotliDecoder.TryDecompress(raw.AsSpan(4), output, out var written) || written != output.Length
+                ? throw new InvalidDataException("Blob is corrupt.")
+                : output;
         }
         finally { _lock.ExitReadLock(); }
     }

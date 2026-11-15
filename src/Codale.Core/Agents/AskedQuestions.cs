@@ -39,8 +39,8 @@ public static class AskedQuestions
             }
         }
 
-        var answers = AnswersFromResult(asked.Select(q => q.Question).ToList(), resultText);
-        return asked.Select((q, i) => new AskedQuestion(q.Header, q.Question, answers[i])).ToList();
+        var answers = AnswersFromResult([.. asked.Select(q => q.Question)], resultText);
+        return [.. asked.Select((q, i) => new AskedQuestion(q.Header, q.Question, answers[i]))];
     }
 
     /// <summary>

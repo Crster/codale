@@ -1,17 +1,5 @@
-using Codale.App.Controls;
-using Codale.App.ViewModels;
-using Codale.Core.Helper;
-using Codale.Core.Text;
-
-using Microsoft.UI.Input;
-using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Hosting;
-using Microsoft.UI.Xaml.Media;
-
-using Windows.System;
-using Windows.UI.Core;
 
 namespace Codale.App.Views;
 
@@ -161,12 +149,9 @@ public sealed partial class EditorTab
 
     private PreviewTarget PreviewKind()
     {
-        if (ViewModel?.FilePath is not { } path)
-        {
-            return PreviewTarget.None;
-        }
-
-        return Path.GetExtension(path).ToLowerInvariant() switch
+        return ViewModel?.FilePath is not { } path
+            ? PreviewTarget.None
+            : Path.GetExtension(path).ToLowerInvariant() switch
         {
             ".md" or ".markdown" => PreviewTarget.Markdown,
             ".html" or ".htm" => PreviewTarget.Browser,

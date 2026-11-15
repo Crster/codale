@@ -44,7 +44,7 @@ internal sealed class SmartConversation : ISmartConversation
 
     public SmartConversation(string system, string input, SmartReasoning reasoning, object[]? tools = null)
     { _system = system; _input = input; Reasoning = reasoning; _tools = tools is { Length: > 0 } ? tools : null; }
-    public static ISmartConversation Create(SmartModel model, string system, string input, SmartReasoning reasoning, object[]? tools = null) =>
+    public static ISmartConversation Create(string system, string input, SmartReasoning reasoning, object[]? tools = null) =>
         new SmartConversation(system, input, reasoning, tools);
 
     public SmartReasoning Reasoning { get; }
@@ -95,9 +95,9 @@ internal sealed class SmartConversation : ISmartConversation
             start = next;
             prompt = RenderCore(start, final);
         }
-        if (runtime.CountTokens(prompt) + reserve > ContextTokens)
-            throw new InvalidDataException("Smart input exceeds the 16K context budget.");
-        return prompt;
+        return runtime.CountTokens(prompt) + reserve > ContextTokens
+            ? throw new InvalidDataException("Smart input exceeds the 16K context budget.")
+            : prompt;
     }
 
     private int? NextExchange(int start)
@@ -316,9 +316,9 @@ internal sealed class SmartConversation : ISmartConversation
                 throw new InvalidDataException("Malformed tool arguments.");
             calls.Add(new(block.Groups[1].Value, args));
         }
-        if (Regex.Matches(visible, "<tool_call>").Count != calls.Count || visible.Contains("<function=") && calls.Count == 0)
-            throw new InvalidDataException("Incomplete or malformed tool call.");
-        return calls;
+        return Regex.Matches(visible, "<tool_call>").Count != calls.Count || visible.Contains("<function=") && calls.Count == 0
+            ? throw new InvalidDataException("Incomplete or malformed tool call.")
+            : (IReadOnlyList<SmartToolCall>)calls;
     }
 
     public static string Result(object value) => JsonSerializer.Serialize(value);

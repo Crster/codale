@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 
 using Codale.Core.Text;
@@ -177,9 +176,8 @@ public static partial class MessageRouting
         if (IsPlanOnly(message)) return true;
         if (IsQuestion(message) && !IsChangeRequest(message)) return false;
         var text = Codale.Core.Agents.SessionTitles.StripFillers(message.Trim());
-        if (ApprovedImplementation().IsMatch(text) && !AdditionalScope().IsMatch(text)) return false;
-        return LargeSubsystem().IsMatch(text) || SubstantialWork().IsMatch(text) || VagueRequest().IsMatch(text) ||
-               ScopeOfWork(message) is { Strong: true };
+        return (!ApprovedImplementation().IsMatch(text) || AdditionalScope().IsMatch(text)) && (LargeSubsystem().IsMatch(text) || SubstantialWork().IsMatch(text) || VagueRequest().IsMatch(text) ||
+               ScopeOfWork(message) is { Strong: true });
     }
 
     private static bool IsBoundedChange(string message)

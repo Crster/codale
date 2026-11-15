@@ -12,8 +12,7 @@ namespace Codale.Editor;
 public sealed class EditorModel
 {
     private readonly UndoHistory _history = new();
-    private List<Selection> _selections = [new(default(DocumentPosition))];
-    private int _primary;
+    private List<Selection> _selections = [new(default)];
 
     /// <summary>When the last Ctrl+D selection came from expanding a bare caret, matches must be whole words.</summary>
     private bool _occurrenceWholeWord;
@@ -42,9 +41,9 @@ public sealed class EditorModel
 
     public IReadOnlyList<Selection> Selections => _selections;
 
-    public int PrimaryIndex => _primary;
+    public int PrimaryIndex { get; private set; }
 
-    public Selection Primary => _selections[_primary];
+    public Selection Primary => _selections[PrimaryIndex];
 
     public bool HasMultipleSelections => _selections.Count > 1;
 
@@ -76,8 +75,8 @@ public sealed class EditorModel
     public void Load(string text)
     {
         Buffer.Load(text);
-        _selections = [new(default(DocumentPosition))];
-        _primary = 0;
+        _selections = [new(default)];
+        PrimaryIndex = 0;
         SelectionsChanged?.Invoke();
     }
 
@@ -113,7 +112,7 @@ public sealed class EditorModel
 
         Normalize(selections, primary, out var normalized, out var newPrimary);
         _selections = normalized;
-        _primary = newPrimary;
+        PrimaryIndex = newPrimary;
         _history.Seal();
         SelectionsChanged?.Invoke();
     }
@@ -129,7 +128,7 @@ public sealed class EditorModel
             {
                 var rest = new List<Selection>(_selections);
                 rest.RemoveAt(hit);
-                SetSelections(rest, Math.Min(_primary, rest.Count - 1));
+                SetSelections(rest, Math.Min(PrimaryIndex, rest.Count - 1));
                 return;
             }
         }
@@ -168,7 +167,7 @@ public sealed class EditorModel
             list.Add(new Selection(extend ? selection.Anchor : caret, caret, keepPreferredX ? selection.PreferredX : double.NaN));
         }
 
-        SetSelections(list, _primary);
+        SetSelections(list, PrimaryIndex);
     }
 
     /// <summary>Left/Right: one grapheme cluster, across line ends; collapses a selection onto its edge first.</summary>
@@ -181,22 +180,13 @@ public sealed class EditorModel
 
         var caret = selection.Caret;
         var line = Buffer.GetLine(caret.Line);
-        if (back)
-        {
-            if (caret.Col == 0)
-            {
-                return caret.Line > 0 ? new DocumentPosition(caret.Line - 1, Buffer.LineLength(caret.Line - 1)) : caret;
-            }
-
-            return new DocumentPosition(caret.Line, word ? TextUnits.PreviousWordStop(line, caret.Col) : TextUnits.PreviousBoundary(line, caret.Col));
-        }
-
-        if (caret.Col >= line.Length)
-        {
-            return caret.Line < Buffer.LineCount - 1 ? new DocumentPosition(caret.Line + 1, 0) : caret;
-        }
-
-        return new DocumentPosition(caret.Line, word ? TextUnits.NextWordStop(line, caret.Col) : TextUnits.NextBoundary(line, caret.Col));
+        return back
+            ? caret.Col == 0
+                ? caret.Line > 0 ? new DocumentPosition(caret.Line - 1, Buffer.LineLength(caret.Line - 1)) : caret
+                : new DocumentPosition(caret.Line, word ? TextUnits.PreviousWordStop(line, caret.Col) : TextUnits.PreviousBoundary(line, caret.Col))
+            : caret.Col >= line.Length
+            ? caret.Line < Buffer.LineCount - 1 ? new DocumentPosition(caret.Line + 1, 0) : caret
+            : new DocumentPosition(caret.Line, word ? TextUnits.NextWordStop(line, caret.Col) : TextUnits.NextBoundary(line, caret.Col));
     }, extend);
 
     /// <summary>Smart Home: the first press lands on the text, the next on column 0.</summary>
@@ -249,8 +239,8 @@ public sealed class EditorModel
 
             _occurrenceWholeWord = true;
             var expanded = _selections.ToList();
-            expanded[_primary] = new Selection(new DocumentPosition(primary.Caret.Line, start), new DocumentPosition(primary.Caret.Line, end));
-            SetSelections(expanded, _primary);
+            expanded[PrimaryIndex] = new Selection(new DocumentPosition(primary.Caret.Line, start), new DocumentPosition(primary.Caret.Line, end));
+            SetSelections(expanded, PrimaryIndex);
             return true;
         }
 
@@ -733,7 +723,7 @@ public sealed class EditorModel
             }
         }
 
-        Execute(EditKind.Other, edits, r => _selections.Select(s => MapSelection(r, s)).ToArray());
+        Execute(EditKind.Other, edits, r => [.. _selections.Select(s => MapSelection(r, s))]);
     }
 
     /// <summary>Shift+Tab: removes one level of indentation from every line under the selections.</summary>
@@ -765,7 +755,7 @@ public sealed class EditorModel
             }
         }
 
-        Execute(EditKind.Other, edits, r => _selections.Select(s => MapSelection(r, s)).ToArray());
+        Execute(EditKind.Other, edits, r => [.. _selections.Select(s => MapSelection(r, s))]);
     }
 
     // ------------------------------------------------------------------ undo / redo
@@ -811,7 +801,7 @@ public sealed class EditorModel
     {
         Normalize(selections, Math.Max(0, selections.Length - 1), out var normalized, out var primary);
         _selections = normalized;
-        _primary = primary;
+        PrimaryIndex = primary;
         SelectionsChanged?.Invoke();
     }
 
@@ -914,7 +904,7 @@ public sealed class EditorModel
             return;
         }
 
-        var step = _history.Begin(kind, _selections.ToArray(), Clock());
+        var step = _history.Begin(kind, [.. _selections], Clock());
         var newStarts = new DocumentPosition[edits.Count];
         var newEnds = new DocumentPosition[edits.Count];
 
@@ -924,12 +914,9 @@ public sealed class EditorModel
         var lastNewEnd = default(DocumentPosition);
         DocumentPosition Shift(DocumentPosition p)
         {
-            if (!hasLast)
-            {
-                return p;
-            }
-
-            return p.Line == lastOldEnd.Line
+            return !hasLast
+                ? p
+                : p.Line == lastOldEnd.Line
                 ? new DocumentPosition(lastNewEnd.Line, lastNewEnd.Col + (p.Col - lastOldEnd.Col))
                 : new DocumentPosition(p.Line + (lastNewEnd.Line - lastOldEnd.Line), p.Col);
         }
@@ -956,10 +943,10 @@ public sealed class EditorModel
 
         var result = new BatchResult(edits, newStarts, newEnds);
         var selections = after(result);
-        Normalize(selections, Math.Min(_primary, selections.Count - 1), out var normalized, out var primary);
+        Normalize(selections, Math.Min(PrimaryIndex, selections.Count - 1), out var normalized, out var primary);
         _selections = normalized;
-        _primary = primary;
-        step.After = _selections.ToArray();
+        PrimaryIndex = primary;
+        step.After = [.. _selections];
         _history.DiscardIfEmpty(step);
         SelectionsChanged?.Invoke();
         Edited?.Invoke();
@@ -984,7 +971,7 @@ public sealed class EditorModel
 
         if (!sorted)
         {
-            edits = edits.OrderBy(e => e.Start).ToList();
+            edits = [.. edits.OrderBy(e => e.Start)];
         }
 
         for (var i = 1; i < edits.Count; i++)
@@ -1076,7 +1063,7 @@ public sealed class EditorModel
             });
         }
 
-        output = new List<Selection>(count);
+        output = [with(count)];
         newPrimary = 0;
         for (var i = 0; i < count; i++)
         {

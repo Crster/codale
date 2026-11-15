@@ -108,8 +108,9 @@ public sealed partial class ProjectKnowledgeIndex
     public IReadOnlyList<FeatureInfo> SearchFeatures(string text, int limit)
     {
         var terms = SearchText.MatchQueryTerms(text);
-        if (terms.Count == 0) return [];
-        return [.. FeatureRoot.Match(FeatureField, Terms(terms), limit)
+        return terms.Count == 0
+            ? []
+            : [.. FeatureRoot.Match(FeatureField, Terms(terms), limit)
             .Select(hit => GetFeature(hit.Node.Name))
             .OfType<FeatureInfo>()];
     }

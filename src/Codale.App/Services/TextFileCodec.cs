@@ -132,12 +132,7 @@ public static class TextFileCodec
             }
         }
 
-        if (crlf == 0 && lf == 0 && cr == 0)
-        {
-            return Environment.NewLine;
-        }
-
-        return crlf >= lf && crlf >= cr ? "\r\n" : lf >= cr ? "\n" : "\r";
+        return crlf == 0 && lf == 0 && cr == 0 ? Environment.NewLine : crlf >= lf && crlf >= cr ? "\r\n" : lf >= cr ? "\n" : "\r";
     }
 
     /// <summary>Rewrites every line break (CRLF, LF or lone CR) to <paramref name="lineEnding"/>.</summary>

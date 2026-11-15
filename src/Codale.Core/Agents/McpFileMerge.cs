@@ -32,7 +32,7 @@ public static class McpFileMerge
         var mapKey = MapKey(format);
         var gemini = format == McpFileFormat.Gemini;
 
-        var map = doc[mapKey] as JsonObject ?? new();
+        var map = doc[mapKey] as JsonObject ?? [];
         foreach (var key in map.Select(p => p.Key).Where(k => k.StartsWith("codale-", StringComparison.Ordinal) || ownedNames.Contains(k)).ToList())
         {
             map.Remove(key);

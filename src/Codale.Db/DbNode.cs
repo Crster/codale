@@ -1,5 +1,7 @@
 using System.Text.Json;
 
+using Codale.Db.Search;
+
 namespace Codale.Db;
 
 /// <summary>
@@ -20,8 +22,9 @@ public readonly struct DbNode
     internal static string Validate(string name)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
-        if (name.Contains(CodaleDb.Sep)) throw new ArgumentException("A name cannot contain the unit separator (U+001F).", nameof(name));
-        return name;
+        return name.Contains(CodaleDb.Sep)
+            ? throw new ArgumentException("A name cannot contain the unit separator (U+001F).", nameof(name))
+            : name;
     }
 
     public DbPath Location => DbPath.FromRaw(_path);

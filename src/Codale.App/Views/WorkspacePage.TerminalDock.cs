@@ -299,12 +299,9 @@ public sealed partial class WorkspacePage
     {
         var width = DockDropTarget.ActualWidth;
         var height = DockDropTarget.ActualHeight;
-        if (_dockDrag is null || width <= 0 || height <= 0 || p.X < width * (1 - DockZoneFraction))
-        {
-            return BlockDock.None;
-        }
-
-        return p.Y < height / 3 ? BlockDock.TopRight
+        return _dockDrag is null || width <= 0 || height <= 0 || p.X < width * (1 - DockZoneFraction)
+            ? BlockDock.None
+            : p.Y < height / 3 ? BlockDock.TopRight
             : p.Y > height * 2 / 3 ? BlockDock.BottomRight
             : BlockDock.Right;
     }

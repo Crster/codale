@@ -22,8 +22,6 @@ public sealed partial class WorkspacePage
 
     /// <summary>Edges within this fraction of the content split it; the middle moves the tab.</summary>
     private const double EdgeFraction = 0.3;
-
-    private TabView? _activeGroup;
     private bool _splitSideBySide = true;
     private bool _secondaryFirst;
 
@@ -34,8 +32,9 @@ public sealed partial class WorkspacePage
     private bool IsSplit => SecondaryGroup.Visibility == Visibility.Visible;
 
     /// <summary>The group new tabs open in and whose selected tab counts as "in front".</summary>
-    private TabView ActiveGroup =>
-        _activeGroup is { } group && (ReferenceEquals(group, CentreTabs) || IsSplit) ? group : CentreTabs;
+    private TabView ActiveGroup { get =>
+        field is { } group && (ReferenceEquals(group, CentreTabs) || IsSplit) ? group : CentreTabs; set;
+    }
 
     /// <summary>The tab in front: the selected tab of the active group.</summary>
     private object? ActiveTabItem => ActiveGroup.SelectedItem;
@@ -69,7 +68,7 @@ public sealed partial class WorkspacePage
             return;
         }
 
-        _activeGroup = group;
+        ActiveGroup = group;
         OnActiveTabChanged();
     }
 
@@ -83,7 +82,7 @@ public sealed partial class WorkspacePage
 
         var group = GroupOf(item) ?? ActiveGroup;
         var changed = !ReferenceEquals(ActiveGroup, group);
-        _activeGroup = group;
+        ActiveGroup = group;
         group.SelectedItem = item;
         if (changed)
         {
@@ -134,7 +133,7 @@ public sealed partial class WorkspacePage
         if (SplitTabs.TabItems.Count == 0)
         {
             SecondaryGroup.Visibility = Visibility.Collapsed;
-            _activeGroup = CentreTabs;
+            ActiveGroup = CentreTabs;
             ApplyTabGroupLayout();
             OnActiveTabChanged();
         }
@@ -230,7 +229,7 @@ public sealed partial class WorkspacePage
             target.TabItems.Add(item);
         }
 
-        _activeGroup = target;
+        ActiveGroup = target;
         target.SelectedItem = item;
         UpdateEmptyState();
         OnActiveTabChanged();

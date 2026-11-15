@@ -1,4 +1,5 @@
 using Codale.Core.Helper;
+using Codale.Search.Engine;
 
 namespace Codale.Search.Tests;
 

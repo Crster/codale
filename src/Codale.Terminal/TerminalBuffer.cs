@@ -15,25 +15,6 @@ public sealed class TerminalBuffer
     /// <summary>How many scrolled-off lines are kept. The oldest lines drop first.</summary>
     public int ScrollbackLimit = 10000;
 
-    private int _cols;
-    private int _rows;
-
-    /// <summary>Scroll region, 0-based inclusive. The full screen by default.</summary>
-    private int _scrollTop;
-    private int _scrollBottom;
-
-    private int _cursorRow;
-    private int _cursorCol;
-
-    /// <summary>
-    /// xterm's deferred wrap: after printing in the last column the cursor stays
-    /// put and only wraps when the next printable character arrives. Without this,
-    /// ConPTY output that lands exactly on the last column would wrap too early.
-    /// </summary>
-    private bool _pendingWrap;
-
-    private CellStyle _currentStyle = CellStyle.Default;
-
     /// <summary>DECSC state, kept per screen because main and alt never share it.</summary>
     private struct SavedCursor
     {
@@ -55,34 +36,33 @@ public sealed class TerminalBuffer
     private TerminalCell[][] _altGrid = [];
 
     // Modes that survive a buffer switch; the alt screen keeps its own origin mode.
-    private bool _altScreen;
     private bool _originModeMain;
     private bool _originModeAlt;
 
     public TerminalBuffer(int cols = 80, int rows = 25)
     {
-        _cols = Math.Max(1, cols);
-        _rows = Math.Max(1, rows);
-        _grid = MakeGrid(_cols, _rows);
+        Cols = Math.Max(1, cols);
+        Rows = Math.Max(1, rows);
+        _grid = MakeGrid(Cols, Rows);
         ResetMargins();
         ResetTabStops();
     }
 
-    public int Cols => _cols;
-    public int Rows => _rows;
+    public int Cols { get; private set; }
+    public int Rows { get; private set; }
 
-    public int CursorRow => _cursorRow;
-    public int CursorCol => _cursorCol;
-    public bool PendingWrap => _pendingWrap;
+    public int CursorRow { get; private set; }
+    public int CursorCol { get; private set; }
+    public bool PendingWrap { get; private set; }
 
-    public int ScrollTop => _scrollTop;
-    public int ScrollBottom => _scrollBottom;
+    public int ScrollTop { get; private set; }
+    public int ScrollBottom { get; private set; }
 
-    public bool OriginMode => _altScreen ? _originModeAlt : _originModeMain;
+    public bool OriginMode => InAlternate ? _originModeAlt : _originModeMain;
 
-    public bool InAlternate => _altScreen;
+    public bool InAlternate { get; private set; }
 
-    public CellStyle CurrentStyle => _currentStyle;
+    public CellStyle CurrentStyle { get; private set; } = CellStyle.Default;
 
     /// <summary>DECAWM: whether printing past the last column wraps to the next line.</summary>
     private bool _autowrap = true;
@@ -90,7 +70,7 @@ public sealed class TerminalBuffer
     public void SetAutowrap(bool on) => _autowrap = on;
 
     public int ScrollbackCount => _scrollback.Count;
-        
+
     /// <summary>
     /// Row <paramref name="index"/> of the combined buffer, where 0 is the oldest
     /// scrollback line and <see cref="ScrollbackCount"/> is the top of the live screen.
@@ -98,18 +78,13 @@ public sealed class TerminalBuffer
     /// </summary>
     public ReadOnlySpan<TerminalCell> GetLine(int index)
     {
-        var offset = _altScreen ? 0 : _scrollback.Count;
+        var offset = InAlternate ? 0 : _scrollback.Count;
         var screenIndex = index - offset;
-        if (screenIndex < 0)
-        {
-            return _scrollback[index];
-        }
-
-        return _grid[screenIndex];
+        return screenIndex < 0 ? (ReadOnlySpan<TerminalCell>)_scrollback[index] : (ReadOnlySpan<TerminalCell>)_grid[screenIndex];
     }
 
     /// <summary>Whether the scrollback is part of the addressable buffer right now (it never is on the alt screen).</summary>
-    public bool ScrollbackVisible => !_altScreen;
+    public bool ScrollbackVisible => !InAlternate;
 
     /// <summary>The live screen row, 0 = top of the screen.</summary>
     public TerminalCell[] GetScreenRow(int index) => _grid[index];
@@ -120,9 +95,9 @@ public sealed class TerminalBuffer
     /// </summary>
     public int GetLastContentRow()
     {
-        for (var row = _rows - 1; row >= 0; row--)
+        for (var row = Rows - 1; row >= 0; row--)
         {
-            if (row == _cursorRow)
+            if (row == CursorRow)
             {
                 return row;
             }
@@ -135,12 +110,12 @@ public sealed class TerminalBuffer
                     cell.Style.Bg != TerminalColor.Default ||
                     (cell.Style.Flags & (CellFlags.Underline | CellFlags.Reverse)) != 0)
                 {
-                    return Math.Max(row, _cursorRow);
+                    return Math.Max(row, CursorRow);
                 }
             }
         }
 
-        return Math.Clamp(_cursorRow, 0, _rows - 1);
+        return Math.Clamp(CursorRow, 0, Rows - 1);
     }
 
     /// <summary>
@@ -150,7 +125,7 @@ public sealed class TerminalBuffer
     /// </summary>
     public int GetLastTextRow()
     {
-        for (var row = _rows - 1; row >= 0; row--)
+        for (var row = Rows - 1; row >= 0; row--)
         {
             var line = _grid[row];
             for (var col = 0; col < line.Length; col++)
@@ -173,69 +148,69 @@ public sealed class TerminalBuffer
 
     public void MoveCursorTo(int row, int col)
     {
-        _pendingWrap = false;
+        PendingWrap = false;
 
         // Origin mode (DECOM) makes row coordinates relative to the scroll region.
-        var top = OriginMode ? _scrollTop : 0;
-        var bottom = OriginMode ? _scrollBottom : _rows - 1;
+        var top = OriginMode ? ScrollTop : 0;
+        var bottom = OriginMode ? ScrollBottom : Rows - 1;
 
-        _cursorRow = Math.Clamp(row, top, bottom);
-        _cursorCol = Math.Clamp(col, 0, _cols - 1);
+        CursorRow = Math.Clamp(row, top, bottom);
+        CursorCol = Math.Clamp(col, 0, Cols - 1);
     }
 
     public void MoveCursorCol(int col)
     {
-        _pendingWrap = false;
-        _cursorCol = Math.Clamp(col, 0, _cols - 1);
+        PendingWrap = false;
+        CursorCol = Math.Clamp(col, 0, Cols - 1);
     }
 
     public void MoveCursorRow(int row)
     {
-        _pendingWrap = false;
-        _cursorRow = Math.Clamp(row, OriginMode ? _scrollTop : 0, OriginMode ? _scrollBottom : _rows - 1);
+        PendingWrap = false;
+        CursorRow = Math.Clamp(row, OriginMode ? ScrollTop : 0, OriginMode ? ScrollBottom : Rows - 1);
     }
 
     /// <summary>Moves the cursor without origin-mode clamping (for CUB/CUF which always stay on the line).</summary>
     public void MoveCursorHorizontal(int col)
     {
-        _pendingWrap = false;
-        _cursorCol = Math.Clamp(col, 0, _cols - 1);
+        PendingWrap = false;
+        CursorCol = Math.Clamp(col, 0, Cols - 1);
     }
 
-    public void MoveCursorVertical(int delta) => MoveCursorRow(_cursorRow + delta);
+    public void MoveCursorVertical(int delta) => MoveCursorRow(CursorRow + delta);
 
     /// <summary>Advances one cell right, wrapping with xterm's deferred-wrap semantics.</summary>
     public void AdvanceCursor()
     {
-        if (_cursorCol < _cols - 1)
+        if (CursorCol < Cols - 1)
         {
-            _cursorCol++;
-            _pendingWrap = false;
+            CursorCol++;
+            PendingWrap = false;
         }
-        else if (_pendingWrap)
+        else if (PendingWrap)
         {
             LineFeed();
         }
         else
         {
-            _pendingWrap = true;
+            PendingWrap = true;
         }
     }
 
-    public void SetStyle(CellStyle style) => _currentStyle = style;
+    public void SetStyle(CellStyle style) => CurrentStyle = style;
 
     public void SaveCursor()
     {
         _saved = new SavedCursor
         {
-            Row = _cursorRow,
-            Col = _cursorCol,
-            Style = _currentStyle,
+            Row = CursorRow,
+            Col = CursorCol,
+            Style = CurrentStyle,
             OriginMode = OriginMode,
-            PendingWrap = _pendingWrap,
+            PendingWrap = PendingWrap,
         };
 
-        if (_altScreen)
+        if (InAlternate)
         {
             _savedAlt = _saved;
         }
@@ -247,17 +222,17 @@ public sealed class TerminalBuffer
 
     public void RestoreCursor()
     {
-        _saved = _altScreen ? _savedAlt : _savedMain;
-        _cursorRow = Math.Clamp(_saved.Row, 0, _rows - 1);
-        _cursorCol = Math.Clamp(_saved.Col, 0, _cols - 1);
-        _currentStyle = _saved.Style;
+        _saved = InAlternate ? _savedAlt : _savedMain;
+        CursorRow = Math.Clamp(_saved.Row, 0, Rows - 1);
+        CursorCol = Math.Clamp(_saved.Col, 0, Cols - 1);
+        CurrentStyle = _saved.Style;
         SetOriginMode(_saved.OriginMode);
-        _pendingWrap = _saved.PendingWrap;
+        PendingWrap = _saved.PendingWrap;
     }
 
     public void SetOriginMode(bool on)
     {
-        if (_altScreen)
+        if (InAlternate)
         {
             _originModeAlt = on;
         }
@@ -277,42 +252,42 @@ public sealed class TerminalBuffer
     public void ResetTabStops()
     {
         _tabStops.Clear();
-        for (var col = 8; col < _cols; col += 8)
+        for (var col = 8; col < Cols; col += 8)
         {
             _tabStops.Add(col);
         }
     }
 
-    public void SetTabStop() => _tabStops.Add(_cursorCol);
+    public void SetTabStop() => _tabStops.Add(CursorCol);
 
-    public void ClearTabStop() => _tabStops.Remove(_cursorCol);
+    public void ClearTabStop() => _tabStops.Remove(CursorCol);
 
     public void ClearAllTabStops() => _tabStops.Clear();
 
     /// <summary>Moves to the next tab stop, or the last column when none remain.</summary>
     public void TabForward()
     {
-        var col = _cursorCol + 1;
-        while (col < _cols - 1 && !_tabStops.Contains(col))
+        var col = CursorCol + 1;
+        while (col < Cols - 1 && !_tabStops.Contains(col))
         {
             col++;
         }
 
-        _cursorCol = Math.Min(col, _cols - 1);
-        _pendingWrap = false;
+        CursorCol = Math.Min(col, Cols - 1);
+        PendingWrap = false;
     }
 
     /// <summary>Moves to the previous tab stop, or column 0 when none remain.</summary>
     public void TabBackward()
     {
-        var col = _cursorCol - 1;
+        var col = CursorCol - 1;
         while (col > 0 && !_tabStops.Contains(col))
         {
             col--;
         }
 
-        _cursorCol = Math.Max(col, 0);
-        _pendingWrap = false;
+        CursorCol = Math.Max(col, 0);
+        PendingWrap = false;
     }
 
     // ------------------------------------------------------------------ line feeding
@@ -320,28 +295,28 @@ public sealed class TerminalBuffer
     /// <summary>Line feed: scrolls the region when the cursor is on its bottom edge, otherwise moves down.</summary>
     public void LineFeed()
     {
-        _pendingWrap = false;
-        if (_cursorRow == _scrollBottom)
+        PendingWrap = false;
+        if (CursorRow == ScrollBottom)
         {
             ScrollUp(1);
         }
-        else if (_cursorRow < _rows - 1)
+        else if (CursorRow < Rows - 1)
         {
-            _cursorRow++;
+            CursorRow++;
         }
     }
 
     /// <summary>Reverse line feed (ESC M): scrolls the region backwards at its top edge.</summary>
     public void ReverseLineFeed()
     {
-        _pendingWrap = false;
-        if (_cursorRow == _scrollTop)
+        PendingWrap = false;
+        if (CursorRow == ScrollTop)
         {
             ScrollDown(1);
         }
-        else if (_cursorRow > 0)
+        else if (CursorRow > 0)
         {
-            _cursorRow--;
+            CursorRow--;
         }
     }
 
@@ -350,29 +325,29 @@ public sealed class TerminalBuffer
     public void SetMargins(int top, int bottom)
     {
         // An invalid or full-screen pair resets the margins.
-        if (top > bottom || (top == 0 && bottom == _rows - 1))
+        if (top > bottom || (top == 0 && bottom == Rows - 1))
         {
             ResetMargins();
             return;
         }
 
-        _scrollTop = Math.Clamp(top, 0, _rows - 1);
-        _scrollBottom = Math.Clamp(bottom, 0, _rows - 1);
+        ScrollTop = Math.Clamp(top, 0, Rows - 1);
+        ScrollBottom = Math.Clamp(bottom, 0, Rows - 1);
         MoveCursorTo(0, 0);
     }
 
     public void ResetMargins()
     {
-        _scrollTop = 0;
-        _scrollBottom = _rows - 1;
+        ScrollTop = 0;
+        ScrollBottom = Rows - 1;
     }
 
     /// <summary>Scrolls the region up by <paramref name="count"/> lines; vacated lines become blank. The top line(s) go to scrollback when the region is the full screen.</summary>
     public void ScrollUp(int count)
     {
-        count = Math.Min(count, _scrollBottom - _scrollTop + 1);
+        count = Math.Min(count, ScrollBottom - ScrollTop + 1);
 
-        if (_scrollTop == 0 && !_altScreen)
+        if (ScrollTop == 0 && !InAlternate)
         {
             for (var i = 0; i < count; i++)
             {
@@ -380,12 +355,12 @@ public sealed class TerminalBuffer
             }
         }
 
-        for (var row = _scrollTop; row + count <= _scrollBottom; row++)
+        for (var row = ScrollTop; row + count <= ScrollBottom; row++)
         {
             _grid[row] = _grid[row + count];
         }
 
-        for (var row = _scrollBottom - count + 1; row <= _scrollBottom; row++)
+        for (var row = ScrollBottom - count + 1; row <= ScrollBottom; row++)
         {
             _grid[row] = NewBlankRow();
         }
@@ -394,14 +369,14 @@ public sealed class TerminalBuffer
     /// <summary>Scrolls the region down by <paramref name="count"/> lines, opening blank lines at the top.</summary>
     public void ScrollDown(int count)
     {
-        count = Math.Min(count, _scrollBottom - _scrollTop + 1);
+        count = Math.Min(count, ScrollBottom - ScrollTop + 1);
 
-        for (var row = _scrollBottom; row - count >= _scrollTop; row--)
+        for (var row = ScrollBottom; row - count >= ScrollTop; row--)
         {
             _grid[row] = _grid[row - count];
         }
 
-        for (var row = _scrollTop; row < _scrollTop + count; row++)
+        for (var row = ScrollTop; row < ScrollTop + count; row++)
         {
             _grid[row] = NewBlankRow();
         }
@@ -410,13 +385,13 @@ public sealed class TerminalBuffer
     /// <summary>Moves lines out of the region between two rows, like IL/DL: everything below the deleted block moves up.</summary>
     public void InsertLines(int atRow, int count)
     {
-        if (atRow < _scrollTop || atRow > _scrollBottom || count <= 0)
+        if (atRow < ScrollTop || atRow > ScrollBottom || count <= 0)
         {
             return;
         }
 
-        count = Math.Min(count, _scrollBottom - atRow + 1);
-        for (var row = _scrollBottom; row - count >= atRow; row--)
+        count = Math.Min(count, ScrollBottom - atRow + 1);
+        for (var row = ScrollBottom; row - count >= atRow; row--)
         {
             _grid[row] = _grid[row - count];
         }
@@ -429,18 +404,18 @@ public sealed class TerminalBuffer
 
     public void DeleteLines(int atRow, int count)
     {
-        if (atRow < _scrollTop || atRow > _scrollBottom || count <= 0)
+        if (atRow < ScrollTop || atRow > ScrollBottom || count <= 0)
         {
             return;
         }
 
-        count = Math.Min(count, _scrollBottom - atRow + 1);
-        for (var row = atRow; row + count <= _scrollBottom; row++)
+        count = Math.Min(count, ScrollBottom - atRow + 1);
+        for (var row = atRow; row + count <= ScrollBottom; row++)
         {
             _grid[row] = _grid[row + count];
         }
 
-        for (var row = _scrollBottom - count + 1; row <= _scrollBottom; row++)
+        for (var row = ScrollBottom - count + 1; row <= ScrollBottom; row++)
         {
             _grid[row] = NewBlankRow();
         }
@@ -451,31 +426,31 @@ public sealed class TerminalBuffer
     /// <summary>Writes one character at the cursor and advances. A double-width character claims the next cell too.</summary>
     public void Put(char code, CellStyle style)
     {
-        if (_pendingWrap)
+        if (PendingWrap)
         {
             if (_autowrap)
             {
                 LineFeed();
-                _cursorCol = 0;
+                CursorCol = 0;
             }
             else
             {
-                _pendingWrap = false;
+                PendingWrap = false;
             }
         }
 
-        ref var cell = ref _grid[_cursorRow][_cursorCol];
+        ref var cell = ref _grid[CursorRow][CursorCol];
         cell.Code = code;
         cell.Style = style;
         cell.WideTail = false;
 
         // CJK-range characters occupy two cells; the tail renders as blank.
-        if (IsWide(code) && _cursorCol + 1 < _cols)
+        if (IsWide(code) && CursorCol + 1 < Cols)
         {
             var tail = TerminalCell.Blank(style);
             tail.WideTail = true;
-            _grid[_cursorRow][_cursorCol + 1] = tail;
-            _cursorCol++;
+            _grid[CursorRow][CursorCol + 1] = tail;
+            CursorCol++;
         }
 
         AdvanceCursor();
@@ -497,9 +472,9 @@ public sealed class TerminalBuffer
     /// <summary>Erases cells between two columns of one row, inclusive-exclusive, with <paramref name="style"/> as the blank style.</summary>
     public void EraseInLine(int row, int fromCol, int toCol)
     {
-        row = Math.Clamp(row, 0, _rows - 1);
+        row = Math.Clamp(row, 0, Rows - 1);
         fromCol = Math.Max(0, fromCol);
-        toCol = Math.Min(toCol, _cols);
+        toCol = Math.Min(toCol, Cols);
 
         var style = EraseStyle();
         for (var col = fromCol; col < toCol; col++)
@@ -512,7 +487,7 @@ public sealed class TerminalBuffer
     public void EraseRows(int fromRow, int toRow)
     {
         fromRow = Math.Max(0, fromRow);
-        toRow = Math.Min(toRow, _rows);
+        toRow = Math.Min(toRow, Rows);
 
         var style = EraseStyle();
         for (var row = fromRow; row < toRow; row++)
@@ -522,7 +497,7 @@ public sealed class TerminalBuffer
     }
 
     /// <summary>Whether erased cells adopt the current background (BCE) or stay plain. ConPTY expects background-colour erase.</summary>
-    private CellStyle EraseStyle() => new(TerminalColor.Default, _currentStyle.Bg, CellFlags.None);
+    private CellStyle EraseStyle() => new(TerminalColor.Default, CurrentStyle.Bg, CellFlags.None);
 
     private TerminalCell[] NewBlankRow() => NewBlankRow(EraseStyle());
 
@@ -531,13 +506,13 @@ public sealed class TerminalBuffer
         // A full scrollback evicts one line per scrolled line; recycling its array keeps a
         // long-running terminal from allocating a row per newline.
         var row = _spareRow;
-        if (row is not null && row.Length == _cols)
+        if (row is not null && row.Length == Cols)
         {
             _spareRow = null;
         }
         else
         {
-            row = new TerminalCell[_cols];
+            row = new TerminalCell[Cols];
         }
 
         Array.Fill(row, TerminalCell.Blank(style));
@@ -572,11 +547,11 @@ public sealed class TerminalBuffer
     /// <summary>Power-on reset (ESC c): blank screen, default style, cursor home, margins and tab stops reset.</summary>
     public void Reset()
     {
-        _grid = MakeGrid(_cols, _rows);
-        _altScreen = false;
-        _currentStyle = CellStyle.Default;
-        _cursorRow = _cursorCol = 0;
-        _pendingWrap = false;
+        _grid = MakeGrid(Cols, Rows);
+        InAlternate = false;
+        CurrentStyle = CellStyle.Default;
+        CursorRow = CursorCol = 0;
+        PendingWrap = false;
         _originModeMain = _originModeAlt = false;
         _savedMain = _savedAlt = default;
         ResetMargins();
@@ -592,7 +567,7 @@ public sealed class TerminalBuffer
     /// </summary>
     public void SetAlternateScreen(bool on)
     {
-        if (on == _altScreen)
+        if (on == InAlternate)
         {
             return;
         }
@@ -600,14 +575,14 @@ public sealed class TerminalBuffer
         if (on)
         {
             _mainGrid = _grid;
-            _altGrid = MakeGrid(_cols, _rows);
+            _altGrid = MakeGrid(Cols, Rows);
             _grid = _altGrid;
-            _altScreen = true;
+            InAlternate = true;
         }
         else
         {
             _grid = _mainGrid;
-            _altScreen = false;
+            InAlternate = false;
         }
     }
 
@@ -622,7 +597,7 @@ public sealed class TerminalBuffer
     {
         cols = Math.Max(1, cols);
         rows = Math.Max(1, rows);
-        if (cols == _cols && rows == _rows)
+        if (cols == Cols && rows == Rows)
         {
             return;
         }
@@ -632,8 +607,8 @@ public sealed class TerminalBuffer
         // Shrinking below the cursor: slide the screen up so the cursor's line stays
         // on screen (the lines that fall off the top go to scrollback on the main
         // screen), instead of cutting off the prompt at the bottom.
-        var shift = Math.Max(0, _cursorRow - (rows - 1));
-        if (!_altScreen)
+        var shift = Math.Max(0, CursorRow - (rows - 1));
+        if (!InAlternate)
         {
             for (var row = 0; row < shift && row < _grid.Length; row++)
             {
@@ -645,18 +620,18 @@ public sealed class TerminalBuffer
 
         // The screen that is not showing has to follow too, or switching back to it
         // later would address a grid of the old size.
-        if (_altScreen)
+        if (InAlternate)
         {
             _mainGrid = ResizeGrid(_mainGrid, 0, cols, rows, CellStyle.Default);
             _altGrid = _grid;
         }
 
-        _cols = cols;
-        _rows = rows;
+        Cols = cols;
+        Rows = rows;
 
-        _cursorRow = Math.Clamp(_cursorRow - shift, 0, rows - 1);
-        _cursorCol = Math.Clamp(_cursorCol, 0, cols - 1);
-        _pendingWrap = false;
+        CursorRow = Math.Clamp(CursorRow - shift, 0, rows - 1);
+        CursorCol = Math.Clamp(CursorCol, 0, cols - 1);
+        PendingWrap = false;
         ResetMargins();
         ResetTabStops();
     }

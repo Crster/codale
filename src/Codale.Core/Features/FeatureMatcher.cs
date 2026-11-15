@@ -80,21 +80,15 @@ public static class FeatureMatcher
         var enough = best.NameHit
             ? best.Score >= MinNameCoverage
             : best.Matched >= 2 && best.Score >= MinCoverage;
-        if (!enough)
-        {
-            return null;
-        }
-
-        return ranked.Count == 1 || best.Score >= ranked[1].Score * MinLead ? best.Feature : null;
+        return !enough ? null : ranked.Count == 1 || best.Score >= ranked[1].Score * MinLead ? best.Feature : null;
     }
 
     /// <summary>The distinct words of the message that can tell features apart.</summary>
     private static List<string> MessageWords(string message) =>
-        SearchText.Tokens(message)
+        [.. SearchText.Tokens(message)
             .Where(t => t.Length >= MinWordLength && !t.All(char.IsDigit) && !SearchText.IsStopWord(t))
             .Distinct(StringComparer.Ordinal)
-            .Take(40)
-            .ToList();
+            .Take(40)];
 
     /// <summary>Rarer words weigh more; a word in every feature weighs next to nothing.</summary>
     private static double Idf(int features, int withWord) =>

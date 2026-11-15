@@ -9,17 +9,16 @@ public sealed class ModelInstaller
     public const string Sha256 = "16a9369d0805f80b7377d25d87f937a90c05dc04ad79173a52001e42c9aab311";
     public const long Size = 5347917952;
     private static readonly HttpClient Http = new() { Timeout = Timeout.InfiniteTimeSpan };
-    private readonly string _directory;
     private readonly HttpClient? _client;
     private readonly SmartModel _model;
     private readonly long _size;
     private readonly string _hash;
     public ModelInstaller(string directory, HttpClient? client = null) : this(directory, SmartModels.Default, client) { }
     public ModelInstaller(string directory, SmartModel model, HttpClient? client = null)
-    { _directory = directory; _model = model; _client = client; _size = model.Size; _hash = model.Sha256; }
+    { ModelPath = directory; _model = model; _client = client; _size = model.Size; _hash = model.Sha256; }
     internal ModelInstaller(string directory, HttpClient client, long size, string hash) : this(directory, client)
     { _size = size; _hash = hash; }
-    public string ModelPath => Path.Combine(_directory, _model.Revision, _model.FileName);
+    public string ModelPath => Path.Combine(field, _model.Revision, _model.FileName);
 
     public async Task<string> EnsureAsync(IProgress<double>? progress, CancellationToken ct)
     {

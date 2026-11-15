@@ -1,5 +1,5 @@
-using Codale.App.Services;
 using Codale.Search;
+using Codale.Search.Engine;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -66,22 +66,11 @@ public sealed partial class WorkspaceHealthViewModel : ObservableObject, IDispos
         var model = _index.Model;
 
         var (done, total) = _summary;
-        if (_index.IsScanning || _knowledge?.IsIndexing == true)
-        {
-            IndexText = "Indexing…";
-        }
-        else if (total > 0 && done < total)
-        {
-            IndexText = $"Summarizing {Math.Min(done + 1, total)}/{total}";
-        }
-        else if (snapshot is null)
-        {
-            IndexText = "Index not built";
-        }
-        else
-        {
-            IndexText = $"{snapshot.Files.Count:N0} files indexed";
-        }
+        IndexText = _index.IsScanning || _knowledge?.IsIndexing == true
+            ? "Indexing…"
+            : total > 0 && done < total
+                ? $"Summarizing {Math.Min(done + 1, total)}/{total}"
+                : snapshot is null ? "Index not built" : $"{snapshot.Files.Count:N0} files indexed";
 
         IndexTooltip = snapshot is null
             ? "The project index is built when the workspace opens."

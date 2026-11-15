@@ -3,6 +3,7 @@ using System.Text.Json;
 
 using Codale.Core.Helper;
 using Codale.Core.Text;
+using Codale.Search.Engine;
 
 namespace Codale.Search;
 
@@ -89,7 +90,7 @@ public sealed partial class SourceExplorer
         var editing = SearchQueryIntent.WantsEditLocation(query);
         var evidence = new Dictionary<string, HashSet<int>>(StringComparer.OrdinalIgnoreCase);
         var source = new StringBuilder();
-        var fileList = CodeDiscovery.BuildFileList(snapshot.Files.Select(f => f.RelativePath).ToList());
+        var fileList = CodeDiscovery.BuildFileList([.. snapshot.Files.Select(f => f.RelativePath)]);
         var pending = shown;
         var answered = false;
         DiscoveryResult? best = null;
@@ -115,12 +116,12 @@ public sealed partial class SourceExplorer
             if (AlignReview(snapshot, answer, evidence, ranked, terms, setup, editing, round: pass + 1) is { } aligned)
                 best = aligned;
 
-            pending = CodeDiscovery.SplitList(answer.GetString("paths"))
+            pending = [.. CodeDiscovery.SplitList(answer.GetString("paths"))
                 .Concat(ReviewPaths(answer))
                 .Select(snapshot.Find).OfType<SourceFile>()
                 .Where(f => !evidence.ContainsKey(f.RelativePath))
                 .DistinctBy(f => f.RelativePath, StringComparer.OrdinalIgnoreCase)
-                .Take(MaxPicked).ToList();
+                .Take(MaxPicked)];
 
             // A confirmed answer with nothing left to read is done; an edit question
             // keeps reading the files it was pointed to.
@@ -146,8 +147,7 @@ public sealed partial class SourceExplorer
         {
             using var document = JsonDocument.Parse(json);
             return document.RootElement.ValueKind != JsonValueKind.Array ? [] :
-                document.RootElement.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.Object).Take(16)
-                    .Select(e => e.Clone()).ToList();
+                [.. document.RootElement.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.Object).Take(16).Select(e => e.Clone())];
         }
         catch (JsonException) { return []; }
     }
@@ -196,8 +196,10 @@ public sealed partial class SourceExplorer
             {
                 confirmed.Add(new DiscoveredFile
                 {
-                    FilePath = file.FullPath, RelativePath = file.RelativePath, Confirmed = true,
-                    Keywords = words.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                    FilePath = file.FullPath,
+                    RelativePath = file.RelativePath,
+                    Confirmed = true,
+                    Keywords = [.. words.Distinct(StringComparer.OrdinalIgnoreCase)],
                     MatchCount = groups.SelectMany(g => g).Distinct().Count(),
                     Ranges = RangesAround(lines, groups),
                     Reason = reason,
@@ -217,7 +219,7 @@ public sealed partial class SourceExplorer
         return new DiscoveryResult
         {
             Files = files,
-            Keywords = files.SelectMany(f => f.Keywords).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            Keywords = [.. files.SelectMany(f => f.Keywords).Distinct(StringComparer.OrdinalIgnoreCase)],
             Round = round,
             IsFinal = true,
         };
@@ -226,9 +228,9 @@ public sealed partial class SourceExplorer
     /// <summary>An item's locations; a flat {path, startLine, endLine, keywords} item is its own one location.</summary>
     private static IEnumerable<JsonElement> Locations(JsonElement item)
     {
-        if (item.TryGetProperty("locations", out var list) && list.ValueKind == JsonValueKind.Array)
-            return list.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.Object);
-        return item.TryGetProperty("keywords", out _) ? [item] : [];
+        return item.TryGetProperty("locations", out var list) && list.ValueKind == JsonValueKind.Array
+            ? list.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.Object)
+            : item.TryGetProperty("keywords", out _) ? [item] : [];
     }
 
     /// <summary>
@@ -255,7 +257,7 @@ public sealed partial class SourceExplorer
             first = Math.Clamp(first, 1, lines.Length);
             last = Math.Clamp(last, first, Math.Min(lines.Length, first + MaxRangeLines - 1));
 
-            rows = Enumerable.Range(first, last - first + 1).Where(n => Hits(n) > 0).ToList();
+            rows = [.. Enumerable.Range(first, last - first + 1).Where(n => Hits(n) > 0)];
             if (rows.Count == 0)
             {
                 // Line numbers drifted: move the span onto the nearest row holding a word.
@@ -266,7 +268,7 @@ public sealed partial class SourceExplorer
                         if (n < 1 || n > lines.Length || Hits(n) == 0) continue;
                         var shift = n < first ? n - first : n - last;
                         var (a, b) = (Math.Max(1, first + shift), Math.Min(lines.Length, last + shift));
-                        rows = Enumerable.Range(a, b - a + 1).Where(x => Hits(x) > 0).ToList();
+                        rows = [.. Enumerable.Range(a, b - a + 1).Where(x => Hits(x) > 0)];
                         break;
                     }
                 }
@@ -274,7 +276,7 @@ public sealed partial class SourceExplorer
         }
         else
         {
-            rows = shown.Order().Where(n => n <= lines.Length && Hits(n) > 0).ToList();
+            rows = [.. shown.Order().Where(n => n <= lines.Length && Hits(n) > 0)];
         }
 
         if (rows.Count == 0) return null;
@@ -283,7 +285,7 @@ public sealed partial class SourceExplorer
         if (rows.Count > MaxRowsPerLocation)
         {
             var most = rows.Max(Hits);
-            rows = rows.Where(n => Hits(n) == most).Take(MaxRowsPerLocation).ToList();
+            rows = [.. rows.Where(n => Hits(n) == most).Take(MaxRowsPerLocation)];
         }
 
         var found = keywords.Where(k => rows.Any(n => lines[n - 1].Contains(k, StringComparison.OrdinalIgnoreCase))).ToList();
@@ -304,20 +306,20 @@ public sealed partial class SourceExplorer
             .ToList();
 
         var merged = new List<(int Start, int End, List<int> Rows)>();
-        foreach (var span in spans)
+        foreach (var (start, end, rows) in spans)
         {
-            if (merged.Count > 0 && span.Start <= merged[^1].End + 1 && span.End - merged[^1].Start < MaxRangeLines)
-                merged[^1] = (merged[^1].Start, Math.Max(merged[^1].End, span.End), [.. merged[^1].Rows, .. span.Rows]);
+            if (merged.Count > 0 && start <= merged[^1].End + 1 && end - merged[^1].Start < MaxRangeLines)
+                merged[^1] = (merged[^1].Start, Math.Max(merged[^1].End, end), [.. merged[^1].Rows, .. rows]);
             else
-                merged.Add((span.Start, span.End, [.. span.Rows]));
+                merged.Add((start, end, [.. rows]));
         }
 
-        return merged.Select(m => new DiscoveredRange
+        return [.. merged.Select(m => new DiscoveredRange
         {
             StartLine = m.Start,
             EndLine = m.End,
             Code = Code(lines, m.Start, m.End),
-            MatchLines = m.Rows.Distinct().Order().ToList(),
-        }).ToList();
+            MatchLines = [.. m.Rows.Distinct().Order()],
+        })];
     }
 }

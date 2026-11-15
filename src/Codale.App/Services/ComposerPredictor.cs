@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
+
 using Codale.Core.Text;
 using Codale.Search;
+using Codale.Search.Engine;
 
 namespace Codale.App.Services;
 
@@ -154,12 +156,9 @@ internal sealed class ComposerPredictor(string projectRoot)
 
             // The session knows the topic; the system's language model knows English and the phrase so far.
             var general = word.Length >= 2 ? SystemPrediction.Complete(word.Text, WordsBefore(text, word.Start)) : [];
-            if (_vocabulary.Complete(word.Text, previous, draft, general) is { } completion)
-            {
-                return new ComposerPrediction(word.Start, word.Length, completion, IsCorrection: false);
-            }
-
-            return word.Length >= MinCorrectionLength ? Correct(word, previous, typing: true) : null;
+            return _vocabulary.Complete(word.Text, previous, draft, general) is { } completion
+                ? new ComposerPrediction(word.Start, word.Length, completion, IsCorrection: false)
+                : word.Length >= MinCorrectionLength ? Correct(word, previous, typing: true) : null;
         }
 
         // Just finished a word with a space: check its spelling, else offer the word that usually follows.

@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
 
-using Codale.App.Services;
+using Codale.App.Themes;
 
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
@@ -604,40 +604,40 @@ public sealed partial class HexViewer : UserControl
             return; // the file shrank under the selection
         }
 
-        var set = (string label, string? text) =>
+        void Set(string label, string? text)
         {
             var row = _inspector.First(r => r.Label == label).Value;
             row.Text = text ?? "–";
-        };
+        }
 
         string? Need(int n, Func<ReadOnlySpan<byte>, string?> read) => data.Length >= n ? read(data) : null;
 
-        set("Binary", Convert.ToString(data[0], 2).PadLeft(8, '0'));
-        set("Int8", ((sbyte)data[0]).ToString());
-        set("UInt8", data[0].ToString());
-        set("Int16 LE", Need(2, d => BinaryPrimitives.ReadInt16LittleEndian(d).ToString("N0")));
-        set("Int16 BE", Need(2, d => BinaryPrimitives.ReadInt16BigEndian(d).ToString("N0")));
-        set("UInt16 LE", Need(2, d => BinaryPrimitives.ReadUInt16LittleEndian(d).ToString("N0")));
-        set("UInt16 BE", Need(2, d => BinaryPrimitives.ReadUInt16BigEndian(d).ToString("N0")));
-        set("Int32 LE", Need(4, d => BinaryPrimitives.ReadInt32LittleEndian(d).ToString("N0")));
-        set("Int32 BE", Need(4, d => BinaryPrimitives.ReadInt32BigEndian(d).ToString("N0")));
-        set("UInt32 LE", Need(4, d => BinaryPrimitives.ReadUInt32LittleEndian(d).ToString("N0")));
-        set("UInt32 BE", Need(4, d => BinaryPrimitives.ReadUInt32BigEndian(d).ToString("N0")));
-        set("Int64 LE", Need(8, d => BinaryPrimitives.ReadInt64LittleEndian(d).ToString("N0")));
-        set("Int64 BE", Need(8, d => BinaryPrimitives.ReadInt64BigEndian(d).ToString("N0")));
-        set("UInt64 LE", Need(8, d => BinaryPrimitives.ReadUInt64LittleEndian(d).ToString("N0")));
-        set("UInt64 BE", Need(8, d => BinaryPrimitives.ReadUInt64BigEndian(d).ToString("N0")));
-        set("Float32 LE", Need(4, d => BinaryPrimitives.ReadSingleLittleEndian(d).ToString("G9", CultureInfo.InvariantCulture)));
-        set("Float32 BE", Need(4, d => BinaryPrimitives.ReadSingleBigEndian(d).ToString("G9", CultureInfo.InvariantCulture)));
-        set("Float64 LE", Need(8, d => BinaryPrimitives.ReadDoubleLittleEndian(d).ToString("G17", CultureInfo.InvariantCulture)));
-        set("Float64 BE", Need(8, d => BinaryPrimitives.ReadDoubleBigEndian(d).ToString("G17", CultureInfo.InvariantCulture)));
-        set("Unix time (32)", Need(4, d => FormatUnix(BinaryPrimitives.ReadUInt32LittleEndian(d))));
-        set("FILETIME (64)", Need(8, d => FormatFileTime(BinaryPrimitives.ReadInt64LittleEndian(d))));
-        set("ASCII", data[0] is >= 0x20 and < 0x7F ? $"'{(char)data[0]}'" : "(non-printable)");
+        Set("Binary", Convert.ToString(data[0], 2).PadLeft(8, '0'));
+        Set("Int8", ((sbyte)data[0]).ToString());
+        Set("UInt8", data[0].ToString());
+        Set("Int16 LE", Need(2, d => BinaryPrimitives.ReadInt16LittleEndian(d).ToString("N0")));
+        Set("Int16 BE", Need(2, d => BinaryPrimitives.ReadInt16BigEndian(d).ToString("N0")));
+        Set("UInt16 LE", Need(2, d => BinaryPrimitives.ReadUInt16LittleEndian(d).ToString("N0")));
+        Set("UInt16 BE", Need(2, d => BinaryPrimitives.ReadUInt16BigEndian(d).ToString("N0")));
+        Set("Int32 LE", Need(4, d => BinaryPrimitives.ReadInt32LittleEndian(d).ToString("N0")));
+        Set("Int32 BE", Need(4, d => BinaryPrimitives.ReadInt32BigEndian(d).ToString("N0")));
+        Set("UInt32 LE", Need(4, d => BinaryPrimitives.ReadUInt32LittleEndian(d).ToString("N0")));
+        Set("UInt32 BE", Need(4, d => BinaryPrimitives.ReadUInt32BigEndian(d).ToString("N0")));
+        Set("Int64 LE", Need(8, d => BinaryPrimitives.ReadInt64LittleEndian(d).ToString("N0")));
+        Set("Int64 BE", Need(8, d => BinaryPrimitives.ReadInt64BigEndian(d).ToString("N0")));
+        Set("UInt64 LE", Need(8, d => BinaryPrimitives.ReadUInt64LittleEndian(d).ToString("N0")));
+        Set("UInt64 BE", Need(8, d => BinaryPrimitives.ReadUInt64BigEndian(d).ToString("N0")));
+        Set("Float32 LE", Need(4, d => BinaryPrimitives.ReadSingleLittleEndian(d).ToString("G9", CultureInfo.InvariantCulture)));
+        Set("Float32 BE", Need(4, d => BinaryPrimitives.ReadSingleBigEndian(d).ToString("G9", CultureInfo.InvariantCulture)));
+        Set("Float64 LE", Need(8, d => BinaryPrimitives.ReadDoubleLittleEndian(d).ToString("G17", CultureInfo.InvariantCulture)));
+        Set("Float64 BE", Need(8, d => BinaryPrimitives.ReadDoubleBigEndian(d).ToString("G17", CultureInfo.InvariantCulture)));
+        Set("Unix time (32)", Need(4, d => FormatUnix(BinaryPrimitives.ReadUInt32LittleEndian(d))));
+        Set("FILETIME (64)", Need(8, d => FormatFileTime(BinaryPrimitives.ReadInt64LittleEndian(d))));
+        Set("ASCII", data[0] is >= 0x20 and < 0x7F ? $"'{(char)data[0]}'" : "(non-printable)");
 
         var utf8Length = (int)Math.Min(data.Length, Math.Min(32, SelEnd - SelStart + 1));
         var decoded = Encoding.UTF8.GetString(data, 0, utf8Length);
-        set("UTF-8", string.Concat(decoded.Select(c => char.IsControl(c) ? '·' : c)));
+        Set("UTF-8", string.Concat(decoded.Select(c => char.IsControl(c) ? '·' : c)));
     }
 
     private static string? FormatUnix(uint seconds) =>
@@ -692,7 +692,7 @@ public sealed partial class HexViewer : UserControl
         var text = format switch
         {
             CopyFormat.Hex => string.Join(' ', data.Select(b => b.ToString("X2"))),
-            CopyFormat.Ascii => new string(data.Select(b => b is >= 0x20 and < 0x7F ? (char)b : '.').ToArray()),
+            CopyFormat.Ascii => new string([.. data.Select(b => b is >= 0x20 and < 0x7F ? (char)b : '.')]),
             CopyFormat.Base64 => Convert.ToBase64String(data),
             _ => ToCArray(data),
         };

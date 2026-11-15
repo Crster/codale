@@ -13,8 +13,8 @@ namespace Codale.App.Services;
 internal static class SystemSpelling
 {
     private static readonly Lock Gate = new();
-    private static ISpellChecker? _checker;
-    private static bool _tried;
+    private static ISpellChecker? s_checker;
+    private static bool s_tried;
 
     /// <summary>True when the checker knows the word, or there is no checker to ask.</summary>
     public static bool IsCorrect(string word)
@@ -82,12 +82,12 @@ internal static class SystemSpelling
 
     private static ISpellChecker? Checker()
     {
-        if (_tried)
+        if (s_tried)
         {
-            return _checker;
+            return s_checker;
         }
 
-        _tried = true;
+        s_tried = true;
         try
         {
             var factory = (ISpellCheckerFactory)new SpellCheckerFactoryClass();
@@ -95,17 +95,17 @@ internal static class SystemSpelling
             {
                 if (tag.Length > 0 && factory.IsSupported(tag, out var supported) == 0 && supported != 0)
                 {
-                    factory.CreateSpellChecker(tag, out _checker);
+                    factory.CreateSpellChecker(tag, out s_checker);
                     break;
                 }
             }
         }
         catch (Exception ex) when (ex is COMException or InvalidCastException)
         {
-            _checker = null;
+            s_checker = null;
         }
 
-        return _checker;
+        return s_checker;
     }
 
     [ComImport]

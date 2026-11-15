@@ -377,12 +377,9 @@ public sealed class BrowserSession : IAsyncDisposable
     /// </summary>
     public static string RequireWebUrl(string url)
     {
-        if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https" or "about"))
-        {
-            throw new McpToolException($"Only http, https and about: addresses can be opened, not '{url}'.");
-        }
-
-        return url.Trim();
+        return !Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https" or "about")
+            ? throw new McpToolException($"Only http, https and about: addresses can be opened, not '{url}'.")
+            : url.Trim();
     }
 
     private static void Append(List<string> log, string entry)
@@ -559,7 +556,7 @@ public sealed class BrowserSession : IAsyncDisposable
         {
             foreach (var page in _pages)
             {
-                await page.SetViewportSizeAsync(target!.Value.Item1, target.Value.Item2);
+                await page.SetViewportSizeAsync(target!.Value.Width, target.Value.Height);
             }
 
             return;
@@ -597,7 +594,8 @@ public sealed class BrowserSession : IAsyncDisposable
                 : new Dictionary<string, object> { ["windowState"] = windowState! };
             await cdp.SendAsync("Browser.setWindowBounds", new Dictionary<string, object>
             {
-                ["windowId"] = state.WindowId, ["bounds"] = bounds,
+                ["windowId"] = state.WindowId,
+                ["bounds"] = bounds,
             });
         }
         finally { await cdp.DetachAsync(); }
@@ -617,8 +615,10 @@ public sealed class BrowserSession : IAsyncDisposable
         {
             await cdp.SendAsync("Emulation.setDeviceMetricsOverride", new Dictionary<string, object>
             {
-                ["width"] = fixedSize.Width, ["height"] = fixedSize.Height,
-                ["deviceScaleFactor"] = 0, ["mobile"] = false,
+                ["width"] = fixedSize.Width,
+                ["height"] = fixedSize.Height,
+                ["deviceScaleFactor"] = 0,
+                ["mobile"] = false,
             });
             _attachedSizes[page] = fixedSize;
             _windowSizedPages.Remove(page);
@@ -981,12 +981,9 @@ public sealed class BrowserSession : IAsyncDisposable
     public static ILocator Resolve(IPage page, string target)
     {
         target = target.Trim();
-        if (target.Length > 1 && target[0] == 'e' && target[1..].All(char.IsAsciiDigit))
-        {
-            return page.Locator($"[data-codale-ref=\"{target}\"]");
-        }
-
-        return page.Locator(target);
+        return target.Length > 1 && target[0] == 'e' && target[1..].All(char.IsAsciiDigit)
+            ? page.Locator($"[data-codale-ref=\"{target}\"]")
+            : page.Locator(target);
     }
 
     /// <summary>True when target names a snapshot ref that no element carries any more (a stale or unknown ref).</summary>

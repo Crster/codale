@@ -1,7 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
 
-using Codale.Db;
+using Codale.Db.Search;
+using Codale.Db.Security;
 
 namespace Codale.Db.Tests;
 

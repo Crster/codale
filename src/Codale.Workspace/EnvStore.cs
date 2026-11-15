@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 
 using Codale.Db;
+using Codale.Db.Security;
 
 namespace Codale.Workspace;
 
@@ -14,7 +15,7 @@ namespace Codale.Workspace;
 public sealed partial class EnvStore(string directory, WorkspaceDatabasePool? databases = null)
 {
     /// <summary>Protecting swaps the database's master key: one caller at a time.</summary>
-    private static readonly object KeyGate = new();
+    private static readonly Lock KeyGate = new();
 
     [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]*$")]
     private static partial Regex NamePattern();

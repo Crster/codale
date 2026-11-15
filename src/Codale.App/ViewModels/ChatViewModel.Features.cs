@@ -1,11 +1,11 @@
 using System.Text;
+
 using Codale.Agents.History;
 using Codale.App.Services;
 using Codale.Core.Agents;
 using Codale.Core.Features;
-using Codale.Core.Helper;
-using Codale.Core.Projects;
 using Codale.Search;
+
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Codale.App.ViewModels;
@@ -30,16 +30,14 @@ public sealed partial class ChatViewModel
     private readonly string _chatId = Guid.NewGuid().ToString("N");
     private string? _featureRequest;
     private CancellationTokenSource? _briefing;
-    private readonly HashSet<string> _deliveredContext = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, SourceReference> _turnReferences = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _turnEditedPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, SourceReference> _turnReferences = [with(StringComparer.OrdinalIgnoreCase)];
+    private readonly HashSet<string> _turnEditedPaths = [with(StringComparer.OrdinalIgnoreCase)];
     /// <summary>Files the agent opened with a read tool this turn, first few only: what it needed beyond the enrichment.</summary>
-    private readonly HashSet<string> _turnReadPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _turnReadPaths = [with(StringComparer.OrdinalIgnoreCase)];
     private const int MaxLearnedReads = 6;
     /// <summary>When the current turn's request went out; files changed on disk since then are the turn's work.</summary>
     private DateTime? _turnStartedUtc;
     private readonly StringBuilder _turnFindings = new();
-    private string? _retrievalId;
 
     /// <summary>The prompt Auto already put in the transcript before routing, with the composer attachments to restore if it never goes out.</summary>
     private (UserMessageItem Item, List<ComposerAttachment> Composer)? _preShown;
@@ -67,7 +65,6 @@ public sealed partial class ChatViewModel
             EndpointName = mapping.Endpoint;
             ResumeSessionId = mapping.ProviderSessionId;
             OnPropertyChanged(nameof(EndpointName));
-            foreach (var key in features.DeliveredContext(mapping.ProviderSessionId)) _deliveredContext.Add(key);
         }
         SetFeature(feature);
         if (handoff) CaptureHandoff();
@@ -187,14 +184,12 @@ public sealed partial class ChatViewModel
         _turnEditedPaths.Clear();
         _turnReadPaths.Clear();
         _turnStartedUtc = null;
-        _deliveredContext.Clear();
-        _retrievalId = null;
     }
 
     private void BindHistoryProvider()
     {
         if (FeatureId is { } id && SessionId is { Length: > 0 } native)
-            Features?.BindProviderSession(id, CliId, native, _projectPath, EndpointName);
+            Features?.BindProviderSession(id, CliId, native, ProjectPath, EndpointName);
     }
 
     private void PublishFeatureActivity(bool busy)
@@ -235,7 +230,7 @@ public sealed partial class ChatViewModel
 
     private void CaptureReference(string path)
     {
-        var root = _projectPath;
+        var root = ProjectPath;
         try
         {
             var relative = Path.IsPathRooted(path) ? Path.GetRelativePath(root, path) : path;
@@ -251,7 +246,6 @@ public sealed partial class ChatViewModel
         if (e is SessionInitialized) BindHistoryProvider();
         if (e is ToolCallStarted tool)
         {
-            if (_retrievalId is { } retrieval && IsExplorationTool(tool.ToolName)) features.RecordExploration(retrieval);
             if (tool.Input.ValueKind == System.Text.Json.JsonValueKind.Object)
                 foreach (var property in tool.Input.EnumerateObject())
                     if (property.Name is "file_path" or "path" or "file" && property.Value.ValueKind == System.Text.Json.JsonValueKind.String &&
@@ -275,27 +269,26 @@ public sealed partial class ChatViewModel
         }
         if (e is TurnCompleted completed)
         {
-            if (_retrievalId is { } usageId && completed.Usage is { } usage) features.RecordUsage(usageId, usage.ContextTokens, usage.OutputTokens);
             EndFeatureTurn(completed.Subtype);
             if (FeatureId is { } id)
             {
                 foreach (var path in _turnEditedPaths)
-                    features.RecordLearnedEdit(id, _projectPath, path, _featureRequest ?? "");
+                    features.RecordLearnedEdit(id, ProjectPath, path, _featureRequest ?? "");
                 // A file the agent had to open to do the work is evidence for the next similar request, weaker than an edit.
                 foreach (var path in _turnReadPaths.Where(p => !_turnEditedPaths.Contains(p)))
-                    features.RecordLearned(id, _projectPath, path, _featureRequest ?? "", LearnedKind.Read);
+                    features.RecordLearned(id, ProjectPath, path, _featureRequest ?? "", LearnedKind.Read);
                 // Shell edits (sed, scripts) only show on disk: credit them to this history's working set.
                 if (_turnStartedUtc is { } started)
-                    _ = features.RecordTurnChangesAsync(id, _projectPath, started);
+                    _ = features.RecordTurnChangesAsync(id, ProjectPath, started);
                 foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
                     _turnFindings.ToString(), @"(?:[A-Za-z0-9_.-]+[/\\])+[A-Za-z0-9_.-]+")) CaptureReference(match.Value);
-                features.RecordFinding(id, CliId, _projectPath,
-                    _featureRequest + "\n" + _turnFindings, _turnReferences.Values.ToList());
+                features.RecordFinding(id, CliId, ProjectPath,
+                    _featureRequest + "\n" + _turnFindings, [.. _turnReferences.Values]);
             }
             _turnFindings.Clear();
             _turnReferences.Clear();
             _turnEditedPaths.Clear();
-        _turnReadPaths.Clear();
+            _turnReadPaths.Clear();
             _turnStartedUtc = null;
             return;
         }
@@ -305,11 +298,6 @@ public sealed partial class ChatViewModel
     private static bool IsFileReadTool(string name) =>
         name.Equals("Read", StringComparison.OrdinalIgnoreCase) || name.Contains("read_file", StringComparison.OrdinalIgnoreCase) ||
         name.Contains("readfile", StringComparison.OrdinalIgnoreCase) || name.Equals("view", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsExplorationTool(string name) =>
-        name.Contains("read", StringComparison.OrdinalIgnoreCase) || name.Contains("search", StringComparison.OrdinalIgnoreCase) ||
-        name.Contains("grep", StringComparison.OrdinalIgnoreCase) || name.Contains("glob", StringComparison.OrdinalIgnoreCase) ||
-        name.Contains("exec", StringComparison.OrdinalIgnoreCase) || name is "Bash" or "Shell";
 
     private void IndexWrittenFile(string path)
     {
@@ -324,20 +312,13 @@ public sealed partial class ChatViewModel
     /// <summary>
     /// Topic detection on local hashed vectors.
     /// </summary>
-    private static bool IsNewTopic(string text, IReadOnlyList<string> earlier, string? lastReply) =>
-        TopicShift.IsNewTopic(text, earlier, lastReply);
-
-    private async Task<RetrievalResult?> RetrieveProjectContextAsync(string text, UserMessageItem? sent = null, CancellationToken preparationToken = default, DateTimeOffset? preparationDeadline = null)
+    /// <summary>
+    /// Marks a prompt that opens a new topic, for the transcript's "new topic" marker. Slash commands and prompts with no
+    /// subject are never marked, and a failure to read the conversation leaves the prompt unmarked.
+    /// </summary>
+    private void MarkNewTopic(string text, UserMessageItem? sent)
     {
-        _retrievalId = null;
-        if (text.StartsWith('/')) return null;
-        // "commit this", "continue in full permission mode": no subject to look up, and whatever the
-        // conversation is about was enriched when it was asked. Matching the words alone adds noise.
-        if (!SearchText.HasTopic(text)) return null;
-        using var cts = new CancellationTokenSource();
-        using var smartDeadline = CancellationTokenSource.CreateLinkedTokenSource(preparationToken, cts.Token);
-        _briefing = cts;
-        var session = _session;
+        if (sent is null || text.StartsWith('/') || !SearchText.HasTopic(text)) return;
         try
         {
             var priorItems = Items.TakeWhile(i => !ReferenceEquals(i, sent)).ToList();
@@ -345,50 +326,11 @@ public sealed partial class ChatViewModel
                 .TakeLast(3).Select(i => i.Text).ToList();
             var lastReply = priorItems.AsEnumerable().Reverse().TakeWhile(i => i is not UserMessageItem)
                 .OfType<AssistantMessageItem>().FirstOrDefault(i => !i.IsStreaming)?.Text;
-            var newTopic = sent is not null && IsNewTopic(text, earlier, lastReply);
-            cts.Token.ThrowIfCancellationRequested();
-            if (!ReferenceEquals(session, _session)) throw new OperationCanceledException();
-            if (newTopic) sent!.IsNewTopic = true;
-            // Project context enrichment is removed: prompts go out as typed.
-            return null;
+            if (TopicShift.IsNewTopic(text, earlier, lastReply)) sent.IsNewTopic = true;
         }
-        catch (OperationCanceledException) { throw; }
         catch (Exception)
         {
-            return null;
         }
-        finally { _briefing = null; }
-    }
-
-    private void ContextDelivered(RetrievalResult? result)
-    {
-        if (result is null) return;
-        foreach (var key in result.Keys) _deliveredContext.Add(key);
-        try
-        {
-            if (SessionId is { } native) Features?.MarkContextDelivered(native, result.Keys);
-        }
-        catch (Exception) {  }
-    }
-
-    private void ForgetDeliveredContext()
-    {
-        _retrievalId = null;
-        ContextCompacted();
-    }
-
-    /// <summary>
-    /// The conversation was summarised, by "/compact" or by the CLI on its own: the excerpts it carried
-    /// are gone, so the next prompt about them must get them again rather than be told they were sent.
-    /// </summary>
-    private void ContextCompacted()
-    {
-        _deliveredContext.Clear();
-        try
-        {
-            if (SessionId is { } native) Features?.ClearDeliveredContext(native);
-        }
-        catch (Exception) {  }
     }
 
     private void AbandonFeatureTurn()

@@ -37,12 +37,9 @@ public sealed class SearchAgentLoopTests : IDisposable
     }
 
     /// <summary>A model that returns a fixed script of calls, so the loop is deterministic.</summary>
-    private sealed class ScriptedModel : ISearchModel
+    private sealed class ScriptedModel(params string[] callsJson) : ISearchModel
     {
-        private readonly Queue<ToolCall> _calls;
-
-        public ScriptedModel(params string[] callsJson) =>
-            _calls = new Queue<ToolCall>(callsJson.Select(j => ToolCall.FromJson(j)!));
+        private readonly Queue<ToolCall> _calls = new(callsJson.Select(j => ToolCall.FromJson(j)!));
 
         public int Invocations { get; private set; }
 

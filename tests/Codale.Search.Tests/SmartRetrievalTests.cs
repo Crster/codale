@@ -1,5 +1,5 @@
-using Codale.Smart;
 using Codale.Db;
+using Codale.Smart;
 
 namespace Codale.Search.Tests;
 
@@ -32,11 +32,14 @@ public sealed class SmartRetrievalTests : IDisposable
             File.WriteAllText(Path.Combine(_root, $"Noise{i}.cs"), $"class Noise{i} {{ void SmartExperience() {{ }} string message; }}");
         await _index.RefreshAsync(_root);
         IReadOnlyList<SmartCandidate> seen = [];
-        _index.Smart = new FakeSmart { Rank = (c, _) =>
+        _index.Smart = new FakeSmart
+        {
+            Rank = (c, _) =>
         {
             seen = c;
-            return Task.FromResult<IReadOnlyList<string>?>(c.Select(x => x.Id).ToArray());
-        } };
+            return Task.FromResult<IReadOnlyList<string>?>([.. c.Select(x => x.Id)]);
+        }
+        };
         var result = await _index.RetrieveSmartAsync(_root, "there is no loading when pressing ctrl space in the commit message git when smart experience is working or busy", "", new HashSet<string>(), null, null, default);
         Assert.Contains(result.Files, p => p.EndsWith("Workspace.xaml"));
         Assert.Contains(seen, c => c.Path.EndsWith("Workspace.xaml") && c.Evidence.Contains("CommitMessage"));
@@ -48,11 +51,14 @@ public sealed class SmartRetrievalTests : IDisposable
         File.WriteAllText(Path.Combine(_root, "Beta.cs"), "public class Beta { public void RenderWidget() {} }");
         await _index.RefreshAsync(_root);
         string? expected = null;
-        _index.Smart = new FakeSmart { Rank = (candidates, _) =>
+        _index.Smart = new FakeSmart
+        {
+            Rank = (candidates, _) =>
         {
             var reversed = candidates.Reverse().ToList(); expected = reversed[0].Path;
-            return Task.FromResult<IReadOnlyList<string>?>(reversed.Select(c => c.Id).ToArray());
-        } };
+            return Task.FromResult<IReadOnlyList<string>?>([.. reversed.Select(c => c.Id)]);
+        }
+        };
         var result = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default);
         Assert.Equal(expected, result.Files[0]);
     }
@@ -62,13 +68,16 @@ public sealed class SmartRetrievalTests : IDisposable
         File.WriteAllText(Path.Combine(_root, "GitViewModel.cs"), "class GitViewModel { void GenerateCommitMessage() {} }");
         File.WriteAllText(Path.Combine(_root, "Workspace.xaml"), "<TextBox Text=\"{Binding CommitMessage}\" />");
         await _index.RefreshAsync(_root);
-        _index.Smart = new FakeSmart { Explore = async (initial, search, ct) =>
+        _index.Smart = new FakeSmart
+        {
+            Explore = async (initial, search, ct) =>
         {
             var found = await search("CommitMessage", ct);
             var view = Assert.Single(found, c => c.Path.EndsWith("Workspace.xaml"));
             Assert.Contains("CommitMessage", view.Evidence);
-            return new[] { view.Id }.Concat(initial.Select(c => c.Id).Where(id => id != view.Id)).ToArray();
-        } };
+            return [view.Id, .. initial.Select(c => c.Id).Where(id => id != view.Id)];
+        }
+        };
         var result = await _index.RetrieveSmartAsync(_root, "GenerateCommitMessage", "", new HashSet<string>(), null, null, default);
         Assert.Equal("Workspace.xaml", result.Files[0]);
         Assert.Equal("Smart review", result.Method);
@@ -81,7 +90,7 @@ public sealed class SmartRetrievalTests : IDisposable
     {
         File.WriteAllText(Path.Combine(_root, "Widget.cs"), "class Widget { void RenderWidget() {} }");
         await _index.RefreshAsync(_root);
-        _index.Smart = new FakeSmart { Explore = (initial, _, _) => Task.FromResult<IReadOnlyList<string>?>(duplicate ? new[] { initial[0].Id, initial[0].Id } : new[] { "invented" }) };
+        _index.Smart = new FakeSmart { Explore = (initial, _, _) => Task.FromResult<IReadOnlyList<string>?>(duplicate ? new[] { initial[0].Id, initial[0].Id } : ["invented"]) };
         var result = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default);
         Assert.Null(result.SmartActivityId);
         Assert.Contains("Widget.cs", result.Files);
@@ -93,11 +102,14 @@ public sealed class SmartRetrievalTests : IDisposable
         var path = Path.Combine(_root, "Widget.cs");
         File.WriteAllText(path, "class Widget { void RenderWidget() {} }");
         await _index.RefreshAsync(_root);
-        _index.Smart = new FakeSmart { Explore = (initial, _, _) =>
+        _index.Smart = new FakeSmart
+        {
+            Explore = (initial, _, _) =>
         {
             File.WriteAllText(path, "class Changed {} ");
             return Task.FromResult<IReadOnlyList<string>?>([initial[0].Id]);
-        } };
+        }
+        };
         var result = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default);
         Assert.Null(result.SmartActivityId);
     }
@@ -107,7 +119,7 @@ public sealed class SmartRetrievalTests : IDisposable
     {
         File.WriteAllText(Path.Combine(_root, "Workspace.xaml"), "<TextBox Text=\"{Binding CommitMessage}\" />");
         await _index.RefreshAsync(_root);
-        _index.Smart = new FakeSmart { Explore = async (_, search, ct) => (await search("CommitMessage", ct)).Select(c => c.Id).ToArray() };
+        _index.Smart = new FakeSmart { Explore = async (_, search, ct) => [.. (await search("CommitMessage", ct)).Select(c => c.Id)] };
         var result = await _index.RetrieveSmartAsync(_root, "zzzzunrelatedtopic", "", new HashSet<string>(), null, null, default);
         Assert.Contains("Workspace.xaml", result.Files);
     }
@@ -150,7 +162,7 @@ public sealed class SmartRetrievalTests : IDisposable
     {
         File.WriteAllText(Path.Combine(_root, "Widget.cs"), "public class Widget { public void RenderWidget() {} }");
         await _index.RefreshAsync(_root);
-        _index.Smart = new FakeSmart { Rank = (c, _) => Task.FromResult<IReadOnlyList<string>?>(c.Select(x => x.Id).ToArray()) };
+        _index.Smart = new FakeSmart { Rank = (c, _) => Task.FromResult<IReadOnlyList<string>?>([.. c.Select(x => x.Id)]) };
         var result = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default);
         Assert.Contains("Widget.cs", result.Text);
         Assert.DoesNotContain("```", result.Text);
@@ -169,7 +181,7 @@ public sealed class SmartRetrievalTests : IDisposable
         Assert.Null(result.SmartActivityId);
         Assert.Contains("RenderWidget", result.Text);
         Assert.Equal(0, smart.Briefs);
-        smart.Rank = (c, _) => Task.FromResult<IReadOnlyList<string>?>(c.Select(x => x.Id).ToArray());
+        smart.Rank = (c, _) => Task.FromResult<IReadOnlyList<string>?>([.. c.Select(x => x.Id)]);
         var ranked = await _index.RetrieveSmartAsync(_root, "RenderWidget", "", new HashSet<string>(), null, null, default, intent: SmartIntent.Act);
         Assert.Equal("Smart review", ranked.Method);
         Assert.Equal(0, smart.Briefs);
@@ -194,7 +206,9 @@ public sealed class SmartRetrievalTests : IDisposable
         _index.SummaryStartupDelay = TimeSpan.Zero;
         _index.SummaryInterval = TimeSpan.Zero;
         _index.Summaries = new SummaryCache(Path.Combine(_root, "summaries"));
-        _index.Smart = new FakeSmart { Summary = (context, relative, _) =>
+        _index.Smart = new FakeSmart
+        {
+            Summary = (context, relative, _) =>
         {
             Assert.True(context.Deadline <= DateTimeOffset.UtcNow.AddSeconds(20));
             Interlocked.Increment(ref calls);
@@ -202,7 +216,8 @@ public sealed class SmartRetrievalTests : IDisposable
             var source = File.ReadAllText(path);
             return Task.FromResult<SmartResult<string>?>(new("A widget class.",
                 [new("file", path, source, DateTimeOffset.UtcNow, SummaryCache.Hash(source), 1, 1)], "summary"));
-        } };
+        }
+        };
         _index.SummaryProgressChanged += (_, total) => { if (total == 0) ended.TrySetResult(); };
         await _index.RefreshAsync(_root);
         await ended.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -219,11 +234,14 @@ public sealed class SmartRetrievalTests : IDisposable
         var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _index.SummaryStartupDelay = TimeSpan.FromMinutes(1);
         _index.Summaries = new SummaryCache(Path.Combine(_root, "summaries"));
-        _index.Smart = new FakeSmart { Summary = (_, _, _) =>
+        _index.Smart = new FakeSmart
+        {
+            Summary = (_, _, _) =>
         {
             Interlocked.Increment(ref calls);
             return Task.FromResult<SmartResult<string>?>(null);
-        } };
+        }
+        };
         _index.SummaryProgressChanged += (_, total) => { if (total == 0) ended.TrySetResult(); };
         await _index.RefreshAsync(_root);
         _index.Dispose();

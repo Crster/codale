@@ -1,7 +1,8 @@
 using System.Text.Json;
+
 using Codale.Agents.Codex;
-using Codale.Core.Agents;
 using Codale.App.ViewModels;
+using Codale.Core.Agents;
 
 namespace Codale.Agents.Tests;
 
@@ -18,7 +19,9 @@ public sealed class CodexFileChangeTests
         {
             item = new
             {
-                type = "fileChange", id = "edit", status = "completed",
+                type = "fileChange",
+                id = "edit",
+                status = "completed",
                 changes = new[] { new { path = "one.cs", kind = new { type = kind }, diff = patch } },
             },
         });
@@ -93,6 +96,6 @@ public sealed class CodexFileChangeTests
         Assert.Equal(error, end.IsError);
         Assert.Equal(count, end.FileChanges?.Count ?? 0);
         if (count > 0)
-            Assert.Equal(new[] { FileChangeKind.Update, FileChangeKind.Create }, end.FileChanges!.Select(c => c.Kind));
+            Assert.Equal([FileChangeKind.Update, FileChangeKind.Create], end.FileChanges!.Select(c => c.Kind));
     }
 }

@@ -57,7 +57,8 @@ public sealed class FimTextTests
         var raw = "\n        if (done)\n        {\n            break;\n        }";
         Assert.Equal("if (done)", FimText.Tidy(raw, "{\n        ", "\n    }"));
         var longBlock = string.Join("\n", Enumerable.Range(0, 20).Select(i => $"        Step{i}();"));
-        Assert.Equal(FimText.MaxBlockLines, FimText.Tidy(longBlock, "{\n        ", "\n}").Split('\n').Length);
+        Assert.Equal(1, FimText.MaxBlockLines);
+        Assert.Single(FimText.Tidy(longBlock, "{\n        ", "\n}").Split('\n'));
     }
 
     [Fact]

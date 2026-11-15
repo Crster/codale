@@ -14,11 +14,9 @@ namespace Codale.App.ViewModels;
 /// user is reviewing - and it stays correct when a tool call is missed, when the user
 /// edits a file by hand, or when a change is reverted.
 /// </remarks>
-public sealed partial class DiffViewModel : ObservableObject
+public sealed partial class DiffViewModel(IGitRepository repository) : ObservableObject
 {
-    private readonly IGitRepository _repository;
-
-    public DiffViewModel(IGitRepository repository) => _repository = repository;
+    private readonly IGitRepository _repository = repository;
 
     public RangeObservableCollection<FileDiff> Files { get; } = [];
 

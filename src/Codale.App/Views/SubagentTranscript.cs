@@ -1,5 +1,6 @@
 using System.Collections.Specialized;
 
+using Codale.App.Themes;
 using Codale.App.ViewModels;
 
 using Microsoft.UI.Xaml;
@@ -35,10 +36,7 @@ public sealed class SubagentTranscript : StackPanel
 
     public void Detach()
     {
-        if (_task is not null)
-        {
-            _task.Entries.CollectionChanged -= OnEntriesChanged;
-        }
+        _task?.Entries.CollectionChanged -= OnEntriesChanged;
 
         _task = null;
         Children.Clear();

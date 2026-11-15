@@ -1,5 +1,3 @@
-using Codale.Settings;
-
 namespace Codale.Settings.Tests;
 
 public sealed class ApplicationStoreTests

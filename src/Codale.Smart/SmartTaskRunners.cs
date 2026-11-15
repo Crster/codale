@@ -1,4 +1,5 @@
 using System.Text.Json;
+
 using Codale.Core.Agents;
 
 namespace Codale.Smart;
@@ -16,8 +17,9 @@ public static class SmartHelperRunner
     public static async Task<T?> RunAsync<T>(ISmartTaskHost host, string projectPath, string task, TimeSpan timeout,
         string system, string input, int cap, Func<string, T?> parse, CancellationToken ct) where T : class
     {
-        if (!IsAvailable(host, task)) return null;
-        return await SmartRequestWorkflow.RunWithDeadlineAsync<T>(timeout, async token =>
+        return !IsAvailable(host, task)
+            ? null
+            : await SmartRequestWorkflow.RunWithDeadlineAsync<T>(timeout, async token =>
         {
             var result = await host.GenerateAsync(new SmartRequestContext(projectPath, projectPath, task),
                 system, input, cap, parse, background: false, token).ConfigureAwait(false);

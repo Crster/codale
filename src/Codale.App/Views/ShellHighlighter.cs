@@ -23,12 +23,13 @@ internal enum ShellTokenKind
 /// </summary>
 internal static class ShellHighlighter
 {
-    private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
-    {
+    private static readonly HashSet<string> Keywords =
+    [
+        with(StringComparer.Ordinal),
         "if", "then", "elif", "else", "fi", "for", "while", "until", "do", "done",
         "case", "esac", "in", "function", "select", "time", "return",
         "foreach", "switch", "try", "catch", "finally", "param", "begin", "end",
-    };
+    ];
 
     private const string WordBreaks = " \t|&;<>()#\"'`$";
 

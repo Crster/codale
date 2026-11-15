@@ -1,5 +1,7 @@
 using System.Text;
 
+using Codale.Db.Engine;
+
 namespace Codale.Db;
 
 public sealed partial class CodaleDb
@@ -13,9 +15,11 @@ public sealed partial class CodaleDb
         try
         {
             var node = FindNode(path, create: false);
-            if (node is not { HasValue: true }) return null;
-            if (node.ValueFlags != 0) throw new InvalidOperationException("This value is protected or a blob; use ReadProtect()/ReadBlob().");
-            return ReadString(node);
+            return node is not { HasValue: true }
+                ? null
+                : node.ValueFlags != 0
+                ? throw new InvalidOperationException("This value is protected or a blob; use ReadProtect()/ReadBlob().")
+                : ReadString(node);
         }
         finally { _lock.ExitReadLock(); }
     }
@@ -51,8 +55,8 @@ public sealed partial class CodaleDb
         try
         {
             if (FindNode(path, create: false) is null) return false;
-            var append = Append(RecordType.Remove, 0, Encoding.UTF8.GetBytes(path));
-            ApplyRemove(path, append.Size);
+            var (_, _, size) = Append(RecordType.Remove, 0, Encoding.UTF8.GetBytes(path));
+            ApplyRemove(path, size);
             Emit(path, DbEventKind.Removed, null);
             Committed();
             return true;

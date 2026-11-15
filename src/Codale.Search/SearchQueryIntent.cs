@@ -5,20 +5,22 @@ namespace Codale.Search;
 /// <summary>Distinguishes direct code searches from questions and descriptions that need interpretation.</summary>
 public static class SearchQueryIntent
 {
-    private static readonly HashSet<string> SentenceStarts = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly HashSet<string> SentenceStarts =
+    [
+        with(StringComparer.OrdinalIgnoreCase),
         "where", "what", "which", "how", "why", "who", "when",
         "does", "do", "did", "is", "are", "was", "were",
         "can", "could", "should", "would", "will",
         "find", "show", "explain", "tell", "locate",
-    };
+    ];
 
-    private static readonly HashSet<string> SentenceWords = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly HashSet<string> SentenceWords =
+    [
+        with(StringComparer.OrdinalIgnoreCase),
         "a", "an", "the", "this", "that", "these", "those", "my", "our",
         "i", "we", "it", "its", "when", "where", "why", "because",
         "is", "are", "was", "were", "does", "doesn't", "don't", "isn't",
-    };
+    ];
 
     /// <summary>
     /// Questions and grammatical descriptions use discovery; identifiers, paths, quoted

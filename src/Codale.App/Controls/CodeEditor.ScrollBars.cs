@@ -1,5 +1,3 @@
-using Codale.Editor;
-
 using Microsoft.Graphics.Canvas;
 
 namespace Codale.App.Controls;
@@ -20,7 +18,6 @@ public sealed partial class CodeEditor
     private const double WheelScrollTimeConstantMs = 55;
 
     private double _scrollX;
-    private double _scrollY;
     private double _targetY = double.NaN;
     private double _extentWidth;
     private double _extentHeight;
@@ -65,13 +62,13 @@ public sealed partial class CodeEditor
     private void ClampScroll()
     {
         var x = Math.Clamp(_scrollX, 0, MaxScrollX);
-        var y = Math.Clamp(_scrollY, 0, MaxScrollY);
+        var y = Math.Clamp(VerticalScroll, 0, MaxScrollY);
         if (!double.IsNaN(_targetY))
         {
             _targetY = Math.Clamp(_targetY, 0, MaxScrollY);
         }
 
-        if (x != _scrollX || y != _scrollY)
+        if (x != _scrollX || y != VerticalScroll)
         {
             SetScroll(x, y);
         }
@@ -91,7 +88,7 @@ public sealed partial class CodeEditor
                 _targetY = v;
                 if (x != _scrollX)
                 {
-                    SetScroll(x, _scrollY);
+                    SetScroll(x, VerticalScroll);
                 }
 
                 StartRenderLoop();
@@ -103,12 +100,12 @@ public sealed partial class CodeEditor
             return;
         }
 
-        SetScroll(x, _scrollY);
+        SetScroll(x, VerticalScroll);
     }
 
     private void SetScroll(double x, double y)
     {
-        if (x == _scrollX && y == _scrollY)
+        if (x == _scrollX && y == VerticalScroll)
         {
             return;
         }
@@ -119,7 +116,7 @@ public sealed partial class CodeEditor
         }
 
         _scrollX = x;
-        _scrollY = y;
+        VerticalScroll = y;
         Invalidate();
         ScrollChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -131,7 +128,7 @@ public sealed partial class CodeEditor
         UpdateExtent();
         var (row, x) = Locate(_model.Primary.Caret);
         var top = row * _lineHeight;
-        var viewTop = double.IsNaN(_targetY) ? _scrollY : _targetY;
+        var viewTop = double.IsNaN(_targetY) ? VerticalScroll : _targetY;
         var height = ViewportHeight;
         var margin = Math.Min(_lineHeight, height / 4);
 
@@ -175,7 +172,7 @@ public sealed partial class CodeEditor
         var moving = false;
         if (!double.IsNaN(_targetY))
         {
-            var diff = _targetY - _scrollY;
+            var diff = _targetY - VerticalScroll;
             if (Math.Abs(diff) < 0.5)
             {
                 SetScroll(_scrollX, _targetY);
@@ -184,7 +181,7 @@ public sealed partial class CodeEditor
             else
             {
                 var step = diff * (1 - Math.Exp(-dt / WheelScrollTimeConstantMs));
-                SetScroll(_scrollX, _scrollY + step);
+                SetScroll(_scrollX, VerticalScroll + step);
                 moving = true;
             }
         }
@@ -231,7 +228,7 @@ public sealed partial class CodeEditor
         var track = ViewportHeight;
         var length = Math.Clamp(track * ViewportHeight / Math.Max(1, _extentHeight), Math.Min(MinThumb, track), track);
         var travel = track - length;
-        var start = MaxScrollY > 0 ? _scrollY / MaxScrollY * travel : 0;
+        var start = MaxScrollY > 0 ? VerticalScroll / MaxScrollY * travel : 0;
         return (start, length);
     }
 
@@ -351,10 +348,10 @@ public sealed partial class CodeEditor
             return;
         }
 
-        const int Lanes = 4;
-        var colors = new Windows.UI.Color[Lanes, track];
-        var targets = new (int Line, int Col)[Lanes, track];
-        var used = new bool[Lanes, track];
+        const int lanes = 4;
+        var colors = new Windows.UI.Color[lanes, track];
+        var targets = new (int Line, int Col)[lanes, track];
+        var used = new bool[lanes, track];
         var totalRows = (double)Math.Max(1, TotalRows);
         var scale = track / totalRows;
 
@@ -430,7 +427,7 @@ public sealed partial class CodeEditor
             used[3, p] = true;
         }
 
-        for (var lane = 0; lane < Lanes; lane++)
+        for (var lane = 0; lane < lanes; lane++)
         {
             var p = 0;
             while (p < track)

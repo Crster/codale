@@ -18,7 +18,7 @@ public class LinkFinderTests
         Assert.Equal(path, link.Path);
         Assert.Equal(start, link.Line);
         Assert.Equal(end, link.EndLine);
-        Assert.Equal(new[] { new FileLineRange(start, end), new FileLineRange(nextStart, nextEnd) }, link.LineRanges);
+        Assert.Equal([new FileLineRange(start, end), new FileLineRange(nextStart, nextEnd)], link.LineRanges);
         Assert.Equal(link.LineRanges, LinkFinder.AsFileReference(input)!.LineRanges);
         Assert.NotNull(LinkFinder.At($"See {input}.", 4 + input.Length - 1));
     }
@@ -40,7 +40,7 @@ public class LinkFinderTests
         var link = LinkFinder.AsFileReference("shader.frag:1-7,30,40-50");
         Assert.NotNull(link);
         Assert.Equal("shader.frag", link.Path);
-        Assert.Equal(new[] { new FileLineRange(1, 7), new FileLineRange(30, 30), new FileLineRange(40, 50) }, link.LineRanges);
+        Assert.Equal([new FileLineRange(1, 7), new FileLineRange(30, 30), new FileLineRange(40, 50)], link.LineRanges);
         Assert.Null(LinkFinder.AsFileReference("shader.frag:1-7,30-40 extra"));
     }
 

@@ -14,12 +14,10 @@ public sealed partial class CliUpdateViewModel : ObservableObject
 {
     private static readonly TimeSpan LatestTtl = TimeSpan.FromHours(1);
 
-    private static readonly Dictionary<string, (Version Version, DateTimeOffset Checked)> LatestByCli = new();
-
-    private CliDescriptor _cli = CliLocator.ActiveCli;
+    private static readonly Dictionary<string, (Version Version, DateTimeOffset Checked)> LatestByCli = [];
     private int _refreshGeneration;
 
-    public CliDescriptor Cli => _cli;
+    public CliDescriptor Cli { get; private set; } = CliLocator.ActiveCli;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(VersionText), nameof(IsVersionKnown), nameof(UpdateAvailable), nameof(UpdateTip))]
@@ -36,14 +34,14 @@ public sealed partial class CliUpdateViewModel : ObservableObject
     public bool UpdateAvailable => Installed is { } installed && Latest is { } latest && latest > installed;
 
     public string UpdateTip => UpdateAvailable
-        ? $"{_cli.DisplayName} CLI {Latest} is available (you have {Installed}). " +
+        ? $"{Cli.DisplayName} CLI {Latest} is available (you have {Installed}). " +
           "Click to update in a terminal tab."
         : "";
 
     public async Task RefreshAsync(CliDescriptor cli, bool forceLatest = false)
     {
         var generation = ++_refreshGeneration;
-        _cli = cli;
+        Cli = cli;
         OnPropertyChanged(nameof(Cli));
         Installed = null;
         Latest = null;

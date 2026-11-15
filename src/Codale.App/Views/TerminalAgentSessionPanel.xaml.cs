@@ -5,7 +5,6 @@ using Codale.Agents;
 using Codale.Agents.Claude;
 using Codale.Agents.Codex;
 using Codale.Agents.History;
-using Codale.App.Services;
 using Codale.App.ViewModels;
 using Codale.Core.Agents;
 
@@ -18,30 +17,23 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 namespace Codale.App.Views;
 
 /// <summary>One bar in the panel's vitals: a label, what it reads, and how full it is.</summary>
-public sealed partial class UsageMeter : ObservableObject
+public sealed partial class UsageMeter(string label, string summary, double percent) : ObservableObject
 {
     [ObservableProperty]
-    public partial string Label { get; set; }
+    public partial string Label { get; set; } = label;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(Tip))]
-    public partial string Summary { get; set; }
+    public partial string Summary { get; set; } = summary;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PercentText))]
-    public partial double Percent { get; set; }
+    public partial double Percent { get; set; } = percent;
 
     /// <summary>The rail ring's tooltip, e.g. "Context: 42K / 200K".</summary>
     public string Tip => $"{char.ToUpperInvariant(Label[0])}{Label[1..].ToLowerInvariant()}: {Summary}";
 
     public string PercentText => $"{Percent:0}%";
-
-    public UsageMeter(string label, string summary, double percent)
-    {
-        Label = label;
-        Summary = summary;
-        Percent = percent;
-    }
 }
 
 /// <summary>One stored conversation of the panel's CLI, shown in the History view.</summary>
@@ -74,8 +66,6 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
     private readonly DateTime _openedAtUtc = DateTime.UtcNow.AddMinutes(-1);
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _timer;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _elapsedTimer;
-    private ChatViewModel? _session;
-    private WorkspaceViewModel? _workspace;
     private ICliHistoryReader? _reader;
     private int _ticks;
     private bool _probing;
@@ -126,26 +116,26 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     public ChatViewModel? Session
     {
-        get => _session;
+        get;
         set
         {
-            if (ReferenceEquals(_session, value))
+            if (ReferenceEquals(field, value))
             {
                 return;
             }
 
-            if (_session is not null)
+            if (field is not null)
             {
-                Detach(_session);
+                Detach(field);
             }
 
-            _session = value;
+            field = value;
             _reader = null;
             StopWatchingHistory();
 
-            if (_session is not null)
+            if (field is not null)
             {
-                Attach(_session);
+                Attach(field);
                 EnsureReader();
             }
 
@@ -160,10 +150,10 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     public WorkspaceViewModel? Workspace
     {
-        get => _workspace;
+        get;
         set
         {
-            _workspace = value;
+            field = value;
             EnsureReader();
             Raise(nameof(CliName));
             Raise(nameof(CliInitials));
@@ -173,12 +163,12 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
     /// <summary>Opens the history reader once there is a project path; Workspace can arrive after Session.</summary>
     private void EnsureReader()
     {
-        if (_workspace is null || _session is null || _reader is not null || string.IsNullOrWhiteSpace(ProjectPath))
+        if (Workspace is null || Session is null || _reader is not null || string.IsNullOrWhiteSpace(ProjectPath))
         {
             return;
         }
 
-        _reader = _workspace.CliHistory.Create(_session.TerminalCli?.Id, ProjectPath);
+        _reader = Workspace.CliHistory.Create(Session.TerminalCli?.Id, ProjectPath);
         WatchHistory();
         _ = RefreshHistoryAsync();
     }
@@ -329,7 +319,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
             {
                 if (await Task.Run(() => ClaudeContextProbe.Read(source, since)) is { } reading)
                 {
-                    var known = reading.Model is { Length: > 0 } model ? _workspace!.Smart.Settings.ClaudeContextWindowFor(model) : null;
+                    var known = reading.Model is { Length: > 0 } model ? Workspace!.Smart.Settings.ClaudeContextWindowFor(model) : null;
                     var window = ClaudeContextProbe.WindowFor(reading.Tokens, known);
                     session.Status.ContextTokens = reading.Tokens;
                     session.Status.ContextWindow = window;
@@ -338,7 +328,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
                     // this one after a compact) does not fall back to 200K.
                     if (reading.Model is { Length: > 0 } seen && window > (known ?? 200_000))
                     {
-                        _workspace!.Smart.Settings.RememberClaudeContextWindow(seen, window);
+                        Workspace!.Smart.Settings.RememberClaudeContextWindow(seen, window);
                     }
                 }
 

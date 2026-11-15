@@ -298,8 +298,7 @@ public sealed class MessageRoutingTests
         {
             Calls++;
             Conversation = conversation;
-            if (Fail) throw new HelperModelException("offline");
-            return Hang ? new TaskCompletionSource<ToolCall?>().Task : Task.FromResult(Reply);
+            return Fail ? throw new HelperModelException("offline") : Hang ? new TaskCompletionSource<ToolCall?>().Task : Task.FromResult(Reply);
         }
     }
 }

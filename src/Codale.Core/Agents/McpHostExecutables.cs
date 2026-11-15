@@ -9,8 +9,8 @@ public sealed class McpHostExecutables(string baseDirectory, string stagingRoot)
 {
     private const string PackagedMarker = @"\WindowsApps\";
 
-    private readonly object _gate = new();
-    private readonly Dictionary<string, string> _runnable = new(StringComparer.Ordinal);
+    private readonly Lock _gate = new();
+    private readonly Dictionary<string, string> _runnable = [with(StringComparer.Ordinal)];
 
     /// <summary>The executable as installed: <c>base\name\name.exe</c>.</summary>
     public string SourcePath(string name) => Path.Combine(baseDirectory, name, name + ".exe");

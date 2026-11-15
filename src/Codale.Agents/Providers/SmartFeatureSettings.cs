@@ -16,9 +16,9 @@ public static class SmartFeatureSettings
     public static ByokProvider? ResolveAccount(IEnumerable<ByokProvider> profiles, string cli, string? key, string? defaultEmail)
     {
         var accounts = profiles.Where(p => p.IsAccount && p.Supports(cli)).ToArray();
-        if (!string.IsNullOrWhiteSpace(key))
-            return accounts.FirstOrDefault(p => string.Equals(p.Key, key, StringComparison.OrdinalIgnoreCase));
-        return accounts.FirstOrDefault(p => p.AccountId.Length == 0)
+        return !string.IsNullOrWhiteSpace(key)
+            ? accounts.FirstOrDefault(p => string.Equals(p.Key, key, StringComparison.OrdinalIgnoreCase))
+            : accounts.FirstOrDefault(p => p.AccountId.Length == 0)
             ?? accounts.FirstOrDefault(p => !string.IsNullOrWhiteSpace(defaultEmail) && string.Equals(p.Email, defaultEmail, StringComparison.OrdinalIgnoreCase))
             ?? (accounts.Length == 1 ? accounts[0] : null);
     }
@@ -100,8 +100,8 @@ public static class SmartFeatureSettings
         {
             values.Remove(key);
         }
-        foreach (var role in Roles)
-            values.TryAdd($"ai.smart.groups.{role.Id}.provider", "off");
+        foreach (var (id, label, description, placeholder) in Roles)
+            values.TryAdd($"ai.smart.groups.{id}.provider", "off");
         values[MigratedKey] = "1";
         return true;
     }

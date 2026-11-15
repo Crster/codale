@@ -15,11 +15,11 @@ namespace Codale.Agents.Codex;
 /// turns become turns, thread items become tool calls and messages, and the app
 /// server's approval requests become <see cref="ApprovalRequested"/>.
 /// </summary>
-public sealed partial class CodexAgentSession : IAgentSession
+public sealed partial class CodexAgentSession(CodexSessionOptions options) : IAgentSession
 {
     private static readonly JsonSerializerOptions WireJson = new(JsonSerializerDefaults.Web);
 
-    private readonly CodexSessionOptions _options;
+    private readonly CodexSessionOptions _options = options;
     private readonly Channel<AgentEvent> _events =
         Channel.CreateUnbounded<AgentEvent>(new UnboundedChannelOptions { SingleReader = false, SingleWriter = true });
 
@@ -41,9 +41,9 @@ public sealed partial class CodexAgentSession : IAgentSession
     private readonly List<string> _stderr = [];
 
     /// <summary>The mode and model/effort applied to the next turn; codex takes them per turn, not mid-turn.</summary>
-    private string _permissionMode = CodexSessionOptions.ClampPermissionMode("");
-    private string? _liveModel;
-    private string? _liveEffort;
+    private string _permissionMode = CodexSessionOptions.ClampPermissionMode(options.PermissionMode ?? "");
+    private string? _liveModel = options.Model;
+    private string? _liveEffort = CodexSessionOptions.ClampEffort(options.Effort);
 
     private string? _threadId;
     private string? _currentTurnId;
@@ -61,16 +61,7 @@ public sealed partial class CodexAgentSession : IAgentSession
     // Allows protocol tests to capture outgoing frames without launching the CLI.
     internal Func<object, CancellationToken, Task>? MessageWriter { get; init; }
 
-    public CodexAgentSession(CodexSessionOptions options)
-    {
-        _options = options;
-        _permissionMode = CodexSessionOptions.ClampPermissionMode(options.PermissionMode ?? "");
-        _liveModel = options.Model;
-        _liveEffort = CodexSessionOptions.ClampEffort(options.Effort);
-        SessionId = options.ResumeSessionId;
-    }
-
-    public string? SessionId { get; private set; }
+    public string? SessionId { get; private set; } = options.ResumeSessionId;
 
     /// <summary>Test seam: the thread notifications are judged against, without a running app-server.</summary>
     internal void AdoptThread(string threadId) => _threadId = threadId;
@@ -392,7 +383,9 @@ public sealed partial class CodexAgentSession : IAgentSession
             _planReview = null;
             await _events.Writer.WriteAsync(new ToolCallCompleted
             {
-                ToolUseId = review.Id, IsError = true, ResultText = "Plan review stopped.",
+                ToolUseId = review.Id,
+                IsError = true,
+                ResultText = "Plan review stopped.",
             }, ct).ConfigureAwait(false);
             await _events.Writer.WriteAsync(review.Completion with { Subtype = "interrupted" }, ct).ConfigureAwait(false);
             return;
@@ -1478,11 +1471,16 @@ public sealed partial class CodexAgentSession : IAgentSession
             var input = JsonSerializer.SerializeToElement(new { plan = plan.Text }, WireJson);
             await _events.Writer.WriteAsync(new ToolCallStarted
             {
-                ToolUseId = plan.Id, ToolName = "ExitPlanMode", Input = input,
+                ToolUseId = plan.Id,
+                ToolName = "ExitPlanMode",
+                Input = input,
             }).ConfigureAwait(false);
             await _events.Writer.WriteAsync(new ApprovalRequested
             {
-                RequestId = plan.Id, ToolUseId = plan.Id, ToolName = "ExitPlanMode", Input = input,
+                RequestId = plan.Id,
+                ToolUseId = plan.Id,
+                ToolName = "ExitPlanMode",
+                Input = input,
             }).ConfigureAwait(false);
             return;
         }
@@ -1631,14 +1629,9 @@ public sealed partial class CodexAgentSession : IAgentSession
             DateTimeOffset? resetsAt = window.Prop("resetsAt") is { ValueKind: JsonValueKind.Number } resets
                 && resets.TryGetInt64(out var seconds) ? DateTimeOffset.FromUnixTimeSeconds(seconds) : null;
 
-            if (durationMins > 600)
-            {
-                limits = limits with { SevenDayUtilization = percent / 100.0, SevenDayResetsAt = resetsAt, LongWindowMins = durationMins };
-            }
-            else
-            {
-                limits = limits with { FiveHourUtilization = percent / 100.0, FiveHourResetsAt = resetsAt };
-            }
+            limits = durationMins > 600
+                ? (limits with { SevenDayUtilization = percent / 100.0, SevenDayResetsAt = resetsAt, LongWindowMins = durationMins })
+                : (limits with { FiveHourUtilization = percent / 100.0, FiveHourResetsAt = resetsAt });
         }
 
         if (snapshot.Prop("primary") is { } primary)

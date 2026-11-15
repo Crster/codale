@@ -1,5 +1,5 @@
-using Codale.Git;
 using Codale.App.Services;
+using Codale.Git;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -62,26 +62,28 @@ public sealed partial class EditorViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsBinaryPlaceholder))]
     public partial bool IsMedia { get; set; }
 
-    private static readonly HashSet<string> MediaExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly HashSet<string> MediaExtensions =
+    [
+        with(StringComparer.OrdinalIgnoreCase),
         ".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".wma", ".opus",
         ".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".wmv",
-    };
+    ];
 
     public static bool IsMediaPath(string path) => MediaExtensions.Contains(Path.GetExtension(path));
 
-    private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".tif", ".tiff", ".svg",
-    };
+    private static readonly HashSet<string> ImageExtensions =
+    [
+with(StringComparer.OrdinalIgnoreCase),         ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".tif", ".tiff", ".svg",
+    ];
 
     /// <summary>Extensions that are never text; skipped without reading the file.</summary>
-    private static readonly HashSet<string> BinaryExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly HashSet<string> BinaryExtensions =
+    [
+        with(StringComparer.OrdinalIgnoreCase),
         ".exe", ".dll", ".pdb", ".zip", ".7z", ".rar", ".gz", ".tar", ".pdf", ".docx", ".xlsx", ".pptx",
         ".mp3", ".wav", ".flac", ".mp4", ".mkv", ".avi", ".mov", ".webm", ".ttf", ".otf", ".woff", ".woff2",
         ".msix", ".nupkg", ".bin", ".dat", ".db", ".sqlite", ".pfx", ".snk", ".obj", ".lib", ".pri",
-    };
+    ];
 
     public static bool IsImagePath(string path) => ImageExtensions.Contains(Path.GetExtension(path));
 
@@ -456,23 +458,13 @@ public sealed partial class EditorViewModel : ObservableObject
     /// <summary>True when the file exists on disk and its write time or size differs from what was loaded or saved.</summary>
     public bool ChangedOnDisk()
     {
-        if (FilePath is not { } path)
-        {
-            return false;
-        }
-
-        return ChangedOnDisk(path);
+        return FilePath is { } path && ChangedOnDisk(path);
     }
 
     /// <summary>True when the file was loaded from disk but no longer exists on disk.</summary>
     public bool DeletedOnDisk()
     {
-        if (FilePath is not { } path || _diskStamp is null)
-        {
-            return false;
-        }
-
-        return !File.Exists(path);
+        return FilePath is { } path && _diskStamp is not null && !File.Exists(path);
     }
 
     private bool ChangedOnDisk(string path)

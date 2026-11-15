@@ -1,9 +1,9 @@
 using Codale.Agents;
-using Codale.Core.Agents;
 using Codale.Agents.Claude;
-using Codale.Core.Helper;
 using Codale.App.Services;
 using Codale.App.ViewModels;
+using Codale.Core.Agents;
+using Codale.Core.Helper;
 using Codale.Core.Syntax;
 
 using Microsoft.UI.Xaml;
@@ -48,8 +48,11 @@ public sealed partial class SettingsPanel : UserControl
         InitializeComponent();
         // Subscribe only while visible in the visual tree; each window uses its composed store.
         Loaded += (_, _) => { _settings.Changed += OnAppSettingsChanged; _smart.Instance.Changed += OnSmartStatusChanged; RefreshSmartStatus(); RefreshSyntaxSection(); };
-        Unloaded += (_, _) => { _settings.Changed -= OnAppSettingsChanged; _smart.Instance.Changed -= OnSmartStatusChanged;
-            if (_syntaxSubscribed) { _syntax.Store.Changed -= OnSyntaxStoreChanged; _syntaxSubscribed = false; } };
+        Unloaded += (_, _) =>
+        {
+            _settings.Changed -= OnAppSettingsChanged; _smart.Instance.Changed -= OnSmartStatusChanged;
+            if (_syntaxSubscribed) { _syntax.Store.Changed -= OnSyntaxStoreChanged; _syntaxSubscribed = false; }
+        };
 
     }
 
@@ -177,7 +180,9 @@ public sealed partial class SettingsPanel : UserControl
         var provider = _settings.SmartProviderFor(role.Id);
         var row = new Grid
         {
-            ColumnSpacing = 8, RowSpacing = 4, Padding = new Thickness(16, 10, 16, 10),
+            ColumnSpacing = 8,
+            RowSpacing = 4,
+            Padding = new Thickness(16, 10, 16, 10),
             BorderThickness = new Thickness(0, first ? 0 : 1, 0, 0),
             BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"],
         };
@@ -211,9 +216,13 @@ public sealed partial class SettingsPanel : UserControl
             i.Tag is (string p, string profile) && p == provider && (provider == "off" || profile == selectedProfile));
         if (current is null && provider != "off")
         {
-            current = new ComboBoxItem { Content = char.ToUpperInvariant(provider[0]) + provider[1..] +
+            current = new ComboBoxItem
+            {
+                Content = char.ToUpperInvariant(provider[0]) + provider[1..] +
                 (SmartFeatureSettings.SupportsProvider(role.Id, provider) ? " (unavailable)" : " (needs API endpoint)"),
-                Tag = (provider, savedProfile), IsEnabled = false };
+                Tag = (provider, savedProfile),
+                IsEnabled = false
+            };
             providers.Items.Add(current); // keep a saved choice visible even if its profile is gone
         }
         providers.SelectedItem = current ?? providers.Items[0];
@@ -233,8 +242,15 @@ public sealed partial class SettingsPanel : UserControl
         row.Children.Add(providers);
 
         var active = provider != "off" && SmartFeatureSettings.SupportsProvider(role.Id, provider);
-        var model = new ComboBox { IsEditable = true, PlaceholderText = role.Placeholder, HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Center, Tag = role.Id, Visibility = active ? Visibility.Visible : Visibility.Collapsed };
+        var model = new ComboBox
+        {
+            IsEditable = true,
+            PlaceholderText = role.Placeholder,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Center,
+            Tag = role.Id,
+            Visibility = active ? Visibility.Visible : Visibility.Collapsed
+        };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(model, role.Label + " model");
         model.LostFocus += (_, _) => { if (!_loading && _smartModelBoxes.GetValueOrDefault(role.Id) == model) _settings.SetSmartRoleModel(role.Id, model.Text); };
         model.TextSubmitted += (_, args) => { if (!_loading) _settings.SetSmartRoleModel(role.Id, args.Text); };
@@ -289,7 +305,7 @@ public sealed partial class SettingsPanel : UserControl
             var client = _smart.CreateClient(role);
             var accountId = client.AccountId;
             var ids = provider is "claude" or "codex"
-                ? (ChatViewModel.KnownCatalogue(provider, accountId) ?? await ChatViewModel.FetchCatalogueAsync(_agentSessions, provider, accountId)).Select(m => m.Id).ToArray()
+                ? [.. (ChatViewModel.KnownCatalogue(provider, accountId) ?? await ChatViewModel.FetchCatalogueAsync(_agentSessions, provider, accountId)).Select(m => m.Id)]
                 : await client.ModelsAsync(CancellationToken.None);
             if (provider != _settings.SmartProviderFor(role) || profileKey != _settings.SmartApiProfileFor(role) || !_smartModelBoxes.ContainsValue(box)) return;
             var current = box.Text;
@@ -613,8 +629,14 @@ public sealed partial class SettingsPanel : UserControl
                         var profile = _providers.FirstOrDefault(p => p.IsAccount && p.CliId == cli && p.AccountId == account.AccountId);
                         if (profile is null)
                         {
-                            profile = new ByokProvider { Id = Guid.NewGuid().ToString("N"), CliId = cli, IsAccount = true, AccountId = account.AccountId,
-                                Name = account.Email ?? (account.AccountId == CodaleAccount.UserAccountId ? "Detected CLI account" : "Detected account") };
+                            profile = new ByokProvider
+                            {
+                                Id = Guid.NewGuid().ToString("N"),
+                                CliId = cli,
+                                IsAccount = true,
+                                AccountId = account.AccountId,
+                                Name = account.Email ?? (account.AccountId == CodaleAccount.UserAccountId ? "Detected CLI account" : "Detected account")
+                            };
                             _providers.Add(profile);
                         }
                         if (account.Email is { Length: > 0 } email
@@ -646,11 +668,18 @@ public sealed partial class SettingsPanel : UserControl
             if (SignInAsync is null) throw new InvalidOperationException("Account setup is unavailable in this window.");
             status.Text = "Connecting account…";
             await SignInAsync(cli, id);
-            var account = await CodaleAccountCli.GetAccountAsync(cli, accountId: id);
-            if (!account.SignedIn) { status.Text = "Account setup did not complete. No account was added."; return; }
+            var (signedIn, email) = await CodaleAccountCli.GetAccountAsync(cli, accountId: id);
+            if (!signedIn) { status.Text = "Account setup did not complete. No account was added."; return; }
             if (!_providers.Any(p => p.IsAccount && p.CliId == cli && p.AccountId == id))
-                _providers.Add(new ByokProvider { Id = Guid.NewGuid().ToString("N"), Name = account.Email ?? "Connected account", CliId = cli,
-                    IsAccount = true, AccountId = id, Email = account.Email });
+                _providers.Add(new ByokProvider
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    Name = email ?? "Connected account",
+                    CliId = cli,
+                    IsAccount = true,
+                    AccountId = id,
+                    Email = email
+                });
             _accountStates[AccountKey(cli, id)] = true;
             _expandedAccountKey = _providers.First(p => p.IsAccount && p.CliId == cli && p.AccountId == id).Key;
             SaveProviders();
@@ -696,10 +725,10 @@ public sealed partial class SettingsPanel : UserControl
         ProvidersPanel.Children.Clear();
         CodexProfilesPanel.Children.Clear();
         foreach (var cli in new[] { "claude", "codex" })
-        foreach (var provider in _providers.Where(p => p.Supports(cli)))
-        {
-            (cli == "codex" ? CodexProfilesPanel : ProvidersPanel).Children.Add(BuildProviderEditor(provider, expanded: provider.Key == _expandedAccountKey, cli));
-        }
+            foreach (var provider in _providers.Where(p => p.Supports(cli)))
+            {
+                (cli == "codex" ? CodexProfilesPanel : ProvidersPanel).Children.Add(BuildProviderEditor(provider, expanded: provider.Key == _expandedAccountKey, cli));
+            }
 
     }
 
@@ -736,8 +765,12 @@ public sealed partial class SettingsPanel : UserControl
 
         if (provider.IsAccount)
         {
-            var status = new TextBlock { Text = _accountStates.GetValueOrDefault(AccountKey(cli, provider.AccountId), true)
-                ? provider.Email ?? "Connected account" : "Not connected. Remove this account and add it again to reconnect.", TextWrapping = TextWrapping.Wrap };
+            var status = new TextBlock
+            {
+                Text = _accountStates.GetValueOrDefault(AccountKey(cli, provider.AccountId), true)
+                ? provider.Email ?? "Connected account" : "Not connected. Remove this account and add it again to reconnect.",
+                TextWrapping = TextWrapping.Wrap
+            };
             panel.Children.Add(status);
         }
         if (!provider.IsAccount)
@@ -900,12 +933,12 @@ public sealed partial class SettingsPanel : UserControl
         }
 
         SetModelStatus(boxes, null);
-        provider.ModelContextWindows ??= new(StringComparer.OrdinalIgnoreCase);
-        foreach (var model in models)
+        provider.ModelContextWindows ??= [with(StringComparer.OrdinalIgnoreCase)];
+        foreach (var (id, contextWindow) in models)
         {
-            if (model.ContextWindow is int window && window > 0)
+            if (contextWindow is int window && window > 0)
             {
-                provider.ModelContextWindows[model.Id] = window;
+                provider.ModelContextWindows[id] = window;
             }
         }
         var ids = models.Select(model => model.Id).ToList();
@@ -1170,7 +1203,7 @@ public sealed partial class SettingsPanel : UserControl
 
     private void OnSyntaxClearOverridesClick(object sender, RoutedEventArgs e)
     {
-        _settings.SyntaxOverrides = new Dictionary<string, string>();
+        _settings.SyntaxOverrides = [];
 
         // Open editors re-detect their language; the store event is the one nudge they already listen for.
         _syntax.Store.NotifyChanged();

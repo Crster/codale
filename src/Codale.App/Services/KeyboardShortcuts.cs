@@ -23,17 +23,11 @@ public readonly record struct KeyChord(VirtualKey Key, bool Ctrl, bool Shift, bo
     /// </summary>
     public static KeyChord? FromKeyPress(VirtualKey key, bool usableOnly = false)
     {
-        if (!CanName(key))
-        {
-            return null;
-        }
-
-        if (usableOnly && key is not (>= VirtualKey.F1 and <= VirtualKey.F12) && !IsDown(VirtualKey.Control) && !IsDown(VirtualKey.Menu))
-        {
-            return null;
-        }
-
-        return new KeyChord(key, IsDown(VirtualKey.Control), IsDown(VirtualKey.Shift), IsDown(VirtualKey.Menu));
+        return !CanName(key)
+            ? null
+            : usableOnly && key is not (>= VirtualKey.F1 and <= VirtualKey.F12) && !IsDown(VirtualKey.Control) && !IsDown(VirtualKey.Menu)
+            ? null
+            : new KeyChord(key, IsDown(VirtualKey.Control), IsDown(VirtualKey.Shift), IsDown(VirtualKey.Menu));
     }
 
     public static bool AnyModifierDown() =>
@@ -171,7 +165,7 @@ public readonly record struct KeyChord(VirtualKey Key, bool Ctrl, bool Shift, bo
 /// user's overrides from settings.json (<c>shortcut.*</c>). A chord stored as "none"
 /// disables the action; an unreadable one falls back to the default.
 /// </summary>
-public sealed class KeyboardShortcuts : IDisposable
+public sealed class KeyboardShortcuts(AppSettingsStore settings) : IDisposable
 {
     public const string OpenTerminal = "openTerminal";
     public const string FocusShellCommand = "focusShellCommand";
@@ -209,9 +203,7 @@ public sealed class KeyboardShortcuts : IDisposable
     /// <summary>While a Settings recorder waits for a chord, the window must not act on the keys it is about to capture.</summary>
     public bool IsRecording { get; set; }
 
-    private readonly ShortcutBindings _bindings;
-
-    public KeyboardShortcuts(AppSettingsStore settings) => _bindings = new(settings, Actions,
+    private readonly ShortcutBindings _bindings = new(settings, Actions,
         text => text.Equals(DoubleEscape, StringComparison.OrdinalIgnoreCase) ? DoubleEscape : KeyChord.Parse(text)?.ToString());
 
     public void Dispose()

@@ -1,4 +1,3 @@
-using Codale.Agents.Claude;
 using Codale.Core.Agents;
 
 namespace Codale.Agents.Tests;

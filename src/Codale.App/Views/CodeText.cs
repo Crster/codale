@@ -1,4 +1,4 @@
-using Codale.App.Controls;
+using Codale.App.Controls.Editing;
 using Codale.Core.Syntax;
 
 using Microsoft.UI.Xaml;
@@ -111,7 +111,7 @@ public static class CodeText
 
         var spans = syntax == "shell"
             ? ShellHighlighter.Tokenize(code)
-            : new List<(string Text, ShellTokenKind Kind)> { (code, ShellTokenKind.Plain) };
+            : [(code, ShellTokenKind.Plain)];
 
         foreach (var (span, kind) in spans)
         {

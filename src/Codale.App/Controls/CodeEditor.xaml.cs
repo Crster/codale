@@ -1,4 +1,4 @@
-using Codale.App.Services;
+using Codale.App.Controls.Editing;
 using Codale.Editor;
 
 using Microsoft.UI.Input;
@@ -94,10 +94,7 @@ public sealed partial class CodeEditor : UserControl
             Invalidate();
         };
 
-        GotFocus += (_, _) =>
-        {
-            RestartCaretBlink();
-        };
+        GotFocus += (_, _) => RestartCaretBlink();
         LostFocus += (_, _) =>
         {
             _caretTimer.Stop();
@@ -176,7 +173,7 @@ public sealed partial class CodeEditor : UserControl
     }
 
     /// <summary>Vertical scroll offset in dips from the top of the buffer.</summary>
-    public double VerticalScroll => _scrollY;
+    public double VerticalScroll { get; private set; }
 
     /// <summary>Scrolls so <paramref name="offset"/> dips of the buffer are at the top.</summary>
     public void SetVerticalScroll(double offset) => ScrollTo(null, Math.Max(0, offset), animate: false);
@@ -274,7 +271,7 @@ public sealed partial class CodeEditor : UserControl
     /// <summary>The id of the language the buffer is coloured with, or null for plain text.</summary>
     public string? LanguageId => _highlighter.LanguageId;
 
-    private string? _languageId => _highlighter.LanguageId;
+    private string? languageId => _highlighter.LanguageId;
 
     /// <summary>The buffer-space visual row a position starts in, for overlays mapping lines to y.</summary>
     public int VisualRowOfPosition(int line, int col)
@@ -297,7 +294,7 @@ public sealed partial class CodeEditor : UserControl
         EnsureMetrics();
         var position = _model.Buffer.Clamp(new DocumentPosition(line, col));
         var (row, x) = Locate(position);
-        return new Windows.Foundation.Rect(TextLeft + x - _scrollX, row * _lineHeight - _scrollY, CaretWidth, _lineHeight);
+        return new Windows.Foundation.Rect(TextLeft + x - _scrollX, row * _lineHeight - VerticalScroll, CaretWidth, _lineHeight);
     }
 
     // ------------------------------------------------------------------ events

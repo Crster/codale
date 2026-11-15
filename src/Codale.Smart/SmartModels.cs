@@ -13,6 +13,6 @@ public static class SmartModels
         "ibm-granite/granite-4.2-8b-GGUF", ModelInstaller.Revision, ModelInstaller.FileName,
         ModelInstaller.Size, ModelInstaller.Sha256);
 
-    public static IReadOnlyList<SmartModel> All { get; } = Array.AsReadOnly(new[] { Default });
+    public static IReadOnlyList<SmartModel> All { get; } = Array.AsReadOnly([Default]);
     public static SmartModel Resolve(string? id) => All.FirstOrDefault(m => m.Id == id) ?? Default;
 }

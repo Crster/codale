@@ -1,7 +1,10 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+
 using Codale.Core.Projects;
 using Codale.Db;
+using Codale.Search.Engine;
+
 using Xunit.Abstractions;
 
 namespace Codale.Search.Tests;
@@ -157,7 +160,7 @@ public sealed class IndexQualityTests(ITestOutputHelper output) : IDisposable
         // ---- ghost text: does the header carry the declarations the next line needs?
         var snapshot = scan.Current;
         var file = Path.Combine(root, "src", "Codale.App", "Views", "EditorTab.xaml.cs");
-        const string nearby = "var index = Codale.Search.SourceIndex.For(ProjectRoot);\nvar list = index.Suggest(prefix, previousWord);\nvar knowledge = new ProjectKnowledgeIndex(db);\nknowledge.RefreshAsync(";
+        const string nearby = "var index = Codale.Search.Engine.SourceIndex.For(ProjectRoot);\nvar list = index.Suggest(prefix, previousWord);\nvar knowledge = new ProjectKnowledgeIndex(db);\nknowledge.RefreshAsync(";
         var related = index.Search(root, nearby, "", 4, 1).Select(c => (c.Path, c.Text)).ToList();
         clock.Restart();
         var header = Codale.Search.CompletionContext.Build(snapshot, root, file, "csharp", nearby, related);

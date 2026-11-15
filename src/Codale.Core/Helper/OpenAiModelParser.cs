@@ -102,13 +102,12 @@ public static class OpenAiModelParser
             return (id, window);
         }
 
-        return array
+        return [.. array
             .EnumerateArray()
             .Select(Model)
             .Where(model => model.Id.Length > 0)
             .GroupBy(model => model.Id, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
-            .OrderBy(model => model.Id, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+            .OrderBy(model => model.Id, StringComparer.OrdinalIgnoreCase)];
     }
 }

@@ -5,7 +5,7 @@ namespace Codale.Terminal;
 /// exact RGB value from true-colour SGR. The terminal theme resolves Default and
 /// Indexed at draw time so the palette lives with the renderer.
 /// </summary>
-public readonly struct TerminalColor : IEquatable<TerminalColor>
+public readonly struct TerminalColor(TerminalColor.Kinds kind, byte index, byte r, byte g, byte b) : IEquatable<TerminalColor>
 {
     public enum Kinds : byte
     {
@@ -14,31 +14,22 @@ public readonly struct TerminalColor : IEquatable<TerminalColor>
         Rgb,
     }
 
-    public TerminalColor(Kinds kind, byte index, byte r, byte g, byte b)
-    {
-        Kind = kind;
-        Index = index;
-        R = r;
-        G = g;
-        B = b;
-    }
-
     public static TerminalColor Default { get; } = new(Kinds.Default, 0, 0, 0, 0);
 
     public static TerminalColor Indexed(byte index) => new(Kinds.Indexed, index, 0, 0, 0);
 
     public static TerminalColor FromRgb(byte r, byte g, byte b) => new(Kinds.Rgb, 0, r, g, b);
 
-    public Kinds Kind { get; }
+    public Kinds Kind { get; } = kind;
 
     /// <summary>Palette index when <see cref="Kind"/> is <see cref="Kinds.Indexed"/>.</summary>
-    public byte Index { get; }
+    public byte Index { get; } = index;
 
-    public byte R { get; }
+    public byte R { get; } = r;
 
-    public byte G { get; }
+    public byte G { get; } = g;
 
-    public byte B { get; }
+    public byte B { get; } = b;
 
     public bool IsDefault => Kind == Kinds.Default;
 
@@ -74,22 +65,15 @@ public enum CellFlags : byte
 /// The full look of one terminal cell: colours plus attribute flags. Style structs
 /// compare by value so the renderer can coalesce cells into runs.
 /// </summary>
-public readonly struct CellStyle : IEquatable<CellStyle>
+public readonly struct CellStyle(TerminalColor fg, TerminalColor bg, CellFlags flags) : IEquatable<CellStyle>
 {
-    public CellStyle(TerminalColor fg, TerminalColor bg, CellFlags flags)
-    {
-        Fg = fg;
-        Bg = bg;
-        Flags = flags;
-    }
-
     public static CellStyle Default { get; } = new(TerminalColor.Default, TerminalColor.Default, CellFlags.None);
 
-    public TerminalColor Fg { get; }
+    public TerminalColor Fg { get; } = fg;
 
-    public TerminalColor Bg { get; }
+    public TerminalColor Bg { get; } = bg;
 
-    public CellFlags Flags { get; }
+    public CellFlags Flags { get; } = flags;
 
     public bool Equals(CellStyle other) => Fg == other.Fg && Bg == other.Bg && Flags == other.Flags;
 

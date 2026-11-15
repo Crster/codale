@@ -1,10 +1,7 @@
 using System.Collections.ObjectModel;
 
 using Codale.Agents.History;
-using Codale.Core.Agents;
 using Codale.App.Services;
-using Codale.Core.Features;
-using Codale.Core.Projects;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -155,7 +152,7 @@ public sealed partial class SessionsViewModel : ObservableObject
     /// One row per history. Its title is Codale's own name for it, which follows the latest prompt
     /// (see ChatViewModel.RenameSessionFromPrompt); the CLIs' stored session titles are not used.
     /// </summary>
-    private List<TranscriptSummary> ReadRows() => _features.List()
+    private List<TranscriptSummary> ReadRows() => [.. _features.List()
         .Select(f =>
         {
             var provider = _features.ProviderSession(f.Id)?.Provider;
@@ -169,8 +166,7 @@ public sealed partial class SessionsViewModel : ObservableObject
                 FirstPrompt = f.Description,
                 Detail = provider is not null ? provider == "codex" ? "Codex" : provider == "claude" ? "Claude" : provider : "Session",
             };
-        })
-        .ToList();
+        })];
 
     /// <summary>Renames a feature.</summary>
     public async Task RetitleAsync(SessionListItem item, string title)

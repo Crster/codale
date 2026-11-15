@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -47,64 +46,103 @@ public static partial class ShellCommandClassifier
     {
         public ShellClass Class;
         public ShellClass? SubDefault;
-        public Dictionary<string, ShellClass> Sub = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, ShellClass> Sub = [with(StringComparer.OrdinalIgnoreCase)];
         public List<Esc> Escalations = [];
-        public Dictionary<string, List<Esc>> SubEscalations = new(StringComparer.OrdinalIgnoreCase);
-        public Dictionary<string, ShellClass> RunScripts = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, List<Esc>> SubEscalations = [with(StringComparer.OrdinalIgnoreCase)];
+        public Dictionary<string, ShellClass> RunScripts = [with(StringComparer.OrdinalIgnoreCase)];
     }
 
-    private sealed class Database
+    private sealed partial class Database
     {
-        public Dictionary<string, Entry> Programs = new(StringComparer.OrdinalIgnoreCase);
-        public HashSet<string> ReadVerbs = new(StringComparer.OrdinalIgnoreCase);
-        public HashSet<string> WriteVerbs = new(StringComparer.OrdinalIgnoreCase);
-        public HashSet<string> DeleteVerbs = new(StringComparer.OrdinalIgnoreCase);
-        public HashSet<string> DangerVerbs = new(StringComparer.OrdinalIgnoreCase);
-        public HashSet<string> Shells = new(StringComparer.OrdinalIgnoreCase);
-        public HashSet<string> Transparent = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, Entry> Programs = [with(StringComparer.OrdinalIgnoreCase)];
+        public HashSet<string> ReadVerbs = [with(StringComparer.OrdinalIgnoreCase)];
+        public HashSet<string> WriteVerbs = [with(StringComparer.OrdinalIgnoreCase)];
+        public HashSet<string> DeleteVerbs = [with(StringComparer.OrdinalIgnoreCase)];
+        public HashSet<string> DangerVerbs = [with(StringComparer.OrdinalIgnoreCase)];
+        public HashSet<string> Shells = [with(StringComparer.OrdinalIgnoreCase)];
+        public HashSet<string> Transparent = [with(StringComparer.OrdinalIgnoreCase)];
     }
 
     private static readonly Lazy<Database> Db = new(Load);
 
-    private static readonly HashSet<string> Keywords = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly HashSet<string> Keywords =
+    [
+        with(StringComparer.OrdinalIgnoreCase),
         "if", "elif", "else", "elseif", "while", "until", "for", "foreach", "switch", "do", "then", "fi", "done", "esac",
         "try", "catch", "finally", "function", "param", "begin", "process", "end", "in", "case",
-    };
+    ];
 
-    private static readonly HashSet<string> Jumps = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "return", "break", "continue", "exit", "throw", "local", "declare", "typeset", "readonly",
-    };
+    private static readonly HashSet<string> Jumps =
+    [
+with(StringComparer.OrdinalIgnoreCase),         "return", "break", "continue", "exit", "throw", "local", "declare", "typeset", "readonly",
+    ];
 
     // PowerShell's short aliases for the cmdlets the database knows by full name.
     private static readonly Dictionary<string, ShellClass> PowerShellAliases = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["gc"] = ShellClass.ReadOnly, ["gci"] = ShellClass.ReadOnly, ["gi"] = ShellClass.ReadOnly, ["gl"] = ShellClass.ReadOnly,
-        ["gcm"] = ShellClass.ReadOnly, ["gps"] = ShellClass.ReadOnly, ["gsv"] = ShellClass.ReadOnly, ["gp"] = ShellClass.ReadOnly,
-        ["sls"] = ShellClass.ReadOnly, ["select"] = ShellClass.ReadOnly, ["where"] = ShellClass.ReadOnly, ["foreach"] = ShellClass.ReadOnly,
-        ["%"] = ShellClass.ReadOnly, ["?"] = ShellClass.ReadOnly, ["measure"] = ShellClass.ReadOnly, ["sort"] = ShellClass.ReadOnly,
-        ["ft"] = ShellClass.ReadOnly, ["fl"] = ShellClass.ReadOnly, ["fw"] = ShellClass.ReadOnly, ["gm"] = ShellClass.ReadOnly,
-        ["sl"] = ShellClass.ReadOnly, ["pushd"] = ShellClass.ReadOnly, ["popd"] = ShellClass.ReadOnly, ["gjb"] = ShellClass.ReadOnly,
-        ["echo"] = ShellClass.ReadOnly, ["write"] = ShellClass.ReadOnly, ["oss"] = ShellClass.ReadOnly, ["ogv"] = ShellClass.ReadOnly,
-        ["ni"] = ShellClass.Write, ["mi"] = ShellClass.Write, ["cpi"] = ShellClass.Write, ["rni"] = ShellClass.Write,
-        ["si"] = ShellClass.Write, ["sp"] = ShellClass.Write, ["ac"] = ShellClass.Write, ["clc"] = ShellClass.Delete,
-        ["ri"] = ShellClass.Delete, ["rp"] = ShellClass.Delete, ["rv"] = ShellClass.ReadOnly, ["sv"] = ShellClass.ReadOnly,
-        ["iex"] = ShellClass.Danger, ["saps"] = ShellClass.Unknown, ["start"] = ShellClass.Unknown, ["icm"] = ShellClass.Unknown,
+        ["gc"] = ShellClass.ReadOnly,
+        ["gci"] = ShellClass.ReadOnly,
+        ["gi"] = ShellClass.ReadOnly,
+        ["gl"] = ShellClass.ReadOnly,
+        ["gcm"] = ShellClass.ReadOnly,
+        ["gps"] = ShellClass.ReadOnly,
+        ["gsv"] = ShellClass.ReadOnly,
+        ["gp"] = ShellClass.ReadOnly,
+        ["sls"] = ShellClass.ReadOnly,
+        ["select"] = ShellClass.ReadOnly,
+        ["where"] = ShellClass.ReadOnly,
+        ["foreach"] = ShellClass.ReadOnly,
+        ["%"] = ShellClass.ReadOnly,
+        ["?"] = ShellClass.ReadOnly,
+        ["measure"] = ShellClass.ReadOnly,
+        ["sort"] = ShellClass.ReadOnly,
+        ["ft"] = ShellClass.ReadOnly,
+        ["fl"] = ShellClass.ReadOnly,
+        ["fw"] = ShellClass.ReadOnly,
+        ["gm"] = ShellClass.ReadOnly,
+        ["sl"] = ShellClass.ReadOnly,
+        ["pushd"] = ShellClass.ReadOnly,
+        ["popd"] = ShellClass.ReadOnly,
+        ["gjb"] = ShellClass.ReadOnly,
+        ["echo"] = ShellClass.ReadOnly,
+        ["write"] = ShellClass.ReadOnly,
+        ["oss"] = ShellClass.ReadOnly,
+        ["ogv"] = ShellClass.ReadOnly,
+        ["ni"] = ShellClass.Write,
+        ["mi"] = ShellClass.Write,
+        ["cpi"] = ShellClass.Write,
+        ["rni"] = ShellClass.Write,
+        ["si"] = ShellClass.Write,
+        ["sp"] = ShellClass.Write,
+        ["ac"] = ShellClass.Write,
+        ["clc"] = ShellClass.Delete,
+        ["ri"] = ShellClass.Delete,
+        ["rp"] = ShellClass.Delete,
+        ["rv"] = ShellClass.ReadOnly,
+        ["sv"] = ShellClass.ReadOnly,
+        ["iex"] = ShellClass.Danger,
+        ["saps"] = ShellClass.Unknown,
+        ["start"] = ShellClass.Unknown,
+        ["icm"] = ShellClass.Unknown,
         ["ii"] = ShellClass.Unknown,
     };
 
-    private static readonly HashSet<string> UnknownCmdlets = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly HashSet<string> UnknownCmdlets =
+    [
+        with(StringComparer.OrdinalIgnoreCase),
         "start-process", "start-job", "start-transcript", "invoke-command", "invoke-item", "invoke-expression", "invoke-wmimethod",
         "invoke-cimmethod", "invoke-history", "import-module", "add-type", "new-object", "register-objectevent", "start-threadjob",
         "enter-pssession", "new-pssession", "set-psbreakpoint", "foreach-object-parallel",
-    };
+    ];
 
-    private static readonly Regex QuotedText = new("'[^']*'|\"[^\"]*\"", RegexOptions.Compiled);
-    private static readonly Regex AssignmentWord = new(@"^[A-Za-z_][A-Za-z0-9_]*=", RegexOptions.Compiled);
-    private static readonly Regex SimpleExpression = new(@"^\$[\w:{}]+(\.\w+|\[[^\]]*\])*$|^\[[\w.\[\],]+\]\$?[\w:]*$", RegexOptions.Compiled);
-    private static readonly Regex IdentifierThenParen = new(@"(?<id>[A-Za-z_][\w.\-]*)$", RegexOptions.Compiled);
+    [GeneratedRegex("'[^']*'|\"[^\"]*\"", RegexOptions.Compiled)]
+    private static partial Regex QuotedText();
+    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*=", RegexOptions.Compiled)]
+    private static partial Regex AssignmentWord();
+    [GeneratedRegex(@"^\$[\w:{}]+(\.\w+|\[[^\]]*\])*$|^\[[\w.\[\],]+\]\$?[\w:]*$", RegexOptions.Compiled)]
+    private static partial Regex SimpleExpression();
+    [GeneratedRegex(@"(?<id>[A-Za-z_][\w.\-]*)$", RegexOptions.Compiled)]
+    private static partial Regex IdentifierThenParen();
 
     /// <summary>The class of the whole command; the reason names the part that set it.</summary>
     public static ShellClassification Classify(string? command, string? cwd = null, IReadOnlyList<string>? extraRoots = null)
@@ -133,12 +171,9 @@ public static partial class ShellCommandClassifier
 
         // A script the token reader could not judge may still be a plain read-only PowerShell
         // tree (loops, variables, pipelines) that the syntax-tree validator proves harmless.
-        if (best.Class == ShellClass.Unknown && PlanningShellPolicy.AllowsInspection(text))
-        {
-            return new ShellClassification(ShellClass.ReadOnly, "reads or prints only");
-        }
-
-        return best;
+        return best.Class == ShellClass.Unknown && PlanningShellPolicy.AllowsInspection(text)
+            ? new ShellClassification(ShellClass.ReadOnly, "reads or prints only")
+            : best;
     }
 
     private static ShellClassification ClassifyText(string text, bool bashMode, int depth)
@@ -185,17 +220,11 @@ public static partial class ShellCommandClassifier
         }
 
         var words = lexed.Words;
-        if (words.Count == 0 || (words.Count == 1 && lexed.FirstQuoted))
-        {
-            return new ShellClassification(ShellClass.ReadOnly, "reads or prints only");
-        }
-
-        if (segment.HasInvocation || QuotedText.Replace(segment.Text, "").Contains("::", StringComparison.Ordinal))
-        {
-            return new ShellClassification(ShellClass.Unknown, "calls a method or .NET member");
-        }
-
-        return ClassifyWords(words, bashMode, depth, segment);
+        return words.Count == 0 || (words.Count == 1 && lexed.FirstQuoted)
+            ? new ShellClassification(ShellClass.ReadOnly, "reads or prints only")
+            : segment.HasInvocation || QuotedText().Replace(segment.Text, "").Contains("::", StringComparison.Ordinal)
+            ? new ShellClassification(ShellClass.Unknown, "calls a method or .NET member")
+            : ClassifyWords(words, bashMode, depth, segment);
     }
 
     private static ShellClassification ClassifyWords(List<string> input, bool bashMode, int depth, Segment segment)
@@ -203,7 +232,7 @@ public static partial class ShellCommandClassifier
         var words = new List<string>(input);
 
         // Leading VAR=value words and call operators do not change what runs.
-        while (words.Count > 0 && AssignmentWord.IsMatch(words[0]) && !words[0].StartsWith('$'))
+        while (words.Count > 0 && AssignmentWord().IsMatch(words[0]) && !words[0].StartsWith('$'))
         {
             words.RemoveAt(0);
         }
@@ -252,12 +281,9 @@ public static partial class ShellCommandClassifier
             }
 
             // $f in Get-ChildItem   (the head of a foreach)
-            if (words.Count > 2 && words[1].Equals("in", StringComparison.OrdinalIgnoreCase))
-            {
-                return ClassifyWords(words.Skip(2).ToList(), bashMode, depth + 1, segment);
-            }
-
-            return SimpleExpression.IsMatch(first) || first.StartsWith("$_", StringComparison.Ordinal) || words.Count > 1 && words[1].StartsWith('-')
+            return words.Count > 2 && words[1].Equals("in", StringComparison.OrdinalIgnoreCase)
+                ? ClassifyWords([.. words.Skip(2)], bashMode, depth + 1, segment)
+                : SimpleExpression().IsMatch(first) || first.StartsWith("$_", StringComparison.Ordinal) || words.Count > 1 && words[1].StartsWith('-')
                 ? new ShellClassification(ShellClass.ReadOnly, "evaluates an expression")
                 : new ShellClassification(ShellClass.Unknown, "runs an expression the checker cannot read");
         }
@@ -317,12 +343,9 @@ public static partial class ShellCommandClassifier
 
         if (args.Count == 1 && args[0] is "--version" or "-V" or "--help" && !db.Shells.Contains(program))
         {
-            if (db.Programs.TryGetValue(program, out var known) && known.Class == ShellClass.Danger && program is "sudo" or "su" or "runas" or "gsudo" or "doas")
-            {
-                return new ShellClassification(ShellClass.Danger, "runs with elevated rights");
-            }
-
-            return new ShellClassification(ShellClass.ReadOnly, $"{program} prints its version or help");
+            return db.Programs.TryGetValue(program, out var known) && known.Class == ShellClass.Danger && program is "sudo" or "su" or "runas" or "gsudo" or "doas"
+                ? new ShellClassification(ShellClass.Danger, "runs with elevated rights")
+                : new ShellClassification(ShellClass.ReadOnly, $"{program} prints its version or help");
         }
 
         if (db.Programs.TryGetValue(program, out var entry))
@@ -378,22 +401,11 @@ public static partial class ShellCommandClassifier
             return new ShellClassification(ShellClass.ReadOnly, "reads or prints only");
         }
 
-        if (db.DeleteVerbs.Contains(verb))
-        {
-            return new ShellClassification(ShellClass.Delete, $"{name} removes data");
-        }
-
-        if (db.DangerVerbs.Contains(verb))
-        {
-            return new ShellClassification(ShellClass.Danger, $"{name} can damage the system");
-        }
-
-        if (db.WriteVerbs.Contains(verb))
-        {
-            return new ShellClassification(ShellClass.Write, $"{name} changes files or state");
-        }
-
-        return null;
+        return db.DeleteVerbs.Contains(verb)
+            ? new ShellClassification(ShellClass.Delete, $"{name} removes data")
+            : db.DangerVerbs.Contains(verb)
+            ? new ShellClassification(ShellClass.Danger, $"{name} can damage the system")
+            : db.WriteVerbs.Contains(verb) ? new ShellClassification(ShellClass.Write, $"{name} changes files or state") : null;
     }
 
     private static ShellClassification ClassifyKnown(string program, Entry entry, List<string> args)
@@ -418,7 +430,7 @@ public static partial class ShellCommandClassifier
             if (index >= 0)
             {
                 sub = args[index];
-                rest = args.Skip(index + 1).ToList();
+                rest = [.. args.Skip(index + 1)];
                 if (entry.Sub.TryGetValue(sub, out var subClass))
                 {
                     cls = subClass;
@@ -539,7 +551,7 @@ public static partial class ShellCommandClassifier
 
         var comparison = flag.Length == 2 && flag[0] == '-' ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
         var isDash = flag.StartsWith('-') || flag.StartsWith('/');
-        var scope = isDash ? args : args.Where(a => !a.StartsWith('-')).Take(4).ToList();
+        var scope = isDash ? args : [.. args.Where(a => !a.StartsWith('-')).Take(4)];
         foreach (var arg in scope)
         {
             if (flag.EndsWith('-') && !isDash ? arg.StartsWith(flag, comparison) : arg.Equals(flag, comparison))
@@ -568,7 +580,7 @@ public static partial class ShellCommandClassifier
         switch (program.ToLowerInvariant())
         {
             case "env":
-                while (rest.Count > 0 && (rest[0].StartsWith('-') || AssignmentWord.IsMatch(rest[0])))
+                while (rest.Count > 0 && (rest[0].StartsWith('-') || AssignmentWord().IsMatch(rest[0])))
                 {
                     rest.RemoveAt(0);
                 }
@@ -672,7 +684,7 @@ public static partial class ShellCommandClassifier
 
             if (rest.Count > 1 && Db.Value.Shells.Contains(ProgramName(rest[0])))
             {
-                return ClassifyShellInvocation(ProgramName(rest[0]), rest.Skip(1).ToList(), true, depth + 1);
+                return ClassifyShellInvocation(ProgramName(rest[0]), [.. rest.Skip(1)], true, depth + 1);
             }
 
             script = rest.Count > 0 ? string.Join(' ', rest) : null;
@@ -689,12 +701,9 @@ public static partial class ShellCommandClassifier
             }
         }
 
-        if (string.IsNullOrWhiteSpace(script))
-        {
-            return new ShellClassification(ShellClass.Unknown, $"starts {shell} without a command line");
-        }
-
-        return ClassifyText(script, lowered is not ("pwsh" or "powershell" or "cmd"), depth + 1);
+        return string.IsNullOrWhiteSpace(script)
+            ? new ShellClassification(ShellClass.Unknown, $"starts {shell} without a command line")
+            : ClassifyText(script, lowered is not ("pwsh" or "powershell" or "cmd"), depth + 1);
     }
 
     private static string Display(string word) => word.Length > 40 ? word[..40] + "..." : word;
@@ -884,7 +893,7 @@ public static partial class ShellCommandClassifier
             if (c == '(')
             {
                 // name( is a call; a keyword( or a bare ( is grouping.
-                var head = IdentifierThenParen.Match(buffer.ToString());
+                var head = IdentifierThenParen().Match(buffer.ToString());
                 if (head.Success && !Keywords.Contains(head.Groups["id"].Value) && !Jumps.Contains(head.Groups["id"].Value) &&
                     !head.Groups["id"].Value.StartsWith('-') && buffer.Length > 0 && !char.IsWhiteSpace(buffer[^1]))
                 {

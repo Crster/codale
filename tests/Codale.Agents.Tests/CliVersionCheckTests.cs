@@ -1,5 +1,3 @@
-using Codale.Agents;
-
 namespace Codale.Agents.Tests;
 
 public class CliVersionCheckTests

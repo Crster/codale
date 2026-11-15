@@ -1,7 +1,5 @@
 using System.Diagnostics;
 
-using Codale.Editor;
-
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Brushes;
 using Microsoft.Graphics.Canvas.Text;
@@ -220,8 +218,8 @@ public sealed partial class CodeEditor
         var width = ViewportWidth;
         var height = ViewportHeight;
         var totalRows = TotalRows;
-        var firstRow = Math.Clamp((int)(_scrollY / _lineHeight), 0, totalRows - 1);
-        var lastRow = Math.Clamp((int)((_scrollY + height) / _lineHeight), 0, totalRows - 1);
+        var firstRow = Math.Clamp((int)(VerticalScroll / _lineHeight), 0, totalRows - 1);
+        var lastRow = Math.Clamp((int)((VerticalScroll + height) / _lineHeight), 0, totalRows - 1);
         var (firstLine, _) = LineOfRow(firstRow);
         var (lastLine, _) = LineOfRow(lastRow);
         _firstVisibleLine = firstLine;
@@ -260,7 +258,7 @@ public sealed partial class CodeEditor
 
     // ------------------------------------------------------------------ layers
 
-    private float RowY(int row) => (float)(row * _lineHeight - _scrollY);
+    private float RowY(int row) => (float)(row * _lineHeight - VerticalScroll);
 
     private void DrawLineBands(CanvasDrawingSession ds, int firstLine, int lastLine, double width, bool focused)
     {
@@ -559,4 +557,3 @@ public sealed partial class CodeEditor
         return false;
     }
 }
-

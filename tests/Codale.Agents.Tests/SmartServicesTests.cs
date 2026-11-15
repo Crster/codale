@@ -1,4 +1,3 @@
-using Codale.Agents.Providers;
 using Codale.Core.Agents;
 using Codale.Core.Features;
 
@@ -36,24 +35,16 @@ public sealed class SmartServicesTests
                 await Task.Delay(Timeout.Infinite, ct);
             }
 
-            if (Fail is not null)
-            {
-                throw Fail;
-            }
-
-            return Vector;
+            return Fail is not null ? throw Fail : Vector;
         }
 
         public Task<IReadOnlyDictionary<string, SmartDecision>> DecideAsync(object state,
             IReadOnlyDictionary<string, SmartQuestion> questions, CancellationToken ct)
         {
             DecideCalls++;
-            if (Fail is not null)
-            {
-                throw Fail;
-            }
-
-            return Task.FromResult<IReadOnlyDictionary<string, SmartDecision>>(new Dictionary<string, SmartDecision>());
+            return Fail is not null
+                ? throw Fail
+                : Task.FromResult<IReadOnlyDictionary<string, SmartDecision>>(new Dictionary<string, SmartDecision>());
         }
     }
 
@@ -80,7 +71,7 @@ public sealed class SmartServicesTests
 
         Assert.NotNull(answers);
         Assert.Equal(1, decider.DecideCalls);
-        Assert.Equal(new[] { "start", "finish" }, status.Events.Select(e => e.Kind));
+        Assert.Equal(["start", "finish"], status.Events.Select(e => e.Kind));
         Assert.Equal("completed", status.Events[^1].Outcome);
     }
 
@@ -121,7 +112,7 @@ public sealed class SmartServicesTests
         var vector = service.Embed(client, "hello");
 
         Assert.Equal([0.5f], vector);
-        Assert.Equal(new[] { "start", "finish" }, status.Events.Select(e => e.Kind));
+        Assert.Equal(["start", "finish"], status.Events.Select(e => e.Kind));
         Assert.Equal(("finish", "", "completed", (string?)null), status.Events[^1]);
         Assert.Equal("openai:key:url:model", SmartEmbeddingService.ModelOf(client));
     }

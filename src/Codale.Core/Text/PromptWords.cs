@@ -30,12 +30,7 @@ public static class PromptWords
             start--;
         }
 
-        if (char.IsDigit(text[start]) || !IsProse(text, start, caret))
-        {
-            return null;
-        }
-
-        return new Word(start, caret - start, text[start..caret]);
+        return char.IsDigit(text[start]) || !IsProse(text, start, caret) ? null : new Word(start, caret - start, text[start..caret]);
     }
 
     /// <summary>The word before the one starting at <paramref name="start"/>, across spaces and dots, for ranking what follows it.</summary>
@@ -62,17 +57,11 @@ public static class PromptWords
     /// </summary>
     public static string MatchCase(string typed, string suggestion)
     {
-        if (typed.Length == 0 || suggestion.Length == 0 || suggestion.Any(char.IsUpper))
-        {
-            return suggestion;
-        }
-
-        if (typed.Length > 1 && typed.All(c => !char.IsLetter(c) || char.IsUpper(c)) && typed.Any(char.IsLetter))
-        {
-            return suggestion.ToUpperInvariant();
-        }
-
-        return char.IsUpper(typed[0]) ? char.ToUpperInvariant(suggestion[0]) + suggestion[1..] : suggestion;
+        return typed.Length == 0 || suggestion.Length == 0 || suggestion.Any(char.IsUpper)
+            ? suggestion
+            : typed.Length > 1 && typed.All(c => !char.IsLetter(c) || char.IsUpper(c)) && typed.Any(char.IsLetter)
+            ? suggestion.ToUpperInvariant()
+            : char.IsUpper(typed[0]) ? char.ToUpperInvariant(suggestion[0]) + suggestion[1..] : suggestion;
     }
 
     public static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';

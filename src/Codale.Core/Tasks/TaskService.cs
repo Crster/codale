@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IO.Pipes;
 using System.Security.Cryptography;
 using System.Text;
@@ -351,12 +350,9 @@ public sealed class TaskPipeClient(string pipeName, string token) : ITaskService
                 ?? throw new TaskServiceException("Codale closed the connection.");
             var response = JsonNode.Parse(line)!.AsObject();
 
-            if (response["ok"]?.GetValue<bool>() != true)
-            {
-                throw new TaskServiceException(response["error"]?.GetValue<string>() ?? "Request failed.");
-            }
-
-            return response;
+            return response["ok"]?.GetValue<bool>() != true
+                ? throw new TaskServiceException(response["error"]?.GetValue<string>() ?? "Request failed.")
+                : response;
         }
         catch (OperationCanceledException) when (timeout is { } waited && !outer.IsCancellationRequested)
         {

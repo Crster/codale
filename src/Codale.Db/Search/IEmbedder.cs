@@ -1,6 +1,6 @@
 using Codale.Core.Features;
 
-namespace Codale.Db;
+namespace Codale.Db.Search;
 
 /// <summary>Turns text into a unit-length vector of a fixed dimension. Swap in a trained model for true semantic matching.</summary>
 public interface IEmbedder

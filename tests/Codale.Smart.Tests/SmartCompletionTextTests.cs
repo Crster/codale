@@ -1,5 +1,3 @@
-using Codale.Smart;
-
 namespace Codale.Smart.Tests;
 
 public sealed class SmartCompletionTextTests

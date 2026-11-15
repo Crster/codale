@@ -1,7 +1,9 @@
+using Codale.App.Controls.Editing;
+
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 
-namespace Codale.App;
+namespace Codale.App.Themes;
 
 /// <summary>
 /// The ChatPalette brushes are shared SolidColorBrush instances in Application.Resources,
@@ -18,10 +20,8 @@ namespace Codale.App;
 /// </remarks>
 public static class ChatPaletteTheme
 {
-    private static bool _isLight;
-
     /// <summary>True while the resolved app theme is Light.</summary>
-    public static bool IsLight => _isLight;
+    public static bool IsLight { get; private set; }
 
     /// <summary>
     /// A resource for code that cannot use ThemeResource. Application.Resources[key] hands
@@ -31,13 +31,8 @@ public static class ChatPaletteTheme
     public static object Resource(string key)
     {
         var resources = Application.Current.Resources;
-        var themeKey = _isLight ? "Light" : "Default";
-        if (FindThemed(resources, themeKey, key) is { } themed)
-        {
-            return themed;
-        }
-
-        return resources[key];
+        var themeKey = IsLight ? "Light" : "Default";
+        return FindThemed(resources, themeKey, key) is { } themed ? themed : resources[key];
     }
 
     /// <summary><see cref="Resource"/> for brushes.</summary>
@@ -86,13 +81,13 @@ public static class ChatPaletteTheme
     /// <summary>Re-colours the palette brushes for the given resolved theme. Cheap; safe to call repeatedly.</summary>
     public static void Apply(bool light)
     {
-        Controls.CodePalette.Light = light;
-        if (_isLight == light)
+        CodePalette.Light = light;
+        if (IsLight == light)
         {
             return;
         }
 
-        _isLight = light;
+        IsLight = light;
         try
         {
             var resources = Application.Current.Resources;

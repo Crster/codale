@@ -17,16 +17,14 @@ public sealed partial class SearchTab : UserControl
     /// <summary>The workspace opens the file in the editor tab and highlights the spans.</summary>
     public event EventHandler<SearchOpenRequest>? FileOpenRequested;
 
-    private SearchViewModel? _viewModel;
-
     public SearchTab() => InitializeComponent();
 
     public SearchViewModel ViewModel
     {
-        get => _viewModel!;
+        get => field!;
         set
         {
-            _viewModel = value;
+            field = value;
             Bindings.Update();
         }
     }

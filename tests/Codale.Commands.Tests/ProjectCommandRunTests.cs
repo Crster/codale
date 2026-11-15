@@ -1,5 +1,3 @@
-using Codale.Commands;
-
 namespace Codale.Commands.Tests;
 
 public sealed class ProjectCommandRunTests

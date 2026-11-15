@@ -14,12 +14,9 @@ public sealed class FileFocusTests
             string systemPrompt, string conversation, IReadOnlyList<ToolDefinition> tools, CancellationToken ct)
         {
             (SystemPrompt, Prompt) = (systemPrompt, conversation);
-            if (rangesJson is null && bestJson is null)
-            {
-                return Task.FromResult<ToolCall?>(null);
-            }
-
-            return Task.FromResult(bestJson is not null
+            return rangesJson is null && bestJson is null
+                ? Task.FromResult<ToolCall?>(null)
+                : Task.FromResult(bestJson is not null
                 ? ToolCall.FromJson($$$"""{"tool":"highlight","arguments":{"best":"{{{bestJson}}}"}}""")
                 : ToolCall.FromJson($$$"""{"tool":"highlight","arguments":{"ranges":"{{{rangesJson}}}"}}"""));
         }

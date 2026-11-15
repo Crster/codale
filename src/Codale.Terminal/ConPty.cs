@@ -34,11 +34,11 @@ internal sealed partial class ConPty : IDisposable
 
     public Stream Output { get; private set; } = Stream.Null;
 
-    public int ProcessId => _process.dwProcessId;
+    public int ProcessId => _process.DwProcessId;
 
     public bool HasExited =>
-        _process.hProcess == IntPtr.Zero ||
-        (WaitForSingleObject(_process.hProcess, 0) == 0);
+        _process.HProcess == IntPtr.Zero ||
+        (WaitForSingleObject(_process.HProcess, 0) == 0);
 
     /// <summary>
     /// True while a live process names the shell as its parent: the command a wrapped shell
@@ -65,10 +65,10 @@ internal sealed partial class ConPty : IDisposable
 
         try
         {
-            var entry = new PROCESSENTRY32W { dwSize = Marshal.SizeOf<PROCESSENTRY32W>() };
+            var entry = new PROCESSENTRY32W { DwSize = Marshal.SizeOf<PROCESSENTRY32W>() };
             for (var more = Process32FirstW(snapshot, ref entry); more; more = Process32NextW(snapshot, ref entry))
             {
-                if (entry.th32ParentProcessID == ProcessId && StartedAfterShell(entry.th32ProcessID))
+                if (entry.Th32ParentProcessID == ProcessId && StartedAfterShell(entry.Th32ProcessID))
                 {
                     return true;
                 }
@@ -120,15 +120,15 @@ internal sealed partial class ConPty : IDisposable
         }
 
         var startup = new STARTUPINFOEX();
-        startup.StartupInfo.cb = Marshal.SizeOf<STARTUPINFOEX>();
-        startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        startup.StartupInfo.Cb = Marshal.SizeOf<STARTUPINFOEX>();
+        startup.StartupInfo.DwFlags = STARTF_USESTDHANDLES;
 
         // Size the attribute list, allocate, then fill it with the pseudoconsole handle.
         var attributeSize = IntPtr.Zero;
         InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref attributeSize);
 
         _attributeList = Marshal.AllocHGlobal(attributeSize);
-        startup.lpAttributeList = _attributeList;
+        startup.LpAttributeList = _attributeList;
 
         if (!InitializeProcThreadAttributeList(_attributeList, 1, 0, ref attributeSize))
         {
@@ -235,11 +235,11 @@ internal sealed partial class ConPty : IDisposable
             _pseudoConsole = IntPtr.Zero;
         }
 
-        if (_process.hProcess != IntPtr.Zero)
+        if (_process.HProcess != IntPtr.Zero)
         {
-            TerminateProcess(_process.hProcess, 0);
-            CloseHandle(_process.hProcess);
-            CloseHandle(_process.hThread);
+            TerminateProcess(_process.HProcess, 0);
+            CloseHandle(_process.HProcess);
+            CloseHandle(_process.HThread);
             _process = default;
         }
 
@@ -266,40 +266,40 @@ internal sealed partial class ConPty : IDisposable
     [StructLayout(LayoutKind.Sequential)]
     private struct STARTUPINFO
     {
-        public int cb;
-        public IntPtr lpReserved;
-        public IntPtr lpDesktop;
-        public IntPtr lpTitle;
-        public int dwX;
-        public int dwY;
-        public int dwXSize;
-        public int dwYSize;
-        public int dwXCountChars;
-        public int dwYCountChars;
-        public int dwFillAttribute;
-        public int dwFlags;
-        public short wShowWindow;
-        public short cbReserved2;
-        public IntPtr lpReserved2;
-        public IntPtr hStdInput;
-        public IntPtr hStdOutput;
-        public IntPtr hStdError;
+        public int Cb;
+        public IntPtr LpReserved;
+        public IntPtr LpDesktop;
+        public IntPtr LpTitle;
+        public int DwX;
+        public int DwY;
+        public int DwXSize;
+        public int DwYSize;
+        public int DwXCountChars;
+        public int DwYCountChars;
+        public int DwFillAttribute;
+        public int DwFlags;
+        public short WShowWindow;
+        public short CbReserved2;
+        public IntPtr LpReserved2;
+        public IntPtr HStdInput;
+        public IntPtr HStdOutput;
+        public IntPtr HStdError;
     }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct STARTUPINFOEX
     {
         public STARTUPINFO StartupInfo;
-        public IntPtr lpAttributeList;
+        public IntPtr LpAttributeList;
     }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct PROCESS_INFORMATION
     {
-        public IntPtr hProcess;
-        public IntPtr hThread;
-        public int dwProcessId;
-        public int dwThreadId;
+        public IntPtr HProcess;
+        public IntPtr HThread;
+        public int DwProcessId;
+        public int DwThreadId;
     }
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
@@ -362,16 +362,16 @@ internal sealed partial class ConPty : IDisposable
     [StructLayout(LayoutKind.Sequential)]
     private unsafe struct PROCESSENTRY32W
     {
-        public int dwSize;
-        public int cntUsage;
-        public int th32ProcessID;
-        public IntPtr th32DefaultHeapID;
-        public int th32ModuleID;
-        public int cntThreads;
-        public int th32ParentProcessID;
-        public int pcPriClassBase;
-        public int dwFlags;
-        public fixed char szExeFile[260];
+        public int DwSize;
+        public int CntUsage;
+        public int Th32ProcessID;
+        public IntPtr Th32DefaultHeapID;
+        public int Th32ModuleID;
+        public int CntThreads;
+        public int Th32ParentProcessID;
+        public int PcPriClassBase;
+        public int DwFlags;
+        public fixed char SzExeFile[260];
     }
 
     [LibraryImport("kernel32.dll", SetLastError = true)]

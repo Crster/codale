@@ -1,21 +1,19 @@
 using System.Threading.Channels;
 
-namespace Codale.Db;
+namespace Codale.Db.Events;
 
 /// <summary>
 /// Fan-out to subscribers. Every subscriber owns a bounded queue and a pump task, so a slow or throwing
 /// handler never blocks a writer or another subscriber (the oldest queued item is dropped on overflow).
 /// </summary>
-internal sealed class Hub<T> : IDisposable
+/// <param name="matches">(subscribedPath, itemPath, item) → whether the subscriber should see the item.</param>
+internal sealed class Hub<T>(Func<string, string, T, bool> matches) : IDisposable
 {
     private const int QueueCapacity = 1024;
 
-    private readonly Func<string, string, T, bool> _matches;
-    private readonly object _gate = new();
+    private readonly Func<string, string, T, bool> _matches = matches;
+    private readonly Lock _gate = new();
     private Subscription[] _subscriptions = [];
-
-    /// <param name="matches">(subscribedPath, itemPath, item) → whether the subscriber should see the item.</param>
-    public Hub(Func<string, string, T, bool> matches) => _matches = matches;
 
     public bool IsEmpty => _subscriptions.Length == 0;
 
@@ -41,7 +39,7 @@ internal sealed class Hub<T> : IDisposable
 
     private void Remove(Subscription subscription)
     {
-        lock (_gate) _subscriptions = _subscriptions.Where(s => s != subscription).ToArray();
+        lock (_gate) _subscriptions = [.. _subscriptions.Where(s => s != subscription)];
     }
 
     public void Dispose()

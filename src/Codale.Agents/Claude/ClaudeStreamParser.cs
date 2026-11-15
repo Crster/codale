@@ -67,7 +67,7 @@ public sealed class ClaudeStreamParser
         using (doc)
         {
             // Events outlive the document, so the only element they keep (a tool's input) is cloned out of it.
-            return ParseRoot(doc.RootElement, line).ToList();
+            return [.. ParseRoot(doc.RootElement, line)];
         }
     }
 
@@ -186,14 +186,9 @@ public sealed class ClaudeStreamParser
                 break;
 
             case "informational":
-                if ((root.Str("message") ?? root.Str("text") ?? root.Str("content")) is { Length: > 0 } info)
-                {
-                    yield return new CliInformation(info.Trim());
-                }
-                else
-                {
-                    yield return new CliMessageIgnored("system/informational", Truncate(raw));
-                }
+                yield return (root.Str("message") ?? root.Str("text") ?? root.Str("content")) is { Length: > 0 } info
+                    ? new CliInformation(info.Trim())
+                    : new CliMessageIgnored("system/informational", Truncate(raw));
 
                 break;
 
@@ -470,14 +465,12 @@ public sealed class ClaudeStreamParser
                     Mode = s.Str("mode"),
                     Destination = s.Str("destination"),
                     Behavior = s.Str("behavior"),
-                    Directories = s.Items("directories")
+                    Directories = [.. s.Items("directories")
                         .Where(d => d.ValueKind == JsonValueKind.String)
-                        .Select(d => d.GetString()!)
-                        .ToList(),
-                    Rules = s.Items("rules")
+                        .Select(d => d.GetString()!)],
+                    Rules = [.. s.Items("rules")
                         .Select(r => (Tool: r.Str("toolName") ?? "", Content: r.Str("ruleContent")))
-                        .Where(r => r.Tool.Length > 0)
-                        .ToList(),
+                        .Where(r => r.Tool.Length > 0)],
                     Raw = s.Clone(),
                 });
             }

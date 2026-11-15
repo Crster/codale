@@ -1,5 +1,4 @@
-using Codale.Db;
-
+using Codale.Db.Search;
 namespace Codale.Db.Tests;
 
 /// <summary>

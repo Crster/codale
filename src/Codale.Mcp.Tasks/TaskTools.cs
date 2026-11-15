@@ -13,7 +13,7 @@ namespace Codale.Mcp.Tasks;
 /// </summary>
 public static class TaskTools
 {
-    private static readonly object CommandsFileLock = new();
+    private static readonly Lock CommandsFileLock = new();
 
     /// <param name="tasks">Where started commands run.</param>
     /// <param name="projectRoot">

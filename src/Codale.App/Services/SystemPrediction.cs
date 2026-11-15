@@ -1,4 +1,5 @@
 using System.Globalization;
+
 using Windows.Data.Text;
 
 namespace Codale.App.Services;
@@ -14,8 +15,8 @@ internal static class SystemPrediction
     private const int MaxPreviousWords = 5;
 
     private static readonly Lock Gate = new();
-    private static TextPredictionGenerator? _generator;
-    private static bool _tried;
+    private static TextPredictionGenerator? s_generator;
+    private static bool s_tried;
 
     /// <summary>Candidates for the word starting <paramref name="prefix"/>, best first; empty when the engine is unavailable.</summary>
     /// <param name="previous">The words before it, oldest first; only the last few are used.</param>
@@ -46,12 +47,12 @@ internal static class SystemPrediction
 
     private static TextPredictionGenerator? Generator()
     {
-        if (_tried)
+        if (s_tried)
         {
-            return _generator;
+            return s_generator;
         }
 
-        _tried = true;
+        s_tried = true;
         foreach (var tag in new[] { CultureInfo.CurrentUICulture.Name, "en-US" })
         {
             if (tag.Length == 0)
@@ -64,7 +65,7 @@ internal static class SystemPrediction
                 var generator = new TextPredictionGenerator(tag);
                 if (!generator.LanguageAvailableButNotInstalled)
                 {
-                    _generator = generator;
+                    s_generator = generator;
                     break;
                 }
             }
@@ -74,6 +75,6 @@ internal static class SystemPrediction
             }
         }
 
-        return _generator;
+        return s_generator;
     }
 }

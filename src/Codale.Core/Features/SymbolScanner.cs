@@ -16,8 +16,7 @@ public static partial class SymbolScanner
         public bool IsBoundary => Kind is not ("const" or "let" or "var" or "namespace");
     }
 
-    private static readonly HashSet<string> Primitive = new(StringComparer.Ordinal)
-        { "int", "long", "bool", "string", "double", "float", "char", "byte", "short", "uint", "ulong", "decimal", "object", "var", "TimeSpan", "DateTime" };
+    private static readonly HashSet<string> Primitive = [with(StringComparer.Ordinal), "int", "long", "bool", "string", "double", "float", "char", "byte", "short", "uint", "ulong", "decimal", "object", "var", "TimeSpan", "DateTime"];
 
     [GeneratedRegex(
         @"^\s*(?:export\s+)?(?:(?:public|private|protected|internal|static|async|sealed|partial|abstract|default|readonly|override|virtual|pub|declare)\s+)*" +
@@ -51,15 +50,18 @@ public static partial class SymbolScanner
             var kind = m.Groups["kind"].Value.ToLowerInvariant();
             var name = m.Groups["name"].Value;
             // "const int Max", "namespace Codale": the keyword is followed by a type or a container, never the thing defined.
-            if (kind == "namespace" || (kind is "const" or "var" or "let" && Primitive.Contains(name))) return null;
-            if (kind is "const" or "let" or "var") return ArrowPattern().IsMatch(line) ? new Declaration("function", name) : new Declaration(kind, name);
-            return new Declaration(kind, name);
+            return kind == "namespace" || (kind is "const" or "var" or "let" && Primitive.Contains(name))
+                ? null
+                : kind is "const" or "let" or "var"
+                ? ArrowPattern().IsMatch(line) ? new Declaration("function", name) : new Declaration(kind, name)
+                : new Declaration(kind, name);
         }
 
-        if ((m = GoMethodPattern().Match(line)).Success) return new Declaration("method", m.Groups["name"].Value);
-        if ((m = TablePattern().Match(line)).Success) return new Declaration("table", m.Groups["name"].Value);
-        if ((m = MethodPattern().Match(line)).Success) return new Declaration("method", m.Groups["name"].Value);
-        return null;
+        return (m = GoMethodPattern().Match(line)).Success
+            ? new Declaration("method", m.Groups["name"].Value)
+            : (m = TablePattern().Match(line)).Success
+            ? new Declaration("table", m.Groups["name"].Value)
+            : (m = MethodPattern().Match(line)).Success ? new Declaration("method", m.Groups["name"].Value) : null;
     }
 
     /// <summary>Columns of leading whitespace, a tab counting as four.</summary>

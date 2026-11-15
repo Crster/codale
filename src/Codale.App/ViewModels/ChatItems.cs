@@ -32,14 +32,13 @@ public static class ChatTypography
 /// </summary>
 public abstract class ScaledObservable : ObservableObject
 {
-    private AppSettingsStore? _textSettings;
     public AppSettingsStore? TextSettings
     {
-        get => _textSettings;
+        get;
         internal set
         {
-            if (ReferenceEquals(_textSettings, value)) return;
-            _textSettings = value;
+            if (ReferenceEquals(field, value)) return;
+            field = value;
             RaiseTextScale();
         }
     }
@@ -756,10 +755,10 @@ public sealed partial class ApprovalRequestItem : ObservableObject
     /// </summary>
     public IReadOnlyList<ApprovalQuestion> Questions
     {
-        get => _questions;
+        get;
         init
         {
-            _questions = value;
+            field = value;
             foreach (var question in value)
             {
                 question.PropertyChanged += (_, e) =>
@@ -772,9 +771,7 @@ public sealed partial class ApprovalRequestItem : ObservableObject
                 };
             }
         }
-    }
-
-    private readonly IReadOnlyList<ApprovalQuestion> _questions = [];
+    } = [];
 
     public bool IsAskUserQuestion => Questions.Count > 0;
 
@@ -884,7 +881,7 @@ public sealed partial class ApprovalRequestItem : ObservableObject
     }
 
     /// <summary>Progress dots: one per question, the current one lit.</summary>
-    public IReadOnlyList<QuestionDot> Dots => Questions.Select((_, i) => new QuestionDot(i == CurrentIndex)).ToList();
+    public IReadOnlyList<QuestionDot> Dots => [.. Questions.Select((_, i) => new QuestionDot(i == CurrentIndex))];
 
     /// <summary>
     /// Reads the questions array out of an AskUserQuestion payload; empty for any
@@ -1036,9 +1033,8 @@ public sealed partial class ApprovalQuestion : ScaledObservable
 
     /// <summary>Everything the reader chose, the typed answer last.</summary>
     public IReadOnlyList<string> Answers =>
-        Options.Where(o => o.IsSelected).Select(o => o.Label)
-            .Concat(HasOtherText ? new[] { OtherText.Trim() } : Array.Empty<string>())
-            .ToList();
+        [.. Options.Where(o => o.IsSelected).Select(o => o.Label)
+, .. HasOtherText ? [OtherText.Trim()] : Array.Empty<string>()];
 
     /// <summary>Single-select questions clear their siblings (and the typed answer); multi ones toggle freely.</summary>
     public void Toggle(ApprovalQuestionOption option)
@@ -1480,7 +1476,7 @@ public sealed partial class ToolCallItem : ChatItem
                 }
                 else
                 {
-                    kept.Add(hunk with { Lines = hunk.Lines.Take(remaining).ToList() });
+                    kept.Add(hunk with { Lines = [.. hunk.Lines.Take(remaining)] });
                     remaining = 0;
                 }
             }
@@ -1556,22 +1552,13 @@ public sealed partial class ToolCallItem : ChatItem
     /// </summary>
     public static IReadOnlyList<ToolFileRef> FileInputs(string toolName, JsonElement input)
     {
-        if (input.ValueKind != JsonValueKind.Object)
-        {
-            return [];
-        }
-
-        if (Str(input, "file_path") is { Length: > 0 } filePath)
-        {
-            return [new ToolFileRef { Path = filePath, IsEdit = toolName is not "Read" }];
-        }
-
-        if (Str(input, "notebook_path") is { Length: > 0 } notebookPath)
-        {
-            return [new ToolFileRef { Path = notebookPath, IsEdit = toolName is not "NotebookRead" }];
-        }
-
-        return [];
+        return input.ValueKind != JsonValueKind.Object
+            ? []
+            : Str(input, "file_path") is { Length: > 0 } filePath
+            ? [new ToolFileRef { Path = filePath, IsEdit = toolName is not "Read" }]
+            : Str(input, "notebook_path") is { Length: > 0 } notebookPath
+            ? [new ToolFileRef { Path = notebookPath, IsEdit = toolName is not "NotebookRead" }]
+            : [];
     }
 
     private static string? Str(JsonElement element, string name) =>

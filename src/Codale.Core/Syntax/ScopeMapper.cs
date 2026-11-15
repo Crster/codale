@@ -72,10 +72,11 @@ public static class ScopeMapper
             || s.StartsWith("variable.other.object.property", StringComparison.Ordinal)
             || s.StartsWith("variable.other.member", StringComparison.Ordinal)) return CodeTokenKind.Property;
         if (s.StartsWith("markup.heading", StringComparison.Ordinal)) return CodeTokenKind.Heading;
-        if (s.StartsWith("markup.inline.raw", StringComparison.Ordinal)
-            || s.StartsWith("markup.fenced_code", StringComparison.Ordinal)) return CodeTokenKind.String;
-        if (s.StartsWith("markup.underline.link", StringComparison.Ordinal)) return CodeTokenKind.Property;
-        if (s.StartsWith("invalid", StringComparison.Ordinal)) return CodeTokenKind.Preprocessor;
-        return CodeTokenKind.Plain;
+        return s.StartsWith("markup.inline.raw", StringComparison.Ordinal)
+            || s.StartsWith("markup.fenced_code", StringComparison.Ordinal)
+            ? CodeTokenKind.String
+            : s.StartsWith("markup.underline.link", StringComparison.Ordinal)
+            ? CodeTokenKind.Property
+            : s.StartsWith("invalid", StringComparison.Ordinal) ? CodeTokenKind.Preprocessor : CodeTokenKind.Plain;
     }
 }

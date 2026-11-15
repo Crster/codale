@@ -11,7 +11,7 @@ namespace Codale.Terminal;
 /// not recognize are consumed silently, which is the correct failure mode for a
 /// terminal: unknown controls must never leak to the screen as text.
 /// </summary>
-public sealed class TerminalEmulator
+public sealed class TerminalEmulator(int cols = 80, int rows = 25)
 {
     private enum State
     {
@@ -31,7 +31,7 @@ public sealed class TerminalEmulator
         SosPmApcString,
     }
 
-    private readonly TerminalBuffer _buffer;
+    private readonly TerminalBuffer _buffer = new(cols, rows);
 
     private State _state = State.Ground;
 
@@ -49,9 +49,6 @@ public sealed class TerminalEmulator
     private int _oscLength;
 
     // Modes the renderer and input encoder need to read.
-    private bool _cursorVisible = true;
-    private bool _applicationCursorKeys;
-    private bool _bracketedPaste;
 
     public enum MouseTracking
     {
@@ -64,9 +61,6 @@ public sealed class TerminalEmulator
         Any,
     }
 
-    private MouseTracking _mouseTracking = MouseTracking.None;
-    private bool _sgrMouse;
-
     public enum CursorShape
     {
         BlinkBlock,
@@ -77,25 +71,18 @@ public sealed class TerminalEmulator
         Beam,
     }
 
-    private CursorShape _cursorShape = CursorShape.BlinkBlock;
-
-    public TerminalEmulator(int cols = 80, int rows = 25)
-    {
-        _buffer = new TerminalBuffer(cols, rows);
-    }
-
     // ------------------------------------------------------------------ public surface
 
     public int Cols => _buffer.Cols;
     public int Rows => _buffer.Rows;
     public int CursorRow => _buffer.CursorRow;
     public int CursorCol => _buffer.CursorCol;
-    public bool CursorVisible => _cursorVisible;
-    public CursorShape Shape => _cursorShape;
-    public bool ApplicationCursorKeys => _applicationCursorKeys;
-    public bool BracketedPaste => _bracketedPaste;
-    public MouseTracking MouseMode => _mouseTracking;
-    public bool SgrMouse => _sgrMouse;
+    public bool CursorVisible { get; private set; } = true;
+    public CursorShape Shape { get; private set; } = CursorShape.BlinkBlock;
+    public bool ApplicationCursorKeys { get; private set; }
+    public bool BracketedPaste { get; private set; }
+    public MouseTracking MouseMode { get; private set; } = MouseTracking.None;
+    public bool SgrMouse { get; private set; }
     public bool InAlternate => _buffer.InAlternate;
 
     /// <summary>How many scrolled-off lines are currently kept.</summary>
@@ -131,12 +118,7 @@ public sealed class TerminalEmulator
         get
         {
             var row = _buffer.GetLastTextRow();
-            if (InAlternate)
-            {
-                return row;
-            }
-
-            return row >= 0 ? ScrollbackCount + row : ScrollbackCount - 1;
+            return InAlternate ? row : row >= 0 ? ScrollbackCount + row : ScrollbackCount - 1;
         }
     }
 
@@ -527,22 +509,11 @@ public sealed class TerminalEmulator
         switch (_state)
         {
             case State.DcsEntry:
-                if (IsIntermediate(c))
-                {
-                    _state = State.DcsIntermediate;
-                }
-                else if (c >= '0' && c <= '9' || c == ';' || c == ':' || c == '?' || c == '<' || c == '=' || c == '>')
-                {
-                    _state = State.DcsParam;
-                }
-                else if (IsFinal(c))
-                {
-                    _state = State.DcsIgnore;
-                }
-                else
-                {
-                    _state = State.DcsPassthrough;
-                }
+                _state = IsIntermediate(c)
+                    ? State.DcsIntermediate
+                    : c >= '0' && c <= '9' || c == ';' || c == ':' || c == '?' || c == '<' || c == '=' || c == '>'
+                        ? State.DcsParam
+                        : IsFinal(c) ? State.DcsIgnore : State.DcsPassthrough;
 
                 break;
             case State.DcsParam:
@@ -986,7 +957,7 @@ public sealed class TerminalEmulator
             switch (_params[i])
             {
                 case 1: // DECCKM
-                    _applicationCursorKeys = on;
+                    ApplicationCursorKeys = on;
                     break;
                 case 6: // DECOM
                     _buffer.SetOriginMode(on);
@@ -995,7 +966,7 @@ public sealed class TerminalEmulator
                     _buffer.SetAutowrap(on);
                     break;
                 case 25: // DECTCEM
-                    _cursorVisible = on;
+                    CursorVisible = on;
                     break;
                 case 47:
                     _buffer.SetAlternateScreen(on);
@@ -1038,19 +1009,19 @@ public sealed class TerminalEmulator
 
                     break;
                 case 1000:
-                    _mouseTracking = on ? MouseTracking.Press : MouseTracking.None;
+                    MouseMode = on ? MouseTracking.Press : MouseTracking.None;
                     break;
                 case 1002:
-                    _mouseTracking = on ? MouseTracking.Drag : MouseTracking.None;
+                    MouseMode = on ? MouseTracking.Drag : MouseTracking.None;
                     break;
                 case 1003:
-                    _mouseTracking = on ? MouseTracking.Any : MouseTracking.None;
+                    MouseMode = on ? MouseTracking.Any : MouseTracking.None;
                     break;
                 case 1006:
-                    _sgrMouse = on;
+                    SgrMouse = on;
                     break;
                 case 2004:
-                    _bracketedPaste = on;
+                    BracketedPaste = on;
                     break;
                 case 12:
                     // Cursor blink on/off - we keep our own blink.
@@ -1062,20 +1033,20 @@ public sealed class TerminalEmulator
     /// <summary>Full reset (ESC c): back to the power-on state, scrollback kept.</summary>
     private void FullReset()
     {
-        _cursorVisible = true;
-        _applicationCursorKeys = false;
-        _bracketedPaste = false;
+        CursorVisible = true;
+        ApplicationCursorKeys = false;
+        BracketedPaste = false;
 
-        _mouseTracking = MouseTracking.None;
-        _sgrMouse = false;
-        _cursorShape = CursorShape.BlinkBlock;
+        MouseMode = MouseTracking.None;
+        SgrMouse = false;
+        Shape = CursorShape.BlinkBlock;
         _buffer.Reset();
     }
 
     /// <summary>The cursor shape the app asked for (DECSCUSR, CSI Ps SP q).</summary>
     public void SetCursorShape(int style)
     {
-        _cursorShape = style switch
+        Shape = style switch
         {
             0 or 1 => CursorShape.BlinkBlock,
             2 => CursorShape.Block,

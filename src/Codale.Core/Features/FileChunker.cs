@@ -40,9 +40,9 @@ public static class FileChunker
 
         foreach (var segment in Segments(lines, path))
         {
-            var size = Size(lines, segment.Start, segment.End);
-            if (size.Lines == 0) continue;
-            if (size.Lines > MaxLines || size.Chars > MaxChars)
+            var (segmentLines, segmentChars) = Size(lines, segment.Start, segment.End);
+            if (segmentLines == 0) continue;
+            if (segmentLines > MaxLines || segmentChars > MaxChars)
             {
                 // One unit too big for a chunk: its own overlapping windows, each still named after it.
                 Flush();
@@ -52,8 +52,8 @@ public static class FileChunker
 
             if (current.Count > 0)
             {
-                var combined = Size(lines, current[0].Start, segment.End);
-                if (combined.Lines > MaxLines || combined.Chars > MaxChars) Flush();
+                var (Lines, Chars) = Size(lines, current[0].Start, segment.End);
+                if (Lines > MaxLines || Chars > MaxChars) Flush();
             }
             current.Add(segment);
         }

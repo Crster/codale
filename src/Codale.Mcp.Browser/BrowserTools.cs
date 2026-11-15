@@ -38,12 +38,9 @@ internal static class BrowserTools
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectDir));
         var full = Path.GetFullPath(path, root);
         var relative = Path.GetRelativePath(root, full);
-        if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-        {
-            throw new McpToolException($"Only files inside the project directory can be uploaded: {path}");
-        }
-
-        return full;
+        return Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            ? throw new McpToolException($"Only files inside the project directory can be uploaded: {path}")
+            : full;
     }
 
     private static string Script(McpArgs a) =>
@@ -120,7 +117,7 @@ internal static class BrowserTools
                 {
                     var v = a.RequiredString("value");
                     await (await Locate(p, a))
-                        .SelectOptionAsync(new[] { new SelectOptionValue { Value = v }, new SelectOptionValue { Label = v } });
+                        .SelectOptionAsync([new SelectOptionValue { Value = v }, new SelectOptionValue { Label = v }]);
                     return (IReadOnlyList<McpContent>)[McpContent.FromText("Selected.")];
                 })),
 

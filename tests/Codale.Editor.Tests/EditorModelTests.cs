@@ -1,5 +1,4 @@
 using Codale.Core.Syntax;
-using Codale.Editor;
 
 namespace Codale.Editor.Tests;
 

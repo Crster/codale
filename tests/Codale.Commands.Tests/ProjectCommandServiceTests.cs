@@ -25,7 +25,7 @@ public sealed class ProjectCommandServiceTests
     public void InjectedDetectorsDefineTheDiscoveryPipeline()
     {
         IProjectCommandService service = new ProjectCommandService(detectors: [new Detector("first"), new Detector("second")]);
-        Assert.Equal(new[] { "first", "second" }, service.Discover(Path.GetTempPath()).Select(c => c.Name));
+        Assert.Equal(["first", "second"], service.Discover(Path.GetTempPath()).Select(c => c.Name));
     }
 
     [Fact]

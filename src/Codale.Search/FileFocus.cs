@@ -129,7 +129,7 @@ public static partial class FileFocus
     /// good enough to look at while the model reads the file.
     /// </summary>
     public static IReadOnlyList<LineSpan> Instant(string query, IReadOnlyList<string> lines) =>
-        Group(Hits(query, lines), gap: 2).Take(20).ToList();
+        [.. Group(Hits(query, lines), gap: 2).Take(20)];
 
     /// <summary>The search's own words, found exactly where they sit in the given lines (0-based line, column and length).</summary>
     public static IEnumerable<(int Line, int Col, int Length)> Occurrences(
@@ -309,12 +309,9 @@ public static partial class FileFocus
             return null;
         }
 
-        if (call is null)
-        {
-            return null;
-        }
-
-        return candidates.Count > 0
+        return call is null
+            ? null
+            : candidates.Count > 0
             ? PickCandidates(call.GetString("best"), candidates)
             : ParseRanges(call.GetString("ranges"), lines.Count);
     }
@@ -426,7 +423,7 @@ public static partial class FileFocus
         var kept = new List<(int Number, string Text)>();
         var size = 0;
 
-        foreach (var line in clipped.Where(l => near.Contains(l.Number) || Declaration.IsMatch(l.Text)))
+        foreach (var line in clipped.Where(l => near.Contains(l.Number) || Declaration().IsMatch(l.Text)))
         {
             size += line.Text.Length + 8;
             if (size > MaxFileChars)
@@ -444,9 +441,9 @@ public static partial class FileFocus
         static string Clip(string text) => text.Length > 120 ? text[..120] : text;
     }
 
-    private static readonly Regex Declaration = new(
-        @"^\s*(export\s+)?(public|private|protected|internal|static|async|abstract|override|sealed|partial|def|class|interface|struct|enum|record|function|fn|func|const|let|var|type|module|namespace|impl|#+\s)",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"^\s*(export\s+)?(public|private|protected|internal|static|async|abstract|override|sealed|partial|def|class|interface|struct|enum|record|function|fn|func|const|let|var|type|module|namespace|impl|#+\s)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex Declaration();
 
     /// <summary>
     /// Reads "12-30, 45-52" (and the looser "12 to 30", "12..30", a bare "7") into

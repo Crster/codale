@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Codale.Core.Helper;
 using Codale.Core.Projects;
 using Codale.Core.Text;
+using Codale.Search.Engine;
 
 using Microsoft.Extensions.FileSystemGlobbing;
 
@@ -134,7 +135,7 @@ public sealed record SearchAnswer
 /// * Repeated identical calls are refused rather than obeyed, since looping on one grep
 ///   is the characteristic small-model failure.
 /// </remarks>
-public sealed partial class SearchAgentLoop
+public sealed partial class SearchAgentLoop(string root, ISearchModel model)
 {
     public const int DefaultMaxSteps = 12;
 
@@ -150,16 +151,9 @@ public sealed partial class SearchAgentLoop
     /// </summary>
     public static readonly TimeSpan DefaultBudget = TimeSpan.FromMinutes(5);
 
-    private readonly WorkspaceSearch _search;
-    private readonly string _root;
-    private readonly ISearchModel _model;
-
-    public SearchAgentLoop(string root, ISearchModel model)
-    {
-        _root = root;
-        _model = model;
-        _search = new WorkspaceSearch(root);
-    }
+    private readonly WorkspaceSearch _search = new(root);
+    private readonly string _root = root;
+    private readonly ISearchModel _model = model;
 
     public int MaxSteps { get; init; } = DefaultMaxSteps;
 
@@ -540,7 +534,7 @@ public sealed partial class SearchAgentLoop
                 StartLine = start,
                 EndLine = end,
                 Reason = reason,
-                Find = find.Count > 0 ? find : _terms.Take(3).ToList(),
+                Find = find.Count > 0 ? find : [.. _terms.Take(3)],
                 Contains = DescribeContents(relative, start, end),
             };
         }
@@ -716,12 +710,9 @@ public sealed partial class SearchAgentLoop
             }
 
             var lines = File.ReadLines(full).Skip(start - 1).Take(end - start + 1).ToList();
-            if (lines.Count == 0)
-            {
-                return null;
-            }
-
-            return new SearchSection
+            return lines.Count == 0
+                ? null
+                : new SearchSection
             {
                 FilePath = full,
                 RelativePath = Path.GetRelativePath(_root, full),
@@ -766,14 +757,13 @@ public sealed partial class SearchAgentLoop
                 }
             }
 
-            return matcher
+            return [.. matcher
                 .Match(_root, files)
                 .Files
                 .Select(f => f.Path.Replace('/', Path.DirectorySeparatorChar))
                 .OrderBy(p => p.Count(c => c == Path.DirectorySeparatorChar))
                 .ThenBy(p => p, StringComparer.OrdinalIgnoreCase)
-                .Take(25)
-                .ToList();
+                .Take(25)];
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
@@ -994,14 +984,13 @@ public sealed partial class SearchAgentLoop
             "or", "our", "this", "that", "handle", "handled", "code", "find", "show", "me",
         };
 
-        return query
-            .Split(new[] { ' ', '\t', '\n', '?', '.', ',', '!', ':', ';', '(', ')', '"', '\'' },
+        return [.. query
+            .Split([' ', '\t', '\n', '?', '.', ',', '!', ':', ';', '(', ')', '"', '\''],
                    StringSplitOptions.RemoveEmptyEntries)
             .Where(w => w.Length > 2 && !stop.Contains(w))
             .Select(System.Text.RegularExpressions.Regex.Escape)
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(6)
-            .ToList();
+            .Take(6)];
     }
 
     /// <summary>
@@ -1032,12 +1021,11 @@ public sealed partial class SearchAgentLoop
             var matcher = new Microsoft.Extensions.FileSystemGlobbing.Matcher();
             matcher.AddInclude(glob);
 
-            return matcher
+            return [.. matcher
                 .Match(_root, files)
                 .Files
                 .Select(f => f.Path.Replace('/', Path.DirectorySeparatorChar))
-                .Take(200)
-                .ToList();
+                .Take(200)];
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
@@ -1146,12 +1134,11 @@ public sealed partial class SearchAgentLoop
             .GroupBy(h => h.FilePath)
             .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
 
-        return distinct
+        return [.. distinct
             .OrderByDescending(h => weight[h.FilePath])
             .ThenBy(h => h.RelativePath, StringComparer.OrdinalIgnoreCase)
             .ThenBy(h => h.LineNumber)
-            .Take(100)
-            .ToList();
+            .Take(100)];
     }
 
     /// <summary>

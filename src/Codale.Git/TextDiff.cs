@@ -106,7 +106,7 @@ public static class TextDiff
         {
             if (lines.Count > 0)
             {
-                hunks.Add(new DiffHunk { Header = header, Lines = lines.ToList() });
+                hunks.Add(new DiffHunk { Header = header, Lines = [.. lines] });
                 lines.Clear();
             }
         }
@@ -140,7 +140,7 @@ public static class TextDiff
         // A trailing newline leaves one empty context row behind; it is not content.
         if (hunks is [.., var last] && last.Lines is [.., { Kind: DiffLineKind.Context, Text: "" }])
         {
-            hunks[^1] = last with { Lines = last.Lines.Take(last.Lines.Count - 1).ToList() };
+            hunks[^1] = last with { Lines = [.. last.Lines.Take(last.Lines.Count - 1)] };
         }
 
         return new FileDiff { Path = path, IsNew = isNew, IsDeleted = isDeleted, Hunks = hunks };
@@ -155,7 +155,7 @@ public static class TextDiff
             Path = path,
             IsNew = list.Count > 0 && list[0].IsNew,
             IsDeleted = list.Count > 0 && list[^1].IsDeleted,
-            Hunks = list.SelectMany(d => d.Hunks).ToList(),
+            Hunks = [.. list.SelectMany(d => d.Hunks)],
         };
     }
 
@@ -170,21 +170,18 @@ public static class TextDiff
         var prefix = raw.Length > 0 ? raw[0] : ' ';
         var text = raw.Length > 0 && prefix is '+' or '-' or ' ' ? raw[1..] : raw;
 
-        switch (prefix)
+        return prefix switch
         {
-            case '+':
-                return new DiffLine { Kind = DiffLineKind.Added, Text = text, NewNumber = numbered ? newLine++ : null };
-            case '-':
-                return new DiffLine { Kind = DiffLineKind.Removed, Text = text, OldNumber = numbered ? oldLine++ : null };
-            default:
-                return new DiffLine
-                {
-                    Kind = DiffLineKind.Context,
-                    Text = text,
-                    OldNumber = numbered ? oldLine++ : null,
-                    NewNumber = numbered ? newLine++ : null,
-                };
-        }
+            '+' => new DiffLine { Kind = DiffLineKind.Added, Text = text, NewNumber = numbered ? newLine++ : null },
+            '-' => new DiffLine { Kind = DiffLineKind.Removed, Text = text, OldNumber = numbered ? oldLine++ : null },
+            _ => new DiffLine
+            {
+                Kind = DiffLineKind.Context,
+                Text = text,
+                OldNumber = numbered ? oldLine++ : null,
+                NewNumber = numbered ? newLine++ : null,
+            },
+        };
     }
 
     /// <summary>
@@ -335,7 +332,7 @@ public static class TextDiff
         if (found < 0)
         {
             // Too different to align: show it as replaced wholesale.
-            return Myers(a, aLo, aHi, b, bHi, bHi).Concat(Myers(a, aHi, aHi, b, bLo, bHi)).ToList();
+            return [.. Myers(a, aLo, aHi, b, bHi, bHi), .. Myers(a, aHi, aHi, b, bLo, bHi)];
         }
 
         var cx = n;

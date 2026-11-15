@@ -1,10 +1,9 @@
 using System.Text.Json;
-using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
 using System.Xml.Linq;
+
 using static Codale.Commands.CommandParsing;
 
-namespace Codale.Commands;
+namespace Codale.Commands.Detectors;
 
 internal sealed class DotnetCommandDetector : IProjectCommandDetector
 {
@@ -154,14 +153,9 @@ internal sealed class DotnetCommandDetector : IProjectCommandDetector
         {
             var doc = XDocument.Load(csprojPath);
             var sdk = doc.Root?.Attribute("Sdk")?.Value ?? "";
-            if (sdk.Contains("Microsoft.NET.Sdk.Web", StringComparison.OrdinalIgnoreCase) ||
+            return sdk.Contains("Microsoft.NET.Sdk.Web", StringComparison.OrdinalIgnoreCase) ||
                 sdk.Contains("Microsoft.NET.Sdk.Worker", StringComparison.OrdinalIgnoreCase) ||
-                sdk.Contains("Microsoft.NET.Sdk.BlazorWebAssembly", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            return doc.Descendants()
+                sdk.Contains("Microsoft.NET.Sdk.BlazorWebAssembly", StringComparison.OrdinalIgnoreCase) || doc.Descendants()
                 .Any(e => string.Equals(e.Name.LocalName, "OutputType", StringComparison.OrdinalIgnoreCase) &&
                           (string.Equals(e.Value.Trim(), "Exe", StringComparison.OrdinalIgnoreCase) ||
                            string.Equals(e.Value.Trim(), "WinExe", StringComparison.OrdinalIgnoreCase)));

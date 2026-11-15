@@ -13,12 +13,9 @@ public sealed class SmartDecisionService(ISmartRequestStatus status)
     public Task<IReadOnlyDictionary<string, SmartDecision>?> AskAsync(ISmartProviderClient? decider, object state,
         IReadOnlyDictionary<string, SmartQuestion> questions, CancellationToken ct)
     {
-        if (decider is null)
-        {
-            return Task.FromResult<IReadOnlyDictionary<string, SmartDecision>?>(null);
-        }
-
-        return SmartRequestWorkflow.RunTrackedAsync<IReadOnlyDictionary<string, SmartDecision>>(status,
+        return decider is null
+            ? Task.FromResult<IReadOnlyDictionary<string, SmartDecision>?>(null)
+            : SmartRequestWorkflow.RunTrackedAsync<IReadOnlyDictionary<string, SmartDecision>>(status,
             SmartFeatureSettings.DecideTask,
             async token => await decider.DecideAsync(state, questions, token).ConfigureAwait(false), ct);
     }

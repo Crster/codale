@@ -3,7 +3,7 @@ namespace Codale.Agents.Providers;
 /// <summary>Request outcomes per model role, independent of service availability and model loading.</summary>
 public sealed class SmartStatusTracker
 {
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private readonly Dictionary<string, (string Role, string Task, long Generation, long Order)> _active = [];
     private long _order;
     private readonly Dictionary<string, string?> _errors = [];
@@ -19,10 +19,10 @@ public sealed class SmartStatusTracker
             _generation++;
             _configuredAt = DateTimeOffset.UtcNow;
             _active.Clear(); _errors.Clear(); _enabled.Clear();
-            foreach (var role in roles)
+            foreach (var (role, enabled, error) in roles)
             {
-                if (role.Enabled) _enabled.Add(role.Role);
-                if (role.Error is not null) _errors[role.Role] = role.Error;
+                if (enabled) _enabled.Add(role);
+                if (error is not null) _errors[role] = error;
             }
         }
         Changed?.Invoke(this, EventArgs.Empty);

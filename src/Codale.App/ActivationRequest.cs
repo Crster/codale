@@ -59,12 +59,7 @@ public sealed record ActivationRequest(string? ProjectPath)
         }
 
         var path = HttpUtility.ParseQueryString(uri.Query).Get("path");
-        if (!IsLocalDirectory(path))
-        {
-            return null;
-        }
-
-        return ProjectPaths.Normalize(path!);
+        return !IsLocalDirectory(path) ? null : ProjectPaths.Normalize(path!);
     }
 
     /// <summary>

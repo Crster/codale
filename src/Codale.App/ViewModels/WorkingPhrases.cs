@@ -11,8 +11,8 @@ namespace Codale.App.ViewModels;
 /// </remarks>
 public static class WorkingPhrases
 {
-    private static readonly string[] Phrases = new[]
-    {
+    private static readonly string[] Phrases =
+    [
         // The originals.
         "Reticulating splines", "Herding semicolons", "Consulting the rubber duck", "Untangling the spaghetti",
         "Polishing pixels", "Negotiating with the compiler", "Brewing fresh bytes", "Aligning the curly braces",
@@ -202,22 +202,22 @@ public static class WorkingPhrases
         "Getting to the bottom of it", "Peeling back the layers", "Following the thread", "Pulling on the loose string",
         "Weighing the options", "Flipping a mental coin", "Sleeping on it, very briefly", "Waking up with the answer",
         "Almost there, probably", "Nearly done, most likely", "Just one more thing", "Wrapping things up, soon-ish",
-    };
+    ];
 
     // The bag is shared by every chat tab, so it only ever runs on the UI thread.
     private static readonly List<string> Bag = [];
-    private static string? _last;
+    private static string? s_last;
 
     public static string Next(string? previous)
     {
         if (Bag.Count == 0)
         {
-            Refill(previous ?? _last);
+            Refill(previous ?? s_last);
         }
 
         var next = Bag[^1];
         Bag.RemoveAt(Bag.Count - 1);
-        _last = next;
+        s_last = next;
         return next + "…";
     }
 

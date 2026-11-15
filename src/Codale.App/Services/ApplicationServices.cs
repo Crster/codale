@@ -1,9 +1,9 @@
-using Codale.Workspace;
-using Codale.Commands;
 using Codale.Agents;
-using Codale.App.ViewModels;
-using Codale.Git;
 using Codale.Agents.History;
+using Codale.App.ViewModels;
+using Codale.Commands;
+using Codale.Git;
+using Codale.Workspace;
 
 namespace Codale.App.Services;
 

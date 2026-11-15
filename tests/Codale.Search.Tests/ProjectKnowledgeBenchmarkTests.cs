@@ -1,8 +1,10 @@
 using System.Text;
+
 using Codale.Core.Agents;
 using Codale.Core.Features;
 using Codale.Core.Helper;
 using Codale.Db;
+
 using Xunit.Abstractions;
 
 namespace Codale.Search.Tests;

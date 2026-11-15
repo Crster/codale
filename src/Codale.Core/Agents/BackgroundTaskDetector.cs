@@ -28,15 +28,10 @@ public static partial class BackgroundTaskDetector
     /// </summary>
     public static bool IsBackgroundLaunch(string toolName, JsonElement input)
     {
-        if (!IsShellTool(toolName) || input.ValueKind != JsonValueKind.Object)
-        {
-            return false;
-        }
-
-        return IsBackgroundShell(toolName, input)
+        return IsShellTool(toolName) && input.ValueKind == JsonValueKind.Object && (IsBackgroundShell(toolName, input)
             || (input.TryGetProperty("mode", out var mode) && mode.ValueKind == JsonValueKind.String
                 && string.Equals(mode.GetString(), "async", StringComparison.OrdinalIgnoreCase))
-            || (input.TryGetProperty("detach", out var detach) && detach.ValueKind == JsonValueKind.True);
+            || (input.TryGetProperty("detach", out var detach) && detach.ValueKind == JsonValueKind.True));
     }
 
     /// <summary>The refusal the model reads when it tries to background a shell itself.</summary>

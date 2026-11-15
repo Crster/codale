@@ -39,17 +39,18 @@ public static class ApprovalPolicy
     public const string AskMode = "ask";
     public const string AutomaticMode = "automatic";
 
-    private static readonly HashSet<string> ReadTools = new(StringComparer.Ordinal)
-    {
+    private static readonly HashSet<string> ReadTools =
+    [
+        with(StringComparer.Ordinal),
         "Read", "Glob", "Grep", "LS", "WebSearch", "WebFetch", "NotebookRead", "TodoWrite", "TaskOutput", "BashOutput",
         "ListMcpResources", "ReadMcpResource", "ToolSearch", "Skill", "Task", "Agent", "EnterPlanMode", "TaskCreate",
         "TaskUpdate", "TaskList", "TaskGet", "SlashCommand",
-    };
+    ];
 
-    private static readonly HashSet<string> EditTools = new(StringComparer.Ordinal)
-    {
-        "Edit", "Write", "MultiEdit", "NotebookEdit",
-    };
+    private static readonly HashSet<string> EditTools =
+    [
+with(StringComparer.Ordinal),         "Edit", "Write", "MultiEdit", "NotebookEdit",
+    ];
 
     private static readonly string[] ProtectedFolders = [".git", ".claude", ".codex", ".ssh", ".gnupg", ".aws", ".azure"];
 
@@ -85,12 +86,9 @@ public static class ApprovalPolicy
 
         if (toolName.StartsWith("mcp__", StringComparison.Ordinal))
         {
-            if (highRiskMcp)
-            {
-                return readOnlyMode ? ApprovalPlan.Deny(ReadOnlyReason(mode, "tool")) : ApprovalPlan.Ask;
-            }
-
-            return readOnlyMode ? ApprovalPlan.Ask : ApprovalPlan.Allow;
+            return highRiskMcp
+                ? readOnlyMode ? ApprovalPlan.Deny(ReadOnlyReason(mode, "tool")) : ApprovalPlan.Ask
+                : readOnlyMode ? ApprovalPlan.Ask : ApprovalPlan.Allow;
         }
 
         if (toolName is "Bash" or "PowerShell")
@@ -101,17 +99,11 @@ public static class ApprovalPolicy
         if (EditTools.Contains(toolName) || toolName == "Edit")
         {
             var paths = FilePaths(input);
-            if (mode == "plan" && paths.Count > 0 && paths.All(IsPlanFile))
-            {
-                return ApprovalPlan.Allow;
-            }
-
-            if (readOnlyMode)
-            {
-                return ApprovalPlan.Deny(ReadOnlyReason(mode, "edit"));
-            }
-
-            return automatic && paths.Count > 0 && paths.All(path => IsSafeToEdit(path, cwd, extraRoots))
+            return mode == "plan" && paths.Count > 0 && paths.All(IsPlanFile)
+                ? ApprovalPlan.Allow
+                : readOnlyMode
+                ? ApprovalPlan.Deny(ReadOnlyReason(mode, "edit"))
+                : automatic && paths.Count > 0 && paths.All(path => IsSafeToEdit(path, cwd, extraRoots))
                 ? ApprovalPlan.Allow
                 : ApprovalPlan.Ask;
         }

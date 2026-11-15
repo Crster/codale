@@ -238,8 +238,7 @@ public sealed partial class CodeEditor
         foreach (var pinned in _pinnedWords)
         {
             var whole = pinned.Text.All(TextUnits.IsWordChar);
-            pinned.Hits = TextSearch.FindAll(_model.Buffer, pinned.Text, whole, MaxOccurrences)
-                .Select(p => (p.Line, p.Col)).ToList();
+            pinned.Hits = [.. TextSearch.FindAll(_model.Buffer, pinned.Text, whole, MaxOccurrences).Select(p => (p.Line, p.Col))];
         }
 
         _marksDirty = true;

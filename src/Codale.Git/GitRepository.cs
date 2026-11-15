@@ -11,7 +11,7 @@ namespace Codale.Git;
 /// large repository is where managed implementations fall down, and git's own
 /// porcelain v2 format is explicitly designed to be parsed by tools.
 /// </remarks>
-public sealed class GitRepository : IGitRepository
+public sealed class GitRepository(string workingDirectory) : IGitRepository
 {
     /// <summary>The flags every diff shares; the prefixes are pinned because the parser expects a/ and b/ whatever the user's diff.noprefix says.</summary>
     private static readonly string[] DiffFlags =
@@ -28,13 +28,14 @@ public sealed class GitRepository : IGitRepository
         var diff = await RunReadAsync(["diff", "--cached", .. DiffFlags], ct).ConfigureAwait(false);
         if (!diff.Success) throw new IOException(diff.StandardError);
         var after = await RunReadAsync(["write-tree"], ct).ConfigureAwait(false);
-        if (!after.Success || before.StandardOutput != after.StandardOutput) throw new IOException("Staged changes changed. Generate again.");
-        return new StagedDiffSnapshot(after.StandardOutput.Trim(), diff.StandardOutput);
+        return !after.Success || before.StandardOutput != after.StandardOutput
+            ? throw new IOException("Staged changes changed. Generate again.")
+            : new StagedDiffSnapshot(after.StandardOutput.Trim(), diff.StandardOutput);
     }
 
     private static readonly GitWriteResult InvalidRef = new(false, "That is not a valid branch or commit name.");
 
-    private readonly string _workingDirectory;
+    private readonly string _workingDirectory = workingDirectory;
 
     /// <summary>
     /// The cached rev-parse answer: the repository root, or null when the folder is not
@@ -43,8 +44,6 @@ public sealed class GitRepository : IGitRepository
     /// </summary>
     private string? _repositoryRootCache;
     private long _insideProbedAt = long.MinValue;
-
-    public GitRepository(string workingDirectory) => _workingDirectory = workingDirectory;
 
     public async Task<GitSnapshot> GetSnapshotAsync(CancellationToken ct = default)
     {
@@ -509,7 +508,7 @@ public sealed class GitRepository : IGitRepository
     /// name so the panel never leaves it unclear where a file comes from.
     /// </summary>
     private static List<GitFileStatus> DisambiguateNames(List<GitFileStatus> changes) =>
-        changes.Select(c => c.FileName.Length > 0 && c.Directory is { } dir ? c with { PathHint = dir + "/" } : c).ToList();
+        [.. changes.Select(c => c.FileName.Length > 0 && c.Directory is { } dir ? c with { PathHint = dir + "/" } : c)];
 
     /// <summary>
     /// Pulls the "! &lt;path&gt;" records out of a porcelain v2 status run that was asked
@@ -725,12 +724,9 @@ public sealed class GitRepository : IGitRepository
     /// <summary>Creates a commit from whatever is staged.</summary>
     public async Task<GitWriteResult> CommitAsync(string message, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(message))
-        {
-            return new GitWriteResult(false, "The commit message is empty.");
-        }
-
-        return await RunWriteAsync(["commit", "-m", message], ct).ConfigureAwait(false);
+        return string.IsNullOrWhiteSpace(message)
+            ? new GitWriteResult(false, "The commit message is empty.")
+            : await RunWriteAsync(["commit", "-m", message], ct).ConfigureAwait(false);
     }
 
     /// <summary>Moves the working tree onto another branch.</summary>

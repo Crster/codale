@@ -1,8 +1,6 @@
 using System.Text;
 
 using Codale.App.Services;
-using Codale.Core.Helper;
-using Codale.Core.Text;
 using Codale.Git;
 
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -533,12 +531,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     /// <summary>Switches the working tree to another branch.</summary>
     public async Task<bool> SwitchBranchAsync(GitBranch branch)
     {
-        if (branch.IsCurrent)
-        {
-            return true;
-        }
-
-        return await RunWriteAsync(_repository.CheckoutAsync(branch.Name)).ConfigureAwait(true);
+        return branch.IsCurrent || await RunWriteAsync(_repository.CheckoutAsync(branch.Name)).ConfigureAwait(true);
     }
 
     /// <summary>Creates a branch at HEAD and switches to it. Returns false on failure.</summary>

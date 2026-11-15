@@ -33,7 +33,7 @@ public sealed partial class CodeEditor
     /// <summary>Whether ghost text is asked for after a pause in typing (Ctrl+Space always asks).</summary>
     public bool AutomaticInlineCompletions { get; set; } = true;
 
-    private bool GhostVisible => _ghostText.Length > 0 && !_model.HasMultipleSelections && _ghostAt == _caret && _model.Primary.IsEmpty;
+    private bool GhostVisible => _ghostText.Length > 0 && !_model.HasMultipleSelections && _ghostAt == caret && _model.Primary.IsEmpty;
 
     private void ClearGhost()
     {
@@ -57,7 +57,7 @@ public sealed partial class CodeEditor
 
         var text = _ghostText;
         ClearGhost();
-        _model.ReplaceRange(_caret, _caret, text);
+        _model.ReplaceRange(caret, caret, text);
         return true;
     }
 
@@ -89,7 +89,7 @@ public sealed partial class CodeEditor
     /// <summary>True when only whitespace or closing punctuation follows the caret on its line.</summary>
     private bool AtLineEndOfCode()
     {
-        var rest = _doc.GetLine(_caret.Line)[_caret.Col..];
+        var rest = doc.GetLine(caret.Line)[caret.Col..];
         return rest.All(c => char.IsWhiteSpace(c) || c is ')' or ']' or '}' or ';' or ',' or '"' or '\'' or '>');
     }
 
@@ -103,7 +103,7 @@ public sealed partial class CodeEditor
             return;
         }
 
-        var at = _caret;
+        var at = caret;
         if (_ghostSeenAt != at)
         {
             _ghostSeen.Clear();
@@ -131,8 +131,8 @@ public sealed partial class CodeEditor
     {
         try
         {
-            var text = await complete(prefix, suffix, _ghostSeen.ToList(), cts.Token);
-            if (string.IsNullOrEmpty(text) || cts.IsCancellationRequested || _caret != at || !_model.Primary.IsEmpty)
+            var text = await complete(prefix, suffix, [.. _ghostSeen], cts.Token);
+            if (string.IsNullOrEmpty(text) || cts.IsCancellationRequested || caret != at || !_model.Primary.IsEmpty)
             {
                 return;
             }
@@ -153,11 +153,11 @@ public sealed partial class CodeEditor
     /// <summary>The buffer's text before <paramref name="at"/>, at most <see cref="GhostPrefixChars"/> characters, whole lines where it can.</summary>
     private string PrefixBefore(DocumentPosition at)
     {
-        var lines = new List<string> { _doc.GetLine(at.Line)[..at.Col] };
+        var lines = new List<string> { doc.GetLine(at.Line)[..at.Col] };
         var size = lines[0].Length;
         for (var i = at.Line - 1; i >= 0 && size < GhostPrefixChars; i--)
         {
-            var text = _doc.GetLine(i);
+            var text = doc.GetLine(i);
             lines.Add(text);
             size += text.Length + 1;
         }
@@ -169,10 +169,10 @@ public sealed partial class CodeEditor
     /// <summary>The buffer's text from <paramref name="at"/> on, at most <see cref="GhostSuffixChars"/> characters, whole lines where it can.</summary>
     private string SuffixAfter(DocumentPosition at)
     {
-        var builder = new StringBuilder(_doc.GetLine(at.Line)[at.Col..]);
-        for (var i = at.Line + 1; i < _doc.LineCount && builder.Length < GhostSuffixChars; i++)
+        var builder = new StringBuilder(doc.GetLine(at.Line)[at.Col..]);
+        for (var i = at.Line + 1; i < doc.LineCount && builder.Length < GhostSuffixChars; i++)
         {
-            builder.Append('\n').Append(_doc.GetLine(i));
+            builder.Append('\n').Append(doc.GetLine(i));
         }
 
         return builder.ToString();
@@ -186,7 +186,7 @@ public sealed partial class CodeEditor
             return;
         }
 
-        var (row, x) = Locate(_caret);
+        var (row, x) = Locate(caret);
         var color = _baseText;
         color.A = (byte)(color.A * 0.45);
         var lines = _ghostText.Replace("\r\n", "\n").Split('\n');

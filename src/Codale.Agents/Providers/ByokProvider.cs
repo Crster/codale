@@ -40,7 +40,7 @@ public sealed class ByokProvider
         !string.IsNullOrWhiteSpace(FlashModel) ? FlashModel.Trim() : null;
 
     /// <summary>Context windows discovered from each model's metadata, in tokens.</summary>
-    public Dictionary<string, int> ModelContextWindows { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, int> ModelContextWindows { get; set; } = [with(StringComparer.OrdinalIgnoreCase)];
 
     /// <summary>Context size in tokens assumed for models whose endpoint publishes no metadata.</summary>
     public const int DefaultContextWindow = 200000;

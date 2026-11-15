@@ -1,3 +1,5 @@
+using Codale.Db.Search;
+
 namespace Codale.Db;
 
 /// <summary>A search result: the matching node and how well it matched (cosine similarity, or BM25 for keyword search).</summary>

@@ -9,7 +9,7 @@ namespace Codale.Smart;
 /// prompt, instead of a tool round whose shell output is cut to 2 KiB: every changed file stays visible and only
 /// oversized hunks are shortened.
 /// </summary>
-public static class SmartCommit
+public static partial class SmartCommit
 {
     /// <summary>Patch characters given to the model: about 7K tokens, leaving room for reasoning in the 16K context.</summary>
     public const int PatchBudget = 24_000;
@@ -43,8 +43,7 @@ public static class SmartCommit
         "scope ::= \"(\" [a-z0-9_./-]{1,30} \")\"\n" +
         "breaking ::= \"!\"\nsubject ::= [!-~] [ -~]{0," + (SubjectLimit - 1) + "}";
 
-    private static readonly HashSet<string> DanglingWords = new(StringComparer.OrdinalIgnoreCase)
-    { "a", "an", "the", "and", "or", "to", "for", "with", "by", "of", "in", "on", "at", "from", "that", "which", "when", "as", "into" };
+    private static readonly HashSet<string> DanglingWords = [with(StringComparer.OrdinalIgnoreCase), "a", "an", "the", "and", "or", "to", "for", "with", "by", "of", "in", "on", "at", "from", "that", "which", "when", "as", "into"];
 
     /// <summary>The longest subject the grammar allows; a subject that reaches it was cut and is trimmed to whole words.</summary>
     public const int SubjectLimit = 80;
@@ -75,24 +74,24 @@ public static class SmartCommit
         return message[..(colon + 2)] + subject;
     }
 
-    private static readonly Regex Generated = new(
-        @"(^|/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|poetry\.lock|composer\.lock|Gemfile\.lock|packages\.lock\.json|go\.sum)$|\.(min\.js|min\.css|map|snap|g\.cs|designer\.cs|g\.i\.cs)$",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"(^|/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|poetry\.lock|composer\.lock|Gemfile\.lock|packages\.lock\.json|go\.sum)$|\.(min\.js|min\.css|map|snap|g\.cs|designer\.cs|g\.i\.cs)$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex Generated();
 
     /// <summary>The model input and evidence for the staged change in <paramref name="directory"/>, or null when nothing is staged.</summary>
     internal static async Task<(string Input, IReadOnlyList<SmartEvidence> Evidence)?> PrepareAsync(string directory, CancellationToken ct)
     {
-        var stat = await GitAsync(directory, ["-c", "core.quotepath=off", "diff", "--cached", "--stat=160", "--no-color"], ct).ConfigureAwait(false);
-        if (stat.ExitCode != 0 || string.IsNullOrWhiteSpace(stat.Output)) return null;
-        var patch = await GitAsync(directory, ["-c", "core.quotepath=off", "diff", "--cached", "--unified=2", "--no-color", "--no-ext-diff"], ct).ConfigureAwait(false);
-        if (patch.ExitCode != 0) return null;
+        var (exitCode, output) = await GitAsync(directory, ["-c", "core.quotepath=off", "diff", "--cached", "--stat=160", "--no-color"], ct).ConfigureAwait(false);
+        if (exitCode != 0 || string.IsNullOrWhiteSpace(output)) return null;
+        var (ExitCode, Output) = await GitAsync(directory, ["-c", "core.quotepath=off", "diff", "--cached", "--unified=2", "--no-color", "--no-ext-diff"], ct).ConfigureAwait(false);
+        if (ExitCode != 0) return null;
         var now = DateTimeOffset.UtcNow;
         SmartEvidence[] evidence =
         [
-            new("command", directory, SmartConversation.Clip(stat.Output), now, Command: "git diff --cached --stat", ExitCode: stat.ExitCode),
-            new("command", directory, SmartConversation.Clip(patch.Output), now, Command: "git diff --cached --unified=2", ExitCode: patch.ExitCode),
+            new("command", directory, SmartConversation.Clip(output), now, Command: "git diff --cached --stat", ExitCode: exitCode),
+            new("command", directory, SmartConversation.Clip(Output), now, Command: "git diff --cached --unified=2", ExitCode: ExitCode),
         ];
-        return (BuildInput(stat.Output, patch.Output), evidence);
+        return (BuildInput(output, Output), evidence);
     }
 
     /// <summary>
@@ -106,7 +105,7 @@ public static class SmartCommit
         {
             var header = sections[i].Split('\n', 2)[0];
             var path = Regex.Match(header, @" b/(.+)$").Groups[1].Value;
-            if (path.Length > 0 && Generated.IsMatch(path)) sections[i] = header + "\n[lock or generated file: diff omitted]\n";
+            if (path.Length > 0 && Generated().IsMatch(path)) sections[i] = header + "\n[lock or generated file: diff omitted]\n";
         }
         var allowance = new int[sections.Count];
         var order = Enumerable.Range(0, sections.Count).OrderBy(i => sections[i].Length).ToArray();
@@ -135,8 +134,13 @@ public static class SmartCommit
     {
         var info = new ProcessStartInfo("git")
         {
-            WorkingDirectory = directory, UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true,
-            RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8,
+            WorkingDirectory = directory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
         };
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
         try

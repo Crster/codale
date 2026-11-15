@@ -1,17 +1,15 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using System.Xml.Linq;
+
 using static Codale.Commands.CommandParsing;
 
-namespace Codale.Commands;
+namespace Codale.Commands.Detectors;
 
-internal sealed class GradleCommandDetector : IProjectCommandDetector
+internal sealed partial class GradleCommandDetector : IProjectCommandDetector
 {
     public string Id => "Gradle";
-    private static readonly Regex GradleTaskRegex = new(
-        @"^\s*(?:tasks\.register\s*(?:<[^>]+>)?\s*\(\s*[""']([A-Za-z0-9_.-]+)[""']|task\s+([A-Za-z0-9_.-]+)\b|task\s*\(\s*[""']([A-Za-z0-9_.-]+)[""']\s*\))",
-        RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"^\s*(?:tasks\.register\s*(?:<[^>]+>)?\s*\(\s*[""']([A-Za-z0-9_.-]+)[""']|task\s+([A-Za-z0-9_.-]+)\b|task\s*\(\s*[""']([A-Za-z0-9_.-]+)[""']\s*\))",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex GradleTaskRegex();
 
     public IReadOnlyList<ProjectCommand> Discover(string root)
     {
@@ -49,7 +47,7 @@ internal sealed class GradleCommandDetector : IProjectCommandDetector
         var seen = new HashSet<string>(commands.Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
         foreach (var line in buildText.Split('\n'))
         {
-            var match = GradleTaskRegex.Match(line);
+            var match = GradleTaskRegex().Match(line);
             if (!match.Success)
             {
                 continue;

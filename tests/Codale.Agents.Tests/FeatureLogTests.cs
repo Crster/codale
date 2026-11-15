@@ -64,11 +64,11 @@ public sealed class FeatureLogTests : IDisposable
         log.EndTurn("success");
         log.Archive();
         log.AppendUser("current request");
-        var snapshot = log.ReadAllSnapshot();
+        var (entries, length) = log.ReadAllSnapshot();
 
-        Assert.Equal(["archived request", "success", "current request"], snapshot.Entries.Select(e => e.Text));
+        Assert.Equal(["archived request", "success", "current request"], entries.Select(e => e.Text));
         log.AppendUser("arrived during rebuild");
-        log.ArchiveUpTo(snapshot.Length);
+        log.ArchiveUpTo(length);
 
         Assert.Equal("arrived during rebuild", Assert.Single(log.ReadSince(0).Entries).Text);
         Assert.Equal(4, log.ReadAllSnapshot().Entries.Count);
@@ -122,7 +122,7 @@ public sealed class FeatureLogTests : IDisposable
         Assert.Equal(1, turns);
         Assert.Equal(
             [(HandoffRole.User, "now the tests"), (HandoffRole.Assistant, "tests added")],
-            entries.Select(e => (e.Role, e.Text)).ToArray());
+            [.. entries.Select(e => (e.Role, e.Text))]);
     }
 
     [Fact]
@@ -190,7 +190,7 @@ public sealed class FeatureLogTests : IDisposable
         var others = a.ReadSince(0, excludeChat: "chat-a").Entries;
 
         Assert.Equal(2, turns);
-        Assert.Equal(["chat-a", "chat-b", "chat-b", "chat-b"], all.Select(e => e.Chat ?? "").ToArray());
+        Assert.Equal(["chat-a", "chat-b", "chat-b", "chat-b"], [.. all.Select(e => e.Chat ?? "")]);
         Assert.Equal(HandoffRole.TurnEnd, all[^1].Role);
         Assert.DoesNotContain(others, e => e.Chat == "chat-a");
         Assert.Equal("rename the key", others[0].Text);

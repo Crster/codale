@@ -12,7 +12,8 @@ public sealed class CodexMcpApprovalTests
     private static Task StartAsync(CodexAgentSession session, string id, string command, string thread = "main", string turn = "turn-1") =>
         session.HandleNotificationAsync("item/started", Json(new
         {
-            threadId = thread, turnId = turn,
+            threadId = thread,
+            turnId = turn,
             item = new { type = "mcpToolCall", id, server = "codale-tasks", tool = "start_task", arguments = new { command } },
         }));
 
@@ -23,7 +24,10 @@ public sealed class CodexMcpApprovalTests
         {
             @params = new
             {
-                threadId = "main", turnId = "turn-1", serverName = "codale-tasks", mode = "form",
+                threadId = "main",
+                turnId = "turn-1",
+                serverName = "codale-tasks",
+                mode = "form",
                 _meta = new { codex_approval_kind = "mcp_tool_call", tool_params = new { command } },
                 message = "Allow the codale-tasks MCP server to run tool \"start_task\"?",
                 requestedSchema = new { type = "object", properties = new { } },
@@ -63,7 +67,8 @@ public sealed class CodexMcpApprovalTests
         await StartAsync(session, "old", "dotnet build");
         await session.HandleNotificationAsync("item/completed", Json(new
         {
-            threadId = "main", turnId = "turn-1",
+            threadId = "main",
+            turnId = "turn-1",
             item = new { type = "mcpToolCall", id = "old", status = "completed" },
         }));
         await StartAsync(session, "new", "dotnet build");

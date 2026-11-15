@@ -1,5 +1,3 @@
-using Codale.Agents.Providers;
-
 namespace Codale.Agents.Tests;
 
 public sealed class SmartStatusTrackerTests

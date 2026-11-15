@@ -1,3 +1,5 @@
+using Codale.Db.Engine;
+
 namespace Codale.Db;
 
 public sealed partial class CodaleDb
@@ -73,9 +75,9 @@ public sealed partial class CodaleDb
         {
             if (node.HasValue)
             {
-                var moved = _log.Copy(node.ValueSegment, node.ValueRecordOffset, node.ValueRecordSize);
-                node.ValueSegment = moved.Segment;
-                node.ValueRecordOffset = moved.Offset;
+                var (segment, offset, size) = _log.Copy(node.ValueSegment, node.ValueRecordOffset, node.ValueRecordSize);
+                node.ValueSegment = segment;
+                node.ValueRecordOffset = offset;
             }
             if (node.Vector is null && node.Links is not { Count: > 0 }) continue;
             var path = node.PathString();

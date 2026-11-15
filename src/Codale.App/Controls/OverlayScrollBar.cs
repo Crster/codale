@@ -104,8 +104,6 @@ public sealed class OverlayScrollBar : Grid
     private readonly TranslateTransform _thumbPosition = new();
     private readonly CanvasControl _marksCanvas;
     private readonly DispatcherQueueTimer _hideTimer;
-    private IReadOnlyList<ScrollMark> _marks = [];
-
     private double _value;
     private double _maximum;
     private double _viewport;
@@ -194,13 +192,13 @@ public sealed class OverlayScrollBar : Grid
     /// <summary>The stripes drawn on the track; replace the list to repaint.</summary>
     public IReadOnlyList<ScrollMark> Marks
     {
-        get => _marks;
+        get;
         set
         {
-            _marks = value;
+            field = value;
             _marksCanvas.Invalidate();
         }
-    }
+    } = [];
 
     /// <summary>
     /// Mirrors the host's scroll position: <paramref name="maximum"/> is the largest offset,
@@ -281,7 +279,7 @@ public sealed class OverlayScrollBar : Grid
 
     private void OnMarksDraw(CanvasControl sender, CanvasDrawEventArgs args)
     {
-        if (!_vertical || _marks.Count == 0)
+        if (!_vertical || Marks.Count == 0)
         {
             return;
         }
@@ -294,7 +292,7 @@ public sealed class OverlayScrollBar : Grid
 
         // Two lanes side by side: lane 0 on the left, lane 1 on the right.
         const float laneWidth = 4;
-        foreach (var mark in _marks)
+        foreach (var mark in Marks)
         {
             var top = (float)(Inset + Math.Clamp(mark.Start, 0, 1) * track);
             var height = mark.Lane == 2 ? 2f : Math.Max(2f, (float)((Math.Clamp(mark.End, 0, 1) - Math.Clamp(mark.Start, 0, 1)) * track));
@@ -340,7 +338,7 @@ public sealed class OverlayScrollBar : Grid
     /// <summary>The mark under <paramref name="axis"/> that leads somewhere, nearest first; null when none.</summary>
     private ScrollMark? MarkAt(double axis)
     {
-        if (!_vertical || _marks.Count == 0)
+        if (!_vertical || Marks.Count == 0)
         {
             return null;
         }
@@ -348,7 +346,7 @@ public sealed class OverlayScrollBar : Grid
         var track = Math.Max(1, ActualHeight - Inset * 2);
         ScrollMark? best = null;
         var bestDistance = double.MaxValue;
-        foreach (var mark in _marks)
+        foreach (var mark in Marks)
         {
             if (mark.Line < 0)
             {

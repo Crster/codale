@@ -53,28 +53,20 @@ public static class MarkdownLinks
         if (reference is null && (decoded.Contains('/') || decoded.Contains('\\') || (decoded.Length >= 2 && decoded[1] == ':')))
         {
             var matches = LinkFinder.Find(decoded);
-            if (matches.Count == 1 && matches[0].Index == 0 && matches[0].Length == decoded.Length)
-            {
-                reference = matches[0];
-            }
-            else
-            {
-                reference = new LinkMatch(0, decoded.Length, decoded, null, decoded);
-            }
+            reference = matches.Count == 1 && matches[0].Index == 0 && matches[0].Length == decoded.Length
+                ? matches[0]
+                : new LinkMatch(0, decoded.Length, decoded, null, decoded);
         }
 
-        if (reference is { Path: not null })
-        {
-            return reference with
+        return reference is { Path: not null }
+            ? (reference with
             {
                 Line = reference.Line > 0 ? reference.Line : line,
                 Column = reference.Column > 0 ? reference.Column : col,
                 EndLine = reference.EndLine > 0 ? reference.EndLine : endLine,
                 EndColumn = reference.EndColumn > 0 ? reference.EndColumn : endCol,
-            };
-        }
-
-        return null;
+            })
+            : null;
     }
 
     public static string InlineText(IReadOnlyList<MarkdownInline> content) => string.Concat(content.Select(TextOf));

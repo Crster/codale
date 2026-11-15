@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 
 using Codale.Core.Text;
+using Codale.Search.Engine;
 
 namespace Codale.Search;
 

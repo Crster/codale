@@ -55,8 +55,9 @@ public static partial class MessageRouting
 
         // Many separate changes in one long message, with nothing attached to show what is meant: a project, not a tweak.
         var words = CountWords(text);
-        if (words >= 50 && !HasAttachmentMarker(message) && ChangeVerbs().Count(text) >= 5) return new("many changes in one request", false);
-        return null;
+        return words >= 50 && !HasAttachmentMarker(message) && ChangeVerbs().Count(text) >= 5
+            ? new("many changes in one request", false)
+            : null;
     }
 
     [GeneratedRegex(@"<(?<tag>ide_[a-z_]+|browser_instruction|system-reminder)>.*?</\k<tag>>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
@@ -93,7 +94,7 @@ public static partial class MessageRouting
     /// <summary>"implement this feature" approves what was discussed; it does not ask for a new one.</summary>
     private const string NotApproval = @"(?!(?:this|that|these|those|it|them|same|above|following|approved|agreed)\b)";
 
-    private const string Determiners =@"(?:(?:a|an|the|new|full|complete|basic|simple|proper|whole|our|some|user|users)\s+){0,3}";
+    private const string Determiners = @"(?:(?:a|an|the|new|full|complete|basic|simple|proper|whole|our|some|user|users)\s+){0,3}";
     /// <summary>Descriptive words before the noun. A preposition ends them: "a column to the database" is a change to a database.</summary>
     private const string Modifiers = @"(?:(?!" + Preposition + @"\b)[\w/'-]+\s+){0,3}?";
 

@@ -67,13 +67,8 @@ internal sealed class Adb
     /// <summary>Runs adb and returns raw stdout bytes (screencap).</summary>
     public async Task<byte[]> RunBinaryAsync(IEnumerable<string> args, CancellationToken ct)
     {
-        var result = await ExecAsync(AdbPath, args, ct, null, binary: true);
-        if (result.Code != 0)
-        {
-            throw new McpToolException($"adb failed ({result.Code}): {result.Error.Trim()}");
-        }
-
-        return result.Bytes;
+        var (code, _, error, bytes) = await ExecAsync(AdbPath, args, ct, null, binary: true);
+        return code != 0 ? throw new McpToolException($"adb failed ({code}): {error.Trim()}") : bytes;
     }
 
     /// <summary>Runs a command in the device shell. The command travels as one argument so the device shell parses it.</summary>
@@ -90,8 +85,8 @@ internal sealed class Adb
     /// <summary>Like <see cref="ShellAsync"/> but a non-zero exit is returned, not thrown (pidof, grep and friends use it for "no match").</summary>
     public async Task<(int Code, string Output)> TryShellAsync(string serial, string command, CancellationToken ct, TimeSpan? timeout = null)
     {
-        var result = await ExecAsync(AdbPath, ForDevice(serial, "shell", command), ct, timeout);
-        return (result.Code, result.Output);
+        var (code, output, _, _) = await ExecAsync(AdbPath, ForDevice(serial, "shell", command), ct, timeout);
+        return (code, output);
     }
 
     /// <summary>
@@ -181,8 +176,8 @@ internal sealed class Adb
     {
         try
         {
-            var result = await ExecAsync(AdbPath, ForDevice(serial, "emu", "avd", "name"), ct, TimeSpan.FromSeconds(10));
-            return result.Code == 0 ? result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() : null;
+            var (code, output, error, bytes) = await ExecAsync(AdbPath, ForDevice(serial, "emu", "avd", "name"), ct, TimeSpan.FromSeconds(10));
+            return code == 0 ? output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() : null;
         }
         catch (McpToolException)
         {
@@ -216,7 +211,7 @@ internal sealed class Adb
             .Select(d => Identity(d.Detail))
             .ToHashSet();
 
-        return devices.Where(d => !d.Serial.Contains("._adb-tls-", StringComparison.Ordinal) || !direct.Contains(Identity(d.Detail))).ToList();
+        return [.. devices.Where(d => !d.Serial.Contains("._adb-tls-", StringComparison.Ordinal) || !direct.Contains(Identity(d.Detail)))];
     }
 
     public static IReadOnlyList<(string Serial, string State, string Detail)> ParseDevices(string output)
@@ -269,12 +264,9 @@ internal sealed class Adb
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectDir));
         var full = Path.GetFullPath(path, root);
         var relative = Path.GetRelativePath(root, full);
-        if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-        {
-            throw new McpToolException($"Only files inside the project directory can be used: {path}");
-        }
-
-        return full;
+        return Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            ? throw new McpToolException($"Only files inside the project directory can be used: {path}")
+            : full;
     }
 
     private static string Check((int Code, string Output, string Error, byte[] Bytes) result)

@@ -8,7 +8,7 @@ public sealed partial class ProjectKnowledgeIndex
     public ISmartExperience? Smart { get; set; }
     public SummaryCache? Summaries { get; set; }
     public string? SmartProjectRoot { get; set; }
-    private readonly Dictionary<string, Task> _summaryTasks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Task> _summaryTasks = [with(StringComparer.OrdinalIgnoreCase)];
 
     /// <summary>Whether to pre-summarise files in the background at all; asked before every pass so a setting change applies at once.</summary>
     public Func<bool> SummariesEnabled { get; set; } = () => true;
@@ -17,7 +17,7 @@ public sealed partial class ProjectKnowledgeIndex
     public TimeSpan SummaryStartupDelay { get; set; } = TimeSpan.FromSeconds(15);
     public TimeSpan SummaryInterval { get; set; } = TimeSpan.FromSeconds(2);
     public TimeSpan SummaryPassInterval { get; set; } = TimeSpan.FromMinutes(5);
-    private readonly Dictionary<string, DateTimeOffset> _summaryPasses = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTimeOffset> _summaryPasses = [with(StringComparer.OrdinalIgnoreCase)];
     /// <summary>Raised from a background thread as a pass advances: files done and files it set out to do; (0, 0) when it ends.</summary>
     public event Action<int, int>? SummaryProgressChanged;
 
@@ -107,7 +107,7 @@ public sealed partial class ProjectKnowledgeIndex
             {
                 var found = await SearchAsync(worktree, query, "", 8, 2, token).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
-                return found.Select(Candidate).ToArray();
+                return [.. found.Select(Candidate)];
             }
             var chunks = await SearchAsync(worktree, prompt, recent, 8, 2, ct).ConfigureAwait(false);
             var candidates = chunks.Take(8).Select(Candidate).ToArray();

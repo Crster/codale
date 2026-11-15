@@ -1,6 +1,8 @@
 using System.Runtime.InteropServices;
 
-namespace Codale.Db;
+using Codale.Db.Engine;
+
+namespace Codale.Db.Search;
 
 /// <summary>A word the keyword search looks for; with <see cref="Prefix"/> it also matches every word that begins with it.</summary>
 public readonly record struct KeywordTerm(string Text, bool Prefix = false);
@@ -48,12 +50,11 @@ internal sealed class KeywordIndex
 
     private sealed record Stats(TNode Root, long Version, int Documents, long Words);
 
-    private readonly Dictionary<string, Postings> _terms = new(StringComparer.Ordinal);
-    private readonly Dictionary<TNode, int> _byNode = new(ReferenceEqualityComparer.Instance);
-    private readonly Dictionary<string, int> _counts = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Postings> _terms = [with(StringComparer.Ordinal)];
+    private readonly Dictionary<TNode, int> _byNode = [with(ReferenceEqualityComparer.Instance)];
+    private readonly Dictionary<string, int> _counts = [with(StringComparer.Ordinal)];
     private Doc[] _docs = new Doc[16];
     private int _docCount;
-    private int _liveDocs;
     private long _livePostings;
     private long _deadPostings;
     private long _version;
@@ -63,7 +64,7 @@ internal sealed class KeywordIndex
     private string[] _sorted = [];
     private readonly List<string> _unsorted = [];
 
-    public int LiveDocuments => _liveDocs;
+    public int LiveDocuments { get; private set; }
 
     public static string[] Split(string text) => text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
@@ -84,7 +85,7 @@ internal sealed class KeywordIndex
         var id = _docCount++;
         _docs[id] = new Doc { Node = node, Offset = offset, Segment = segment, RecordSize = recordSize, Length = length, Terms = _counts.Count };
         _byNode[node] = id;
-        _liveDocs++;
+        LiveDocuments++;
         _livePostings += _counts.Count;
         _version++;
 
@@ -104,7 +105,7 @@ internal sealed class KeywordIndex
         if (!_byNode.Remove(node, out var id)) return 0;
         ref var doc = ref _docs[id];
         doc.Node = null;
-        _liveDocs--;
+        LiveDocuments--;
         _livePostings -= doc.Terms;
         _deadPostings += doc.Terms;
         _version++;
@@ -128,7 +129,7 @@ internal sealed class KeywordIndex
         if (_deadPostings < SweepMinimum || _deadPostings < _livePostings) return;
 
         var remap = new int[_docCount];
-        var docs = new Doc[Math.Max(16, _liveDocs)];
+        var docs = new Doc[Math.Max(16, LiveDocuments)];
         var kept = 0;
         for (var id = 0; id < _docCount; id++)
         {
@@ -177,7 +178,7 @@ internal sealed class KeywordIndex
         if (stats.Documents == 0) return [];
         var averageLength = Math.Max(1, (double)stats.Words / stats.Documents);
         // When every live document is under the root there is nothing to filter: skip the walk up the tree.
-        var everything = stats.Documents == _liveDocs;
+        var everything = stats.Documents == LiveDocuments;
 
         var scores = new Dictionary<int, double>();
         var tfs = new Dictionary<int, int>();

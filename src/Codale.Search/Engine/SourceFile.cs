@@ -36,7 +36,6 @@ public sealed class SourceFile
 
     /// <summary>The retained text as UTF-8: half the size of the string for source code.</summary>
     private readonly byte[]? _utf8;
-    private readonly SourceSymbol[] _symbols;
 
     internal SourceFile(
         string relativePath,
@@ -58,7 +57,7 @@ public sealed class SourceFile
         TermKeys = termKeys;
         TermCounts = termCounts;
         TokenCount = tokenCount;
-        _symbols = symbols;
+        SymbolArray = symbols;
         Transitions = transitions ?? [];
         NameKey = Path.GetFileNameWithoutExtension(relativePath).ToLowerInvariant();
         DirectoryKey = (Path.GetDirectoryName(relativePath) ?? "").ToLowerInvariant();
@@ -74,9 +73,9 @@ public sealed class SourceFile
 
     public DateTime LastWriteUtc { get; }
 
-    public IReadOnlyList<SourceSymbol> Symbols => _symbols;
+    public IReadOnlyList<SourceSymbol> Symbols => SymbolArray;
 
-    internal SourceSymbol[] SymbolArray => _symbols;
+    internal SourceSymbol[] SymbolArray { get; }
 
     /// <summary>The identifier pairs written next to each other in the file, with their counts (the model's transition channel).</summary>
     internal WordPair[] Transitions { get; }
@@ -389,11 +388,10 @@ internal static class SourceTokens
             previous = word;
         }
 
-        return counts
+        return [.. counts
             .OrderByDescending(p => p.Value)
             .Take(MaxTransitions)
-            .Select(p => new WordPair(p.Key.Item1, p.Key.Item2, p.Value))
-            .ToArray();
+            .Select(p => new WordPair(p.Key.Item1, p.Key.Item2, p.Value))];
     }
 
     public static bool IsPart(char c) => char.IsLetterOrDigit(c) || c == '_' || c == '$';
@@ -645,12 +643,13 @@ internal static partial class SourceSymbols
     private static partial Regex ScriptVariable();
 
     /// <summary>Words a loose pattern may take for a name.</summary>
-    private static readonly HashSet<string> Reserved = new(StringComparer.Ordinal)
-    {
+    private static readonly HashSet<string> Reserved =
+    [
+        with(StringComparer.Ordinal),
         "if", "for", "foreach", "while", "switch", "catch", "using", "lock", "return", "new", "await",
         "get", "set", "init", "add", "remove", "value", "var", "let", "const", "this", "base", "super",
         "true", "false", "null", "void", "int", "string", "bool", "object", "struct", "class",
-    };
+    ];
 
     [GeneratedRegex(
         @"^[ \t]*(?:export[ \t]+)?(?:default[ \t]+)?(?:declare[ \t]+)?" +

@@ -48,7 +48,6 @@ public readonly record struct TextChange(DocumentPosition Start, DocumentPositio
 public sealed class TextBuffer
 {
     private readonly List<string> _lines = [""];
-    private long _charCount;
     private string? _textCache;
     private int _textCacheVersion = -1;
 
@@ -61,7 +60,7 @@ public sealed class TextBuffer
     public int LineCount => _lines.Count;
 
     /// <summary>Characters in the document, not counting line breaks.</summary>
-    public long CharCount => _charCount;
+    public long CharCount { get; private set; }
 
     /// <summary>Raised after each edit, in the order edits were applied.</summary>
     public event Action<TextChange>? Changed;
@@ -86,7 +85,7 @@ public sealed class TextBuffer
     public void Load(ReadOnlySpan<char> text)
     {
         _lines.Clear();
-        _charCount = 0;
+        CharCount = 0;
         var estimate = 0;
         foreach (var c in text)
         {
@@ -119,7 +118,7 @@ public sealed class TextBuffer
     private void AddLine(ReadOnlySpan<char> line)
     {
         _lines.Add(line.Length == 0 ? string.Empty : new string(line));
-        _charCount += line.Length;
+        CharCount += line.Length;
     }
 
     /// <summary>The whole text joined with <see cref="NewLine"/>. Cached until the next change.</summary>
@@ -130,7 +129,7 @@ public sealed class TextBuffer
             return _textCache;
         }
 
-        var length = _charCount + (long)(_lines.Count - 1) * NewLine.Length;
+        var length = CharCount + (long)(_lines.Count - 1) * NewLine.Length;
         if (length > int.MaxValue)
         {
             throw new InvalidOperationException("The document is too large to join into one string.");
@@ -294,7 +293,7 @@ public sealed class TextBuffer
             }
         }
 
-        _charCount += CountChars(text) - removedChars;
+        CharCount += CountChars(text) - removedChars;
         Version++;
         Changed?.Invoke(new TextChange(start, end, newEnd));
         return newEnd;

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -78,8 +79,6 @@ public sealed partial class TerminalView : UserControl
         B = b,
     };
 
-    private TerminalEmulator _emulator = new();
-
     /// <summary>
     /// False once <see cref="Attach"/> handed this view an emulator someone else feeds (a command
     /// block's): that owner answers the emulator's DSR/DA replies itself, so the view must not
@@ -132,12 +131,12 @@ public sealed partial class TerminalView : UserControl
         // Settings drive the defaults; ApplyAppSettings follows a live change.
         _fontSize = 13;
         _fontFamily = ResolveFontFamily("Cascadia Mono");
-        _emulator.ScrollbackLimit = 10000;
+        Emulator.ScrollbackLimit = 10000;
 
         // Every fed chunk repaints - without this, output (including the echo of each
         // keystroke) only showed up on the next caret blink, up to 530ms late.
         // CanvasControl.Invalidate coalesces, so a burst of chunks is one frame.
-        HookEmulator(_emulator);
+        HookEmulator(Emulator);
 
         _caretTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
         _caretTimer.Interval = TimeSpan.FromMilliseconds(530);
@@ -188,7 +187,7 @@ public sealed partial class TerminalView : UserControl
         if (_closed) return;
         _closed = true;
         _caretTimer.Stop();
-        UnhookEmulator(_emulator);
+        UnhookEmulator(Emulator);
         DisposeTextFormats();
         foreach (var brush in _brushes.Values) brush.Dispose();
         _brushes.Clear();
@@ -208,7 +207,7 @@ public sealed partial class TerminalView : UserControl
     public event EventHandler<(int Cols, int Rows)>? Resized;
 
     /// <summary>Raw output from the pseudoconsole, fed through the emulator.</summary>
-    public void Write(string text) => _emulator.Feed(text);
+    public void Write(string text) => Emulator.Feed(text);
 
     /// <summary>
     /// Applies the Settings-window values to this terminal: a new font size or family
@@ -218,7 +217,7 @@ public sealed partial class TerminalView : UserControl
     /// </summary>
     public void ApplyAppSettings(AppSettingsStore settings)
     {
-        _emulator.ScrollbackLimit = settings.TerminalScrollback;
+        Emulator.ScrollbackLimit = settings.TerminalScrollback;
 
         var family = ResolveFontFamily(settings.TerminalFontFamily);
         var size = Math.Clamp(settings.TerminalFontSize, AppSettingsStore.MinFontSize, AppSettingsStore.MaxFontSize);
@@ -287,22 +286,22 @@ public sealed partial class TerminalView : UserControl
     /// </summary>
     public void Attach(TerminalEmulator emulator)
     {
-        if (ReferenceEquals(emulator, _emulator) || _closed)
+        if (ReferenceEquals(emulator, Emulator) || _closed)
         {
             return;
         }
 
-        UnhookEmulator(_emulator);
-        _emulator = emulator;
+        UnhookEmulator(Emulator);
+        Emulator = emulator;
         _ownsEmulator = false;
-        HookEmulator(_emulator);
+        HookEmulator(Emulator);
 
-        _trimmedSeen = _emulator.TrimmedLines;
+        _trimmedSeen = Emulator.TrimmedLines;
         _pinned = true;
         _topLine = 0;
         _selectionAnchor = _selectionHead = default;
         _singleCell = false;
-        _selectedSnapshot = null;
+        SelectedText = null;
         _hoverLink = null;
 
         UpdateBlockHeight();
@@ -312,7 +311,7 @@ public sealed partial class TerminalView : UserControl
     }
 
     /// <summary>The emulator this view draws.</summary>
-    public TerminalEmulator Emulator => _emulator;
+    public TerminalEmulator Emulator { get; private set; } = new();
 
     private void OnEmulatorInvalidated()
     {
@@ -334,18 +333,15 @@ public sealed partial class TerminalView : UserControl
     /// this many lines, scrolling inside beyond that. A full-screen app (alternate screen) always
     /// gets all of them.
     /// </summary>
-    public int BlockRows
-    {
-        get => _blockRows;
-        set
+    public int BlockRows { get; set
         {
             value = Math.Max(0, value);
-            if (_blockRows == value)
+            if (field == value)
             {
                 return;
             }
 
-            _blockRows = value;
+            field = value;
             if (value == 0)
             {
                 VisibleBlockLines = 0;
@@ -354,32 +350,23 @@ public sealed partial class TerminalView : UserControl
 
             UpdateBlockHeight();
             RefitGrid();
-        }
-    }
-
-    private int _blockRows;
+        } }
 
     /// <summary>
     /// Whether the cursor is drawn and counts as content. A finished block hides it, so the
     /// blank line a trailing newline left it on does not show as an extra row.
     /// </summary>
-    public bool ShowCursor
-    {
-        get => _showCursor;
-        set
+    public bool ShowCursor { get; set
         {
-            if (_showCursor == value)
+            if (field == value)
             {
                 return;
             }
 
-            _showCursor = value;
+            field = value;
             UpdateBlockHeight();
             InvalidateAll();
-        }
-    }
-
-    private bool _showCursor = true;
+        } } = true;
 
     /// <summary>Lines of output a block-mode view shows: its content, capped at <see cref="BlockRows"/>.</summary>
     public int VisibleBlockLines { get; private set; }
@@ -396,15 +383,15 @@ public sealed partial class TerminalView : UserControl
 
     private void UpdateBlockHeight()
     {
-        if (_blockRows <= 0 || _closed)
+        if (BlockRows <= 0 || _closed)
         {
             return;
         }
 
-        var content = _emulator.InAlternate
-            ? _blockRows
-            : (_showCursor ? _emulator.LastContentLine : _emulator.LastTextLine) + 1;
-        var lines = Math.Clamp(content, 0, _blockRows);
+        var content = Emulator.InAlternate
+            ? BlockRows
+            : (ShowCursor ? Emulator.LastContentLine : Emulator.LastTextLine) + 1;
+        var lines = Math.Clamp(content, 0, BlockRows);
         var height = HeightForLines(lines);
         if (lines == VisibleBlockLines && Math.Abs(Height - height) < 0.5)
         {
@@ -430,7 +417,7 @@ public sealed partial class TerminalView : UserControl
     /// </summary>
     private void ApplyTrim()
     {
-        var trimmed = _emulator.TrimmedLines;
+        var trimmed = Emulator.TrimmedLines;
         var delta = (int)(trimmed - _trimmedSeen);
         _trimmedSeen = trimmed;
         if (delta <= 0)
@@ -451,7 +438,7 @@ public sealed partial class TerminalView : UserControl
             {
                 _selectionAnchor = _selectionHead = default;
                 _singleCell = false;
-                _selectedSnapshot = null;
+                SelectedText = null;
             }
         }
     }
@@ -473,15 +460,12 @@ public sealed partial class TerminalView : UserControl
     /// <summary>A one-cell selection (a single-character word) has the same anchor and head, so it is flagged apart.</summary>
     private bool _singleCell;
 
-    /// <summary>What the selection read when it was made, so the copy is that text even if output has since changed the cells under it.</summary>
-    private string? _selectedSnapshot;
-
     public bool HasSelection => _selectionAnchor != _selectionHead || _singleCell;
 
     /// <summary>Clears the screen and scrollback, and the selection with it (the menu's Clear).</summary>
     public void Clear()
     {
-        _emulator.Clear();
+        Emulator.Clear();
         ClearSelection();
         _pinned = true;
         SyncScrollbar();
@@ -492,12 +476,13 @@ public sealed partial class TerminalView : UserControl
     {
         _singleCell = false;
         _selectionAnchor = (0, 0);
-        _selectionHead = (Math.Max(0, _emulator.LastContentLine), _emulator.Cols - 1);
-        _selectedSnapshot = GetSelectionText();
+        _selectionHead = (Math.Max(0, Emulator.LastContentLine), Emulator.Cols - 1);
+        SelectedText = GetSelectionText();
         InvalidateAll();
     }
 
-    public string SelectedText => HasSelection ? _selectedSnapshot ?? GetSelectionText() : string.Empty;
+    [AllowNull]
+    public string SelectedText { get => HasSelection ? field ?? GetSelectionText() : string.Empty; private set; }
 
     /// <summary>Copies the selection; the clipboard write retries in the background until it lands.</summary>
     public void CopySelection() => _ = ClipboardWriter.SetTextAsync(SelectedText);
@@ -525,7 +510,7 @@ public sealed partial class TerminalView : UserControl
         }
 
         text = text.Replace("\r\n", "\r").Replace('\n', '\r');
-        if (_emulator.BracketedPaste)
+        if (Emulator.BracketedPaste)
         {
             text = "\x1b[200~" + text + "\x1b[201~";
         }
@@ -562,7 +547,7 @@ public sealed partial class TerminalView : UserControl
 
         _selectionAnchor = _selectionHead = default;
         _singleCell = false;
-        _selectedSnapshot = null;
+        SelectedText = null;
         InvalidateAll();
     }
 
@@ -623,7 +608,7 @@ public sealed partial class TerminalView : UserControl
     {
         EnsureMetrics();
         var cols = (int)((Canvas.ActualWidth - PadLeft - PadRight) / _charWidth);
-        var rows = _blockRows > 0 ? _blockRows : (int)((Canvas.ActualHeight - PadTop - PadBottom) / _lineHeight);
+        var rows = BlockRows > 0 ? BlockRows : (int)((Canvas.ActualHeight - PadTop - PadBottom) / _lineHeight);
         return (Math.Max(1, cols), Math.Max(1, rows));
     }
 
@@ -636,15 +621,15 @@ public sealed partial class TerminalView : UserControl
         // While the tab is hidden the control reports zero; resizing the shell to
         // nothing would be wrong, so wait for a real size.
         // A block may be zero lines tall before its first output, so only its width must be real.
-        if (Canvas.ActualWidth < _charWidth || (_blockRows == 0 && Canvas.ActualHeight < _lineHeight))
+        if (Canvas.ActualWidth < _charWidth || (BlockRows == 0 && Canvas.ActualHeight < _lineHeight))
         {
             return;
         }
 
         var (cols, rows) = FitGrid();
-        if (cols != _emulator.Cols || rows != _emulator.Rows)
+        if (cols != Emulator.Cols || rows != Emulator.Rows)
         {
-            _emulator.Resize(cols, rows);
+            Emulator.Resize(cols, rows);
             ApplyTrim();
             Resized?.Invoke(this, (cols, rows));
         }
@@ -738,7 +723,7 @@ public sealed partial class TerminalView : UserControl
         {
             EnsureMetrics();
             var topLine = TopLine;
-            var lastLine = Math.Min(_emulator.TotalLines - 1, topLine + _emulator.Rows - 1);
+            var lastLine = Math.Min(Emulator.TotalLines - 1, topLine + Emulator.Rows - 1);
             DrawCursor(args.DrawingSession, topLine, lastLine);
         }
         catch
@@ -781,7 +766,7 @@ public sealed partial class TerminalView : UserControl
         // Exactly one screen's worth of rows from the top line: the grid was sized to
         // fit the viewport, so pinned, the live screen's last row is the last one drawn.
         var topLine = TopLine;
-        var lastLine = Math.Min(_emulator.TotalLines - 1, topLine + _emulator.Rows - 1);
+        var lastLine = Math.Min(Emulator.TotalLines - 1, topLine + Emulator.Rows - 1);
 
         for (var line = topLine; line <= lastLine; line++)
         {
@@ -795,11 +780,11 @@ public sealed partial class TerminalView : UserControl
 
     private void DrawRow(CanvasDrawingSession session, int absoluteLine, float y)
     {
-        var row = _emulator.GetLine(absoluteLine);
+        var row = Emulator.GetLine(absoluteLine);
 
         // Scrollback lines keep the width they were written at, so after the window
         // widens they are shorter than the grid - never index past their end.
-        var cols = Math.Min(_emulator.Cols, row.Length);
+        var cols = Math.Min(Emulator.Cols, row.Length);
 
         // Background fills first, then selection, then text - the same layering xterm uses.
         var col = 0;
@@ -982,25 +967,25 @@ public sealed partial class TerminalView : UserControl
         }
 
         // U+2596-U+259F: quadrants, as a bit set of upper-left, upper-right, lower-left, lower-right.
-        const int UL = 1, UR = 2, LL = 4, LR = 8;
+        const int ul = 1, ur = 2, ll = 4, lr = 8;
         var quadrants = code switch
         {
-            '▖' => LL,
-            '▗' => LR,
-            '▘' => UL,
-            '▙' => UL | LL | LR,
-            '▚' => UL | LR,
-            '▛' => UL | UR | LL,
-            '▜' => UL | UR | LR,
-            '▝' => UR,
-            '▞' => UR | LL,
-            _ => UR | LL | LR,
+            '▖' => ll,
+            '▗' => lr,
+            '▘' => ul,
+            '▙' => ul | ll | lr,
+            '▚' => ul | lr,
+            '▛' => ul | ur | ll,
+            '▜' => ul | ur | lr,
+            '▝' => ur,
+            '▞' => ur | ll,
+            _ => ur | ll | lr,
         };
 
-        if ((quadrants & UL) != 0) Fill(0, 0, 0.5f, 0.5f, color);
-        if ((quadrants & UR) != 0) Fill(0.5f, 0, 0.5f, 0.5f, color);
-        if ((quadrants & LL) != 0) Fill(0, 0.5f, 0.5f, 0.5f, color);
-        if ((quadrants & LR) != 0) Fill(0.5f, 0.5f, 0.5f, 0.5f, color);
+        if ((quadrants & ul) != 0) Fill(0, 0, 0.5f, 0.5f, color);
+        if ((quadrants & ur) != 0) Fill(0.5f, 0, 0.5f, 0.5f, color);
+        if ((quadrants & ll) != 0) Fill(0, 0.5f, 0.5f, 0.5f, color);
+        if ((quadrants & lr) != 0) Fill(0.5f, 0.5f, 0.5f, 0.5f, color);
     }
 
     /// <summary>Concatenates the run's characters, dropping blank cell padding at the end.</summary>
@@ -1068,19 +1053,19 @@ public sealed partial class TerminalView : UserControl
     /// <summary>The cursor, drawn only when its screen row is on the visible part of the buffer.</summary>
     private void DrawCursor(CanvasDrawingSession session, int topLine, int lastLine)
     {
-        if (!_emulator.CursorVisible || !_caretVisible || !_showCursor)
+        if (!Emulator.CursorVisible || !_caretVisible || !ShowCursor)
         {
             return;
         }
 
-        var absolute = _emulator.ScrollbackCount + _emulator.CursorRow;
+        var absolute = Emulator.ScrollbackCount + Emulator.CursorRow;
         if (absolute < topLine || absolute > lastLine)
         {
             return;
         }
 
         var y = PadTop + (absolute - topLine) * _lineHeight;
-        var x = PadLeft + _emulator.CursorCol * _charWidth;
+        var x = PadLeft + Emulator.CursorCol * _charWidth;
         var focused = FocusState != FocusState.Unfocused;
 
         // The caret hugs the glyphs, not the whole cell: the text occupies roughly
@@ -1090,15 +1075,15 @@ public sealed partial class TerminalView : UserControl
         var cursorTop = (float)(y - 1);
         var cursorHeight = (float)(_fontSize + 1);
 
-        if (_emulator.Shape is TerminalEmulator.CursorShape.BlinkBlock or TerminalEmulator.CursorShape.Block)
+        if (Emulator.Shape is TerminalEmulator.CursorShape.BlinkBlock or TerminalEmulator.CursorShape.Block)
         {
             if (focused)
             {
                 // A filled block in the cursor colour; the glyph under it flips to the
                 // background colour so it stays readable.
                 session.FillRectangle((float)x, cursorTop, (float)_charWidth, cursorHeight, _caretBrush!);
-                var row = _emulator.GetLine(absolute);
-                var cell = row[_emulator.CursorCol];
+                var row = Emulator.GetLine(absolute);
+                var cell = row[Emulator.CursorCol];
                 if (cell.Code is not ' ' and not '\0')
                 {
                     var text = cell.Code.ToString();
@@ -1112,7 +1097,7 @@ public sealed partial class TerminalView : UserControl
                 session.DrawRectangle((float)x, cursorTop, (float)_charWidth, cursorHeight, _caretBrush!);
             }
         }
-        else if (_emulator.Shape is TerminalEmulator.CursorShape.BlinkUnderline or TerminalEmulator.CursorShape.Underline)
+        else if (Emulator.Shape is TerminalEmulator.CursorShape.BlinkUnderline or TerminalEmulator.CursorShape.Underline)
         {
             session.FillRectangle((float)x, (float)(y + _fontSize - 1), (float)_charWidth, 2, _caretBrush!);
         }
@@ -1133,18 +1118,13 @@ public sealed partial class TerminalView : UserControl
     {
         get
         {
-            if (_emulator.InAlternate)
+            if (Emulator.InAlternate)
             {
                 return 0;
             }
 
-            var lastLine = _emulator.LastContentLine;
-            if (lastLine + 1 > _emulator.Rows)
-            {
-                return lastLine - _emulator.Rows + 1;
-            }
-
-            return 0;
+            var lastLine = Emulator.LastContentLine;
+            return lastLine + 1 > Emulator.Rows ? lastLine - Emulator.Rows + 1 : 0;
         }
     }
 
@@ -1173,7 +1153,7 @@ public sealed partial class TerminalView : UserControl
             return;
         }
 
-        _bar.Update(TopLine, MaxTopLine, _emulator.Rows, reveal);
+        _bar.Update(TopLine, MaxTopLine, Emulator.Rows, reveal);
     }
 
     private void OnScrollBarValueChanged(object? sender, double value)
@@ -1193,17 +1173,17 @@ public sealed partial class TerminalView : UserControl
 
         // When the app tracks the mouse, the wheel belongs to it - fzf, less and
         // friends scroll their own way. Wheel reports are button 64 (up) / 65 (down).
-        if (_emulator.MouseMode != TerminalEmulator.MouseTracking.None)
+        if (Emulator.MouseMode != TerminalEmulator.MouseTracking.None)
         {
             var button = delta > 0 ? 64 : 65;
-            var cell = PointToCell(e.GetCurrentPoint(Canvas).Position);
-            _ = WriteToShellAsync(EncodeMouseReport(button, cell.Col, ViewportRow(cell.Line), pressed: true));
+            var (line, col) = PointToCell(e.GetCurrentPoint(Canvas).Position);
+            _ = WriteToShellAsync(EncodeMouseReport(button, col, ViewportRow(line), pressed: true));
             e.Handled = true;
             return;
         }
 
         // A block that cannot scroll further that way leaves the wheel to the notebook around it.
-        if (_blockRows > 0 && (MaxTopLine == 0 || (delta > 0 && TopLine == 0) || (delta < 0 && TopLine >= MaxTopLine)))
+        if (BlockRows > 0 && (MaxTopLine == 0 || (delta > 0 && TopLine == 0) || (delta < 0 && TopLine >= MaxTopLine)))
         {
             _wheelLines = 0;
             return;
@@ -1244,8 +1224,8 @@ public sealed partial class TerminalView : UserControl
     /// <summary>One buffer row as text, a character per cell, so a match's index is its column.</summary>
     private string LineText(int line)
     {
-        var row = _emulator.GetLine(line);
-        var chars = new char[Math.Min(row.Length, _emulator.Cols)];
+        var row = Emulator.GetLine(line);
+        var chars = new char[Math.Min(row.Length, Emulator.Cols)];
         for (var i = 0; i < chars.Length; i++)
         {
             chars[i] = row[i].Code is '\0' ? ' ' : row[i].Code;
@@ -1257,19 +1237,14 @@ public sealed partial class TerminalView : UserControl
     private (int Line, int From, int To, LinkMatch Match)? LinkAt(Windows.Foundation.Point point)
     {
         // An app tracking the mouse owns clicks; Shift is the usual way to take them back.
-        if (_emulator.MouseMode != TerminalEmulator.MouseTracking.None && !IsShiftDown())
-        {
-            return null;
-        }
-
-        return ComputeLinkAt(point);
+        return Emulator.MouseMode != TerminalEmulator.MouseTracking.None && !IsShiftDown() ? null : ComputeLinkAt(point);
     }
 
     /// <summary>The link for the cell under the point, cached against the cell and the buffer revision.</summary>
     private (int Line, int From, int To, LinkMatch Match)? ComputeLinkAt(Windows.Foundation.Point point)
     {
         var (line, col) = PointToCell(point);
-        if (_linkCacheKey == (line, col, _emulator.Revision))
+        if (_linkCacheKey == (line, col, Emulator.Revision))
         {
             return _linkCache;
         }
@@ -1278,7 +1253,7 @@ public sealed partial class TerminalView : UserControl
             ? (line, match.Index, match.Index + match.Length, match)
             : default((int, int, int, LinkMatch)?);
 
-        _linkCacheKey = (line, col, _emulator.Revision);
+        _linkCacheKey = (line, col, Emulator.Revision);
         _linkCache = link;
         return link;
     }
@@ -1369,10 +1344,10 @@ public sealed partial class TerminalView : UserControl
 
         // Motion reports: 1003 sends every move, 1002 only moves with a button held.
         // Button codes get +32 for motion; 35 is "no button".
-        if (AppOwnsMouse && _emulator.MouseMode is TerminalEmulator.MouseTracking.Drag or TerminalEmulator.MouseTracking.Any)
+        if (AppOwnsMouse && Emulator.MouseMode is TerminalEmulator.MouseTracking.Drag or TerminalEmulator.MouseTracking.Any)
         {
             var held = Canvas.PointerCaptures is { Count: > 0 };
-            if (held || _emulator.MouseMode == TerminalEmulator.MouseTracking.Any)
+            if (held || Emulator.MouseMode == TerminalEmulator.MouseTracking.Any)
             {
                 var cell = PointToCell(point.Position);
                 if (cell != _lastReportedCell)
@@ -1417,12 +1392,12 @@ public sealed partial class TerminalView : UserControl
         // The app only hears about clicks it asked for; wheel reports carry no
         // coordinates, clicks do.
         var point = e.GetCurrentPoint(Canvas);
-        if (_emulator.MouseMode != TerminalEmulator.MouseTracking.None && _reportedButton >= 0)
+        if (Emulator.MouseMode != TerminalEmulator.MouseTracking.None && _reportedButton >= 0)
         {
-            var cell = PointToCell(point.Position);
+            var (line, col) = PointToCell(point.Position);
             // X10 encoding has no per-button release: it is always button 3.
-            var button = _emulator.SgrMouse ? _reportedButton : 3;
-            _ = WriteToShellAsync(EncodeMouseReport(button, cell.Col, ViewportRow(cell.Line), pressed: false));
+            var button = Emulator.SgrMouse ? _reportedButton : 3;
+            _ = WriteToShellAsync(EncodeMouseReport(button, col, ViewportRow(line), pressed: false));
         }
 
         var appClick = _reportedButton >= 0;
@@ -1438,7 +1413,7 @@ public sealed partial class TerminalView : UserControl
         // The selection is final: remember its text now, for Ctrl+C to copy as the reader saw it.
         if (!appClick)
         {
-            _selectedSnapshot = HasSelection ? GetSelectionText() : null;
+            SelectedText = HasSelection ? GetSelectionText() : null;
         }
 
         e.Handled = true;
@@ -1457,7 +1432,7 @@ public sealed partial class TerminalView : UserControl
         }
     }
 
-    private bool AppOwnsMouse => _emulator.MouseMode != TerminalEmulator.MouseTracking.None && !IsShiftDown();
+    private bool AppOwnsMouse => Emulator.MouseMode != TerminalEmulator.MouseTracking.None && !IsShiftDown();
 
     /// <summary>The button of an app-reported press (0 left, 1 middle, 2 right), or -1 when none is held.</summary>
     private int _reportedButton = -1;
@@ -1472,7 +1447,7 @@ public sealed partial class TerminalView : UserControl
     /// <summary>SGR (1006) mouse encoding when the app requested it, X10 otherwise. Col is 0-based; pass pressed=false for release.</summary>
     private string EncodeMouseReport(int button, int col, int line, bool pressed)
     {
-        if (_emulator.SgrMouse)
+        if (Emulator.SgrMouse)
         {
             return $"\x1b[<{button};{col + 1};{line + 1}{(pressed ? 'M' : 'm')}";
         }
@@ -1490,17 +1465,17 @@ public sealed partial class TerminalView : UserControl
         EnsureMetrics();
 
         // Same TopLine the frame was drawn from, so a click lands on the row under it.
-        var totalLines = _emulator.TotalLines;
+        var totalLines = Emulator.TotalLines;
         var row = (int)Math.Floor((point.Y - PadTop) / _lineHeight);
         var line = Math.Clamp(TopLine + row, 0, Math.Max(0, totalLines - 1));
-        var col = Math.Clamp((int)Math.Floor((point.X - PadLeft) / _charWidth), 0, _emulator.Cols - 1);
+        var col = Math.Clamp((int)Math.Floor((point.X - PadLeft) / _charWidth), 0, Emulator.Cols - 1);
         return (line, col);
     }
 
     private void SelectWordAt(Windows.Foundation.Point point)
     {
         var (line, col) = PointToCell(point);
-        var row = _emulator.GetLine(line).ToArray();
+        var row = Emulator.GetLine(line).ToArray();
 
         bool IsWordChar(int i) =>
             i < row.Length && (char.IsLetterOrDigit(row[i].Code) || row[i].Code == '_'
@@ -1529,7 +1504,7 @@ public sealed partial class TerminalView : UserControl
         _selectionAnchor = (line, start);
         _selectionHead = (line, end - 1);
         _singleCell = end - 1 == start;
-        _selectedSnapshot = GetSelectionText();
+        SelectedText = GetSelectionText();
         InvalidateAll();
     }
 
@@ -1551,7 +1526,7 @@ public sealed partial class TerminalView : UserControl
         }
 
         var from = line == a.Line ? a.Col : 0;
-        var to = line == b.Line ? Math.Min(b.Col + 1, _emulator.Cols) : _emulator.Cols;
+        var to = line == b.Line ? Math.Min(b.Col + 1, Emulator.Cols) : Emulator.Cols;
         return (from, to);
     }
 
@@ -1569,7 +1544,7 @@ public sealed partial class TerminalView : UserControl
         var builder = new System.Text.StringBuilder();
         for (var line = a.Line; line <= b.Line; line++)
         {
-            var row = _emulator.GetLine(line).ToArray();
+            var row = Emulator.GetLine(line).ToArray();
             // A scrollback line written before the window widened can be narrower
             // than the selection's column.
             var from = Math.Min(line == a.Line ? a.Col : 0, row.Length);
@@ -1610,7 +1585,7 @@ public sealed partial class TerminalView : UserControl
     /// <summary>The text of the screen row holding the cursor, prompt included, trailing blanks trimmed.</summary>
     private string ReadCursorLine()
     {
-        var row = _emulator.GetScreenRow(Math.Clamp(_emulator.CursorRow, 0, _emulator.Rows - 1));
+        var row = Emulator.GetScreenRow(Math.Clamp(Emulator.CursorRow, 0, Emulator.Rows - 1));
         var builder = new System.Text.StringBuilder(row.Length);
         foreach (var cell in row)
         {
@@ -1657,7 +1632,7 @@ public sealed partial class TerminalView : UserControl
 
         // Enter at a shell prompt: the screen shows exactly what the shell is about to run (history
         // recall, completion and edits included), so the host can swap it for an adjusted command.
-        if (e.Key == VirtualKey.Enter && !ctrl && !alt && !shift && SubmitRewriter is { } rewrite && !_emulator.InAlternate &&
+        if (e.Key == VirtualKey.Enter && !ctrl && !alt && !shift && SubmitRewriter is { } rewrite && !Emulator.InAlternate &&
             rewrite(ReadCursorLine()) is { } rewritten)
         {
             // Escape reverts the typed line in PSReadLine and cmd.exe alike.
@@ -1770,61 +1745,46 @@ public sealed partial class TerminalView : UserControl
         var esc = alt ? "\x1b" : "";
         var mods = modifier > 1 ? $";{modifier + 1}" : "";
 
-        switch (key)
+        return key switch
         {
-            case VirtualKey.Enter:
-                return esc + "\r";
-            case VirtualKey.Back:
-                return esc + "\x7f";
-            case VirtualKey.Escape:
-                return "\x1b";
-            case VirtualKey.Tab:
-                return shift ? "\x1b[Z" : "\t";
-            case VirtualKey.Up: return Arrow('A', mods);
-            case VirtualKey.Down: return Arrow('B', mods);
-            case VirtualKey.Right: return Arrow('C', mods);
-            case VirtualKey.Left: return Arrow('D', mods);
-            case VirtualKey.Home: return ApplicationKeys('H', 'H', mods);
-            case VirtualKey.End: return ApplicationKeys('F', 'F', mods);
-            case VirtualKey.Insert: return $"\x1b[2{mods}~";
-            case VirtualKey.Delete: return $"\x1b[3{mods}~";
-            case VirtualKey.PageUp: return $"\x1b[5{mods}~";
-            case VirtualKey.PageDown: return $"\x1b[6{mods}~";
-            case VirtualKey.F1: return "\x1bOP";
-            case VirtualKey.F2: return "\x1bOQ";
-            case VirtualKey.F3: return "\x1bOR";
-            case VirtualKey.F4: return "\x1bOS";
-            case VirtualKey.F5: return $"\x1b[15{mods}~";
-            case VirtualKey.F6: return $"\x1b[17{mods}~";
-            case VirtualKey.F7: return $"\x1b[18{mods}~";
-            case VirtualKey.F8: return $"\x1b[19{mods}~";
-            case VirtualKey.F9: return $"\x1b[20{mods}~";
-            case VirtualKey.F10: return $"\x1b[21{mods}~";
-            case VirtualKey.F11: return $"\x1b[23{mods}~";
-            case VirtualKey.F12: return $"\x1b[24{mods}~";
-            default:
-                return null;
-        }
+            VirtualKey.Enter => esc + "\r",
+            VirtualKey.Back => esc + "\x7f",
+            VirtualKey.Escape => "\x1b",
+            VirtualKey.Tab => shift ? "\x1b[Z" : "\t",
+            VirtualKey.Up => Arrow('A', mods),
+            VirtualKey.Down => Arrow('B', mods),
+            VirtualKey.Right => Arrow('C', mods),
+            VirtualKey.Left => Arrow('D', mods),
+            VirtualKey.Home => ApplicationKeys('H', 'H', mods),
+            VirtualKey.End => ApplicationKeys('F', 'F', mods),
+            VirtualKey.Insert => $"\x1b[2{mods}~",
+            VirtualKey.Delete => $"\x1b[3{mods}~",
+            VirtualKey.PageUp => $"\x1b[5{mods}~",
+            VirtualKey.PageDown => $"\x1b[6{mods}~",
+            VirtualKey.F1 => "\x1bOP",
+            VirtualKey.F2 => "\x1bOQ",
+            VirtualKey.F3 => "\x1bOR",
+            VirtualKey.F4 => "\x1bOS",
+            VirtualKey.F5 => $"\x1b[15{mods}~",
+            VirtualKey.F6 => $"\x1b[17{mods}~",
+            VirtualKey.F7 => $"\x1b[18{mods}~",
+            VirtualKey.F8 => $"\x1b[19{mods}~",
+            VirtualKey.F9 => $"\x1b[20{mods}~",
+            VirtualKey.F10 => $"\x1b[21{mods}~",
+            VirtualKey.F11 => $"\x1b[23{mods}~",
+            VirtualKey.F12 => $"\x1b[24{mods}~",
+            _ => null,
+        };
     }
 
     private string Arrow(char letter, string mods)
     {
-        if (mods.Length > 0)
-        {
-            return $"\x1b[1{mods}{letter}";
-        }
-
-        return _emulator.ApplicationCursorKeys ? $"\x1bO{letter}" : $"\x1b[{letter}";
+        return mods.Length > 0 ? $"\x1b[1{mods}{letter}" : Emulator.ApplicationCursorKeys ? $"\x1bO{letter}" : $"\x1b[{letter}";
     }
 
     private string ApplicationKeys(char csiChar, char ss3Char, string mods)
     {
-        if (mods.Length > 0)
-        {
-            return $"\x1b[1{mods}{csiChar}";
-        }
-
-        return _emulator.ApplicationCursorKeys ? $"\x1bO{ss3Char}" : $"\x1b[{csiChar}";
+        return mods.Length > 0 ? $"\x1b[1{mods}{csiChar}" : Emulator.ApplicationCursorKeys ? $"\x1bO{ss3Char}" : $"\x1b[{csiChar}";
     }
 
     private void OnTerminalCharacterReceived(UIElement sender, CharacterReceivedRoutedEventArgs args)

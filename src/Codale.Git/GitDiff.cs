@@ -49,18 +49,16 @@ public sealed record FileDiff
     public bool IsNew { get; init; }
     public bool IsDeleted { get; init; }
 
-    private readonly IReadOnlyList<DiffHunk> _hunks = [];
-
     public IReadOnlyList<DiffHunk> Hunks
     {
-        get => _hunks;
+        get;
         init
         {
-            _hunks = value;
+            field = value;
             Added = value.Sum(h => h.Lines.Count(l => l.Kind == DiffLineKind.Added));
             Removed = value.Sum(h => h.Lines.Count(l => l.Kind == DiffLineKind.Removed));
         }
-    }
+    } = [];
 
     /// <summary>Computed once when the hunks are set: the diff tab sums these across all files per refresh, and a lazy cache field would make record equality depend on whether it had been read.</summary>
     public int Added { get; private set; }
@@ -126,7 +124,7 @@ public static class GitDiffParser
         {
             if (hunkHeader is not null)
             {
-                hunks.Add(new DiffHunk { Header = hunkHeader, Lines = hunkLines.ToList() });
+                hunks.Add(new DiffHunk { Header = hunkHeader, Lines = [.. hunkLines] });
                 hunkLines.Clear();
                 hunkHeader = null;
             }
@@ -145,7 +143,7 @@ public static class GitDiffParser
                     IsBinary = isBinary,
                     IsNew = isNew,
                     IsDeleted = isDeleted,
-                    Hunks = hunks.ToList(),
+                    Hunks = [.. hunks],
                 });
             }
 

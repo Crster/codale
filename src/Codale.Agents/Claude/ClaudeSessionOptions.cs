@@ -15,10 +15,10 @@ public sealed record ClaudeSessionOptions
     public string? Effort { get; init; }
 
     /// <summary>The choices the CLI's --effort flag accepts (claude 2.7).</summary>
-    private static readonly HashSet<string> AllowedEfforts = new(StringComparer.Ordinal)
-    {
-        "low", "medium", "high", "xhigh", "max",
-    };
+    private static readonly HashSet<string> AllowedEfforts =
+    [
+with(StringComparer.Ordinal),         "low", "medium", "high", "xhigh", "max",
+    ];
 
     /// <summary>
     /// The CLI exits rather than tolerate an unknown effort, and effort vocabularies

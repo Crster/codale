@@ -1,5 +1,3 @@
-using Codale.Smart;
-
 namespace Codale.Smart.Tests;
 
 public sealed class SmartTests
@@ -30,7 +28,7 @@ public sealed class SmartTests
     public void Rankings_reject_unknown_duplicate_or_missing_ids()
     {
         SmartCandidate[] candidates = [new("a", "a.cs"), new("b", "b.cs")];
-        Assert.Equal(new[] { "b", "a" }, SmartExperience.ParseRanking("[\"b\",\"a\"]", candidates));
+        Assert.Equal(["b", "a"], SmartExperience.ParseRanking("[\"b\",\"a\"]", candidates));
         Assert.Null(SmartExperience.ParseRanking("[\"a\",\"a\"]", candidates));
         Assert.Null(SmartExperience.ParseRanking("[\"a\",\"c\"]", candidates));
         Assert.Null(SmartExperience.ParseRanking("[\"a\"]", candidates));

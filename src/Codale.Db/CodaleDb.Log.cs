@@ -2,6 +2,8 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
 
+using Codale.Db.Engine;
+
 namespace Codale.Db;
 
 /// <summary>The plumbing between the log on disk and the in-memory tree: appending records, replaying them, applying them.</summary>
@@ -41,9 +43,9 @@ public sealed partial class CodaleDb
         {
             BinaryPrimitives.WriteInt32LittleEndian(head, keyLength);
             Encoding.UTF8.GetBytes(path, head.AsSpan(4));
-            var append = Append(RecordType.Put, flags, head.AsSpan(0, 4 + keyLength), value);
+            var (segment, offset, size) = Append(RecordType.Put, flags, head.AsSpan(0, 4 + keyLength), value);
             if (node.HasValue) _dead += node.ValueRecordSize;
-            node.SetValue(append.Segment, append.Offset, append.Size, value.Length, flags);
+            node.SetValue(segment, offset, size, value.Length, flags);
             node.Cache = flags == 0 && value.Length <= CacheLimit ? value.ToArray() : null;
         }
         finally { ArrayPool<byte>.Shared.Return(head); }
@@ -132,46 +134,46 @@ public sealed partial class CodaleDb
         switch (type)
         {
             case RecordType.Put:
-            {
-                var keyLength = BinaryPrimitives.ReadInt32LittleEndian(body);
-                var node = FindNode(Encoding.UTF8.GetString(body.Slice(4, keyLength)), create: true)!;
-                var value = body[(4 + keyLength)..];
-                if (node.HasValue) _dead += node.ValueRecordSize;
-                node.SetValue(segment, offset, size, value.Length, flags);
-                node.Cache = flags == 0 && value.Length <= CacheLimit ? value.ToArray() : null;
-                break;
-            }
+                {
+                    var keyLength = BinaryPrimitives.ReadInt32LittleEndian(body);
+                    var node = FindNode(Encoding.UTF8.GetString(body.Slice(4, keyLength)), create: true)!;
+                    var value = body[(4 + keyLength)..];
+                    if (node.HasValue) _dead += node.ValueRecordSize;
+                    node.SetValue(segment, offset, size, value.Length, flags);
+                    node.Cache = flags == 0 && value.Length <= CacheLimit ? value.ToArray() : null;
+                    break;
+                }
             case RecordType.Remove:
                 ApplyRemove(Encoding.UTF8.GetString(body), size);
                 break;
             case RecordType.Vector:
-            {
-                var keyLength = BinaryPrimitives.ReadInt32LittleEndian(body);
-                var node = FindNode(Encoding.UTF8.GetString(body.Slice(4, keyLength)), create: true)!;
-                var modelLength = BinaryPrimitives.ReadUInt16LittleEndian(body[(4 + keyLength)..]);
-                var model = ModelName(body.Slice(6 + keyLength, modelLength));
-                SetVector(node, model, body[(6 + keyLength + modelLength)..].ToArray(), size);
-                break;
-            }
+                {
+                    var keyLength = BinaryPrimitives.ReadInt32LittleEndian(body);
+                    var node = FindNode(Encoding.UTF8.GetString(body.Slice(4, keyLength)), create: true)!;
+                    var modelLength = BinaryPrimitives.ReadUInt16LittleEndian(body[(4 + keyLength)..]);
+                    var model = ModelName(body.Slice(6 + keyLength, modelLength));
+                    SetVector(node, model, body[(6 + keyLength + modelLength)..].ToArray(), size);
+                    break;
+                }
             case RecordType.Index:
-            {
-                var parts = DecodeStrings(body, 3);
-                ApplyIndex(FindNode(parts[0], create: true)!, parts[1], parts[2], segment, offset, size);
-                break;
-            }
+                {
+                    var parts = DecodeStrings(body, 3);
+                    ApplyIndex(FindNode(parts[0], create: true)!, parts[1], parts[2], segment, offset, size);
+                    break;
+                }
             case RecordType.Link:
-            {
-                var parts = DecodeStrings(body, 3);
-                ApplyLink(parts[0], parts[1], parts[2]);
-                break;
-            }
+                {
+                    var parts = DecodeStrings(body, 3);
+                    ApplyLink(parts[0], parts[1], parts[2]);
+                    break;
+                }
             case RecordType.Unlink:
-            {
-                var parts = DecodeStrings(body, 3);
-                _dead += size;
-                ApplyUnlink(parts[0], parts[1], parts[2]);
-                break;
-            }
+                {
+                    var parts = DecodeStrings(body, 3);
+                    _dead += size;
+                    ApplyUnlink(parts[0], parts[1], parts[2]);
+                    break;
+                }
             case RecordType.Begin:
                 _dead += size;
                 _unfinishedBatch ??= (segment, offset);
@@ -268,7 +270,7 @@ public sealed partial class CodaleDb
             {
                 if (!create) return null;
                 next = new TNode(part.ToString(), node);
-                (node.Children ??= new Dictionary<string, TNode>(StringComparer.Ordinal))[next.Name] = next;
+                (node.Children ??= [with(StringComparer.Ordinal)])[next.Name] = next;
             }
             node = next;
             if (cut < 0) return node;

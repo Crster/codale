@@ -1,7 +1,5 @@
 using System.ComponentModel;
 
-using Codale.App.Services;
-
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Codale.App.ViewModels;
@@ -17,8 +15,6 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
 {
     /// <summary>Set while the list rebuilds, so re-selecting the current row is not a write.</summary>
     private bool _loading;
-    private bool _switching;
-
     private readonly AppSettingsStore _settings;
 
     public CliEndpointViewModel(AppSettingsStore settings)
@@ -46,10 +42,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (_chat is not null)
-        {
-            _chat.PropertyChanged -= OnChatPropertyChanged;
-        }
+        _chat?.PropertyChanged -= OnChatPropertyChanged;
 
         _chat = chat;
         chat.PropertyChanged += OnChatPropertyChanged;
@@ -73,7 +66,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
     private ByokProvider? ActiveProvider => _settings.FindByok(_chat?.EndpointName);
 
     /// <summary>False while the chat in front runs a turn (a switch restarts its CLI and would cut the turn off), and for a terminal CLI's session, which has no provider of its own to switch.</summary>
-    public bool CanSwitch => !_switching && _chat is not { IsBusy: true } and not { IsTerminalSession: true } and not { IsConnecting: true };
+    public bool CanSwitch { get => !field && _chat is not { IsBusy: true } and not { IsTerminalSession: true } and not { IsConnecting: true }; private set; }
 
     /// <summary>True when a BYOK provider (not Default) is in use.</summary>
     public bool IsActive => ActiveProvider is { IsAccount: false };
@@ -101,10 +94,11 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
             var at = identity.IndexOf('@');
             if (at >= 0) identity = identity[..at];
             var words = identity.Split([' ', '.', '_', '-', '+'], StringSplitOptions.RemoveEmptyEntries)
-                .Select(word => new string(word.Where(char.IsLetterOrDigit).ToArray()))
+                .Select(word => new string([.. word.Where(char.IsLetterOrDigit)]))
                 .Where(word => word.Length > 0).ToArray();
-            if (words.Length == 0) return "A";
-            return (words.Length > 1 ? $"{words[0][0]}{words[^1][0]}" : words[0][..Math.Min(2, words[0].Length)])
+            return words.Length == 0
+                ? "A"
+                : (words.Length > 1 ? $"{words[0][0]}{words[^1][0]}" : words[0][..Math.Min(2, words[0].Length)])
                 .ToUpperInvariant();
         }
     }
@@ -231,7 +225,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
 
     private async Task SwitchAsync(ProviderChoice choice)
     {
-        _switching = true;
+        CanSwitch = true;
         OnPropertyChanged(nameof(CanSwitch));
         try
         {
@@ -244,7 +238,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
         }
         finally
         {
-            _switching = false;
+            CanSwitch = false;
             Reload();
             OnPropertyChanged(nameof(CanSwitch));
         }
@@ -261,9 +255,6 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _settings.Changed -= OnSettingsChanged;
-        if (_chat is not null)
-        {
-            _chat.PropertyChanged -= OnChatPropertyChanged;
-        }
+        _chat?.PropertyChanged -= OnChatPropertyChanged;
     }
 }

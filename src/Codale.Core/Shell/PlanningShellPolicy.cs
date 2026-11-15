@@ -1,13 +1,14 @@
-using System.Text.RegularExpressions;
 using System.Management.Automation.Language;
+using System.Text.RegularExpressions;
 
 namespace Codale.Core.Shell;
 
 /// <summary>A conservative subset of shell syntax that permits file inspection during planning.</summary>
 public static class PlanningShellPolicy
 {
-    private static readonly HashSet<string> Commands = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly HashSet<string> Commands =
+    [
+        with(StringComparer.OrdinalIgnoreCase),
         "Get-Content", "Get-ChildItem", "Get-Item", "Get-Location", "Test-Path", "Resolve-Path",
         "Select-String", "Select-Object", "Measure-Object", "Get-FileHash",
         "Format-Table", "Format-List", "Out-String", "Write-Output",
@@ -16,7 +17,7 @@ public static class PlanningShellPolicy
         "Compare-Object", "Split-Path", "Join-Path", "Convert-Path", "ConvertFrom-Json", "ConvertTo-Json", "ConvertTo-Csv",
         "ConvertFrom-Csv", "Write-Host", "Out-Host", "Sort-Object", "Group-Object", "Format-Wide", "Select-Xml",
         "rg", "grep", "cat", "head", "tail", "wc", "ls", "pwd", "findstr", "dir", "type", "echo", "whoami", "hostname",
-    };
+    ];
 
     /// <summary>Reads may proceed during planning; writes and plan review still need approval.</summary>
     public static bool AllowsToolInspection(string toolName, string? command = null) => toolName switch
@@ -65,14 +66,15 @@ public static class PlanningShellPolicy
 
     private sealed class InspectionValidator
     {
-        private readonly HashSet<string> _locals = new(StringComparer.OrdinalIgnoreCase);
-        private static readonly HashSet<string> Reserved = new(StringComparer.OrdinalIgnoreCase)
-        {
+        private readonly HashSet<string> _locals = [with(StringComparer.OrdinalIgnoreCase)];
+        private static readonly HashSet<string> Reserved =
+        [
+            with(StringComparer.OrdinalIgnoreCase),
             "true", "false", "null", "args", "input", "this", "_", "foreach", "switch",
             "Host", "HOME", "PID", "Error", "ExecutionContext", "ShellId", "StackTrace",
             "LASTEXITCODE", "NestedPromptLevel", "Matches", "MyInvocation", "OFS",
             "OutputEncoding", "EnabledExperimentalFeatures", "IsWindows", "IsLinux", "IsMacOS", "IsCoreCLR",
-        };
+        ];
 
         public bool Allows(Ast ast) => ast switch
         {
@@ -165,12 +167,10 @@ public static class PlanningShellPolicy
             }
 
             // Keep executable ripgrep options literal so they cannot be assembled from variables.
-            if (name.Value.Equals("rg", StringComparison.OrdinalIgnoreCase))
-                return c.CommandElements.Skip(1).All(a => a is StringConstantExpressionAst or CommandParameterAst) &&
+            return !name.Value.Equals("rg", StringComparison.OrdinalIgnoreCase) || c.CommandElements.Skip(1).All(a => a is StringConstantExpressionAst or CommandParameterAst) &&
                     !c.CommandElements.Skip(1).Any(a => Regex.IsMatch(
                         a is StringConstantExpressionAst s ? s.Value : a.Extent.Text,
                         @"^--(?:pre|hostname-bin)(?:=|$)", RegexOptions.IgnoreCase));
-            return true;
         }
     }
 }

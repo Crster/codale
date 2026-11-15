@@ -1,5 +1,3 @@
-using Codale.Core.Agents;
-
 namespace Codale.App.ViewModels;
 
 public sealed partial class ChatViewModel

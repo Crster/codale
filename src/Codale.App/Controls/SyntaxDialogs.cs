@@ -1,5 +1,4 @@
 using Codale.App.Services;
-using Codale.Core.Helper;
 using Codale.Core.Syntax;
 
 using Microsoft.UI.Xaml;

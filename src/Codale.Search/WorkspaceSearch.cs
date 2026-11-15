@@ -47,7 +47,7 @@ public sealed record SearchHit
 /// walks the tree itself, applies each folder's .gitignore, skips hidden entries, symbolic
 /// links and binary files, and streams the matching lines as they are found.
 /// </summary>
-public sealed class WorkspaceSearch
+public sealed class WorkspaceSearch(string root)
 {
     /// <summary>Files larger than this are not searched; matches per file are capped below, so a big generated file still cannot flood the results.</summary>
     private const long MaxFileBytes = 32_000_000;
@@ -57,9 +57,7 @@ public sealed class WorkspaceSearch
 
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(2);
 
-    private readonly string _root;
-
-    public WorkspaceSearch(string root) => _root = Path.GetFullPath(root);
+    private readonly string _root = Path.GetFullPath(root);
 
     /// <summary>
     /// Every file under the root that is not ignored, relative to it. Hidden entries, links and

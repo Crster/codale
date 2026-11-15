@@ -1,4 +1,3 @@
-using Codale.Agents.Providers;
 using Codale.Core.Agents;
 
 namespace Codale.Agents.Tests;
@@ -66,7 +65,7 @@ public sealed class AccountSetupTests
             return Task.FromResult(succeeds);
         }, p => { Assert.Same(profile, p); events.Add("remove selected-account"); });
         Assert.Equal(succeeds, removed);
-        Assert.Equal(succeeds ? new[] { "sign out selected-account", "remove selected-account" } : new[] { "sign out selected-account" }, events);
+        Assert.Equal(succeeds ? new[] { "sign out selected-account", "remove selected-account" } : ["sign out selected-account"], events);
     }
 
     [Fact]

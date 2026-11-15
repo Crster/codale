@@ -12,11 +12,11 @@ namespace Codale.Agents.Claude;
 /// Drives one <c>claude</c> child process over the stream-json protocol and
 /// projects it onto <see cref="IAgentSession"/>.
 /// </summary>
-public sealed class ClaudeAgentSession : IAgentSession
+public sealed class ClaudeAgentSession(ClaudeSessionOptions options) : IAgentSession
 {
     private static readonly JsonSerializerOptions WireJson = new(JsonSerializerDefaults.Web);
 
-    private readonly ClaudeSessionOptions _options;
+    private readonly ClaudeSessionOptions _options = options;
     private readonly ClaudeStreamParser _parser = new();
     private readonly Channel<AgentEvent> _events =
         Channel.CreateUnbounded<AgentEvent>(new UnboundedChannelOptions { SingleReader = false, SingleWriter = true });
@@ -33,13 +33,7 @@ public sealed class ClaudeAgentSession : IAgentSession
     private int _controlRequestCounter;
     private readonly List<string> _stderr = [];
 
-    public ClaudeAgentSession(ClaudeSessionOptions options)
-    {
-        _options = options;
-        SessionId = options.ResumeSessionId ?? options.SessionId?.ToString();
-    }
-
-    public string? SessionId { get; private set; }
+    public string? SessionId { get; private set; } = options.ResumeSessionId ?? options.SessionId?.ToString();
 
     public ChannelReader<AgentEvent> Events => _events.Reader;
 
@@ -195,10 +189,10 @@ public sealed class ClaudeAgentSession : IAgentSession
     }
 
     /// <summary>The efforts apply_flag_settings accepts; "max" exists only as a spawn flag.</summary>
-    private static readonly HashSet<string> LiveSwitchEfforts = new(StringComparer.Ordinal)
-    {
-        "low", "medium", "high", "xhigh",
-    };
+    private static readonly HashSet<string> LiveSwitchEfforts =
+    [
+with(StringComparer.Ordinal),         "low", "medium", "high", "xhigh",
+    ];
 
     /// <summary>
     /// Live model and effort switches over the control channel: <c>set_model</c> for the

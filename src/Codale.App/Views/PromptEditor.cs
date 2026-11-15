@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 
 using Codale.Core.Text;
@@ -25,36 +26,32 @@ internal sealed class PromptEditor
     /// <summary>What RichEdit reports in place of an embedded object.</summary>
     private const char ObjectChar = '￼';
 
-    private readonly RichEditBox _box;
-
     /// <summary>The pills in document order: the n-th object character is the n-th pill.</summary>
     private readonly List<PromptPill> _pills = [];
 
     /// <summary>The document's text as RichEdit reports it, pills as <see cref="ObjectChar"/>.</summary>
     private string _raw = "";
 
-    private string? _text;
-
     /// <summary>Set while this class edits the document, so its own changes are not re-read as typing.</summary>
     private bool _editing;
 
     public PromptEditor(RichEditBox box)
     {
-        _box = box;
+        Box = box;
 
         // The composer keeps its own undo history (see ChatTab); RichEdit's would bring back
         // pills behind this class's back.
-        _box.Document.UndoLimit = 0;
-        _box.DisabledFormattingAccelerators = DisabledFormattingAccelerators.All;
-        _box.TextChanged += OnBoxTextChanged;
-        _box.SelectionChanged += (_, _) => SelectionChanged?.Invoke(this, EventArgs.Empty);
-        _box.CopyingToClipboard += OnCopying;
-        _box.CuttingToClipboard += OnCutting;
+        Box.Document.UndoLimit = 0;
+        Box.DisabledFormattingAccelerators = DisabledFormattingAccelerators.All;
+        Box.TextChanged += OnBoxTextChanged;
+        Box.SelectionChanged += (_, _) => SelectionChanged?.Invoke(this, EventArgs.Empty);
+        Box.CopyingToClipboard += OnCopying;
+        Box.CuttingToClipboard += OnCutting;
         // Handled events too: RichEdit takes the tap for itself to place the caret.
-        _box.AddHandler(UIElement.TappedEvent, new TappedEventHandler(OnTapped), handledEventsToo: true);
-        _box.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(OnPointerMoved), handledEventsToo: true);
-        _box.AddHandler(UIElement.PointerExitedEvent, new PointerEventHandler(OnPointerExited), handledEventsToo: true);
-        _box.ActualThemeChanged += (_, _) => RedrawPills();
+        Box.AddHandler(UIElement.TappedEvent, new TappedEventHandler(OnTapped), handledEventsToo: true);
+        Box.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(OnPointerMoved), handledEventsToo: true);
+        Box.AddHandler(UIElement.PointerExitedEvent, new PointerEventHandler(OnPointerExited), handledEventsToo: true);
+        Box.ActualThemeChanged += (_, _) => RedrawPills();
     }
 
     /// <summary>Raised after the text changed, by typing or by <see cref="SetText"/>.</summary>
@@ -65,23 +62,24 @@ internal sealed class PromptEditor
     /// <summary>A pill was clicked: preview the attachment.</summary>
     public event EventHandler<PromptPill>? PillInvoked;
 
-    public RichEditBox Box => _box;
+    public RichEditBox Box { get; }
 
-    public bool IsEnabled => _box.IsEnabled;
+    public bool IsEnabled => Box.IsEnabled;
 
-    public FocusState FocusState => _box.FocusState;
+    public FocusState FocusState => Box.FocusState;
 
-    public bool Focus(FocusState state) => _box.Focus(state);
+    public bool Focus(FocusState state) => Box.Focus(state);
 
     /// <summary>The prompt as plain text, each pill read as its mention or URL; line breaks are \r.</summary>
-    public string Text => _text ??= BuildText();
+    [AllowNull]
+    public string Text { get => field ??= BuildText(); private set; }
 
     /// <summary>The pills, in order. Their offsets are not maintained; use <see cref="Text"/> for positions.</summary>
     public IReadOnlyList<PromptPill> Pills => _pills;
 
     public int SelectionStart
     {
-        get => ToText(_box.Document.Selection.StartPosition);
+        get => ToText(Box.Document.Selection.StartPosition);
         set => Select(value, 0);
     }
 
@@ -89,7 +87,7 @@ internal sealed class PromptEditor
     {
         get
         {
-            var selection = _box.Document.Selection;
+            var selection = Box.Document.Selection;
             return ToText(selection.EndPosition) - ToText(selection.StartPosition);
         }
         set => Select(SelectionStart, value);
@@ -101,7 +99,7 @@ internal sealed class PromptEditor
         var text = Text;
         start = Math.Clamp(start, 0, text.Length);
         var end = Math.Clamp(start + Math.Max(0, length), start, text.Length);
-        _box.Document.Selection.SetRange(ToDocument(start, after: length > 0 ? false : true), ToDocument(end, after: true));
+        Box.Document.Selection.SetRange(ToDocument(start, after: length <= 0), ToDocument(end, after: true));
     }
 
     /// <summary>
@@ -155,7 +153,7 @@ internal sealed class PromptEditor
         _editing = true;
         try
         {
-            var document = _box.Document;
+            var document = Box.Document;
             document.GetRange(documentStart, documentEnd).SetText(TextSetOptions.None, "");
 
             var position = documentStart;
@@ -180,7 +178,7 @@ internal sealed class PromptEditor
         _pills.RemoveRange(pillsBefore, pillsRemoved);
         _pills.InsertRange(pillsBefore, inserted);
         _raw = ReadDocument();
-        _text = null;
+        Text = null;
         if (CountObjects(_raw, 0, _raw.Length) != _pills.Count)
         {
             // RichEdit refused a pill or merged something: re-read rather than drift.
@@ -188,7 +186,7 @@ internal sealed class PromptEditor
         }
 
         var caretInDocument = ToDocument(Math.Min(caret, Text.Length), after: true);
-        _box.Document.Selection.SetRange(caretInDocument, caretInDocument);
+        Box.Document.Selection.SetRange(caretInDocument, caretInDocument);
         TextChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -202,7 +200,7 @@ internal sealed class PromptEditor
             return position;
         }
 
-        _box.Document.GetRange(position, position).SetText(TextSetOptions.None, text);
+        Box.Document.GetRange(position, position).SetText(TextSetOptions.None, text);
 
         // Normalized text maps one to one onto document characters.
         return position + text.Length;
@@ -210,11 +208,11 @@ internal sealed class PromptEditor
 
     private void InsertPill(int position, PromptPill pill)
     {
-        var scale = (float)(_box.XamlRoot?.RasterizationScale ?? 1.0);
-        var rendered = PromptPillBitmap.Render(pill, _box.ActualTheme, scale);
+        var scale = (float)(Box.XamlRoot?.RasterizationScale ?? 1.0);
+        var rendered = PromptPillBitmap.Render(pill, Box.ActualTheme, scale);
         // Not disposed here: RichEdit may still be reading it when InsertImage returns.
         var stream = new MemoryStream(rendered.Png);
-        _box.Document.GetRange(position, position).InsertImage(
+        Box.Document.GetRange(position, position).InsertImage(
             rendered.Width,
             rendered.Height,
             PromptPillBitmap.Ascent,
@@ -244,7 +242,7 @@ internal sealed class PromptEditor
         _editing = true;
         try
         {
-            _box.Document.SetText(TextSetOptions.None, "");
+            Box.Document.SetText(TextSetOptions.None, "");
         }
         finally
         {
@@ -253,7 +251,7 @@ internal sealed class PromptEditor
 
         _pills.Clear();
         _raw = "";
-        _text = null;
+        Text = null;
         SetText(text, caret, p => keep.Contains(p.Text) || extra(p));
     }
 
@@ -287,7 +285,7 @@ internal sealed class PromptEditor
         // by side, Delete before the first must take the first, though the texts alone would
         // match either way.
         var limit = Math.Min(old.Length, current.Length);
-        var prefixLimit = Math.Min(limit, Math.Max(0, _box.Document.Selection.StartPosition));
+        var prefixLimit = Math.Min(limit, Math.Max(0, Box.Document.Selection.StartPosition));
         var prefix = 0;
         while (prefix < prefixLimit && old[prefix] == current[prefix])
         {
@@ -314,7 +312,7 @@ internal sealed class PromptEditor
                 continue;
             }
 
-            _box.Document.GetRange(i, i + 1).GetText(TextGetOptions.UseObjectText, out var alt);
+            Box.Document.GetRange(i, i + 1).GetText(TextGetOptions.UseObjectText, out var alt);
             if (PromptPills.Whole(alt ?? "") is { } pill)
             {
                 added.Add(pill);
@@ -339,7 +337,7 @@ internal sealed class PromptEditor
             {
                 for (var i = strays.Count - 1; i >= 0; i--)
                 {
-                    _box.Document.GetRange(strays[i], strays[i] + 1).SetText(TextSetOptions.None, "");
+                    Box.Document.GetRange(strays[i], strays[i] + 1).SetText(TextSetOptions.None, "");
                 }
             }
             finally
@@ -363,12 +361,12 @@ internal sealed class PromptEditor
         }
 
         _raw = current;
-        _text = null;
+        Text = null;
     }
 
     private string ReadDocument()
     {
-        _box.Document.GetText(TextGetOptions.None, out var text);
+        Box.Document.GetText(TextGetOptions.None, out var text);
         text ??= "";
 
         // RichEdit always ends the document with a paragraph mark of its own.
@@ -488,7 +486,7 @@ internal sealed class PromptEditor
     /// <summary>The selection as prompt text, so a copied pill pastes back as its mention or link.</summary>
     private string SelectedText()
     {
-        var selection = _box.Document.Selection;
+        var selection = Box.Document.Selection;
         var start = ToText(selection.StartPosition);
         var end = ToText(selection.EndPosition);
         return Text[start..Math.Max(start, end)].Replace("\r", "\r\n");
@@ -506,7 +504,7 @@ internal sealed class PromptEditor
         if (CopySelection())
         {
             // Through the selection, as typing would, so the change is read back by Resync.
-            _box.Document.Selection.SetText(TextSetOptions.None, "");
+            Box.Document.Selection.SetText(TextSetOptions.None, "");
         }
     }
 
@@ -533,20 +531,20 @@ internal sealed class PromptEditor
 
     private void OnPointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (_box is PillRichEditBox pillBox)
+        if (Box is PillRichEditBox pillBox)
         {
-            pillBox.SetHandCursor(_pills.Count > 0 && PillAt(e.GetCurrentPoint(_box).Position) is not null);
+            pillBox.SetHandCursor(_pills.Count > 0 && PillAt(e.GetCurrentPoint(Box).Position) is not null);
         }
     }
 
     private void OnPointerExited(object sender, PointerRoutedEventArgs e)
     {
-        (_box as PillRichEditBox)?.SetHandCursor(false);
+        (Box as PillRichEditBox)?.SetHandCursor(false);
     }
 
     private void OnTapped(object sender, TappedRoutedEventArgs e)
     {
-        if (PillAt(e.GetPosition(_box)) is { } pill)
+        if (PillAt(e.GetPosition(Box)) is { } pill)
         {
             e.Handled = true;
             PillInvoked?.Invoke(this, pill);
@@ -556,7 +554,7 @@ internal sealed class PromptEditor
     /// <summary>The pill drawn under a point in the box, if any.</summary>
     private PromptPill? PillAt(Windows.Foundation.Point point)
     {
-        var hit = _box.Document.GetRangeFromPoint(point, PointOptions.ClientCoordinates);
+        var hit = Box.Document.GetRangeFromPoint(point, PointOptions.ClientCoordinates);
         foreach (var candidate in new[] { hit.StartPosition, hit.StartPosition - 1 })
         {
             if (candidate < 0 || candidate >= _raw.Length || _raw[candidate] != ObjectChar)
@@ -564,7 +562,7 @@ internal sealed class PromptEditor
                 continue;
             }
 
-            _box.Document.GetRange(candidate, candidate + 1).GetRect(PointOptions.ClientCoordinates, out var rect, out _);
+            Box.Document.GetRange(candidate, candidate + 1).GetRect(PointOptions.ClientCoordinates, out var rect, out _);
             // A little slack around the drawn pill: the text rect is tight and the pill is small.
             rect.X -= 4;
             rect.Y -= 4;

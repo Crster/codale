@@ -1,3 +1,5 @@
+using Codale.Db.Events;
+
 namespace Codale.Db;
 
 /// <summary>Change events (<c>Watch</c>) and pub/sub (<c>Publish</c>/<c>Subscribe</c>). Both deliver off the writer's thread.</summary>
