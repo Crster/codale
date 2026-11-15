@@ -13,8 +13,10 @@ namespace Codale.Search;
 /// Ranking fuses BM25 with vectors from the database's configured embedder. The library defaults to hashed
 /// n-grams; the app supplies the user's selected embedding provider, or disables vector matching.
 /// </remarks>
-public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
+public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? sources = null) : IDisposable
 {
+    private readonly ISourceIndexes _sources = sources ?? SharedSourceIndexes.Instance;
+
     /// <summary>The cosine a trained embedding model's neighbour needs without lexical support.</summary>
     private const float ModelMatchSimilarity = 0.3f;
     // UTF-8 bytes are a conservative upper bound on byte-tokenizer tokens, including the briefing envelope.
@@ -77,7 +79,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
             // Every search, ghost-text lookup and chat turn asks for a refresh; one that just finished is still current,
             // and the file watcher marks the scan stale on a real change. Rescanning on each ask is CPU spent for nothing.
             if (_lastRefresh.TryGetValue(worktree, out var finished) && Environment.TickCount64 - finished < RefreshCooldownMs
-                && SourceIndex.For(worktree).IsUpToDate
+                && _sources.For(worktree).IsUpToDate
                 && _revisions.TryGetValue(worktree, out var knownRevision) && knownRevision == Revision(worktree))
                 return Task.CompletedTask;
             return _refreshes[worktree] = Task.Run(async () =>
@@ -91,7 +93,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db) : IDisposable
                 {
                     IndexingChanged?.Invoke();
                     _stopping.Token.ThrowIfCancellationRequested();
-                    var index = SourceIndex.For(worktree);
+                    var index = _sources.For(worktree);
                     // HEAD changes and lost watcher events must not leave a branch's snapshot reusable forever.
                     var revision = Revision(worktree);
                     var watched = _revisions.TryGetValue(worktree, out var previousRevision);

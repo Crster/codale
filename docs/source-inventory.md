@@ -135,6 +135,15 @@ Layering change: `ISmartRequestStatus` and `SmartRequestWorkflow` moved from `Co
 
 Provider routing: `SmartFeatureRouter` now depends on `ISmartProviderClient` (with `ConfigurationKey`, `FeatureIdentity` and `CompleteAsync` added to the interface) and `SmartFeatureRouterTests` (14 cases) cover the role mapping, fallbacks, the Decision role, `HasGeneration` and routing of completions. Item 3 is complete.
 
+### Workspace index ownership (2026-11-15)
+
+`ISourceIndexes` in `Codale.Search` supplies the source index for a project root. `ProjectKnowledgeIndex` takes it as an optional constructor argument and defaults to `SharedSourceIndexes`, the existing per-root cache, so behaviour is unchanged. `KnowledgeSourceSeamTests` (2 cases) prove that refresh reads through the injected provider and that the default is the shared cache. The Search suite (335) and the app build pass.
+
+Still open for item 4, and needs decisions:
+- The source index is a process-wide static cache (`SourceIndex.For`). The editor, search, composer prediction and health views still call it directly.
+- The index model is persisted as `workspace-model.json` in the project's knowledge folder, outside the workspace database. Deciding whether it moves into the database is a design choice.
+- `FeatureLog` still has a path-based constructor that opens its own `HistoryStore`. It is used by tests only; removing it means updating about twenty test call sites.
+
 ### Store caller migration (2026-11-15)
 
 `FeatureService` now receives the workspace data context and creates `FeatureLog` instances from its history store. `ProjectCommandService` accepts a configuration-store resolver; the application supplies one backed by its workspace data factory. Feature log and saved-command operations therefore use the composed pool instead of creating stores through the static workspace fallback. Tests verify that both workflows persist normally and reject access after their owner is disposed. Standalone and MCP callers retain their existing defaults and process boundaries.
