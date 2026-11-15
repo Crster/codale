@@ -501,10 +501,7 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
         {
             var picker = new Windows.Storage.Pickers.FolderPicker { SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.ComputerFolder };
             picker.FileTypeFilter.Add("*");
-            if (Owner?.WindowHandle is { } hwnd)
-            {
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-            }
+            PickerOwner.Attach(picker, Owner?.WindowHandle);
 
             if (await picker.PickSingleFolderAsync() is { } folder)
             {

@@ -903,9 +903,7 @@ public sealed partial class EditorTab : UserControl
         {
             // The App SDK picker, unlike the WinRT one, can open in an arbitrary folder,
             // so an untitled buffer starts out in the workspace it was created from.
-            var windowId = Owner?.WindowHandle is { } hwnd
-                ? Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd)
-                : default;
+            var windowId = PickerOwner.WindowId(Owner?.WindowHandle);
             var picker = new Microsoft.Windows.Storage.Pickers.FileSavePicker(windowId)
             {
                 SuggestedFileName = ViewModel.FileName ?? "Untitled",

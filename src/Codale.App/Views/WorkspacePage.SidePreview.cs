@@ -100,13 +100,7 @@ public sealed partial class WorkspacePage
         {
             _sideDiffViewModel = ViewModel.CreateDiffViewer();
             _sideDiff = new DiffTab().WithViewModel(_sideDiffViewModel);
-            _sideDiff.FileOpenRequested += (_, relativePath) =>
-            {
-                if (ResolveGitPath(relativePath) is { } absolute)
-                {
-                    _ = ShowFileBesideAsync(absolute);
-                }
-            };
+            _sideDiff.FileOpenRequested += (_, relativePath) => OpenRepositoryFile(relativePath, beside: true);
         }
 
         var absolutePath = ResolveWorkspacePath(path);

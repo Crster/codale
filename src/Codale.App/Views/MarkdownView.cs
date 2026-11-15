@@ -1,6 +1,7 @@
 using Codale.App.Services;
 using Codale.App.ViewModels;
 using Codale.Core.Markdown;
+using Codale.Core.Text;
 
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Text;
@@ -31,7 +32,6 @@ public sealed class MarkdownView : StackPanel
 
     /// <summary>Largest accepted data: URI payload, base64 characters; a screenshot fits,
     /// a paste that would wedge the stream does not.</summary>
-    private const int MaxDataImageBase64 = 12 * 1024 * 1024;
 
     /// <summary>While a reply streams, deltas land many times a second; this debounces
     /// the rebuild so each frame parses at most once.</summary>
@@ -775,7 +775,7 @@ public sealed class MarkdownView : StackPanel
                         {
                             hyperlink.NavigateUri = uri;
                         }
-                        else if (FileTarget(link.Url) is { } target)
+                        else if (MarkdownLinks.FileTarget(link.Url) is { } target)
                         {
                             hyperlink.Click += (_, _) => FileLinkClicked?.Invoke(this, target);
                         }
@@ -866,7 +866,7 @@ public sealed class MarkdownView : StackPanel
             MaxHeight = 320,
             Margin = new Thickness(0, 2, 0, 4),
         };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(frame, InlineText(image.Content));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(frame, MarkdownLinks.InlineText(image.Content));
 
         if (_images.TryGetValue(key, out var cached) || _imagesInUse.TryGetValue(key, out cached))
         {
@@ -893,7 +893,7 @@ public sealed class MarkdownView : StackPanel
 
         if (isData)
         {
-            if (DataImageBytes(image.Url) is not { } bytes)
+            if (MarkdownLinks.DecodeDataImage(image.Url) is not { } bytes)
             {
                 _failedImages.Add(key);
                 return null;
@@ -961,25 +961,6 @@ public sealed class MarkdownView : StackPanel
     }
 
     /// <summary>The bytes of a data:image/...;base64 URI, or null when malformed or oversized.</summary>
-    private static byte[]? DataImageBytes(string url)
-    {
-        var comma = url.IndexOf(',');
-        if (comma < 0
-            || !url[..comma].EndsWith(";base64", StringComparison.OrdinalIgnoreCase)
-            || url.Length - comma - 1 > MaxDataImageBase64)
-        {
-            return null;
-        }
-
-        try
-        {
-            return Convert.FromBase64String(url[(comma + 1)..]);
-        }
-        catch (FormatException)
-        {
-            return null;
-        }
-    }
 
     /// <summary>A data URI decodes from bytes rather than a file, so the bitmap fills from a
     /// stream after the frame is placed; a corrupt payload reports through <paramref name="failed"/>.</summary>
@@ -1016,7 +997,7 @@ public sealed class MarkdownView : StackPanel
         {
             hyperlink.NavigateUri = uri;
         }
-        else if (FileTarget(image.Url) is { } target)
+        else if (MarkdownLinks.FileTarget(image.Url) is { } target)
         {
             hyperlink.Click += (_, _) => FileLinkClicked?.Invoke(this, target);
         }
@@ -1025,18 +1006,7 @@ public sealed class MarkdownView : StackPanel
     }
 
     /// <summary>An inline list as plain text — an image's alt line, for tools that read it.</summary>
-    private static string InlineText(IReadOnlyList<MarkdownInline> content) => string.Concat(content.Select(TextOf));
 
-    private static string TextOf(MarkdownInline inline) => inline switch
-    {
-        MarkdownInline.Text text => text.Value,
-        MarkdownInline.CodeSpan code => code.Value,
-        MarkdownInline.Emphasis emphasis => InlineText(emphasis.Content),
-        MarkdownInline.Strike struck => InlineText(struck.Content),
-        MarkdownInline.Link link => InlineText(link.Content),
-        MarkdownInline.Image image => InlineText(image.Content),
-        _ => "",
-    };
 
     /// <summary>
     /// A file path or line in the transcript was clicked. Static because the view is
@@ -1063,70 +1033,6 @@ public sealed class MarkdownView : StackPanel
         return hyperlink;
     }
 
-    /// <summary>The file a markdown link points at: a relative or absolute path, a file: URI, or either with #L42.</summary>
-    private static LinkMatch? FileTarget(string url)
-    {
-        var line = 0;
-        var col = 0;
-        var endLine = 0;
-        var endCol = 0;
-
-        var hash = url.LastIndexOf('#');
-        if (hash >= 0)
-        {
-            var fragment = url[(hash + 1)..];
-            url = url[..hash];
-            (line, col, endLine, endCol) = LinkFinder.ParseHashLocation(fragment);
-        }
-
-        if (url.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
-        {
-            if (Uri.TryCreate(url, UriKind.Absolute, out var file))
-            {
-                url = file.LocalPath;
-            }
-            else
-            {
-                url = url[5..].TrimStart('/');
-                if (url.Length >= 2 && url[1] == ':')
-                {
-                    // e.g. "X:/..."
-                }
-                else
-                {
-                    url = "/" + url;
-                }
-            }
-        }
-
-        var decoded = Uri.UnescapeDataString(url).Trim();
-        var reference = LinkFinder.AsFileReference(decoded);
-        if (reference is null && (decoded.Contains('/') || decoded.Contains('\\') || (decoded.Length >= 2 && decoded[1] == ':')))
-        {
-            var matches = LinkFinder.Find(decoded);
-            if (matches.Count == 1 && matches[0].Index == 0 && matches[0].Length == decoded.Length)
-            {
-                reference = matches[0];
-            }
-            else
-            {
-                reference = new LinkMatch(0, decoded.Length, decoded, null, decoded);
-            }
-        }
-
-        if (reference is { Path: not null })
-        {
-            return reference with
-            {
-                Line = reference.Line > 0 ? reference.Line : line,
-                Column = reference.Column > 0 ? reference.Column : col,
-                EndLine = reference.EndLine > 0 ? reference.EndLine : endLine,
-                EndColumn = reference.EndColumn > 0 ? reference.EndColumn : endCol,
-            };
-        }
-
-        return null;
-    }
 
     /// <summary>Theme brushes by name where the lookup reaches them, fixed colours
     /// where it does not - the fallbacks read on dark and light alike.</summary>

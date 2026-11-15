@@ -35,13 +35,13 @@ public sealed class McpServerSettings
 
     private readonly string _projectPath;
     private readonly ApplicationDatabase _database;
-    private readonly string _baseDirectory;
+    private readonly McpHostExecutables _hosts;
 
     public McpServerSettings(string projectPath, ApplicationDatabase database, string? baseDirectory = null)
     {
         _projectPath = projectPath;
         _database = database;
-        _baseDirectory = baseDirectory ?? AppContext.BaseDirectory;
+        _hosts = new McpHostExecutables(baseDirectory ?? AppContext.BaseDirectory, StagingRoot());
     }
 
     /// <summary>Allow unless the user changed it; a global preference.</summary>
@@ -117,6 +117,13 @@ public sealed class McpServerSettings
 
     /// <summary>The three modes in one string, so a session can tell when they changed since it started.</summary>
     public string ModesKey() => McpToolPolicy.ModesKey(BrowserMode, ComputerMode, PhoneMode);
+
+    /// <summary>
+    /// What the agent is told about the tools it was given; null when none of them is on. Pass the servers already
+    /// computed for the session to skip a second scan.
+    /// </summary>
+    public string? Directive(IReadOnlyList<McpServerSpec>? servers = null) =>
+        McpConfigText.Directive(servers ?? Servers(), BrowserName, ComputerName, PhoneName);
 
     public bool PhoneAvailable => File.Exists(ExePath("Codale.Mcp.Phone"));
 
@@ -325,15 +332,15 @@ public sealed class McpServerSettings
             {
                 // Last, because --mcp-config takes any number of values and would swallow a trailing prompt.
                 "claude" => StageClaude(key, servers, tail, powershell),
-                "copilot" => $"copilot --additional-mcp-config {Quote(powershell, "@" + Stage("copilot", key, CopilotConfig(servers)))}{tail}",
-                "codex" => $"codex {CodexOverrides(powershell, servers)}{CodexFeatureOverrides(powershell)}{tail}",
-                "gemini" => WithEnv(powershell, "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
+                "copilot" => $"copilot --additional-mcp-config {McpConfigText.Quote(powershell, "@" + Stage("copilot", key, McpConfigText.CopilotConfig(servers)))}{tail}",
+                "codex" => $"codex {McpConfigText.CodexOverrides(powershell, servers)}{McpConfigText.CodexFeatureOverrides(powershell, CodexFeatures())}{tail}",
+                "gemini" => McpConfigText.WithEnv(powershell, "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
                     StageSettings("gemini", key, servers, Path.Combine(programData, "gemini-cli", "settings.json"), "GEMINI_CLI_SYSTEM_SETTINGS_PATH"),
                     "gemini" + tail),
-                "qwen" => WithEnv(powershell, "QWEN_CODE_SYSTEM_SETTINGS_PATH",
+                "qwen" => McpConfigText.WithEnv(powershell, "QWEN_CODE_SYSTEM_SETTINGS_PATH",
                     StageSettings("qwen", key, servers, Path.Combine(programData, "qwen-code", "settings.json"), "QWEN_CODE_SYSTEM_SETTINGS_PATH"),
                     "qwen" + tail),
-                "opencode" => WithEnv(powershell, "OPENCODE_CONFIG", StageOpenCode(key, servers), "opencode" + tail),
+                "opencode" => McpConfigText.WithEnv(powershell, "OPENCODE_CONFIG", StageOpenCode(key, servers), "opencode" + tail),
                 _ => null,
             };
         }
@@ -361,9 +368,9 @@ public sealed class McpServerSettings
         sb.Append("claude");
         sb.Append(tail);
         sb.Append(" --mcp-config ");
-        sb.Append(Quote(powershell, configPath));
+        sb.Append(McpConfigText.Quote(powershell, configPath));
         sb.Append(" --settings ");
-        sb.Append(Quote(powershell, settingsPath));
+        sb.Append(McpConfigText.Quote(powershell, settingsPath));
         if (ClaudeChrome() is { } chrome)
         {
             sb.Append(chrome ? " --chrome" : " --no-chrome");
@@ -372,7 +379,7 @@ public sealed class McpServerSettings
         if (ClaudeDisallowedTools() is { } disallowed)
         {
             sb.Append(" --disallowedTools ");
-            sb.Append(Quote(powershell, disallowed));
+            sb.Append(McpConfigText.Quote(powershell, disallowed));
         }
 
         return sb.ToString();
@@ -447,78 +454,20 @@ public sealed class McpServerSettings
     }
 
     /// <summary>Copilot CLI's MCP document: <c>mcpServers</c> entries of <c>type: local</c> with every tool allowed.</summary>
-    private static string CopilotConfig(IReadOnlyList<McpServerSpec> servers)
-    {
-        var doc = System.Text.Json.Nodes.JsonNode.Parse(McpServerSpec.ToClaudeConfig(servers)!)!.AsObject();
-        foreach (var (_, entry) in doc["mcpServers"]!.AsObject())
-        {
-            entry!["type"] = "local";
-            entry["tools"] = new System.Text.Json.Nodes.JsonArray("*");
-        }
-
-        return doc.ToJsonString();
-    }
 
     /// <summary>
     /// Codex's per-launch config overrides, one <c>-c key=value</c> per field. Values are TOML literal
     /// strings ('...'), so Windows paths need no escaping.
     /// </summary>
-    private static string CodexOverrides(bool powershell, IReadOnlyList<McpServerSpec> servers)
-    {
-        static string Literal(string value) => $"'{value}'";
-
-        var parts = new List<string>();
-        foreach (var server in servers)
-        {
-            var key = $"mcp_servers.{server.Name}";
-            parts.Add($"-c {Quote(powershell, $"{key}.command={Literal(server.Command)}")}");
-            parts.Add($"-c {Quote(powershell, $"{key}.args=[{string.Join(",", server.Args.Select(Literal))}]")}");
-            if (server.Env is { Count: > 0 } env)
-            {
-                parts.Add($"-c {Quote(powershell, $"{key}.env={{{string.Join(",", env.Select(e => $"{e.Key}={Literal(e.Value)}"))}}}")}");
-            }
-
-            if (server.RequireApproval)
-            {
-                parts.Add($"-c {Quote(powershell, $"{key}.default_tools_approval_mode='prompt'")}");
-            }
-            else if (server.AutoApprove)
-            {
-                parts.Add($"-c {Quote(powershell, $"{key}.default_tools_approval_mode='approve'")}");
-            }
-        }
-
-        return string.Join(' ', parts);
-    }
 
     /// <summary>The Browser Use and Computer Use choices as Codex <c>-c features.*</c> overrides, each with a leading space.</summary>
-    private string CodexFeatureOverrides(bool powershell) =>
-        string.Concat(CodexFeatures().Select(f => $" -c {Quote(powershell, $"features.{f.Key}={(f.Value ? "true" : "false")}")}"));
 
     /// <summary>One argument, quoted for the shell the line was typed into.</summary>
-    private static string Quote(bool powershell, string value) => powershell
-        ? $"'{value.Replace("'", "''")}'"
-        : $"\"{value}\"";
 
     /// <summary>
     /// Runs <paramref name="command"/> with one environment variable set for it alone. PowerShell sets
     /// variables for the whole shell, so it is taken back when the CLI exits (finally runs on Ctrl+C too).
     /// </summary>
-    private static string WithEnv(bool powershell, string name, string value, string command) => powershell
-        ? $"& {{ $env:{name}={Quote(true, value)}; try {{ {command} }} finally {{ Remove-Item Env:{name} -ErrorAction SilentlyContinue }} }}"
-        : $"set \"{name}={value}\" && {command} & set \"{name}=\"";
-
-    private enum McpFileFormat
-    {
-        /// <summary><c>mcpServers</c> with a <c>type</c> field (Claude's <c>.mcp.json</c>).</summary>
-        Standard,
-
-        /// <summary><c>mcpServers</c> without <c>type</c>, plus <c>trust</c> (Gemini CLI and Qwen Code).</summary>
-        Gemini,
-
-        /// <summary>OpenCode's <c>mcp</c> map: <c>type: local</c>, a <c>command</c> array and an <c>environment</c> map.</summary>
-        OpenCode,
-    }
 
     /// <summary>
     /// Writes <paramref name="servers"/> into the MCP map of a CLI's JSON config,
@@ -527,8 +476,6 @@ public sealed class McpServerSettings
     /// </summary>
     private static void MergeServers(string path, IReadOnlyList<McpServerSpec> servers, McpFileFormat format)
     {
-        var mapKey = format == McpFileFormat.OpenCode ? "mcp" : "mcpServers";
-        var gemini = format == McpFileFormat.Gemini;
         try
         {
             var existed = File.Exists(path);
@@ -559,65 +506,7 @@ public sealed class McpServerSettings
                 doc = new();
             }
 
-            var map = doc[mapKey] as System.Text.Json.Nodes.JsonObject ?? new();
-            foreach (var key in map.Select(p => p.Key).Where(k => k.StartsWith("codale-", StringComparison.Ordinal) || OwnedNames.Contains(k)).ToList())
-            {
-                map.Remove(key);
-            }
-
-            if (servers.Count > 0 && System.Text.Json.Nodes.JsonNode.Parse(McpServerSpec.ToClaudeConfig(servers)!)?["mcpServers"] is System.Text.Json.Nodes.JsonObject ours)
-            {
-                foreach (var (name, entry) in ours.ToList())
-                {
-                    ours.Remove(name);
-                    if (format == McpFileFormat.OpenCode)
-                    {
-                        var spec = servers.First(s => s.Name == name);
-                        var local = new System.Text.Json.Nodes.JsonObject
-                        {
-                            ["type"] = "local",
-                            ["command"] = new System.Text.Json.Nodes.JsonArray(
-                                new[] { spec.Command }.Concat(spec.Args).Select(a => (System.Text.Json.Nodes.JsonNode)a).ToArray()),
-                            ["enabled"] = true,
-                        };
-                        if (spec.Env is { Count: > 0 } env)
-                        {
-                            var vars = new System.Text.Json.Nodes.JsonObject();
-                            foreach (var (key, value) in env)
-                            {
-                                vars[key] = value;
-                            }
-
-                            local["environment"] = vars;
-                        }
-
-                        map[name] = local;
-                        continue;
-                    }
-
-                    if (gemini && entry is System.Text.Json.Nodes.JsonObject e)
-                    {
-                        // Gemini has no "type" field; "trust" skips its per-call confirmation.
-                        e.Remove("type");
-                        var spec = servers.First(s => s.Name == name);
-                        if (spec.AutoApprove && !spec.RequireApproval)
-                        {
-                            e["trust"] = true;
-                        }
-                    }
-
-                    map[name] = entry;
-                }
-            }
-
-            if (map.Count == 0)
-            {
-                doc.Remove(mapKey);
-            }
-            else
-            {
-                doc[mapKey] = map;
-            }
+            McpFileMerge.Apply(doc, servers, format, OwnedNames);
 
             if (doc.Count == 0)
             {
@@ -641,44 +530,8 @@ public sealed class McpServerSettings
     /// A standing instruction for the enabled servers, appended to the agent's system prompt; null when none.
     /// Pass the <paramref name="servers"/> already computed for the session to skip a second scan.
     /// </summary>
-    public string? Directive(IReadOnlyList<McpServerSpec>? servers = null)
-    {
-        servers ??= Servers();
-        var parts = new List<string>();
 
-        if (servers.Any(s => s.Name == BrowserName))
-        {
-            parts.Add(
-                $"The {McpServerSpec.PrefixOf(BrowserName)}* tools drive Codale's own Chromium (not the user's; hidden, keeps logins). " +
-                "After changing something a browser can show, verify it before reporting done: browser_navigate, browser_snapshot (prefer it " +
-                "over screenshots; its refs like e12 expire at the next snapshot), exercise the flow, check browser_console_messages. " +
-                "For a sign-in, captcha or 2FA call browser_handoff; never ask for credentials. Layouts: browser_set_viewport or " +
-                "browser_responsive_check; dark mode: browser_emulate.");
-        }
-
-        if (servers.Any(s => s.Name == ComputerName))
-        {
-            parts.Add(
-                $"You can also see and control the user's Windows desktop with the {McpServerSpec.PrefixOf(ComputerName)}* tools, for what " +
-                "the browser tools cannot reach: native apps, installers, system dialogs, the running build of a desktop app. They act on the " +
-                "real screen, so take a computer_screenshot before every click (coordinates refer to the latest screenshot) and the user approves each action.");
-        }
-
-        if (servers.Any(s => s.Name == PhoneName))
-        {
-            parts.Add(
-                $"You can control an Android phone or emulator over adb with the {McpServerSpec.PrefixOf(PhoneName)}* tools, to build and test " +
-                $"mobile apps. MANDATORY: NEVER execute raw 'adb' commands via terminal or shell tools. Always use the {PhoneName} tools instead. " +
-                "Call phone_devices first, and take a phone_screenshot or phone_ui_tree before every tap or swipe (coordinates are " +
-                "device pixels on the latest view). Build with the shell (e.g. gradlew installDebug; use run_in_terminal for long-running builds or " +
-                "dev servers), install with phone_install, start the app with phone_launch_app and read phone_logcat for crashes before you " +
-                "report the work as done. phone_port_forward (reverse) lets the phone reach a dev server on this computer.");
-        }
-
-        return parts.Count == 0 ? null : string.Join(' ', parts);
-    }
-
-    private string ExePath(string name) => Path.Combine(_baseDirectory, name, name + ".exe");
+    private string ExePath(string name) => _hosts.SourcePath(name);
 
     /// <summary>
     /// The exe as a spawned agent can launch it. A package's install folder
@@ -686,67 +539,7 @@ public sealed class McpServerSettings
     /// CLI spawns MCP servers itself (<c>spawn EPERM</c>), so a packaged server is first
     /// copied to a plain folder, once per build, and run from there.
     /// </summary>
-    private string RunnablePath(string name)
-    {
-        var source = ExePath(name);
-        if (!source.Contains(@"\WindowsApps\", StringComparison.OrdinalIgnoreCase))
-        {
-            return source;
-        }
-
-        // Every Servers() and hook call asks; the stamp scan and staging check run once per name.
-        lock (_runnable)
-        {
-            if (_runnable.TryGetValue(name, out var known) && File.Exists(known))
-            {
-                return known;
-            }
-
-            // A failed staging falls back to the source and is retried next time.
-            var staged = StageRunnable(name, source);
-            if (!string.Equals(staged, source, StringComparison.OrdinalIgnoreCase))
-            {
-                _runnable[name] = staged;
-            }
-
-            return staged;
-        }
-    }
-
-    private readonly Dictionary<string, string> _runnable = new(StringComparer.Ordinal);
-
-    private static string StageRunnable(string name, string source)
-    {
-        try
-        {
-            // The exe is a small apphost that rarely changes between builds; the code
-            // lives in the dlls beside it (and in subfolders such as the browser's driver),
-            // so the stamp covers every file under the folder.
-            var files = new DirectoryInfo(Path.GetDirectoryName(source)!).GetFiles("*", SearchOption.AllDirectories);
-            var stamp = $"{files.Length:x}-{files.Sum(f => f.Length):x}-{files.Max(f => f.LastWriteTimeUtc.Ticks):x}";
-            var target = Path.Combine(StagingRoot(), name, stamp);
-            var staged = Path.Combine(target, name + ".exe");
-            if (File.Exists(staged))
-            {
-                return staged;
-            }
-
-            var partial = target + ".partial";
-            if (Directory.Exists(partial))
-            {
-                Directory.Delete(partial, recursive: true);
-            }
-
-            CopyDirectory(Path.GetDirectoryName(source)!, partial);
-            Directory.Move(partial, target);
-
-            return staged;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return source;
-        }
-    }
+    private string RunnablePath(string name) => _hosts.Runnable(name);
 
     /// <summary>
     /// The global Codale data directory in the user's local application data folder:
@@ -772,20 +565,6 @@ public sealed class McpServerSettings
     /// %LOCALAPPDATA% is virtualised, so it is not that; the package's local cache is.
     /// </summary>
     private static string StagingRoot() => Path.Combine(CodaleDataRoot(), "mcp");
-
-    private static void CopyDirectory(string from, string to)
-    {
-        Directory.CreateDirectory(to);
-        foreach (var file in Directory.GetFiles(from))
-        {
-            File.Copy(file, Path.Combine(to, Path.GetFileName(file)), overwrite: true);
-        }
-
-        foreach (var dir in Directory.GetDirectories(from))
-        {
-            CopyDirectory(dir, Path.Combine(to, Path.GetFileName(dir)));
-        }
-    }
 }
 
 

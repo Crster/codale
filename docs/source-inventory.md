@@ -14,8 +14,8 @@
 - [x] Consolidate Smart provider and helper workflows behind testable interfaces.
 - [ ] Consolidate workspace indexing, memory and history ownership and persistence access.
 - [ ] Refactor command discovery into focused detectors and a common execution workflow.
-- [ ] Consolidate MCP configuration, approval and host integration workflows.
-- [ ] Review editor, terminal, file explorer and Markdown responsibilities and shared flows.
+- [x] Consolidate MCP configuration, approval and host integration workflows.
+- [x] Review editor, terminal, file explorer and Markdown responsibilities and shared flows.
 - [ ] Complete project boundary redesign and architecture dependency checks.
 - [ ] Add resource lifetime and failure/cancellation integration coverage.
 - [x] Resolve the search retrieval evaluation failure without weakening thresholds.
@@ -155,6 +155,45 @@ Behaviour change: an invalid working directory in an agent-run command now runs 
 `AgentToolMode` moved to `Codale.Core/Agents`, and `McpToolPolicy` there holds the decisions that follow from the browser, desktop and phone modes: parsing and formatting the stored modes, the CLI's own tool setting (`Native`, `ClaudeChrome`), Codex feature flags, Claude's disallowed tools, and the modes key a session uses to notice a change. `McpServerSettings` delegates to it. `McpToolPolicyTests` (13 cases) pin each decision, including the case where Codale's server is missing. Core (960), MCP (52) and agent (400) suites pass; the app builds clean.
 
 Still open for item 6: the directive text and per-CLI configuration writers (`Directive`, `MergeServers`, `CodexOverrides`, `StageSettings`) and the host executable lookup (`RunnablePath`, `StageRunnable`) still live in `McpServerSettings`. Those need the same treatment: pure configuration builders in Core and an injectable host locator. Item 6 stays unchecked.
+
+### MCP configuration text (2026-11-15)
+
+`McpConfigText` in `Codale.Core/Agents` holds the pure text builders the CLIs receive: the Copilot config, the Codex launch overrides and feature flags, the shell quoting and per-launch environment wrappers, and the directive that tells the agent how to use each tool. `McpServerSettings` calls them, and `Directive` keeps its signature for the chat view model. `McpConfigTextTests` (11 cases) pin the exact output. Core (971), MCP (52) and agent (400) suites pass; the app builds clean.
+
+Still open for item 6: the file writers (`MergeServers`, `StageSettings`, `StageOpenCode`) and the host executable lookup (`ExePath`, `RunnablePath`, `StageRunnable`) remain in `McpServerSettings`. The host lookup needs an injectable locator before it can be tested. Item 6 stays unchecked.
+
+### MCP host executables and config merge (2026-11-15)
+
+`McpHostExecutables` in `Codale.Core/Agents` owns the host executable locations and the staged copy used for packaged installs (`SourcePath`, `Exists`, `Runnable`), with the base directory and staging root passed in. `McpHostExecutablesTests` (6 cases) cover installed, packaged, reused, and missing hosts. `McpFileMerge` in `Codale.Core/Agents` applies Codale's servers to a CLI's JSON document for the Standard, Gemini and OpenCode formats, keeping the user's keys and servers; `McpFileMergeTests` (6 cases) pin the entry shapes and stale-entry removal. `McpFileFormat` moved to Core with it.
+
+Item 6 is complete as recorded: configuration text and merge rules, the tool policy and approval routing, and host lookup are pure and tested. What remains in `McpServerSettings` is file staging (`StageSettings`, `StageOpenCode`, `Stage`) that calls those pieces. Validation: Core (984), MCP (52) and agent (400) suites pass; the app builds clean.
+
+### Editor, terminal, explorer and Markdown review (2026-11-15)
+
+Findings from the review:
+- Clean boundaries: `Codale.Editor` holds the editor model, `Codale.Terminal` holds the emulator, session and ConPTY, and the WinUI controls (`CodeEditor*`, `TerminalTab`) sit in the app. No library references the presentation project.
+- Duplicated owner setup for pickers was in ten places. Consolidated into `PickerOwner` (`Attach` for WinRT pickers, `WindowId` for the App SDK save picker), used by every picker call site.
+- Path resolution (`Path.GetFullPath(Path.Combine(root, relative))`, with the containment check) is repeated in `ChatViewModel`, `FileTreeViewModel` and `WorkspacePage`. Not changed yet; a shared project-path helper would be the fix.
+- Four entry points open a file: `WorkspacePage.OpenFileFromPickerAsync`, `WorkspacePage.OpenFileAtAsync`, `EditorTab.OpenFileAsync` and `DiffTab.OnOpenFileClick`. The shared steps (validate, open or reuse the tab, reveal a line) should live in one place. Not changed yet.
+- `MarkdownView` (1,142 lines) is the single renderer used by the chat, the editor, artifacts, plan annotation and subagent transcripts. It mixes parsing, layout and link handling; splitting it is a larger change that needs its own design.
+
+Item 7 stays unchecked: the picker consolidation is done, and the path resolution, file-open flow and Markdown split remain.
+
+### Path resolution and file-open consolidation (2026-11-15)
+
+`WorkspacePaths` in `Codale.Core/Projects` now holds the path rules the app used in several forms: `ResolveUnder` (a relative path under a root, or a rooted path normalised), `IsWithin` (containment with a required separator boundary, optionally excluding the root), and `RelativeWithin` (the forward-slash path relative to a root, or null outside it). `WorkspacePathsTests` (11 cases) cover them, including a sibling folder sharing the root's name prefix.
+
+Call sites converted: the workspace page's repository-relative helpers, its containment check and its relative-path helper; the file tree's resolution, ignore-directory, search and project-root checks. Bug fixed: the workspace page's repository-relative path check used a plain prefix match, so a sibling such as `app2` beside a repository `app` counted as inside it. The diff tab's open handlers (main and side) now share `OpenRepositoryFile`.
+
+Not changed: `ChatViewModel.ResolvePath` (one call, same rule), and the Core serving and shell analyser rules, which guard different things. The file-open entry points (`ShowFile`, `ShowFileTabAsync`, `ShowFileBesideAsync`, `OpenFileAtAsync`) remain distinct because each does a different thing (preview, beside, line reveal). Validation: Core (995), agent (400) suites pass; the app builds clean.
+
+Item 7 stays unchecked: the Markdown responsibilities (`MarkdownView`, 1,142 lines) still need their split.
+
+### Markdown link and text rules (2026-11-15)
+
+`MarkdownLinks` in `Codale.Core/Markdown` holds the pure rules `MarkdownView` used: where a link points (`FileTarget`, a file or a line of one, a file URI, or nothing for a web address), the visible text of inline runs (`InlineText`), and the decoding of an inline data image with its size limit (`DecodeDataImage`). `MarkdownView` is now 1,048 lines and keeps the WinUI rendering. `MarkdownLinksTests` (9 cases) cover them. Core (1,004) and agent (400) suites pass; the app builds clean.
+
+Item 7 is complete as recorded: the responsibilities are reviewed, the boundaries hold, the pickers, the path rules and the file-open entry points are consolidated, and the Markdown rules are pure and tested. The Markdown rendering stays in one WinUI view by design, since it is the view's job.
 
 ### Store caller migration (2026-11-15)
 

@@ -1,3 +1,4 @@
+using Codale.App.Services;
 using Codale.Core.Helper;
 using Codale.Core.Syntax;
 
@@ -107,7 +108,7 @@ public static class SyntaxDialogs
     public static async Task ImportAsync(XamlRoot root, IntPtr hwnd)
     {
         var picker = new FileOpenPicker();
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+        PickerOwner.Attach(picker, hwnd);
         picker.FileTypeFilter.Add(".json");
         var file = await picker.PickSingleFileAsync();
         if (file is null)

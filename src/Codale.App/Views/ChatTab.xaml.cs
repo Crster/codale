@@ -1748,10 +1748,7 @@ public sealed partial class ChatTab : UserControl
         }
 
         // A packaged picker needs to be told which window owns it.
-        if (Owner?.WindowHandle is { } hwnd)
-        {
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-        }
+        PickerOwner.Attach(picker, Owner?.WindowHandle);
 
         // Each attachment shows up as a pill at the caret (OnAttachmentsChanged).
         foreach (var file in await picker.PickMultipleFilesAsync())

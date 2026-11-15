@@ -49,10 +49,7 @@ public sealed partial class ProjectPickerPage : Page
             picker.FileTypeFilter.Add("*");
 
             // A packaged picker needs to be told which window owns it.
-            if (_window.WindowHandle is { } hwnd)
-            {
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-            }
+            PickerOwner.Attach(picker, _window.WindowHandle);
 
             var folder = await picker.PickSingleFolderAsync();
             if (folder is null)

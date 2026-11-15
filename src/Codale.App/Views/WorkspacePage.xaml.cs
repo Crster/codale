@@ -1,3 +1,4 @@
+using Codale.Core.Projects;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
@@ -1186,10 +1187,7 @@ public sealed partial class WorkspacePage : Page
         picker.FileTypeFilter.Add("*");
 
         // A packaged picker needs to be told which window owns it.
-        if (_window?.WindowHandle is { } hwnd)
-        {
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-        }
+        PickerOwner.Attach(picker, _window?.WindowHandle);
 
         if (await picker.PickSingleFileAsync() is { } file)
         {
@@ -1244,13 +1242,7 @@ public sealed partial class WorkspacePage : Page
         }
 
         _diffTab = new DiffTab().WithViewModel(ViewModel.DiffViewer);
-        _diffTab.FileOpenRequested += (_, relativePath) =>
-        {
-            if (ResolveGitPath(relativePath) is { } absolute)
-            {
-                ShowFile(absolute);
-            }
-        };
+        _diffTab.FileOpenRequested += (_, relativePath) => OpenRepositoryFile(relativePath, beside: false);
 
         var icon = new FontIcon { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Glyph = "\uE8A5" };
         var name = new TextBlock { FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
@@ -1413,8 +1405,8 @@ public sealed partial class WorkspacePage : Page
         string resolved;
         if (!string.IsNullOrEmpty(basePath) && !Path.IsPathRooted(normalized))
         {
-            var combined = Path.GetFullPath(Path.Combine(basePath, normalized));
-            resolved = File.Exists(combined) ? combined : ResolveWorkspacePath(normalized);
+            var combined = WorkspacePaths.ResolveUnder(basePath, normalized);
+            resolved = combined is not null && File.Exists(combined) ? combined : ResolveWorkspacePath(normalized);
         }
         else
         {
@@ -1682,11 +1674,7 @@ public sealed partial class WorkspacePage : Page
 
         try
         {
-            var full = Path.GetFullPath(path);
-            var rootFull = Path.GetFullPath(root);
-            return full.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase)
-                ? Path.GetRelativePath(rootFull, full).Replace('\\', '/')
-                : null;
+            return WorkspacePaths.RelativeWithin(root, path);
         }
         catch (Exception)
         {
@@ -1832,9 +1820,27 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>Change paths are relative to the repository root, which may sit above the project folder.</summary>
+    /// <summary>Opens a file the diff shows, by its repository-relative path: in the main editor, or beside it.</summary>
+    private void OpenRepositoryFile(string relativePath, bool beside)
+    {
+        if (ResolveGitPath(relativePath) is not { } absolute)
+        {
+            return;
+        }
+
+        if (beside)
+        {
+            _ = ShowFileBesideAsync(absolute);
+        }
+        else
+        {
+            ShowFile(absolute);
+        }
+    }
+
     private string? ResolveGitPath(string relativePath) =>
         ViewModel.Git.RepositoryRoot is { } root
-            ? Path.Combine(root, relativePath.Replace('/', '\\'))
+            ? WorkspacePaths.ResolveUnder(root, relativePath)
             : null;
 
 
@@ -2205,10 +2211,7 @@ public sealed partial class WorkspacePage : Page
             var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
             picker.FileTypeFilter.Add("*");
 
-            if (_window?.WindowHandle is { } hwnd)
-            {
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-            }
+            PickerOwner.Attach(picker, _window?.WindowHandle);
 
             if (await picker.PickSingleFolderAsync() is { } folder)
             {
@@ -2981,10 +2984,7 @@ public sealed partial class WorkspacePage : Page
             var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
             picker.FileTypeFilter.Add("*");
 
-            if (_window?.WindowHandle is { } hwnd)
-            {
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-            }
+            PickerOwner.Attach(picker, _window?.WindowHandle);
 
             if (await picker.PickSingleFolderAsync() is { } folder && ViewModel is { } vm)
             {
@@ -3433,13 +3433,7 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>True when <paramref name="path"/> is the folder itself or lies beneath it.</summary>
-    private static bool IsInside(string path, string folder)
-    {
-        var full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar);
-        var root = Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar);
-        return full.Equals(root, StringComparison.OrdinalIgnoreCase)
-            || full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
-    }
+    private static bool IsInside(string path, string folder) => WorkspacePaths.IsWithin(path, folder);
 
     private static string UniquePath(string path, bool isFolder)
     {

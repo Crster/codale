@@ -1150,10 +1150,7 @@ public sealed partial class SettingsPanel : UserControl
 
         var picker = new Windows.Storage.Pickers.FileSavePicker { SuggestedFileName = $"{language.Id}.tmLanguage" };
         picker.FileTypeChoices.Add("TextMate grammar", [".json"]);
-        if (_owner.WindowHandle is { } hwnd)
-        {
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-        }
+        PickerOwner.Attach(picker, _owner.WindowHandle);
 
         if (await picker.PickSaveFileAsync() is { } file)
         {

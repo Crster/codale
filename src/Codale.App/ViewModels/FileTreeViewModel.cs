@@ -1,3 +1,4 @@
+using Codale.Core.Projects;
 using System.Collections.ObjectModel;
 
 using Codale.App.Services;
@@ -564,7 +565,7 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
     private static bool IsIgnoredDirectory(string fullPath, GitStatusMap? map, string? mapRoot)
     {
         if (map is null || mapRoot is null ||
-            !fullPath.StartsWith(mapRoot.TrimEnd('\\') + '\\', StringComparison.OrdinalIgnoreCase))
+            !WorkspacePaths.IsWithin(fullPath, mapRoot, includeRoot: false))
         {
             return false;
         }
@@ -629,7 +630,7 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
         foreach (var hit in SearchResults)
         {
             if (_lastMap is { } map && _lastMapRoot is { } root &&
-                hit.FullPath.StartsWith(root.TrimEnd('\\') + '\\', StringComparison.OrdinalIgnoreCase))
+                WorkspacePaths.IsWithin(hit.FullPath, root, includeRoot: false))
             {
                 var (status, ignored) = map.Classify(Path.GetRelativePath(root, hit.FullPath).Replace('\\', '/'));
                 hit.Node.GitStatus = status;
@@ -846,14 +847,8 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
             return null;
         }
 
-        string fullPath;
-        try
-        {
-            fullPath = !Path.IsPathRooted(path)
-                ? Path.GetFullPath(Path.Combine(ProjectPath, path))
-                : Path.GetFullPath(path);
-        }
-        catch (Exception)
+        var fullPath = WorkspacePaths.ResolveUnder(ProjectPath, path);
+        if (fullPath is null)
         {
             return null;
         }
@@ -897,8 +892,7 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
                 return null;
             }
 
-            if (!fullPath.StartsWith(projectRootTrimmed + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
-                !fullPath.StartsWith(projectRootTrimmed + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            if (!WorkspacePaths.IsWithin(fullPath, projectRootTrimmed, includeRoot: false))
             {
                 return null;
             }
@@ -990,7 +984,7 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
     public GitChangeKind? GitStatusOf(string fullPath)
     {
         if (_lastMap is not { } map || _lastMapRoot is not { } root ||
-            !fullPath.StartsWith(root.TrimEnd('\\') + '\\', StringComparison.OrdinalIgnoreCase))
+            !WorkspacePaths.IsWithin(fullPath, root, includeRoot: false))
         {
             return null;
         }
@@ -1118,7 +1112,7 @@ public sealed partial class FileTreeViewModel : ObservableObject, IDisposable
         foreach (var (root, map) in _nested)
         {
             if (string.Equals(node.FullPath.TrimEnd('\\'), root.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)
-                || node.FullPath.StartsWith(root.TrimEnd('\\') + '\\', StringComparison.OrdinalIgnoreCase))
+                || WorkspacePaths.IsWithin(node.FullPath, root, includeRoot: false))
             {
                 Walk(node, map, root);
                 return;

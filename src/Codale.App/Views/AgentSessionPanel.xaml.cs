@@ -526,7 +526,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             if (string.IsNullOrWhiteSpace(name)) name = "Artifact";
             var extension = source is not null ? System.IO.Path.GetExtension(source) : ".md";
             if (string.IsNullOrEmpty(extension)) extension = ".txt";
-            var windowId = Owner?.WindowHandle is { } hwnd ? Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd) : default;
+            var windowId = PickerOwner.WindowId(Owner?.WindowHandle);
             var picker = new Microsoft.Windows.Storage.Pickers.FileSavePicker(windowId)
             {
                 SuggestedFileName = name,
