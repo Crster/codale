@@ -489,22 +489,19 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// </summary>
     public TerminalViewModel RunProjectCommand(ProjectCommand command)
     {
-        var trimmedCommand = command.Command.Trim();
-        var trimmedName = command.Name.Trim();
         lock (_terminals)
         {
             if (_terminals.FirstOrDefault(t =>
                     t.IsCommandTerminal &&
                     t.IsRunning &&
                     t.Activity == TerminalActivity.Busy &&
-                    (string.Equals(t.CommandName?.Trim(), trimmedName, StringComparison.OrdinalIgnoreCase) ||
-                     string.Equals(t.CommandText?.Trim(), trimmedCommand, StringComparison.Ordinal))) is { } live)
+                    ProjectCommandRun.IsCoveredBy(command, t.CommandName, t.CommandText)) is { } live)
             {
                 return live;
             }
         }
 
-        var terminal = new TerminalViewModel(_smart.Settings, _commandHistory, ResolveCommandDirectory(command), command.Command, command.Name);
+        var terminal = new TerminalViewModel(_smart.Settings, _commandHistory, ProjectCommandRun.WorkingDirectoryFor(command, ProjectPath), command.Command, command.Name);
         terminal.PropertyChanged += OnCommandTerminalPropertyChanged;
         lock (_terminals)
         {
@@ -547,24 +544,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         }
 
         RunningCommandCount = count;
-    }
-
-    /// <summary>The command's directory, relative ones resolved against the project root.</summary>
-    private string ResolveCommandDirectory(ProjectCommand command)
-    {
-        if (string.IsNullOrWhiteSpace(command.WorkingDirectory))
-        {
-            return ProjectPath;
-        }
-
-        try
-        {
-            return Path.GetFullPath(Path.Combine(ProjectPath, command.WorkingDirectory));
-        }
-        catch (ArgumentException)
-        {
-            return ProjectPath;
-        }
     }
 
     /// <summary>

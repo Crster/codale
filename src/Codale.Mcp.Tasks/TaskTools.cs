@@ -335,27 +335,17 @@ public static class TaskTools
         ];
     }
 
-    /// <summary>Exact name first (case-insensitive), then a unique substring; anything else names the candidates.</summary>
+    /// <summary>The saved command a name refers to; see <see cref="ProjectCommandRun.Resolve"/>.</summary>
     private static ProjectCommand Resolve(IReadOnlyList<ProjectCommand> all, string name)
     {
-        name = name.Trim();
-        if (all.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase)) is { } exact)
+        try
         {
-            return exact;
+            return ProjectCommandRun.Resolve(all, name);
         }
-
-        var partial = all.Where(c => c.Name.Contains(name, StringComparison.OrdinalIgnoreCase)).ToList();
-        if (partial.Count == 1)
+        catch (InvalidOperationException e)
         {
-            return partial[0];
+            throw new McpToolException(e.Message);
         }
-
-        var available = string.Join(", ", (partial.Count > 1 ? partial : all).Select(c => $"\"{c.Name}\""));
-        throw new McpToolException(partial.Count > 1
-            ? $"\"{name}\" matches several commands: {available}."
-            : all.Count == 0
-                ? "No commands saved. Use add_command to save one."
-                : $"No command named \"{name}\". Available: {available}.");
     }
 
     /// <summary>The command line, prefixed with a directory change when the entry names a working directory.</summary>
@@ -366,7 +356,7 @@ public static class TaskTools
             return command.Command;
         }
 
-        var dir = Path.GetFullPath(Path.Combine(runDirectory, command.WorkingDirectory));
+        var dir = ProjectCommandRun.WorkingDirectoryFor(command, runDirectory);
         return $"Set-Location -LiteralPath '{dir.Replace("'", "''")}'; {command.Command}";
     }
 

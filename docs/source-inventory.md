@@ -144,6 +144,12 @@ Still open for item 4, and needs decisions:
 - The index model is persisted as `workspace-model.json` in the project's knowledge folder, outside the workspace database. Deciding whether it moves into the database is a design choice.
 - `FeatureLog` still has a path-based constructor that opens its own `HistoryStore`. It is used by tests only; removing it means updating about twenty test call sites.
 
+### Command run rules (2026-11-15)
+
+`ProjectCommandRun` in `Codale.Commands` holds the rules that both ways of running a saved command share: name resolution (exact name, then a unique substring, with the same error messages the agent always got), the absolute working directory (falling back to the root for an invalid path), and whether a live run already covers the command (same name or same command line). `TaskTools` (agent tools) and `WorkspaceViewModel.RunProjectCommand` (commands menu) both use it. `ProjectCommandRunTests` adds 12 cases.
+
+Behaviour change: an invalid working directory in an agent-run command now runs in the run directory instead of failing. Still open for item 5: the two paths still open their own terminals (`TaskTools` through the task service, the app through `TerminalViewModel`); a single launch workflow would need that unified too. Item 5 stays unchecked.
+
 ### Store caller migration (2026-11-15)
 
 `FeatureService` now receives the workspace data context and creates `FeatureLog` instances from its history store. `ProjectCommandService` accepts a configuration-store resolver; the application supplies one backed by its workspace data factory. Feature log and saved-command operations therefore use the composed pool instead of creating stores through the static workspace fallback. Tests verify that both workflows persist normally and reject access after their owner is disposed. Standalone and MCP callers retain their existing defaults and process boundaries.
