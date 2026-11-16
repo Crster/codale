@@ -1,421 +1,185 @@
 # Codale
 
-**A Windows-native workbench for driving AI coding agents.**
+**A Windows-native workbench for AI coding agents.**
 
-Codale is a high-performance WinUI 3 desktop application (built with C# and .NET 10, not Electron) crafted around AI coding agents—in the spirit of modern developer power tools like Paseo, Warp, and Orca.
+Codale is a WinUI 3 desktop application targeting .NET 10 and Windows 11. It combines structured Claude and Codex conversations, a ConPTY terminal, Git tools, a source editor, project search, and MCP tools in a workspace window.
 
-Modern AI coding CLIs are formidable agents, but standard terminal TUIs are a poor medium for reviewing multi-file diffs, tracking progress tasks, exploring transcripts, managing long-running background tasks, and watching token economics. Codale wraps them in a fluent Windows 11 shell with one dedicated window per project, rendering their **structured data** rather than raw terminal output, while providing a hardware-accelerated pseudoconsole (ConPTY) terminal drawer, native Git integration, a fast built-in code editor, and built-in Model Context Protocol (MCP) servers.
+![Project search and source control](docs/search.png)
 
----
+## Workbench
 
-![Codale agentic code search next to the Git panel](docs/search.png)
+### Chat and accounts
 
----
+- Claude and Codex sessions stream answers, reasoning, tool calls, approvals, plans, and usage into the chat view.
+- Select an account or compatible endpoint profile, model, effort, and permission mode. Account profiles keep CLI credential homes separate; endpoint support depends on the selected agent and provider format.
+- Auto mode routes prompts to Ask, Plan, or Act using local rules and configured Smart providers. Session routing can offer to move a prompt to another conversation or start a new one.
+- Open CLI transcript history, resume conversations, and hand off context between sessions. Responses show their model alongside their timestamp and copy action.
+- Next-prompt suggestions use the active agent. Codex can fall back to an ephemeral read-only conversation when its prediction endpoint is unavailable. Suggestions can consume an additional model request.
 
-## Contents
+![Chat and session panel](docs/chat.png)
 
-- [Overview & Philosophy](#overview--philosophy)
-- [Tour of the Workbench](#tour-of-the-workbench)
-  - [Agent Chat & Session Management](#agent-chat--session-management)
-  - [Integrated ConPTY Terminal Drawer](#integrated-conpty-terminal-drawer)
-  - [Supported AI Coding Agent CLIs in Terminal](#supported-ai-coding-agent-clis-in-terminal)
-  - [Built-in Model Context Protocol (MCP) Servers](#built-in-model-context-protocol-mcp-servers)
-  - [Helper Model](#helper-model)
-  - [Git Panel](#git-panel)
-  - [Fast Code Editor & Syntax Highlighting](#fast-code-editor--syntax-highlighting)
-  - [Search & Autonomous Ask Mode](#search--autonomous-ask-mode)
-- [Repository Layout](#repository-layout)
-- [Architecture & Design Principles](#architecture--design-principles)
-- [Configuration & Settings](#configuration--settings)
-- [Getting Started & Build Guide](#getting-started--build-guide)
-- [Testing & Quality Assurance](#testing--quality-assurance)
-- [Gotchas & Troubleshooting](#gotchas--troubleshooting)
-- [Known Limitations & Roadmap](#known-limitations--roadmap)
+### Terminals and project commands
 
----
+- Open multiple terminal tabs backed by Windows ConPTY, with scrollback and a Win2D grid for interactive terminal programs.
+- Choose PowerShell 7, Windows PowerShell, or Command Prompt. Automatic shell selection prefers PowerShell 7 when available.
+- Launch saved or detected project commands from the commands menu. Commands run in terminal tabs where their output remains visible.
+- Agents can read open terminals, run commands in new tabs, and interrupt terminals they opened through the terminal tools.
+- Claude, Codex, Copilot, Gemini, Qwen, and OpenCode launch integration stages MCP configuration outside the repository. Other recognized CLIs, including Antigravity, Aider, Goose, and Cursor, can run in terminals; integration varies by CLI.
+- Claude and Codex transcript readers supply native conversation history. Resuming other terminal CLIs depends on their supported launch arguments.
 
-## Overview & Philosophy
+The former hosted background-task manager and its `start_task`, `read_task`, `list_tasks`, and `stop_task` tools have been removed. Use terminal tabs and the terminal MCP tools for running work.
 
-1. **Windows-Native Performance**: Codale uses WinUI 3 (Windows App SDK) and .NET 10 with Mica material, acrylic accents, and native Windows 11 window chrome. No Chromium/Electron overhead for the shell itself.
-2. **One Window Per Project**: Each project opens in its own window. Reopening an already open project focuses that window immediately. Windows Explorer integration allows right-clicking any folder and selecting **Open in Codale** via a native packaged C++ COM shell extension.
-3. **Structured Agent Protocols**: Codale does not scrape terminal screens for the primary agent conversation. It drives CLI agents via structured streams (such as `claude --output-format stream-json`), converting wire streams into strongly typed `AgentEvent` unions that the WinUI interface binds to natively.
-4. **Git as the Ultimate Source of Truth**: The application never guesses file diffs or repo states; it reads directly from the Git CLI, ensuring what you see in the diff inspector and changes panel is 100% faithful to the filesystem.
-5. **Terminal CLI Integration**: Codale includes a ConPTY terminal drawer. Claude and Codex have full session integration; other detected CLIs have varying levels of integration and can also run in the terminal.
-
----
+### MCP tools
 
-## Tour of the Workbench
-
-### Agent Chat & Session Management
-
-The chat tab provides a clear, high-density stream of the agent's thoughts, tool calls, and replies.
-
-![Chat panel and agent session panel](docs/chat.png)
+The `Codale.Mcp.Tasks` executable hosts five separate workspace servers, selected with `--server NAME`. Its project name is retained, but it no longer exposes a `codale-tasks` server.
 
-- **Permission Approvals**: Agent actions (file edits, command executions, external calls) arrive as fluent WinUI dialogs with allow, deny, or edit options—never raw TUI prompts that scroll off-screen.
-- **Plan Mode & Live Progress**: Multi-step plans and task checklists are parsed and rendered cleanly. Progress steps update dynamically as the agent progresses.
-- **Model & Effort Switching**: Switch between frontier models (e.g., Opus, Sonnet, Haiku) and adjust thinking/reasoning effort levels (`low`, `medium`, `high`, `xhigh`, `max`) on the fly.
-- **Bring Your Own Key (BYOK)**: Connect Claude Code to any Anthropic-compatible gateway or reverse proxy, or use OpenAI-compatible endpoints translated seamlessly into Anthropic streaming protocol via the built-in `MessagesBridge`.
-- **Session History & Crash Recovery**: Replay past conversations from local CLI transcript logs. If Codale or your machine restarts during an active agent turn, Codale detects the unfinished turn and offers one-click resumption.
-- **Next Prompt Suggestions**: With `chat.suggestNextPrompt` enabled (the default), new chat sessions predict a follow-up after successful turns. Press Tab in an empty composer to accept it. If Codex reports that its experimental prediction endpoint is unimplemented, Codale uses a separate ephemeral, read-only conversation with the selected account and model. This adds one short model request using a bounded excerpt of the latest user prompt and answer, without adding a turn to the main chat. Starting another turn cancels the pending suggestion. Prediction failures are available through .NET trace warnings.
+| Server | Tools |
+| --- | --- |
+| `codale-panel` | `todos_set`, `artifact_add` for progress and deliverables |
+| `codale-command` | `list_commands`, `add_command`, `run_command` for saved and detected commands |
+| `codale-terminal` | `list_terminals`, `read_terminal`, `run_in_terminal`, `stop_terminal` |
+| `codale-memory` | `memory_save`, `memory_search`, `memory_list`, `memory_forget` |
+| `codale-secret` | `env_list`, `env_get`, `env_set` for workspace secrets |
 
----
+`run_command` and `run_in_terminal` open visible terminal tabs. `stop_terminal` only interrupts terminals opened by the agent through those tools. The old MCP `explore` tool is no longer exposed.
 
-### Integrated ConPTY Terminal Drawer
+Three additional executables supply optional tools:
 
-Codale features a built-in terminal drawer powered by Windows PseudoConsole (ConPTY), providing an authentic Windows command-line experience embedded right beneath your code.
+- **`codale-browser`**: Playwright browser navigation, snapshots, screenshots, interaction, uploads, viewport/emulation checks, and user handoff. Uploads are restricted to the project directory.
+- **`codale-computer`**: Windows desktop screenshots and mouse/keyboard control.
+- **`codale-phone`**: Android device and emulator control through `adb`, including screenshots, UI trees, input, deployment, logs, and port forwarding. Project file transfers are restricted to the project directory.
 
-- **Supported Terminal Shells**:
-  - **PowerShell 7+ (`pwsh.exe`)** — Recommended default when installed.
-  - **Windows PowerShell (`powershell.exe`)** — Standard Windows PowerShell 5.1.
-  - **Command Prompt (`cmd.exe`)** — Classic Windows command interpreter.
-  - **Automatic Detection (`auto`)** — Intelligently probes `PATH` for `pwsh.exe`, falling back to `powershell.exe`, and finally `%COMSPEC%` (`cmd.exe`).
-- **Dual-Mode Rendering Engine**:
-  - **Line-Buffered Scrollback**: Fast, smooth text rendering with configurable buffer limits for standard build outputs, test runners, and script executions.
-  - **Win2D Cell Grid**: Automatically takes over when an interactive, full-screen terminal application (such as `vim`, `nano`, `htop`, or interactive TUIs) switches to the alternate screen buffer, with hardware-accelerated text rendering and raw key/escape chord forwarding.
-- **Multi-Tab Workspace**: Open multiple independent terminal tabs per project, rename sessions, and run ad-hoc commands concurrently.
-- **Project Commands Launcher**: Discovers and executes run targets from `.codale/commands.json`, `.claude/launch.json`, VS Code `.vscode/tasks.json`, `.vscode/launch.json`, `package.json`, `deno.json`, .NET (`.sln`/`.csproj`/`launchSettings.json`), Gradle, Maven, Python (`pyproject.toml`/`Pipfile`/`manage.py`), Cargo, Go, Composer, Laravel (`artisan`), Rails, Flutter/Dart, Elixir (`mix.exs`), `Makefile`, `justfile`, `Taskfile.yml`, Docker Compose, Prisma (`schema.prisma`), and root shell scripts.
-- **Agent Terminal Diagnostics**: Agents running in Codale can inspect what ran in your open terminal tabs using `list_terminals` and `read_terminal`. When a build fails in your terminal, the agent can diagnose the error output directly without requiring you to copy and paste stack traces.
+Tool availability and approvals depend on the selected tool and permission modes. Browser and desktop modes can also select supported agent-native integrations. Configure them from the agent tools controls.
 
----
+### Smart features
 
-### Supported AI Coding Agent CLIs in Terminal
+Smart features use independently configured **General**, **Auto Complete**, **Embedding**, and **Decision** model roles. All roles start Off. General supports Claude/Codex CLI accounts and compatible API profiles; completion and embedding require supported OpenAI-compatible endpoints and explicit models.
 
-When you launch an AI coding agent directly inside Codale's terminal drawer, Codale's prompt interceptor (`CliLocator.DetectLaunch` & `McpServerSettings.IsSessionLaunch`) detects the command at the shell prompt.
+Configured roles provide commit messages, session names, shell translation, search refinement, summaries, completion, embeddings, and routing/risk decisions. Local search and indexing remain available with Smart roles off. Remote features may send source code to the selected provider. Background provider exploration uses read tools.
 
-Rather than letting the CLI run as an isolated, uncoordinated process, Codale:
-1. **Spawns a Dedicated CLI Tab**: Elevates the launch into a managed CLI terminal tab.
-2. **Injects Codale MCP Servers Dynamically**: Attaches Codale's built-in MCP servers (`codale-tasks`, `codale-browser`, `codale-computer`, `codale-phone`) using command line flags or staged configuration files outside the repository, leaving your git working tree pristine.
-3. **Mirrors Tasks & Progress in the Session Panel**: Calls to `todos_set` and `artifact_add` are piped back to the main UI, keeping your checklist and deliverables synced.
-4. **Watches for User Confirmation**: Monitors the terminal output for interactive confirmation prompts (`(y/n)`, `Allow this action?`, permission requests) and notifies you when the agent is waiting for approval.
+The status bar shows Off, Idle, Suggesting, Processing, or Error. Hover over it for status details. The app no longer downloads, packages, or loads a local inference model. Native inference code remains for development and evaluation only.
 
-#### Supported CLI Matrix
+See [Smart provider configuration and behavior](src/Codale.Smart/README.md) and [native development harness](src/Codale.Smart/native-runtime.md).
 
-| CLI Identifier | Agent Name | Command | Auto MCP Injection Method | Installation Command |
-| :--- | :--- | :--- | :--- | :--- |
-| `claude` | **Claude Code** | `claude` | Staged `--mcp-config <staged.json>` | `irm https://claude.ai/install.ps1 \| iex` |
-| `agy` | **Google Antigravity** | `agy` | Terminal only | `npm i -g @google/antigravity` |
-| `copilot` | **GitHub Copilot CLI** | `copilot` | `--additional-mcp-config @<staged.json>` | Installed via GitHub CLI / npm |
-| `codex` | **OpenAI Codex CLI** | `codex` | Command override `-c mcp_servers.*` | CLI package installer |
-| `gemini` | **Gemini Code Assist** | `gemini` | `GEMINI_CLI_SYSTEM_SETTINGS_PATH=<staged.json>` | Google Cloud / Gemini CLI installer |
-| `qwen` | **Qwen Code CLI** | `qwen` | `QWEN_CODE_SYSTEM_SETTINGS_PATH=<staged.json>` | `npm i -g @qwen-code/qwen-code` |
-| `opencode` | **OpenCode CLI** | `opencode` | `OPENCODE_CONFIG=<staged.json>` | `npm i -g opencode-ai` |
-| `aider` | **Aider** | `aider` | Supported in terminal with attention tracking | `pip install aider-chat` |
-| `goose` | **Block Goose** | `goose` | Supported in terminal with attention tracking | Goose binary / installer |
-| `cursor` | **Cursor CLI** | `cursor` | Supported in terminal with attention tracking | Cursor IDE CLI tools |
+### Files, editor, search, and Git
 
-#### Native Session Resume
+- Browse project files and open text, diff, and Markdown previews. TextMate grammars provide syntax highlighting; missing grammars can be downloaded and cached.
+- Configure editor typography, tabs, line numbers, and wrapping. Project identifiers support local suggestions; AI inline insertions require the Auto Complete role.
+- Search uses a managed source index and `SourceExplorer`: local results appear first, followed by refinement when a provider is configured. Results include source excerpts and related files. The search panel no longer presents the old autonomous Ask answer loop; the retained `SearchAgentLoop` library is not its UI entry point.
+- Workspace knowledge combines keyword and vector retrieval. With remote embedding off, the index uses a local hashed embedder.
+- Git tools provide status, staging, commits, history, branch operations, synchronization, stashes, and diffs. Smart commit messages require a configured generation role.
 
-The session panel of an agent CLI terminal tab lists that CLI's own conversations for the project, and clicking one relaunches the CLI with its native resume arguments in a new tab (with Codale's MCP servers attached). Supported where the CLI resumes by session id:
+![Git and editor](docs/git-editor.png)
 
-- **Claude Code (`claude`)**: `claude --resume <id>`, from `~/.claude/projects/<project>/*.jsonl`.
-- **OpenAI Codex (`codex`)**: `codex resume <id>`, from `~/.codex/sessions/**/rollout-*.jsonl`.
-- **GitHub Copilot (`copilot`)** and **OpenCode (`opencode`)**: launched with `--resume <id>` / `--session <id>`; no history list yet.
+## Configuration and storage
 
----
+Open Settings to configure appearance, shortcuts, terminal/editor preferences, agent accounts, endpoint profiles, and Smart roles. The user-data folder button opens the active data location.
 
-### Built-in Model Context Protocol (MCP) Servers
+Settings live in `%LOCALAPPDATA%\Codale\settings.json`, subject to Windows package redirection for MSIX installs. External edits are watched and reloaded. Application data lives beside settings; workspace stores and CLI transcripts have separate owners and lifetimes. Secrets use Windows protection and encrypted storage.
 
-Codale bundles three dedicated MCP servers compiled as native executables, providing rich capabilities to connected agents:
-
-#### 1. `codale-tasks`
-Manages long-running background processes and panel interactions so agents don't block their chat turn:
-- `start_task`: Launches long-running processes (dev servers, file watchers, test suites) as managed Codale background tasks with live output streaming. (Direct shell background tricks like `Start-Job`, `&`, or `nohup` are blocked to keep tasks visible in the UI).
-- `read_task`: Reads incremental stdout/stderr output from a running task using offsets.
-- `list_tasks` & `stop_task`: Queries active tasks or cleanly terminates a process tree.
-- `list_commands`, `add_command`, `run_command`: Discovers, creates, and executes reusable project commands stored in `.codale/commands.json`.
-- `list_terminals` & `read_terminal`: Allows the agent to read the output of the user's open terminal tabs to diagnose build failures.
-- `todos_set`: Replaces the step list in Codale's session panel, showing real-time 2-6 step checklists to the user.
-- `artifact_add`: Registers deliverables (reports, markdown documents, generated assets) directly in the session panel's Artifacts list.
-- `explore`: Codebase question-answering tool powered by the background helper model.
-
-#### 2. `codale-browser`
-Provides headless and visible Chromium web automation powered by Playwright:
-- Full browser interaction: `browser_navigate`, `browser_snapshot`, `browser_screenshot`, `browser_click`, `browser_type`, `browser_press_key`, `browser_scroll`, `browser_upload`, and `browser_dialog`.
-- **Element Ref System**: Snapshots generate compact element refs (e.g., `e12`) for reliable targeting without fragile XPath queries.
-- **Handoff for Captchas / Logins**: When a web page encounters a CAPTCHA or 2FA challenge, `browser_handoff` pauses automation and opens a visible browser window for the user to solve.
-- **Responsive & Dark Mode Testing**: `browser_set_viewport`, `browser_responsive_check`, and `browser_emulate`.
-- **Security Sandboxing**: `browser_upload` is strictly confined to files within the active project directory (`CODALE_PROJECT_DIR`).
-
-#### 3. `codale-computer`
-Optional desktop automation for tasks requiring GUI interaction beyond web pages:
-- Captures desktop screenshots, tracks mouse coordinates, clicks, drags, scrolls, types text, and sends key combinations.
-- **Strict Approval Policy**: Desktop control actions require explicit user confirmation before executing on the host display.
-
-#### 4. `codale-phone`
-Optional Android device and emulator control over `adb` (found via `ANDROID_HOME` / `ANDROID_SDK_ROOT`, the default Android Studio SDK folder, or `PATH`), for building and testing mobile apps. Enabled per project from the Agent tools flyout:
-- Screenshots, a text UI tree, tap/swipe/type/key input, app launch/stop, logcat, and `adb reverse`/`forward` for dev servers.
-- Deployment: install an `.apk`, uninstall, clear app data, push/pull files, and start an emulator AVD. Builds run through the agent's shell (e.g. `gradlew installDebug`).
-- **Approval Policy**: viewing and input tools run unasked; install, uninstall, clear data, file transfer, `phone_shell` and emulator start still ask. File transfer is confined to the project directory (`CODALE_PROJECT_DIR`).
-
----
-
-### Helper Model
-
-Codale hands peripheral tasks to a lightweight model (via one-shot Claude CLI calls or a configured BYOK endpoint) so they stay off the main conversation thread:
-
-- Automatic commit message generation.
-- Session auto-titling based on prompt contents.
-- Message routing in Auto mode.
-
-Auto mode routes clear short prompts locally, with no helper request. Other messages use one compact classification request, capped at five seconds with a local fallback that defaults to Act. Ask answers without edits. Act is the default: changes, feature requests that say what to build, UI complaints, bug reports, routine commands, and approvals. Plan is reserved for explicit planning requests, large cross-cutting work (rewrites, migrations, architecture, new subsystems such as authentication or billing), and requests with no identifiable target: the agent asks about missing decisions, proposes a plan the user can correct, and waits for approval before implementation. Topic detection runs locally using recent user messages and the latest Claude or Codex answer; it marks a new subject and refreshes retrieval context while keeping the current session.
-
-Routing regression tests run with `dotnet test tests/Codale.Core.Tests`. To exercise the classification corpus against both logged-in CLIs (uses tokens), set `CODALE_ROUTING_LIVE_TESTS=1` and run `dotnet test tests/Codale.Agents.Tests --filter FullyQualifiedName~MessageRoutingLiveTests --logger "console;verbosity=detailed"`.
-
----
-
-### Git Panel
-
-![Git panel and the built-in editor](docs/git-editor.png)
-
-- **Status & Branch Synchronization**: Clear visual representation of modified, untracked, deleted, and staged files. One-click commit creation with optional helper-model generated commit messages.
-- **Commit Graph (`GitGraph`)**: Visual revision history showing branches, tags, commit authors, and timestamps.
-- **Side-by-Side & Inline Diffs**: High-performance diff inspector showing exact line additions and deletions.
-
----
-
-### Fast Code Editor & Syntax Highlighting
-
-- **TextMate Syntax Highlighting**: Powered by `SyntaxService` with TextMate grammar tokenization (`GrammarTokenizer`), supporting C#, TypeScript, JavaScript, Python, Rust, Go, Markdown, JSON, TOML, YAML, HTML, CSS, PowerShell, and more.
-- **Custom Syntax Catalog**: Automatically downloads and caches missing language grammars on demand.
-- **Editor Controls**: Line numbering, customizable tab width, word wrap toggling, font size scaling (with Ctrl+Wheel zoom), and unsaved changes indicators.
-
----
-
-### Search & Autonomous Ask Mode
-
-Codale searches with its own managed engine, so no external binary is needed. A workspace index keeps the project's keywords, variables and function bodies in memory, so suggestions and results point at the exact function that holds a match.
-
-- **Grep Mode**: Literal and regular expression searching with file filtering and match previews. Each match names the function or type its line sits in.
-- **Completion**: While typing, the editor offers the project's declared names (types, functions, variables) and the identifiers the project uses, not only what is in the open file.
-- **Workspace model**: A model trained from the project's own files: its identifiers, declared names and which identifier tends to follow which. It is kept per project beside the knowledge database, updated one file at a time as files change, and reloaded on restart so unchanged files are not read again. Suggestions use it, ranked by the word before the cursor.
-- **Command history**: Commands typed in the shell box and in terminals are kept per project on this computer and offered as you type.
-- **Ask Mode**: An autonomous agent loop (`SearchAgentLoop`) that answers natural language questions about your codebase. A background helper model iteratively greps, finds, and reads relevant source files, streaming its steps and file citations live with per-step execution timings.
-
----
-
-## Repository Layout
-
-```
-Codale.slnx                     .NET 10 solution specification
-src/Codale.App/Codale.App.csproj Native WinUI build, run, watch, and publish entry point
-docs/                           Documentation assets and screenshots
-src/
-  Codale.App/                   WinUI 3 application shell (Mica, views, viewmodels, single-project MSIX)
-  Codale.Core/                  Core domain models (AgentEvent union, models, Markdown, syntax tokenizers)
-  Codale.Agents/                Claude and Codex session drivers and CLI locator
-  Codale.Terminal/              ConPTY P/Invoke interop, VT parsing, and TerminalSession
-  Codale.Commands/              Saved project commands catalog (.codale, .vscode, package.json)
-  Codale.Git/                   Git CLI wrapper (status, graph, diffs, commits)
-  Codale.Mcp.Tasks/             codale-tasks MCP server (process management, todos, terminals, explore)
-  Codale.Mcp.Browser/           codale-browser MCP server (Playwright Chromium browser automation)
-  Codale.Mcp.Computer/          codale-computer MCP server (Windows desktop control)
-  Codale.Mcp.Phone/             codale-phone MCP server (Android device/emulator control over adb)
-  Codale.Mcp.Common/            Shared MCP protocol definitions and JSON-RPC primitives
-  Codale.Search/                Workspace search, file indexing, and autonomous SearchAgentLoop
-  Codale.Db/                    Embedded multi-model database (key-value, semantic + keyword search, graph, blobs, pub/sub, encryption)
-  Codale.ShellExt/              C++ IExplorerCommand Windows 11 shell context menu extension (vcxproj)
-tests/
-  Codale.Agents.Tests/          Agent driver, stream parser, and CLI locator tests
-  Codale.Commands.Tests/        Command discovery and catalog tests
-  Codale.Core.Tests/            Domain logic, tokenizers, and Markdown parser tests
-  Codale.Git.Tests/             Git CLI integration and diff parsing tests
-  Codale.Mcp.Tests/             MCP servers and tool invocation tests
-  Codale.Search.Tests/          Workspace search and search loop tests
-  Codale.Db.Tests/              Database engine tests
-  Codale.Terminal.Tests/        ConPTY and terminal session unit tests
-  fixtures/                     Offline byte-for-byte CLI wire captures and test fixtures
-```
-
----
-
-## Architecture & Design Principles
-
-```mermaid
-flowchart TD
-    subgraph UI ["WinUI 3 Fluent Shell (Codale.App)"]
-        ChatTab["Chat Panel"]
-        TerminalTab["Terminal Drawer (ConPTY)"]
-        GitTab["Git"]
-        EditorTab["Code Editor"]
-        SearchTab["Search & Ask Agent"]
-    end
-
-    subgraph Core ["Domain & Agents (Codale.Core / Codale.Agents)"]
-        AgentEvent["AgentEvent Stream"]
-        CliLocator["CliLocator & Prompt Detector"]
-        HelperModel["Helper Model (BYOK / One-Shot)"]
-    end
-
-    subgraph TerminalEngine ["Terminal & Shells"]
-        Pwsh["PowerShell / pwsh"]
-        Cmd["cmd.exe"]
-        Win2D["Win2D Cell Grid (Alternate Buffer)"]
-    end
-
-    subgraph MCP ["Bundled MCP Servers"]
-        TasksMcp["codale-tasks"]
-        BrowserMcp["codale-browser"]
-        ComputerMcp["codale-computer"]
-        PhoneMcp["codale-phone"]
-    end
-
-    subgraph Agents ["AI Coding CLIs"]
-        ClaudeCli["Claude Code (claude)"]
-        CodexCli["Codex (codex)"]
-        OtherClis["Other terminal CLIs"]
-    end
-
-    ChatTab --> AgentEvent
-    AgentEvent --> ClaudeCli
-    TerminalTab --> TerminalEngine
-    TerminalEngine --> CliLocator
-    CliLocator -- "Intercept & Rewrite Launch" --> Agents
-    Agents --> TasksMcp
-    Agents --> BrowserMcp
-    Agents --> ComputerMcp
-    Agents --> PhoneMcp
-    TasksMcp -. "todos_set / artifacts" .-> ChatTab
-```
-
-- **Pure, Stateless Stream Parsers**: The agent parser transforms raw JSON-RPC and streaming JSON chunks into `AgentEvent` records without maintaining hidden mutable state. Every protocol flow can be replayed offline from captured byte sequences in `tests/fixtures/`.
-- **Unknown Event Drift Alarm**: Any unmapped or unknown protocol event received from a CLI is bubbled to the user interface as an alert rather than silently dropped, alerting developers immediately to upstream CLI changes.
-- **Isolated Workspace Staging**: When injecting MCP configurations into terminal CLIs, Codale writes temporary configuration files to a local staging cache outside the project root (`%LOCALAPPDATA%\Codale\cli\...`), ensuring repositories remain clean and free of spurious configuration files.
-
----
-
-## Configuration & Settings
-
-Settings are stored in `%LOCALAPPDATA%\Codale\settings.json` (or within the MSIX package local folder) and can be configured through the **Settings Panel** or edited directly:
+Example preference keys:
 
 ```json
 {
-  "theme": "System",
+  "app.theme": "Dark",
   "terminal.shell": "auto",
-  "terminal.fontFamily": "Cascadia Code",
-  "terminal.fontSize": 12.0,
+  "terminal.fontFamily": "Cascadia Mono",
+  "terminal.fontSize": 13,
   "terminal.scrollback": 10000,
-  "editor.fontSize": 13.0,
+  "editor.fontSize": 13,
   "editor.tabWidth": 4,
   "editor.lineNumbers": true,
   "editor.highlighting": true,
   "editor.wordWrap": false,
   "chat.fontSize": 12.5,
-  "chat.defaultModel": "sonnet",
-  "chat.defaultEffort": "medium",
-  "byok.providers": [
-    {
-      "name": "My Gateway",
-      "baseUrl": "https://api.example.com/v1",
-      "apiKey": "sk-...",
-      "defaultModel": "claude-3-7-sonnet-latest"
-    }
-  ]
+  "ai.smart.groups.general.provider": "off",
+  "ai.smart.groups.completion.provider": "off",
+  "ai.smart.groups.embedding.provider": "off",
+  "ai.smart.groups.decision.provider": "off"
 }
 ```
 
-### Custom Project Commands
+Use Settings to create account and endpoint profiles and select agent defaults. The generated file contains the current keys; agent-specific defaults use `chat.defaults.<cli>.*`.
 
-Projects can define one-click commands in `.codale/commands.json`:
+### Custom project commands
+
+Save reusable commands in `.codale/commands.json`:
 
 ```json
 [
-  {
-    "name": "dev server",
-    "command": "npm run dev",
-    "cwd": "frontend"
-  },
-  {
-    "name": "run tests",
-    "command": "dotnet test Codale.slnx"
-  }
+  { "name": "dev server", "command": "npm run dev", "cwd": "frontend" },
+  { "name": "run tests", "command": "dotnet test Codale.slnx" }
 ]
 ```
 
-Commands are also automatically detected from `.claude/launch.json`, `.vscode/tasks.json`, `.vscode/launch.json`, `package.json` (npm/yarn/pnpm/bun), `deno.json`, `.sln`/`.csproj`/`launchSettings.json` (.NET), `build.gradle` (Gradle), `pom.xml` (Maven), `pyproject.toml`/`Pipfile`/`manage.py` (Python/Django), `Cargo.toml` (Rust), `go.mod` (Go), `composer.json` & `artisan` (PHP/Laravel), `Gemfile`/`bin/rails` (Rails), `pubspec.yaml` (Flutter/Dart), `mix.exs` (Elixir), `Makefile`, `justfile`, `Taskfile.yml`, `docker-compose.yml`, `schema.prisma` (Prisma), and project root scripts.
+Command detectors also recognize Claude launch configuration, VS Code tasks/launch configuration, package scripts, .NET, Gradle, Maven, Python, Rust, Go, Composer/Laravel, Rails, Flutter, Elixir, Make, Just, Task, Docker Compose, Prisma, and root scripts. Discovery and saved-command access share `ProjectCommandService`; execution uses terminal tabs.
 
----
+## Build and run
 
-## Getting Started & Build Guide
+Requirements:
 
-### Prerequisites
+- Windows 11 with the Windows SDK needed by the app's `net10.0-windows10.0.26100.0` target.
+- .NET SDK 10.0.401 or newer, selected by `global.json` with major-version roll-forward. Projects target .NET 10; the current verification used SDK 11.0.100.
+- Visual Studio 2026 with Desktop development with C++ and the MSVC v145 toolset for the Explorer shell extension.
+- Git for Git features; installed/authenticated agent CLIs for agent sessions. Browser tools use Playwright Chromium; phone tools require Android SDK `adb` and a device or emulator.
 
-- **Operating System**: Windows 11 (Build 22621 or newer).
-- **Runtime & SDK**: [.NET SDK](https://dotnet.microsoft.com/) selected by `global.json` (10.0.401 minimum, with roll-forward to a newer major SDK). Projects target .NET 10.
-- **Build Tools**: Visual Studio 2026 with the **Desktop development with C++** workload and **MSVC v145** toolset (required to compile the native `Codale.ShellExt` COM DLL).
-- **AI Agent CLI**: [Claude Code](https://claude.com/claude-code) or OpenAI Codex installed and authenticated for full integration.
-
-### Build, Run, Watch, and Publish
-
-The executable project is `src/Codale.App/Codale.App.csproj`; `Codale.slnx` groups the app, libraries, and tests. Run app commands from the app directory:
+From the repository root:
 
 ```powershell
-cd src\Codale.App
+dotnet build Codale.slnx -c Debug
+dotnet run --project src/Codale.App/Codale.App.csproj
+dotnet watch --project src/Codale.App/Codale.App.csproj --no-hot-reload
+```
 
-dotnet run
-dotnet watch --no-hot-reload
-dotnet run -c Release
+The solution maps the app to x64. App builds also build and bundle the MCP servers and native Explorer extension. The WinApp integration registers development package identity when launching. Close Codale if a build reports locked binaries.
+
+Publish an unsigned release package from the app directory:
+
+```powershell
+cd src/Codale.App
 dotnet publish -c Release -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false
 ```
 
-The WinApp NuGet integration registers a development package identity and launches the app. MSBuild builds and bundles the MCP servers and Explorer shell extension. Visual Studio's C++ build tools are required for the extension. The native inference library retains its own incremental build helper.
+Release publishing uses ReadyToRun and retains reflection metadata with trimming disabled. The unsigned MSIX must be signed with a trusted certificate for installation/distribution. Development launch uses WinApp registration. Explorer's Open in Codale integration is supplied by the packaged C++ COM extension.
 
-Release publishing enables ReadyToRun to reduce startup JIT work, at the cost of a larger package and longer publish time. Use `-p:PublishReadyToRun=false` to opt out. Trimming remains disabled to preserve reflection metadata. The app limits its managed heap to 4 GB; this does not cap total process or native memory. Visual Studio discovery supplies both the C++ compiler and MSIX symbol tools.
-
-Use watch in rebuild/restart mode; packaged WinUI XAML Hot Reload is not promised by this workflow. Close Codale if Windows reports that its binaries are in use.
-
-From the repository root, select the executable project explicitly:
+## Tests and verification
 
 ```powershell
-dotnet run --project src/Codale.App/Codale.App.csproj
-dotnet watch --project src/Codale.App/Codale.App.csproj --no-hot-reload
-dotnet build Codale.slnx
+dotnet build Codale.slnx -c Debug
+dotnet test Codale.slnx -c Debug --no-build --no-restore
 ```
 
-`dotnet publish` produces deployment artifacts; there is no built-in `dotnet deploy` command for this WinUI project. The unsigned MSIX above must be signed with a trusted certificate before installation or distribution. Set `AppxPackageSigningEnabled=true` and `PackageCertificateThumbprint` to your signing certificate when producing a signed package. Development launch uses WinApp registration rather than repeatedly installing a signed release MSIX.
+On November 16, 2026, merged `main` at `fa9981f` built with zero warnings/errors and passed all 2,372 tests across 12 test projects. This verifies the automated suite; interactive Windows flows, live agent requests, and native model inference were not exercised.
 
----
-
-## Testing & Quality Assurance
-
-Codale includes an extensive automated test suite covering all core libraries:
+Live agent tests are opt-in and can consume tokens:
 
 ```powershell
-# Run the complete offline test suite (~200 unit tests, no API tokens needed)
-dotnet test Codale.slnx
-```
-
-### Testing Live Agent Turns
-
-Tests that execute real CLI turns and communicate with model endpoints are opt-in to avoid accidental token consumption:
-
-```powershell
-# Run live integration tests against an installed CLI
 $env:CODALE_LIVE_TESTS = "1"
 dotnet test tests/Codale.Agents.Tests --filter "FullyQualifiedName~Live"
-
-# Capture live wire transactions into a new replay fixture
-$env:CODALE_LIVE_RAW_LOG = "tests/fixtures/new_turn.jsonl"
-dotnet test tests/Codale.Agents.Tests --filter "FullyQualifiedName~Live"
 ```
 
----
+Routing corpus tests have their own opt-in switch, `CODALE_ROUTING_LIVE_TESTS=1`. Native inference smoke/evaluation commands are documented separately in the native harness notes.
 
-## Gotchas & Troubleshooting
+## Source layout and ownership
 
-1. **Approval Routing Flag (`--permission-prompt-tool stdio`)**:
-   When launching Claude Code sessions directly, Codale passes `--permission-prompt-tool stdio` to route tool permission prompts to the UI. If this flag is omitted, the CLI defaults to non-interactive denials. Furthermore, approval responses must omit `updatedInput` when no edit was made (sending explicit `null` causes silent rejection).
-2. **Task List Synchronization**:
-   Codale disables the CLI's native `TodoWrite`, `TaskCreate`, and `TaskUpdate` tools via `--disallowedTools` when `codale-tasks` is attached. This ensures all task tracking flows exclusively through `todos_set`, providing a single authoritative source for the UI checklist.
-3. **Windows 11 TitleBar Caption**:
-   WinUI 3's custom `TitleBar` control manages caption text inside the window, whereas taskbar and Alt+Tab labels follow `AppWindow.Title`. Codale synchronizes both automatically.
-4. **Explorer Shell Extension Registration**:
-   The packaged COM shell extension (`Codale.ShellExt.dll`) registers automatically upon MSIX installation. If "Open in Codale" does not appear on folder context menus, restart `explorer.exe` or verify Developer Mode is enabled in Windows Settings.
+| Project | Responsibility |
+| --- | --- |
+| `Codale.App` | WinUI views/view models, composition, activation, packaging |
+| `Codale.Core` | Domain models, policies, protocols, Markdown/syntax rules, terminal transport contracts |
+| `Codale.Agents` | Claude/Codex sessions, transcripts, accounts, provider clients and Smart role routing |
+| `Codale.Settings` | Settings, application persistence, recent projects, command history, shortcuts, syntax selection |
+| `Codale.Workspace` | Workspace data contexts, database pool, memory/history/configuration/secrets |
+| `Codale.Db` | Embedded storage, keyword/vector retrieval, graph, blobs, events, encryption |
+| `Codale.Search` | Source indexing, discovery, search, knowledge retrieval |
+| `Codale.Commands` | Focused command detectors, parsing, saved commands and run resolution |
+| `Codale.Editor` / `Codale.Terminal` | Editor model / ConPTY session and terminal emulation |
+| `Codale.Git` | Git CLI repository operations |
+| `Codale.Smart` | Shared generation/exploration machinery and retained native development runtime |
+| `Codale.Mcp.Tasks` | Five workspace MCP servers and terminal CLI pre-tool hook |
+| `Codale.Mcp.Browser` / `.Computer` / `.Phone` | Browser, desktop, Android MCP hosts |
+| `Codale.Mcp.Common` | Shared MCP protocol and workspace server definitions |
+| `Codale.ShellExt` | Native Explorer COM extension |
 
----
+`ApplicationServices` composes the application services and their shutdown. Workspaces receive explicit dependencies and own their workspace resources. Architecture tests pin project references and prohibit application service lookup and static database/settings fallbacks in application code. Standalone MCP processes retain their own storage boundaries. Core syntax/tokenization still includes process-wide services.
 
-## Known Limitations & Roadmap
-
-- **Subagent Sidechains**: Full hierarchical transcript replay for subagents spawned via task sidechains is under active development.
-- **Terminal Splitting**: Vertical and horizontal split-pane terminal tiling within a single tab.
-- **Cross-Platform Support**: Codale is intentionally tailored to Windows 11 and WinUI 3; native macOS and Linux companion wrappers may be evaluated in the future.
+See the [source ownership inventory](docs/source-inventory.md) for implementation details and remaining manual checks. Codale is Windows-only; cross-platform shells are not implemented.

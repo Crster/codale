@@ -1,75 +1,41 @@
-# Native Smart experience
+# Native inference development harness
 
-Local IBM Granite 4.2 inference with no OpenAI client, inference server, Python, or agent CLI.
+The Windows app uses provider-backed Smart roles. It does not expose a local model picker, download model weights, load this runtime, build the shim during an app build, or package inference DLLs. See [current Smart features](README.md) for the application path.
 
-## Model
+`Codale.Smart` retains native inference classes, template tests and the `Codale.Smart.Smoke` console harness for development and evaluation. These require a separate native build and model file.
 
-- **File:** the official `granite-4.2-8b-Q4_K_M.gguf` at revision `93f3f6a8938ee922b784cf4e5b4203cd3428df8f`. The SHA-256 is verified, and the file is stored outside the app package.
-- **License:** Apache 2.0 (https://huggingface.co/ibm-granite/granite-4.2-8b-GGUF).
-- **Device:** loading uses one GPU, the discrete Vulkan GPU with the most memory. An integrated GPU is used only when it is the only GPU, because splitting layers onto an iGPU's shared memory makes every token wait on it. If the GPU can't load, the CPU is tried once.
-- **Context:** 16K tokens (`SmartConversation.ContextTokens` and the shim's `context_tokens`). Flash attention and a q8_0 KV cache keep weights plus cache within an 8 GB GPU; without flash attention the cache falls back to f16.
+## Native payload and model
 
-## Prompt format
-
-- **Chat template:** `SmartConversation` renders the chat template embedded in the GGUF byte for byte. `tests/fixtures/granite` holds goldens rendered by the template itself.
-- **Tools:** the `# Tools … <tools>` block, `<tool_call><function=…><parameter=…>` XML calls, and `<tool_response>` turns. Reasoning in earlier turns is truncated before the last user turn, as the template does.
-- **Sampling:** temperature 1.0 and top_p 0.95 for every task, IBM's recommendation, also stored in the GGUF. Evaluations pin `SmartExperience.Seed`.
-- **Prefix reuse:** each call reuses the KV cache of the longest prompt prefix it shares with the previous call. A repeated system prompt or the next tool round only evaluates its new tail. On an RTX 5050, a repeated 4.5K-token prompt takes about 60 ms instead of 3 s.
-
-## Reasoning per task
-
-The single **Enable thinking** setting maps to one of Granite's three modes for each task (`SmartExperience.ReasoningFor`):
-
-| Task | Thinking off | Thinking on |
-|---|---|---|
-| Routing, shell translation, completions | off | off (they answer in seconds) |
-| Command risk, commit message | off | low effort (`{reasoning effort: low}`, up to 512 tokens) |
-| Exploration, summaries, ranking, briefs | off | full |
-
-When reasoning precedes a grammar-constrained answer, it runs as a free pass that stops at `</think>`. The grammar then constrains only the answer.
-
-## Tasks
-
-- **Routing, ranking, shell translation and command risk** run without tools and use output grammars, with strict validation afterwards.
-- **Commit messages** read the staged diff directly:
-  - the stat in full, then each file's patch
-  - lock and generated files omitted
-  - large files shortened so the patch fits about 24K characters
-  - one grammar-constrained generation; the subject is at most 72 characters
-- **Fill-in-the-middle** (`FillInMiddleAsync`):
-  - prompt: `<|filename|>path\n<|fim_prefix|>…<|fim_suffix|>…<|fim_middle|>`
-  - stops at the end of the line, never queues behind interactive work, and preempts background summaries
-  - the editor shows it as ghost text (Settings → Inline code completions)
-
-`native/build.ps1` downloads checksum-pinned llama.cpp b11960 DLLs and compiles the shim against headers at commit
-`8642541b255bfb5dc39cd351a178be09013a55d6`. Windows x64 and ARM64 need the matching Visual Studio C++ build tools and
-Windows SDK. The app build runs this step when the shim is missing or stale.
+`native/build.ps1` downloads checksum-pinned llama.cpp b11960 Vulkan DLLs and compiles `smart.cpp` against headers at revision `8642541b255bfb5dc39cd351a178be09013a55d6`. Build for x64 or ARM64 with the matching Visual Studio C++ tools and Windows SDK:
 
 ```powershell
 ./src/Codale.Smart/native/build.ps1 -Platform x64
-dotnet test tests/Codale.Smart.Tests
-dotnet run --project tests/Codale.Smart.Smoke -- src/Codale.Smart/native/bin/win-x64 <model.gguf> gpu            # protocol + features
-dotnet run --project tests/Codale.Smart.Smoke -- src/Codale.Smart/native/bin/win-x64 <model.gguf> gpu bench      # speed, prefix reuse
-dotnet run --project tests/Codale.Smart.Smoke -- src/Codale.Smart/native/bin/win-x64 <model.gguf> gpu eval       # accuracy/latency report
-dotnet run --project tests/Codale.Smart.Smoke -- src/Codale.Smart/native/bin/win-x64 <model.gguf> gpu fim-spike  # FIM prompt formats
 ```
 
-## Runtime behaviour
+The current `SmartModels` catalog contains Granite 4.2 8B Q4_K_M. `ModelInstaller` defines its pinned revision, size and checksum; the smoke harness verifies the supplied model file. Keep model files outside the app package.
 
-- **Lifecycle:** Smart experience starts disabled. Disabling it cancels work and unloads the weights. Basic search, indexing and project retrieval stay available.
-- **Scheduling:** interactive inference preempts summary generation and cancels its running commands. Routing and discovery share a 120-second prompt budget that includes queue time; background summaries get 20 seconds. The last five seconds are reserved for the final answer. When time runs out, basic retrieval and local routing take over.
-- **Commits:** a draft is discarded if the message or the staged tree changes during generation.
+`SmartConversation` implements the Granite chat template, including tool turns and Off/Low/Full reasoning. The native context is 16,384 tokens. Template goldens live in [tests/fixtures/granite](../../tests/fixtures/granite/README.md).
 
-## Tools
+## Run the harness
 
-- **Access:** exploring tasks can list directories, search accessible files, read text ranges and run noninteractive shell commands with the app user's permissions, including in background summaries. Commands default to the captured worktree but may choose another directory or change files. Cancellation cannot undo side effects a command has already had.
-- **Limits:**
-  - interactive requests get eight rounds and eight calls, 2,048 generated tokens per round, and 4 KiB tool responses
-  - each command runs for at most 60 seconds
-  - text reads are limited to 16 MiB; searches to 5,000 files and 1 MiB of text per file
+Run these commands from the repository root, replacing `<model.gguf>` with a local model path:
 
-## History
+```powershell
+dotnet test tests/Codale.Smart.Tests
+dotnet run --project tests/Codale.Smart.Smoke -- src/Codale.Smart/native/bin/win-x64 <model.gguf> gpu model=granite-4.2-8b-q4
+dotnet run --project tests/Codale.Smart.Smoke -- src/Codale.Smart/native/bin/win-x64 <model.gguf> gpu model=granite-4.2-8b-q4 bench
+dotnet run --project tests/Codale.Smart.Smoke -- src/Codale.Smart/native/bin/win-x64 <model.gguf> gpu model=granite-4.2-8b-q4 eval
+dotnet run --project tests/Codale.Smart.Smoke -- src/Codale.Smart/native/bin/win-x64 <model.gguf> gpu model=granite-4.2-8b-q4 fim-spike
+```
 
-- **Status log:** the status bar beside index status opens a scrollable process log on hover, click or keyboard activation.
-- **Storage:** history and reusable discoveries live in `smart/history` under the app data directory, capped at 200 runs or 10 MiB per project.
-- **Reuse:** discoveries are scoped to a worktree. File hashes are rechecked; command output is timestamped historical evidence.
+Use `cpu` instead of `gpu` to request CPU execution. `protocol-only` and `features-only` select individual smoke stages; `budget-seconds=120` sets the task budget. The current model ID is `granite-4.2-8b-q4`; use `model=granite-4.2-8b-q4` when supplying it explicitly.
+
+The first run above checks readiness and protocol/features. `bench` measures prompt/prefix reuse and generation; `eval` writes accuracy/latency results; `fim-spike` compares completion prompt formats. These runs load real weights and are separate from the ordinary unit-test suite.
+
+## Scope and tool access
+
+The retained runtime supports prefix reuse, constrained output and bounded tool rounds. Runtime behavior depends on the harness configuration; the application's provider roles and status UI are described in the Smart README.
+
+Background exploration uses the read-only tool set. Interactive development requests can include `run_shell` when their caller supplies that tool set; commands may change files and cancellation cannot undo completed side effects. Consult `SmartTools` and the smoke cases before running a tool-enabled evaluation.
+
+Historical native inference timing and quality measurements are not guarantees for the current application or another device. The automated post-merge build/test verification did not load model weights or run this harness.
