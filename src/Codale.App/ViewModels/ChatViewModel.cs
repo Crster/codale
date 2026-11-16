@@ -4261,7 +4261,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _activeTurn!.LiveStage = compact ? "Compacting" : "Gathering context";
         var contextClock = System.Diagnostics.Stopwatch.StartNew();
         var contextStatus = new NoticeItem { Text = compact ? "Compacting…" : "Gathering context…" };
-        Add(contextStatus);
+        // Activity grows inside the turn's existing row, so preparation must sit
+        // before that row to remain above the work it precedes.
+        Items.Insert(Items.IndexOf(_activeTurn), contextStatus);
+        Reflow();
 
         if (!compact) RecordUserTurn(text);
 
