@@ -186,8 +186,14 @@ public sealed partial class WorkspacePage : Page
 
     private void RefreshSmartStatus()
     {
-        var (text, _, visible) = ViewModel.Smart.Status.Snapshot();
+        var (text, detail, visible) = ViewModel.Smart.Status.Snapshot();
         SmartStatusText.Text = text;
+        ToolTipService.SetToolTip(SmartStatusChip, new TextBlock
+        {
+            Text = detail,
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 480,
+        });
         SmartStatusHost.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
     }
 

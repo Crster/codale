@@ -2416,7 +2416,7 @@
                     </Border>
                     <StackPanel x:Name="SmartStatusHost" Orientation="Horizontal">
                         <Rectangle Style="{StaticResource StatusDivider}" />
-                        <Border Style="{StaticResource StatusChip}">
+                        <Border x:Name="SmartStatusChip" Style="{StaticResource StatusChip}">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <controls:SparkleIcon Width="12" Height="12" VerticalAlignment="Center"
                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
