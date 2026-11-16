@@ -141,12 +141,19 @@ public sealed partial class ChatViewModel
     {
         var question = new FeatureJumpItem { TargetName = redirect.FeatureName };
         Add(question);
-        switch (await question.Answer)
+        AttentionNeeded?.Invoke(this, new AttentionRequest(AttentionKind.Question,
+            redirect.FeatureName is { Length: > 0 } target
+                ? $"Continue this message in {target}, start a new history, or stay here?"
+                : "Start a new history for this message, or stay here?"));
+        var choice = await question.Answer;
+        switch (choice)
         {
             case FeatureJumpChoice.Jump:
             case FeatureJumpChoice.New:
                 if (Draft.Replace("\r\n", "\n").Replace('\r', '\n').Trim() == redirect.Text) Draft = "";
-                TopicRedirectRequested?.Invoke(this, redirect);
+                TopicRedirectRequested?.Invoke(this, choice == FeatureJumpChoice.New
+                    ? redirect with { FeatureId = null, FeatureName = null }
+                    : redirect);
                 break;
             case FeatureJumpChoice.Stay:
                 _keepHere = redirect.Text;

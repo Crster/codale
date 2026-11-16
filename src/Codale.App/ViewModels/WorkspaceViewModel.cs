@@ -917,6 +917,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
         if (FindOpenChat(summary.SessionId) is { } open)
         {
+            if (!ReferenceEquals(open, Chat) && !open.IsBusy && !open.IsConnecting &&
+                Features.Get(summary.SessionId) is { } existing)
+            {
+                await open.AttachFeatureAsync(existing, selection: Chat.ContinuationSelection);
+            }
             ChatActivationRequested?.Invoke(this, open);
             return open;
         }
@@ -926,17 +931,16 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             return null;
         }
 
-        // A history is shared between CLIs: an empty chat already set to the other CLI takes it
-        // (starting fresh there with the transcript); otherwise it resumes under its own CLI.
-        var owner = Features.ProviderSession(feature.Id)?.Provider;
+        // Histories share the active chat's CLI, account, model and mode. Attaching
+        // uses a transcript handoff when that account cannot resume the native session.
+        var selection = Chat.ContinuationSelection;
         // The empty chat in front takes it whether or not it already connected (a blank chat
         // connects on open); AttachFeatureAsync tears that session down and starts the right one.
         var reuseFront = !Chat.HasConversation && !Chat.IsTerminalSession;
-        var wanted = reuseFront ? Chat.CliId : null;
-        var chat = reuseFront ? Chat : FreshChat(owner);
+        var chat = reuseFront ? Chat : FreshChat(selection.CliId);
         IsViewingHistory = false;
         HistoryTitle = null;
-        await chat.AttachFeatureAsync(feature, wanted);
+        await chat.AttachFeatureAsync(feature, selection: selection);
         ChatActivationRequested?.Invoke(this, chat);
         await Diff.RefreshAsync();
         return chat;
@@ -951,24 +955,20 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         if (sender is not ChatViewModel from) return;
         try
         {
+            var selection = from.ContinuationSelection;
             ChatViewModel target;
             if (redirect.FeatureId is { } id)
             {
-                if (FindOpenChat(id) is { } open) target = open;
-                else
-                {
-                    if (Features.Get(id) is not { } feature) { from.Draft = redirect.Text; return; }
-                    var owner = Features.ProviderSession(id)?.Provider;
-                    target = FreshChat(owner);
-                    if (ReferenceEquals(target, from)) target = CreateChat(owner);
-                    await target.AttachFeatureAsync(feature);
-                }
+                if (Features.Get(id) is not { } feature) { from.Draft = redirect.Text; return; }
+                target = FindOpenChat(id) ?? CreateChat(selection.CliId);
+                // A redirect must not interrupt work already running in the destination.
+                if (target.IsBusy || target.IsConnecting) { from.Draft = redirect.Text; return; }
+                await target.AttachFeatureAsync(feature, selection: selection);
             }
             else
             {
-                target = FreshChat(from.CliId);
-                if (ReferenceEquals(target, from)) target = CreateChat(from.CliId);
-                target.PermissionMode = from.PermissionMode;
+                target = CreateChat(selection.CliId);
+                target.ApplyContinuationSelection(selection);
             }
             IsViewingHistory = false;
             HistoryTitle = null;

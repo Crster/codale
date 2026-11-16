@@ -10,6 +10,10 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Codale.App.ViewModels;
 
+/// <summary>The active choices carried when continuing a message in another history.</summary>
+public sealed record ChatContinuationSelection(string CliId, string EndpointName, string? Model, string? Effort, string Mode,
+    IReadOnlyList<AgentModelInfo> Models);
+
 /// <summary>Explicit session history and project-wide context, independent of conversation topic.</summary>
 public sealed partial class ChatViewModel
 {
@@ -45,15 +49,42 @@ public sealed partial class ChatViewModel
     private (UserMessageItem Item, List<ComposerAttachment> Composer)? _preShown;
     private string? _handoffContext;
 
+    public ChatContinuationSelection ContinuationSelection =>
+        new(CliId, EndpointName, RequestedModel, RequestedEffort, PermissionMode, AvailableModels);
+
+    public void ApplyContinuationSelection(ChatContinuationSelection selection)
+    {
+        CliId = selection.CliId;
+        EndpointName = selection.EndpointName;
+        AvailableModels = selection.Models;
+        HasModelCatalog = AvailableModels.Count > 0;
+        OnPropertyChanged(nameof(AvailableModels));
+        OnPropertyChanged(nameof(HasModelCatalog));
+        OnPropertyChanged(nameof(CanPickModel));
+        RequestedModel = selection.Model;
+        RequestedEffort = selection.Effort;
+        PermissionMode = selection.Mode;
+        OnPropertyChanged(nameof(EndpointName));
+        NotifyModelDisplays();
+    }
+
     /// <summary>Only opening a history row resumes it. Prompts never select a different session.</summary>
-    public async Task<bool> AttachFeatureAsync(FeatureInfo feature, string? cliId = null)
+    public async Task<bool> AttachFeatureAsync(FeatureInfo feature, string? cliId = null, ChatContinuationSelection? selection = null)
     {
         if (Features is not { } features) return false;
         await DisposeSessionAsync();
         ResetForNewSession();
+        IsConnected = false;
+        if (selection is not null)
+        {
+            ApplyContinuationSelection(selection);
+            cliId = selection.CliId;
+        }
         var mapping = features.ProviderSession(feature.Id);
         var continuation = mapping is null ? (CacheContinuationPlan?)null : CacheContinuationPlan.Create(
-            mapping.Provider, mapping.Endpoint, "", cliId ?? mapping.Provider, mapping.Endpoint, "");
+            mapping.Provider, mapping.Endpoint, _smart.Settings.FindByok(mapping.Endpoint)?.AccountId ?? "",
+            cliId ?? mapping.Provider, selection?.EndpointName ?? mapping.Endpoint,
+            _smart.Settings.FindByok(selection?.EndpointName ?? mapping.Endpoint)?.AccountId ?? "");
         if (continuation is { } plan) Status.PrepareCache(plan.Explanation);
         // A history is Codale's, not one CLI's: opened under the other CLI it cannot resume the
         // native session, so that CLI starts fresh and its first prompt carries the transcript.
@@ -71,6 +102,7 @@ public sealed partial class ChatViewModel
             ResumeSessionId = mapping.ProviderSessionId;
             OnPropertyChanged(nameof(EndpointName));
         }
+        if (selection is not null) ApplyContinuationSelection(selection);
         SetFeature(feature);
         if (handoff) CaptureHandoff();
         Title = feature.Name;

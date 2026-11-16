@@ -2407,22 +2407,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     Status.ContextWindow = contextWindow;
                 }
 
-                // Ask and automatic are the host's, riding on the CLI's manual and auto:
-                // the CLI confirming its half is not a reason to drop them.
-                if (!RidesOn(PermissionMode, init.PermissionMode))
+                // The selection belongs to the chat. A CLI's startup report must
+                // not replace it when switching providers or reconnecting.
+                if (!RidesOn(PermissionMode, init.PermissionMode) &&
+                    CliMode(PermissionMode) != CliMode(init.PermissionMode) &&
+                    _session is { } live)
                 {
-                    // Full never yields to a CLI that started more cautious: ask it again for YOLO.
-                    if (PermissionMode is "auto" or "dontAsk" or "bypassPermissions")
-                    {
-                        if (_session is { } live)
-                        {
-                            _ = live.TrySetPermissionModeAsync("bypassPermissions");
-                        }
-                    }
-                    else
-                    {
-                        PermissionMode = init.PermissionMode;
-                    }
+                    _ = live.TrySetPermissionModeAsync(CliMode(PermissionMode));
                 }
 
                 NotifyModelDisplays();
@@ -4671,6 +4662,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         if (IsBusy || IsTerminalSession || IsConnecting) return;
         if (cli == CliId) { await SetEndpointAsync(name); return; }
+        var tier = CurrentTier;
+        var mode = PermissionMode;
         var continuation = CacheContinuationPlan.Create(CliId, EndpointName, "", cli, name, "");
         Status.PrepareCache(continuation.Explanation);
         CaptureHandoff();
@@ -4682,12 +4675,18 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         CliId = cli;
         EndpointName = name;
         OnPropertyChanged(nameof(EndpointName));
-        RequestedModel = null;
-        AvailableModels = [];
-        HasModelCatalog = false;
+        // Resolve the shared tier against the destination account, never carry a
+        // provider-specific model id (or the old account's catalogue) across CLIs.
+        var accountId = _smart.Settings.FindByok(name)?.AccountId;
+        AvailableModels = KnownCatalogue(cli, accountId)
+            ?? await FetchCatalogueAsync(_agentSessions, cli, accountId);
+        HasModelCatalog = AvailableModels.Count > 0;
+        (RequestedModel, RequestedEffort) = TierConfig(tier);
+        PermissionMode = mode;
         OnPropertyChanged(nameof(AvailableModels));
         OnPropertyChanged(nameof(HasModelCatalog));
         OnPropertyChanged(nameof(CanPickModel));
+        NotifyModelDisplays();
         await ConnectAsync();
     }
 

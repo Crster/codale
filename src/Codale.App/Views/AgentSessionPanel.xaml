@@ -270,11 +270,8 @@
                     <Grid Width="30" Height="30">
                         <PersonPicture Width="30" Height="30"
                                        Initials="{x:Bind Workspace.CliEndpoint.AvatarInitials, Mode=OneWay}"
-                                       Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                       Foreground="{x:Bind Workspace.CliEndpoint.AccountStatusBrush, Mode=OneWay}"
                                        Background="Transparent" />
-                        <Ellipse Width="7" Height="7" HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                 Fill="{x:Bind Workspace.CliEndpoint.AccountStatusBrush, Mode=OneWay}"
-                                 Visibility="{x:Bind Session.IsConnected, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                     </Grid>
                     <Button.Flyout>
                         <Flyout x:Name="ProfileFlyout" AreOpenCloseAnimationsEnabled="False"
