@@ -128,8 +128,38 @@ public sealed partial class SettingsPanel : UserControl
 
     private void OnSmartStatusChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(RefreshSmartStatus);
     private string? _smartRowsKey;
-    private readonly Dictionary<string, ComboBox> _smartModelBoxes = [];
-    private readonly HashSet<ComboBox> _loadingSmartModels = [];
+    private readonly Dictionary<string, AutoSuggestBox> _smartModelBoxes = [];
+    private readonly HashSet<AutoSuggestBox> _loadingSmartModels = [];
+
+    /// <summary>
+    /// A model field is free text with catalogue suggestions. The text is the source of truth: catalogue
+    /// loads only replace the suggestions, so a saved model the endpoint does not list is kept as typed.
+    /// </summary>
+    private static AutoSuggestBox CreateModelBox(object? header, string placeholder, string value, Action<string> save)
+    {
+        var box = new AutoSuggestBox
+        {
+            Header = header,
+            PlaceholderText = placeholder,
+            Text = value,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        box.TextChanged += (_, e) =>
+        {
+            if (e.Reason == AutoSuggestionBoxTextChangeReason.UserInput) save(box.Text.Trim());
+        };
+        box.SuggestionChosen += (_, e) =>
+        {
+            if (e.SelectedItem is string id) box.Text = id;
+            save(box.Text.Trim());
+        };
+        box.QuerySubmitted += (_, e) =>
+        {
+            box.Text = (e.ChosenSuggestion as string ?? e.QueryText).Trim();
+            save(box.Text);
+        };
+        return box;
+    }
 
     private void RefreshSmartFeatureRows()
     {
@@ -242,26 +272,19 @@ public sealed partial class SettingsPanel : UserControl
         row.Children.Add(providers);
 
         var active = provider != "off" && SmartFeatureSettings.SupportsProvider(role.Id, provider);
-        var model = new ComboBox
-        {
-            IsEditable = true,
-            PlaceholderText = role.Placeholder,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Center,
-            Tag = role.Id,
-            Visibility = active ? Visibility.Visible : Visibility.Collapsed
-        };
+        var model = CreateModelBox(null, role.Placeholder, _settings.SmartRoleModel(role.Id),
+            value => { if (!_loading) _settings.SetSmartRoleModel(role.Id, value); });
+        model.VerticalAlignment = VerticalAlignment.Center;
+        model.Tag = role.Id;
+        model.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(model, role.Label + " model");
-        model.LostFocus += (_, _) => { if (!_loading && _smartModelBoxes.GetValueOrDefault(role.Id) == model) _settings.SetSmartRoleModel(role.Id, model.Text); };
-        model.TextSubmitted += (_, args) => { if (!_loading) _settings.SetSmartRoleModel(role.Id, args.Text); };
-        model.SelectionChanged += (_, _) => { if (!_loading && model.SelectedItem is string id) _settings.SetSmartRoleModel(role.Id, id); };
         // Only problems are spelled out; a working row stays one line.
         var modelStatus = new TextBlock { Visibility = Visibility.Collapsed, Style = (Style)SettingsRootGrid.Resources["RowDesc"] };
         Grid.SetRow(modelStatus, 2); Grid.SetColumn(modelStatus, 1); Grid.SetColumnSpan(modelStatus, 2);
         if (active)
         {
             model.Loaded += async (_, _) => await LoadSmartModelsAsync(model, modelStatus, role.Id, provider);
-            model.DropDownOpened += async (_, _) => await LoadSmartModelsAsync(model, modelStatus, role.Id, provider);
+            model.GotFocus += async (_, _) => await LoadSmartModelsAsync(model, modelStatus, role.Id, provider);
             _smartModelBoxes[role.Id] = model;
         }
         Grid.SetRow(model, 1); Grid.SetColumn(model, 1); Grid.SetColumnSpan(model, 2);
@@ -271,31 +294,19 @@ public sealed partial class SettingsPanel : UserControl
     }
 
     /// <summary>Restores the persisted model after the editable ComboBox template and items have settled.</summary>
-    private void RestoreSmartModelSelection(string id, ComboBox box)
+    private void RestoreSmartModelSelection(string id, AutoSuggestBox box)
     {
-        if (box.FocusState != FocusState.Unfocused) return;
+        if (box.FocusState != FocusState.Unfocused || _smartModelBoxes.GetValueOrDefault(id) != box) return;
 
-        // An editable ComboBox can have its text reset while its model list is populated or its template
-        // is applied. Queue restoration after those changes so the visible editor gets the persisted value.
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            if (box.FocusState != FocusState.Unfocused || _smartModelBoxes.GetValueOrDefault(id) != box) return;
-
-            var model = _settings.SmartRoleModel(id);
-            var catalogChoice = box.Items.OfType<string>().FirstOrDefault(item =>
-                string.Equals(item, model, StringComparison.OrdinalIgnoreCase));
-            var loading = _loading;
-            _loading = true;
-            try
-            {
-                box.SelectedItem = catalogChoice;
-                box.Text = catalogChoice ?? model;
-            }
-            finally { _loading = loading; }
-        });
+        var model = _settings.SmartRoleModel(id);
+        if (box.Text == model) return;
+        var loading = _loading;
+        _loading = true;
+        try { box.Text = model; }
+        finally { _loading = loading; }
     }
 
-    private async Task LoadSmartModelsAsync(ComboBox box, TextBlock status, string role, string provider)
+    private async Task LoadSmartModelsAsync(AutoSuggestBox box, TextBlock status, string role, string provider)
     {
         if (provider == "off" || !SmartFeatureSettings.SupportsProvider(role, provider)) return;
         if (!_loadingSmartModels.Add(box)) return;
@@ -308,25 +319,10 @@ public sealed partial class SettingsPanel : UserControl
                 ? [.. (ChatViewModel.KnownCatalogue(provider, accountId) ?? await ChatViewModel.FetchCatalogueAsync(_agentSessions, provider, accountId)).Select(m => m.Id)]
                 : await client.ModelsAsync(CancellationToken.None);
             if (provider != _settings.SmartProviderFor(role) || profileKey != _settings.SmartApiProfileFor(role) || !_smartModelBoxes.ContainsValue(box)) return;
-            var current = box.Text;
-            var loading = _loading; _loading = true;
-            try
-            {
-                box.Items.Clear();
-                foreach (var id in ids.Where(id => !string.IsNullOrWhiteSpace(id))
-                    .Select(id => id.Trim()).Distinct(StringComparer.OrdinalIgnoreCase))
-                {
-                    box.Items.Add(id);
-                }
-                // Providers often omit embedding-only models from /models. Keep the configured
-                // value selectable and visible even when the endpoint catalogue does not list it.
-                var configured = _settings.SmartRoleModel(role);
-                if (!string.IsNullOrWhiteSpace(configured) && !box.Items.OfType<string>()
-                    .Any(id => string.Equals(id, configured, StringComparison.OrdinalIgnoreCase)))
-                    box.Items.Add(configured);
-                box.Text = current;
-            }
-            finally { _loading = loading; }
+            // Suggestions only: the typed or saved model stays in the box even when the catalogue omits it,
+            // for example embedding-only models.
+            box.ItemsSource = ids.Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             status.Text = ids.Length == 0 ? "No models reported. Enter a model ID." : "";
             status.Visibility = status.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             ToolTipService.SetToolTip(box, ids.Length == 0 ? status.Text : null);
@@ -785,38 +781,12 @@ public sealed partial class SettingsPanel : UserControl
         }
 
         // Accounts and endpoints share model controls; their catalogues use their own credentials.
-        var modelBoxes = new List<ComboBox>();
+        var modelBoxes = new List<AutoSuggestBox>();
 
-        ComboBox ModelField(string label, string placeholder, string value, Action<string> apply)
+        AutoSuggestBox ModelField(string label, string placeholder, string value, Action<string> apply)
         {
-            var box = new ComboBox
-            {
-                Header = label,
-                PlaceholderText = placeholder,
-                IsEditable = true,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                Text = value,
-            };
-            if (value.Length > 0)
-            {
-                box.Items.Add(value);
-                box.SelectedIndex = 0;
-            }
-
-            box.TextSubmitted += (_, e) =>
-            {
-                apply(e.Text.Trim());
-                SaveProviders();
-            };
-            box.SelectionChanged += (_, _) =>
-            {
-                if (box.SelectedItem is string id)
-                {
-                    apply(id);
-                    SaveProviders();
-                }
-            };
-            box.DropDownOpened += async (_, _) => await LoadModelsAsync(provider, modelBoxes);
+            var box = CreateModelBox(label, placeholder, value, v => { apply(v); SaveProviders(); });
+            box.GotFocus += async (_, _) => await LoadModelsAsync(provider, modelBoxes);
             panel.Children.Add(box);
             modelBoxes.Add(box);
             return box;
@@ -851,7 +821,7 @@ public sealed partial class SettingsPanel : UserControl
 
 
     /// <summary>Shows why the list could not load as a tooltip on the model boxes; null clears it.</summary>
-    private static void SetModelStatus(List<ComboBox> boxes, string? message)
+    private static void SetModelStatus(List<AutoSuggestBox> boxes, string? message)
     {
         foreach (var box in boxes)
         {
@@ -860,7 +830,7 @@ public sealed partial class SettingsPanel : UserControl
     }
 
     /// <summary>Fills the model dropdowns from the endpoint's OpenAI-style GET /models; failures leave the current list.</summary>
-    private async Task LoadModelsAsync(ByokProvider provider, List<ComboBox> boxes)
+    private async Task LoadModelsAsync(ByokProvider provider, List<AutoSuggestBox> boxes)
     {
         if (provider.IsAccount)
         {
@@ -872,13 +842,8 @@ public sealed partial class SettingsPanel : UserControl
                 return;
             }
             SetModelStatus(boxes, null);
-            foreach (var box in boxes)
-            {
-                var current = box.Text;
-                box.Items.Clear();
-                foreach (var model in accountModels) box.Items.Add(model.Id);
-                box.Text = current;
-            }
+            var accountIds = accountModels.Select(model => model.Id).ToList();
+            foreach (var box in boxes) box.ItemsSource = accountIds;
             return;
         }
         var anthropicOnly = string.IsNullOrWhiteSpace(provider.BaseUrl);
@@ -944,28 +909,7 @@ public sealed partial class SettingsPanel : UserControl
         var ids = models.Select(model => model.Id).ToList();
         SaveProviders();
 
-        foreach (var box in boxes)
-        {
-            var current = box.Text;
-            box.Items.Clear();
-            foreach (var id in ids)
-            {
-                box.Items.Add(id);
-            }
-
-            if (current.Length > 0)
-            {
-                var index = ids.IndexOf(current);
-                if (index >= 0)
-                {
-                    box.SelectedIndex = index;
-                }
-                else
-                {
-                    box.Text = current;
-                }
-            }
-        }
+        foreach (var box in boxes) box.ItemsSource = ids;
     }
 
     private void SaveProviders()
