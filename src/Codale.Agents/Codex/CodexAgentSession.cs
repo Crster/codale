@@ -1558,9 +1558,11 @@ public sealed partial class CodexAgentSession(CodexSessionOptions options) : IAg
         {
             InputTokens = (int)Math.Max(0, Field("input_tokens", "inputTokens", "preTokens") - cached),
             CacheReadInputTokens = (int)cached,
+            CacheUsageReported = new[] { "cached_input_tokens", "cachedInputTokens", "cacheReadInputTokens" }
+                .Any(name => usage.Prop(name) is { ValueKind: JsonValueKind.Number }),
             OutputTokens = (int)Field("output_tokens", "outputTokens"),
         };
-        return snapshot.InputTokens == 0 && snapshot.OutputTokens == 0 ? null : snapshot;
+        return snapshot.TotalTokens == 0 ? null : snapshot;
     }
 
     /// <summary>

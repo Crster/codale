@@ -90,6 +90,7 @@ public sealed partial class SmartExperience
                     "\nCall only one tool per response. To call a tool reply only with <tool_call><function=NAME><parameter=KEY>VALUE</parameter></function></tool_call>. Otherwise output the final answer in the requested format.";
             var transcript = input;
             int limit = background ? 2 : 8;
+            bool retriedShellFormat = false;
             for (int round = 0; round <= limit; round++)
             {
                 activity = activity with { State = explore && round < limit ? "exploring" : "finalizing" };
@@ -101,7 +102,15 @@ public sealed partial class SmartExperience
                 {
                     // Inserted text keeps its whitespace: it goes in at the caret as is.
                     var value = parse(context.Task is "completion" or "compose-completion" or "shell-completion" ? output :
-                        new SmartConversation("", "", SmartReasoning.Off).FinalVisible(output).Trim()) ?? throw new InvalidDataException("Smart final answer failed validation.");
+                        new SmartConversation("", "", SmartReasoning.Off).FinalVisible(output).Trim());
+                    if (value is null && context.Task == "shell" && !retriedShellFormat)
+                    {
+                        retriedShellFormat = true;
+                        transcript = input + "\nReturn only a JSON object with a string command property, for example {\"command\":\"Get-ChildItem\"}. " +
+                            "No explanation or Markdown. Do not execute the command. Use an empty command if the request is ambiguous.";
+                        continue;
+                    }
+                    if (value is null) throw new InvalidDataException("Smart final answer failed validation.");
                     lock (_gate)
                     {
                         if (generation != _generation) throw new OperationCanceledException(linked.Token);

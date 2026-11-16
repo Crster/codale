@@ -10,6 +10,19 @@ namespace Codale.Agents.Tests;
 /// </summary>
 public sealed class ClaudeStreamParserTests
 {
+    [Theory]
+    [InlineData("", false, 0)]
+    [InlineData(",\"cache_read_input_tokens\":0", true, 0)]
+    [InlineData(",\"cache_read_input_tokens\":800", true, 800)]
+    public void Cache_telemetry_distinguishes_missing_zero_and_hits(string cache, bool reported, int read)
+    {
+        var events = new ClaudeStreamParser().Parse(
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"m\",\"model\":\"test\",\"content\":[],\"usage\":{\"input_tokens\":100" + cache + "}}}");
+        var usage = Assert.Single(events.OfType<AssistantMessageCompleted>()).Usage!.Value;
+        Assert.Equal(reported, usage.CacheUsageReported);
+        Assert.Equal(read, usage.CacheReadInputTokens);
+    }
+
     private static IReadOnlyList<AgentEvent> Replay(string fixtureName)
     {
         var parser = new ClaudeStreamParser();

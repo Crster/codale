@@ -8,6 +8,22 @@ namespace Codale.Agents.Tests;
 /// <summary>thread/tokenUsage/updated feeds the context meter - the only source a BYOK endpoint has.</summary>
 public sealed class CodexTokenUsageTests
 {
+    [Theory]
+    [InlineData("", false, 0)]
+    [InlineData(",\"cachedInputTokens\":0", true, 0)]
+    [InlineData(",\"cachedInputTokens\":100", true, 100)]
+    public async Task Cache_telemetry_handles_missing_miss_and_cached_only_input(string cache, bool reported, int cached)
+    {
+        var session = new CodexAgentSession(new CodexSessionOptions { WorkingDirectory = "." });
+        session.AdoptThread("main");
+        await session.HandleNotificationAsync("thread/tokenUsage/updated", Json(
+            "{\"threadId\":\"main\",\"tokenUsage\":{\"last\":{\"inputTokens\":100" + cache + "}}}"));
+        var usage = Assert.Single(Drain(session).OfType<UsageUpdated>()).Usage;
+        Assert.Equal(reported, usage.CacheUsageReported);
+        Assert.Equal(cached, usage.CacheReadInputTokens);
+        Assert.Equal(100, usage.ContextTokens);
+    }
+
     private static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement.Clone();
 
     private static List<AgentEvent> Drain(CodexAgentSession session)
@@ -39,6 +55,7 @@ public sealed class CodexTokenUsageTests
         var usage = Assert.Single(events.OfType<UsageUpdated>());
         Assert.Equal(27549, usage.Usage.ContextTokens); // cached is part of the input, not added on top
         Assert.Equal(7000, usage.Usage.CacheReadInputTokens);
+        Assert.True(usage.Usage.CacheUsageReported);
         Assert.Equal(258400, usage.ContextWindow);
 
         var running = Assert.Single(events.OfType<SessionTokensUpdated>());

@@ -1889,3 +1889,10 @@ public sealed partial class NoticeItem : ChatItem
         _ => "",
     };
 }
+/// <summary>The exact file shortlist supplied with a prompt, retained for inspection.</summary>
+public sealed partial class ContextEnrichmentItem : ChatItem
+{
+    public override TranscriptBlock Block => TranscriptBlock.Notice;
+    public required string Summary { get; init; }
+    public required string Details { get; init; }
+}

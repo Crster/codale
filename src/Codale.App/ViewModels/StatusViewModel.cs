@@ -14,6 +14,47 @@ namespace Codale.App.ViewModels;
 /// </summary>
 public sealed partial class StatusViewModel : ObservableObject
 {
+    private readonly PromptCacheState _promptCache = new();
+    public string CacheSummary => _promptCache.Summary;
+    public string CacheDetail => _promptCache.Detail;
+
+    public void PrepareCache(string explanation)
+    {
+        _promptCache.Prepare(explanation);
+        NotifyCache();
+    }
+
+    public void ObserveCache(UsageSnapshot usage)
+    {
+        _promptCache.Observe(usage);
+        NotifyCache();
+    }
+
+    public void EndCacheTurn()
+    {
+        _promptCache.EndTurn();
+        NotifyCache();
+    }
+
+    public void ResetCacheObservation() => PrepareCache(_promptCache.Continuation);
+
+    public void ObserveCacheTurnTotal(UsageSnapshot usage)
+    {
+        _promptCache.ObserveTurnTotal(usage);
+        NotifyCache();
+    }
+
+    public void BeginCacheTurn()
+    {
+        _promptCache.BeginTurn();
+        NotifyCache();
+    }
+
+    private void NotifyCache()
+    {
+        OnPropertyChanged(nameof(CacheSummary));
+        OnPropertyChanged(nameof(CacheDetail));
+    }
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasModel))]
     public partial string Model { get; set; } = NotConnected;

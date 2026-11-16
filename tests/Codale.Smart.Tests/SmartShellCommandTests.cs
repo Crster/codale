@@ -55,12 +55,42 @@ public sealed class SmartShellCommandTests
     [InlineData("{\"command\":\"```ls```\"}")]
     [InlineData("{\"command\":\"ls\\u0000\"}")]
     [InlineData("Run ls to list files")]
+    [InlineData("```powershell\nGet-ChildItem\n```")]
+    [InlineData("Here is the command: {\"command\":\"ls\"}")]
+    [InlineData("```json\n{\"command\":\"ls\"}\n```\nRun it now")]
     [InlineData("{}")]
     public async Task Invalid_translation_is_not_returned_as_a_command(string output)
     {
         await using var smart = new SmartExperience(() => new TranslationRuntime(output), (_, _) => Task.FromResult("model"));
         await smart.SetEnabledAsync(true);
         Assert.Null(await smart.ShellCommandAsync(new(Environment.CurrentDirectory, Environment.CurrentDirectory, "shell-command"), "list files", "cmd.exe"));
+    }
+
+    [Fact]
+    public async Task Remote_translation_accepts_fenced_json()
+    {
+        await using var smart = new SmartExperience();
+        await smart.ConfigureRemoteAsync("test", (_, _, _, _, _) => Task.FromResult("```json\n{\"command\":\"Get-ChildItem -Force\"}\n```"));
+        var result = await smart.ShellCommandAsync(new(Environment.CurrentDirectory, Environment.CurrentDirectory, "shell"), "list files", "pwsh.exe");
+        Assert.Equal("Get-ChildItem -Force", result?.Value);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Remote_translation_retries_invalid_format_once(bool staysInvalid)
+    {
+        await using var smart = new SmartExperience();
+        int calls = 0;
+        await smart.ConfigureRemoteAsync("test", (_, _, input, _, _) =>
+        {
+            calls++;
+            Assert.Contains("list files", input);
+            return Task.FromResult(calls == 1 || staysInvalid ? "Run ls to list files" : "{\"command\":\"Get-ChildItem\"}");
+        });
+        var result = await smart.ShellCommandAsync(new(Environment.CurrentDirectory, Environment.CurrentDirectory, "shell"), "list files", "pwsh.exe");
+        Assert.Equal(2, calls);
+        Assert.Equal(staysInvalid ? null : "Get-ChildItem", result?.Value);
     }
 
     [Fact]

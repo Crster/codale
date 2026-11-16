@@ -31,6 +31,8 @@ public sealed partial class ChatViewModel
     private string? _featureRequest;
     private CancellationTokenSource? _briefing;
     private readonly Dictionary<string, SourceReference> _turnReferences = [with(StringComparer.OrdinalIgnoreCase)];
+    private readonly HashSet<string> _knownContextFiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (string Command, string? Cwd)> _pendingShellReads = [];
     private readonly HashSet<string> _turnEditedPaths = [with(StringComparer.OrdinalIgnoreCase)];
     /// <summary>Files the agent opened with a read tool this turn, first few only: what it needed beyond the enrichment.</summary>
     private readonly HashSet<string> _turnReadPaths = [with(StringComparer.OrdinalIgnoreCase)];
@@ -50,9 +52,12 @@ public sealed partial class ChatViewModel
         await DisposeSessionAsync();
         ResetForNewSession();
         var mapping = features.ProviderSession(feature.Id);
+        var continuation = mapping is null ? (CacheContinuationPlan?)null : CacheContinuationPlan.Create(
+            mapping.Provider, mapping.Endpoint, "", cliId ?? mapping.Provider, mapping.Endpoint, "");
+        if (continuation is { } plan) Status.PrepareCache(plan.Explanation);
         // A history is Codale's, not one CLI's: opened under the other CLI it cannot resume the
         // native session, so that CLI starts fresh and its first prompt carries the transcript.
-        var handoff = mapping is not null && cliId is { Length: > 0 } && cliId != mapping.Provider;
+        var handoff = continuation is { ResumeNative: false };
         if (handoff)
         {
             CliId = cliId!;
@@ -173,6 +178,8 @@ public sealed partial class ChatViewModel
         _recording = false;
         _attachLogged = false;
         _featureRequest = null;
+        _knownContextFiles.Clear();
+        _pendingShellReads.Clear();
         _turnFindings.Clear();
         _turnReferences.Clear();
         _turnEditedPaths.Clear();
@@ -228,6 +235,7 @@ public sealed partial class ChatViewModel
         try
         {
             var relative = Path.IsPathRooted(path) ? Path.GetRelativePath(root, path) : path;
+            _knownContextFiles.Add(relative.Replace('\\', '/'));
             if (ProjectKnowledgeIndex.ReadSource(root, relative) is { } content)
                 _turnReferences[relative] = new SourceReference(relative, ProjectKnowledgeIndex.Hash(content));
         }
@@ -240,6 +248,14 @@ public sealed partial class ChatViewModel
         if (e is SessionInitialized) BindHistoryProvider();
         if (e is ToolCallStarted tool)
         {
+            if (tool.Input.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                tool.Input.TryGetProperty("command", out var command) && command.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                var cwd = tool.Input.TryGetProperty("cwd", out var directory) ? directory :
+                    tool.Input.TryGetProperty("workdir", out directory) ? directory : default;
+                _pendingShellReads[tool.ToolUseId] = (command.GetString()!,
+                    cwd.ValueKind == System.Text.Json.JsonValueKind.String ? cwd.GetString() : null);
+            }
             if (tool.Input.ValueKind == System.Text.Json.JsonValueKind.Object)
                 foreach (var property in tool.Input.EnumerateObject())
                     if (property.Name is "file_path" or "path" or "file" && property.Value.ValueKind == System.Text.Json.JsonValueKind.String &&
@@ -251,6 +267,12 @@ public sealed partial class ChatViewModel
         }
         if (e is ToolCallCompleted done)
         {
+            if (_pendingShellReads.Remove(done.ToolUseId, out var shell) && !done.IsError)
+                foreach (var path in ShellReadFiles.Find(ProjectPath, shell.Command, shell.Cwd, done.ResultText))
+                {
+                    CaptureReference(path);
+                    if (_turnReadPaths.Count < MaxLearnedReads) _turnReadPaths.Add(path);
+                }
             if (!done.IsError)
             {
                 if (done.FileChange is { } change) { CaptureReference(change.FilePath); _turnEditedPaths.Add(change.FilePath); }

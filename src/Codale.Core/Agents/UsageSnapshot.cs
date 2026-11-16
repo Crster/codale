@@ -7,6 +7,8 @@ public readonly record struct UsageSnapshot
     public int OutputTokens { get; init; }
     public int CacheReadInputTokens { get; init; }
     public int CacheCreationInputTokens { get; init; }
+    /// <summary>False when the endpoint omitted cache telemetry; zero alone is not a cache miss.</summary>
+    public bool CacheUsageReported { get; init; }
     public int ThinkingTokens { get; init; }
 
     /// <summary>

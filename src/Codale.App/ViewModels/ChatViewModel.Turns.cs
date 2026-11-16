@@ -9,6 +9,7 @@ public sealed partial class ChatViewModel
     /// </summary>
     private void EndTurn(TurnOutcome outcome)
     {
+        Status.EndCacheTurn();
         RestoreBrowserViewport();
         _turnTimer.Stop();
         _preparingTask = null;

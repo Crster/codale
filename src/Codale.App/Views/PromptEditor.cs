@@ -64,7 +64,8 @@ internal sealed class PromptEditor
 
     public RichEditBox Box { get; }
 
-    public bool IsEnabled => Box.IsEnabled;
+    // Loading uses read-only mode so RichEdit never applies disabled text formatting.
+    public bool IsEnabled => Box.IsEnabled && !Box.IsReadOnly;
 
     public FocusState FocusState => Box.FocusState;
 

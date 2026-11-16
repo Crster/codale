@@ -929,6 +929,7 @@ public sealed partial class ChatTab : UserControl
 
     private void OnDraftKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (!_draftBox.IsEnabled) return;
         // Tab accepts the highlighted / or @ row like Enter does, but only completes it:
         // a command is not sent, so its arguments can still be typed.
         if (e.Key is VirtualKey.Tab && IsSuggestOpen && SuggestList.SelectedItem is SuggestionItem picked)
@@ -991,6 +992,7 @@ public sealed partial class ChatTab : UserControl
     private void OnEnterAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
         args.Handled = true;
+        if (!_draftBox.IsEnabled) return;
 
         // With the popup up, Enter completes the selected row for review before sending.
         if (IsSuggestOpen && SuggestList.SelectedItem is SuggestionItem suggestion)
@@ -1014,6 +1016,7 @@ public sealed partial class ChatTab : UserControl
     private void OnPlanEnterAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
         args.Handled = true;
+        if (!_draftBox.IsEnabled) return;
         CloseSuggestions();
         ExecuteIfCan(ViewModel.SendPlanCommand);
     }
@@ -1755,6 +1758,7 @@ public sealed partial class ChatTab : UserControl
     /// </summary>
     private void OnDraftPaste(object sender, TextControlPasteEventArgs e)
     {
+        if (!_draftBox.IsEnabled) { e.Handled = true; return; }
         DataPackageView content;
         bool files, text, image;
         try

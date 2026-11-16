@@ -500,6 +500,7 @@ public sealed class ClaudeStreamParser
             OutputTokens = u.Int("output_tokens") ?? 0,
             CacheReadInputTokens = u.Int("cache_read_input_tokens") ?? 0,
             CacheCreationInputTokens = u.Int("cache_creation_input_tokens") ?? 0,
+            CacheUsageReported = u.Int("cache_read_input_tokens") is not null,
             ThinkingTokens = u.Prop("output_tokens_details")?.Int("thinking_tokens") ?? 0,
         };
 

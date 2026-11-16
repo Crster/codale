@@ -1656,6 +1656,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        Status.PrepareCache(CacheContinuationPlan.Create(CliId, EndpointName, "", CliId, EndpointName, "", modelChanged: true).Explanation);
         RequestedModel = model;
         RequestedEffort = effort;
         _smart.Settings.SetDefaultTier(CliId, tier);
@@ -1895,10 +1896,17 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             foreach (var name in candidates)
             {
                 if (cli == current && string.Equals(name, EndpointName, StringComparison.OrdinalIgnoreCase)) continue;
-                if (cli != CliId)
+                var continuation = CacheContinuationPlan.Create(CliId, EndpointName,
+                    _smart.Settings.FindByok(EndpointName)?.AccountId ?? "", cli, name,
+                    _smart.Settings.FindByok(name)?.AccountId ?? "");
+                Status.PrepareCache(continuation.Explanation);
+                if (!continuation.ResumeNative)
                 {
                     CaptureHandoff();
                     ResumeSessionId = null;
+                }
+                if (cli != CliId)
+                {
                     CliId = cli;
                     RequestedModel = null;
                     AvailableModels = [];
@@ -2127,6 +2135,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             if (resumeLost)
             {
+                CaptureHandoff();
+                Status.PrepareCache("Native resume was unavailable. A fresh session receives a transcript handoff; previous cache reuse is not assumed.");
                 ResumeSessionId = null;
                 Add(new NoticeItem { Text = "The previous CLI conversation could not be resumed; started a new one.", Severity = NoticeSeverity.Info });
                 await ConnectCoreAsync();
@@ -2584,6 +2594,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             case UsageUpdated usage:
+                if (usage.ParentToolUseId is null) Status.ObserveCache(usage.Usage);
                 // A Claude stream's message_delta: the request's own usage (the only real
                 // one a Z.ai-style endpoint sends). A subagent's request fills a different
                 // context, but its tokens are still spent.
@@ -2611,6 +2622,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             case TurnCompleted turn:
+                if (turn.Usage is { } cacheTotal) Status.ObserveCacheTurnTotal(cacheTotal);
+                // Prefer per-request telemetry. Cumulative turn totals cannot establish
+                // whether the first request after a resume or switch hit the cache.
+                Status.EndCacheTurn();
                 IsBusy = false;
                 _allowRestOfTurn = false;
                 SetActivity(null, toolUseId: null);
@@ -4073,6 +4088,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             Add(shown);
             TrimTranscript();
             _preShown = (shown, composerAttachments);
+            // Reserve the routing row before the activity block. That block grows in
+            // place as tools run, so appending the result later puts it after the work.
+            var routingStatus = new NoticeItem { Text = "Auto Mode · Routing…" };
+            Add(routingStatus);
             BeginTurn();
             _preparingTask = "routing";
             _activeTurn!.LiveStage = "Routing";
@@ -4112,7 +4131,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 finally
                 {
                     routingClock.Stop();
-                    Add(new NoticeItem { Text = $"Auto Mode · {routingClock.Elapsed.TotalSeconds:0.00}s · {(stopped.IsCancellationRequested ? "Stopped" : redirect is not null ? "Suggested another session" : decision.Intent.ToString())}" });
+                    CompletePreparationNotice(routingStatus,
+                        $"Auto Mode · {routingClock.Elapsed.TotalSeconds:0.00}s · {(stopped.IsCancellationRequested ? "Stopped" : redirect is not null ? "Suggested another session" : decision.Intent.ToString())}");
                     _briefing = null;
                 }
                 if (stopped.IsCancellationRequested) return;
@@ -4163,7 +4183,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             default:
-                await SendTurnAsync(text, attachments, planOnly: false, askOnly: false, preparationToken);
+                await SendTurnAsync(text, attachments, planOnly: false, askOnly: false, preparationToken,
+                    autoAct: IsAutomaticMode && intent == RouteIntent.Act);
                 break;
         }
     }
@@ -4186,7 +4207,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private async Task SendTurnAsync(string text, IReadOnlyList<TurnAttachment> attachments, bool planOnly, bool askOnly, CancellationToken preparationToken = default)
+    private async Task SendTurnAsync(string text, IReadOnlyList<TurnAttachment> attachments, bool planOnly, bool askOnly, CancellationToken preparationToken = default, bool autoAct = false)
     {
         _idleCompactTimer.Stop();
         var compact = IsCompactCommand(text);
@@ -4257,13 +4278,18 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         if (_activeTurn is null) BeginTurn();
-        _preparingTask = "context";
-        _activeTurn!.LiveStage = compact ? "Compacting" : "Gathering context";
+        // Only the Auto router's Act branch opts in. Manual modes and routed Ask/Plan
+        // turns never retrieve context, even when they share the same send pipeline.
+        var retrieveContext = autoAct && !compact && !planOnly && !askOnly &&
+            Codale.Search.PromptFileLocator.ShouldRetrieve(text, attachments.Count > 0);
+        _preparingTask = compact || retrieveContext ? "context" : null;
+        _activeTurn!.LiveStage = compact ? "Compacting" : retrieveContext ? "Gathering context" : "";
         var contextClock = System.Diagnostics.Stopwatch.StartNew();
+        Codale.Search.FileLocatorContext? locatedContext = null;
         var contextStatus = new NoticeItem { Text = compact ? "Compacting…" : "Gathering context…" };
         // Activity grows inside the turn's existing row, so preparation must sit
         // before that row to remain above the work it precedes.
-        Items.Insert(Items.IndexOf(_activeTurn), contextStatus);
+        if (compact || retrieveContext) Items.Insert(Items.IndexOf(_activeTurn), contextStatus);
         Reflow();
 
         if (!compact) RecordUserTurn(text);
@@ -4274,6 +4300,23 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         try
         {
             preparationToken.ThrowIfCancellationRequested();
+            if (retrieveContext)
+            {
+                using var retrievalBudget = CancellationTokenSource.CreateLinkedTokenSource(preparationToken);
+                retrievalBudget.CancelAfter(TimeSpan.FromSeconds(4));
+                try
+                {
+                    locatedContext = await Codale.Search.PromptFileLocator.RetrieveAsync(
+                        ProjectPath, text, Features?.Knowledge, retrievalBudget.Token,
+                        new HashSet<string>(_knownContextFiles, StringComparer.OrdinalIgnoreCase));
+                }
+                catch (OperationCanceledException) when (!preparationToken.IsCancellationRequested) { }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Debug.WriteLine($"Project file retrieval failed: {ex.Message}");
+                }
+                preparationToken.ThrowIfCancellationRequested();
+            }
         }
         catch (OperationCanceledException)
         {
@@ -4298,9 +4341,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         contextClock.Stop();
-        var contextIndex = Items.IndexOf(contextStatus);
-        if (contextIndex >= 0) Items[contextIndex] = new NoticeItem { Text = $"{(compact ? "Compaction prepared" : "Context gathered")} · {contextClock.Elapsed.TotalSeconds:0.00}s" };
-        Reflow();
+        contextStatus = CompletePreparationNotice(contextStatus,
+            $"{(compact ? "Compaction prepared" : locatedContext?.Files.Count > 0 ? $"Context gathered · {locatedContext.Files.Count} files" : "No file hints available")} · {contextClock.Elapsed.TotalSeconds:0.00}s");
 
         // "/compact" is housekeeping, not part of the conversation a resumed history replays.
         _preparingTask = null;
@@ -4314,12 +4356,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            string? context = null;
+            string? context = locatedContext?.Text;
             if (!compact && _handoffContext is not null)
             {
                 context = context is null ? TakeHandoffContext() : TakeHandoffContext() + "\n\n" + context;
             }
 
+            Status.BeginCacheTurn();
             if (compact && await session.TryCompactAsync())
             {
                 // Started as the provider's own request; its turn reports back like any other.
@@ -4332,6 +4375,23 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             else
             {
                 await session.SendAsync(new UserTurn(text) { Attachments = attachments, PlanOnly = planOnly, AskOnly = askOnly, ContextPrefix = context });
+                if (locatedContext is not null) _knownContextFiles.UnionWith(locatedContext.Files);
+                if (locatedContext is { Files.Count: > 0 })
+                {
+                    var recordedContext = new ContextEnrichmentRecorded(contextStatus.Text, locatedContext.Text)
+                        { Timestamp = contextStatus.Timestamp };
+                    _featureLog?.Append(recordedContext);
+                    var contextIndex = Items.IndexOf(contextStatus);
+                    if (contextIndex >= 0)
+                    {
+                        Items[contextIndex] = new ContextEnrichmentItem
+                        {
+                            Summary = recordedContext.Summary, Details = recordedContext.Details,
+                            Timestamp = contextStatus.Timestamp,
+                        };
+                        Reflow();
+                    }
+                }
             }
         }
         catch (Exception ex)
@@ -4524,6 +4584,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async Task RestartWithCurrentConfigAsync()
     {
+        Status.ResetCacheObservation();
         var resumeId = Items.Any(i => i is UserMessageItem or TurnActivityItem) ? SessionId : null;
 
         // The session only: a dev server Codale runs for the agent outlives a model switch.
@@ -4546,12 +4607,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         if (IsBusy || IsTerminalSession || IsConnecting) return;
         if (cli == CliId) { await SetEndpointAsync(name); return; }
+        var continuation = CacheContinuationPlan.Create(CliId, EndpointName, "", cli, name, "");
+        Status.PrepareCache(continuation.Explanation);
         CaptureHandoff();
         await DisposeSessionAsync();
         IsConnected = false;
         EndTurn(TurnOutcome.Stopped);
         _streaming = null;
-        ResumeSessionId = null;
+        ResumeSessionId = continuation.ResumeNative ? SessionId : null;
         CliId = cli;
         EndpointName = name;
         OnPropertyChanged(nameof(EndpointName));
@@ -4573,11 +4636,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        var accountChanged = (_smart.Settings.FindByok(EndpointName)?.AccountId ?? "") != (_smart.Settings.FindByok(name)?.AccountId ?? "");
+        var continuation = CacheContinuationPlan.Create(CliId, EndpointName,
+            _smart.Settings.FindByok(EndpointName)?.AccountId ?? "", CliId, name,
+            _smart.Settings.FindByok(name)?.AccountId ?? "");
+        Status.PrepareCache(continuation.Explanation);
         EndpointName = name;
         OnPropertyChanged(nameof(EndpointName));
 
-        if (accountChanged)
+        if (!continuation.ResumeNative)
         {
             CaptureHandoff();
             await DisposeSessionAsync();
@@ -4919,6 +4985,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public void ResetForNewSession()
     {
+        Status.PrepareCache("New conversation. Awaiting provider cache usage; no previous session cache is assumed.");
         EndTurn(TurnOutcome.Stopped);
         Items.Clear();
         _toolCalls.Clear();
@@ -5000,6 +5067,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             _lastMessageUsage = usage;
             Status.Apply(usage);
+            Status.ObserveCache(usage);
         }
 
         // A message that was only a tool call has no text worth a bubble.
@@ -5039,6 +5107,18 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         Items.Add(item);
         Reflow();
+    }
+
+    /// <summary>Finishes a preparation row without changing its position or original time.</summary>
+    private NoticeItem CompletePreparationNotice(NoticeItem pending, string text)
+    {
+        var index = Items.IndexOf(pending);
+        if (index < 0) return pending;
+
+        var completed = new NoticeItem { Text = text, Timestamp = pending.Timestamp };
+        Items[index] = completed;
+        Reflow();
+        return completed;
     }
 
     /// <summary>

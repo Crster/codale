@@ -15,6 +15,7 @@
         <!--  The stop button's pulse: animated from code-behind while a turn runs.  -->
 
         <views:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+        <views:NotBoolConverter x:Key="NotBool" />
         <views:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility" />
         <views:NullToVisibilityConverter x:Key="NullToVisibility" />
         <views:CountToInverseVisibilityConverter x:Key="CountToInverseVisibility" />
@@ -1438,6 +1439,22 @@
             </StackPanel>
         </DataTemplate>
 
+        <DataTemplate x:Key="ContextTemplate" x:DataType="vm:ContextEnrichmentItem">
+            <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}"
+                        Padding="12,2,12,10" Spacing="6"
+                        HorizontalAlignment="Center" MaxWidth="760">
+                <TextBlock Text="{x:Bind Summary}" TextWrapping="Wrap"
+                           TextAlignment="Center"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           FontSize="{x:Bind S12, Mode=OneWay}" />
+                <TextBlock Text="{x:Bind Details}" TextWrapping="Wrap"
+                           TextAlignment="Center"
+                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                           IsTextSelectionEnabled="True"
+                           FontSize="{x:Bind S12, Mode=OneWay}" />
+            </StackPanel>
+        </DataTemplate>
+
         <DataTemplate x:Key="NoticeTemplate" x:DataType="vm:NoticeItem">
             <Grid
                 Margin="{x:Bind RowMargin, Mode=OneWay}"
@@ -1896,6 +1913,7 @@
             FeatureJumpTemplate="{StaticResource FeatureJumpTemplate}"
             HandoffBriefTemplate="{StaticResource HandoffBriefTemplate}"
             NoticeTemplate="{StaticResource NoticeTemplate}"
+            ContextTemplate="{StaticResource ContextTemplate}"
             ToolTemplate="{StaticResource ToolTemplate}"
             UserTemplate="{StaticResource UserTemplate}" />
 
@@ -2570,7 +2588,7 @@
                         MaxHeight="220"
                         AcceptsReturn="True"
                         GotFocus="OnDraftFocusChanged"
-                        IsEnabled="{x:Bind ViewModel.IsConnected, Mode=OneWay}"
+                        IsReadOnly="{x:Bind ViewModel.IsConnected, Mode=OneWay, Converter={StaticResource NotBool}}"
                         IsSpellCheckEnabled="False"
                         IsTextPredictionEnabled="False"
                         KeyDown="OnDraftKeyDown"
@@ -2744,6 +2762,13 @@
                                 ToolTipService.ToolTip="{x:Bind ViewModel.Status.ContextSummary, Mode=OneWay}">
                                 <Run Text="{x:Bind ViewModel.Status.ContextPercentText, Mode=OneWay}" /><Run Text=" context" />
                             </TextBlock>
+                            <TextBlock
+                                Margin="6,0,2,0"
+                                VerticalAlignment="Center"
+                                FontSize="11.5"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Text="{x:Bind ViewModel.Status.CacheSummary, Mode=OneWay}"
+                                ToolTipService.ToolTip="{x:Bind ViewModel.Status.CacheDetail, Mode=OneWay}" />
                         </StackPanel>
 
 

@@ -439,6 +439,13 @@ public sealed partial class SmartExperience(Func<ISmartRuntime> factory, Func<Sm
     {
         try
         {
+            text = text?.Trim();
+            // Chat providers sometimes fence structured output despite the format instruction.
+            // Unwrap only a complete JSON fence, never extract a command from prose.
+            if (text is not null && (text.StartsWith("```json\n", StringComparison.OrdinalIgnoreCase) ||
+                text.StartsWith("```json\r\n", StringComparison.OrdinalIgnoreCase) || text.StartsWith("```\n", StringComparison.Ordinal) ||
+                text.StartsWith("```\r\n", StringComparison.Ordinal)) && text.EndsWith("```", StringComparison.Ordinal))
+                text = text[(text.IndexOf('\n') + 1)..^3].Trim();
             using var json = JsonDocument.Parse(text ?? "");
             var command = json.RootElement.GetProperty("command").GetString();
             return string.IsNullOrWhiteSpace(command) || command.Length > 4096 || command.Any(char.IsControl) ||
