@@ -164,7 +164,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
 
     public void Warm(string worktree)
     {
-        _ = RefreshAsync(worktree).ContinueWith(t => System.Diagnostics.Trace.TraceWarning($"Project indexing failed: {t.Exception}"),
+        _ = RefreshAsync(worktree).ContinueWith(t => { _ = t.Exception; },
             CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
     }
 
@@ -548,9 +548,8 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
     private bool CaughtUp(string worktree)
     {
         try { return RefreshAsync(worktree).Wait(StaleRefreshWait); }
-        catch (AggregateException ex)
+        catch (AggregateException)
         {
-            System.Diagnostics.Trace.TraceWarning($"Project indexing failed: {ex.InnerException?.Message}");
             return false;
         }
     }
@@ -673,6 +672,6 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
         lock (_gate) { _disposed = true; running = [.. _refreshes.Values, .. _summaryTasks.Values]; }
         _stopping.Cancel();
         try { Task.WhenAll(running).GetAwaiter().GetResult(); }
-        catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"Project indexing stopped: {ex.Message}"); }
+        catch (Exception) { }
     }
 }

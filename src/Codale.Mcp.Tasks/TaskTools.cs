@@ -48,34 +48,12 @@ public static class TaskTools
 
     /// <summary>
     /// Sends a panel call to the app when this server runs for a terminal CLI; null when it was
-    /// delivered (or is not pushed at all), otherwise why not. Each attempt is logged to
-    /// <c>panel-push.log</c> beside Codale's other data, since a CLI's tool output is easy to miss.
+    /// delivered (or is not pushed at all), otherwise why not.
     /// </summary>
-    private static async Task<string?> PublishAsync(ITaskService tasks, string kind, System.Text.Json.JsonElement input, CancellationToken ct)
-    {
-        if (!PushesToPanel(tasks))
-        {
-            Log($"{kind}: not pushed (pipe client = {tasks is TaskPipeClient}, CODALE_PANEL_PUSH = {Environment.GetEnvironmentVariable("CODALE_PANEL_PUSH")}) input = {input.GetRawText()}");
-            return null;
-        }
-
-        var failure = await ((TaskPipeClient)tasks).PublishPanelAsync(kind, input, ct);
-        Log($"{kind}: {(failure is null ? "delivered" : "FAILED: " + failure)} input = {input.GetRawText()}");
-        return failure;
-    }
-
-    private static void Log(string line)
-    {
-        try
-        {
-            var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale");
-            Directory.CreateDirectory(folder);
-            File.AppendAllText(Path.Combine(folder, "panel-push.log"), $"[{DateTime.Now:HH:mm:ss.fff}] {line}{Environment.NewLine}");
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
+    private static Task<string?> PublishAsync(ITaskService tasks, string kind, System.Text.Json.JsonElement input, CancellationToken ct) =>
+        PushesToPanel(tasks)
+            ? ((TaskPipeClient)tasks).PublishPanelAsync(kind, input, ct)
+            : Task.FromResult<string?>(null);
 
     private static IReadOnlyList<McpTool> Panel(ITaskService tasks) =>
     [

@@ -18,10 +18,9 @@ if (args.Contains("--pretooluse-hook"))
             Console.Out.Write(reply);
         }
     }
-    catch (Exception e)
+    catch (Exception)
     {
         // A guard that fails must never block the user's tool call: say nothing and let it through.
-        Console.Error.WriteLine($"codale: guard hook skipped: {e.Message}");
     }
 
     return 0;

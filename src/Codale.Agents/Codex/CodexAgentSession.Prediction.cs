@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 
 using Codale.Core.Agents;
@@ -27,8 +26,6 @@ public sealed partial class CodexAgentSession
 
     private void ReportPredictionDiagnostic(string message)
     {
-        // No conversation text or credentials: usable with a trace listener, including release builds.
-        Trace.TraceWarning("Codex next-prompt prediction: {0}", message);
         PredictionDiagnostic?.Invoke(message);
     }
 
