@@ -161,7 +161,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// </summary>
     public ChatViewModel CreateTerminalSession(Codale.Agents.CliDescriptor cli)
     {
-        var session = new ChatViewModel(ProjectPath, new StatusViewModel(), _endpoints, _mcp, _agentSessions, Smart, _decider) { ExtraFolders = ExtraFolders, Terminals = new TerminalSource(this), FolderServers = FolderServers, TerminalCli = cli };
+        var session = new ChatViewModel(ProjectPath, new StatusViewModel(), _endpoints, _mcp, _agentSessions, Smart, _decider) { ExtraFolders = ExtraFolders, FolderServers = FolderServers, TerminalCli = cli };
+        session.Terminals = new TerminalSource(this, session);
         TerminalSessions.Add(session);
         return session;
     }
@@ -234,11 +235,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         {
             Features = Features,
             ExtraFolders = ExtraFolders,
-            Terminals = new TerminalSource(this),
             FolderServers = FolderServers,
             CliId = cliId is { Length: > 0 } ? cliId : Smart.Settings.DefaultChatCli,
         };
 
+        chat.Terminals = new TerminalSource(this, chat);
         // Model and effort come from the CLI's saved default pick (or its own default);
         // the mode is the last one the user picked for this CLI.
         chat.PermissionMode = Smart.Settings.DefaultModeFor(chat.CliId);
@@ -330,8 +331,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     }
 
     /// <summary>
-    /// A command tab the agent opened (run_in_terminal, run_command). Raised off the UI thread; the page
-    /// shows it as a tab, which starts its command. Nothing subscribed means there is no window to show it in.
+    /// A terminal task the agent opened (run_in_terminal, run_command). Raised off the UI thread;
+    /// the page starts it hidden in its owner's background tasks. A subscriber provides the UI dispatcher.
     /// </summary>
     public event EventHandler<TerminalViewModel>? AgentTerminalOpened;
 
@@ -347,7 +348,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     }
 
     /// <summary>The open terminals as the agent's terminal tools read them; safe to call off the UI thread.</summary>
-    private sealed class TerminalSource(WorkspaceViewModel workspace) : ITerminalSource
+    private sealed class TerminalSource(WorkspaceViewModel workspace, ChatViewModel owner) : ITerminalSource
     {
         public async Task<TaskSnapshot?> StartAsync(string command, string? name, int waitSeconds, CancellationToken ct)
         {
@@ -358,6 +359,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
             var terminal = workspace.CreateTerminal(command, string.IsNullOrWhiteSpace(name) ? command : name);
             terminal.IsAgentTerminal = true;
+            terminal.BackgroundTaskOwner = owner;
             lock (workspace._terminals)
             {
                 workspace._agentTerminalIds.Add(terminal.Id);
@@ -365,8 +367,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
             opened(workspace, terminal);
 
-            // Early output (a port number, a compile error) is what the agent needs next. The command starts
-            // when its tab opens; a command tab reads busy from creation until the command has finished.
+            // Early output (a port number, a compile error) is what the agent needs next.
+            // The UI dispatcher starts the hidden terminal; it reads busy until the command finishes.
             var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(waitSeconds);
             while (DateTime.UtcNow < deadline && (!terminal.IsOpen || terminal.Activity == TerminalActivity.Busy))
             {

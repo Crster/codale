@@ -2805,13 +2805,6 @@
                                 ToolTipService.ToolTip="{x:Bind ViewModel.Status.ContextSummary, Mode=OneWay}">
                                 <Run Text="{x:Bind ViewModel.Status.ContextPercentText, Mode=OneWay}" /><Run Text=" context" />
                             </TextBlock>
-                            <TextBlock
-                                Margin="6,0,2,0"
-                                VerticalAlignment="Center"
-                                FontSize="11.5"
-                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                Text="{x:Bind ViewModel.Status.CacheSummary, Mode=OneWay}"
-                                ToolTipService.ToolTip="{x:Bind ViewModel.Status.CacheDetail, Mode=OneWay}" />
                         </StackPanel>
 
 

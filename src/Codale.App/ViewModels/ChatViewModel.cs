@@ -470,11 +470,55 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     // The pipe Codale's workspace MCP servers reach this chat through (terminals, commands, the panel).
     // One per chat, kept across session restarts (DisposeSessionAsync); it ends with the chat (DisposeAsync),
-    // or when the conversation is reset. Commands the agent runs live in terminal tabs, not here.
+    // or when the conversation is reset. MCP commands are tracked as background tasks here.
     private TaskPipeServer? _taskPipe;
 
     /// <summary>The workspace's terminal tabs, readable by the agent's terminal tools; null for a chat without a workspace.</summary>
-    public ITerminalSource? Terminals { get; init; }
+    public ITerminalSource? Terminals { get; set; }
+
+    /// <summary>Runs an MCP terminal without opening a tab; its output is available in the task peek pane.</summary>
+    public void StartBackgroundTerminal(TerminalViewModel terminal)
+    {
+        var task = new RunningTaskItem
+        {
+            ToolUseId = "mcp-terminal-" + terminal.Id,
+            IsWorkspaceTerminal = true,
+            ShellId = terminal.Id,
+            Kind = RunningTaskKind.Shell,
+            Title = terminal.CommandText ?? "Terminal",
+            Description = terminal.CommandName ?? "",
+            Header = RunningTaskItem.CommandHeader(terminal.CommandText ?? ""),
+        };
+
+        void OnOutput(object? sender, string output) => task.AppendOutput(output);
+        void Detach()
+        {
+            terminal.OutputReceived -= OnOutput;
+            terminal.PropertyChanged -= OnChanged;
+        }
+        void OnChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName != nameof(TerminalViewModel.Activity) || terminal.Activity == TerminalActivity.Busy) return;
+            task.Status = terminal.Activity == TerminalActivity.Error
+                ? RunningTaskStatus.Failed : RunningTaskStatus.Completed;
+            Detach();
+        }
+
+        task.Cancel = () =>
+        {
+            Detach();
+            terminal.Close();
+            task.Status = RunningTaskStatus.Ended;
+        };
+        terminal.OutputReceived += OnOutput;
+        terminal.PropertyChanged += OnChanged;
+        AddTask(task);
+        // MCP runs are explicitly background tasks, so pin them immediately rather than
+        // waiting for the CLI's long-running-task capture threshold.
+        SortedTasks.Add(task);
+        ResortTasks();
+        terminal.Toggle();
+    }
 
     /// <summary>The workspace's localhost folder servers, started from the Agent tools flyout.</summary>
     public Codale.Core.Serving.FolderServerHost? FolderServers { get; init; }
@@ -1067,7 +1111,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             {
                 var kind = info.Kind == AgentTaskKind.Shell ? RunningTaskKind.Shell : RunningTaskKind.Subagent;
                 var trimmedTitle = info.Title.Trim();
-                task = RunningTasks.FirstOrDefault(t => t.IsRunning && t.Kind == kind && t.Title == trimmedTitle && t.RuntimeId is null);
+                task = RunningTasks.FirstOrDefault(t => !t.IsWorkspaceTerminal && t.IsRunning && t.Kind == kind && t.Title == trimmedTitle && t.RuntimeId is null);
             }
 
             if (task is null)
@@ -1215,7 +1259,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Whatever was still running has lost its process: mark it ended.</summary>
     private void EndAllTasks()
     {
-        foreach (var t in RunningTasks.Where(t => t.IsRunning))
+        foreach (var t in RunningTasks.Where(t => t.IsRunning && !t.IsWorkspaceTerminal))
         {
             t.Status = RunningTaskStatus.Ended;
         }
@@ -1225,6 +1269,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         foreach (var task in RunningTasks.ToList())
         {
+            if (task.IsWorkspaceTerminal && task.IsRunning) task.Cancel?.Invoke();
             RunningTasks.Remove(task);
             ResortTasks();
             _tasksByToolUse.Remove(task.ToolUseId);
@@ -4285,10 +4330,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         if (_activeTurn is null) BeginTurn();
+        if (!compact) MarkNewTopic(text, sent);
+        var freshSession = !Items.TakeWhile(i => !ReferenceEquals(i, sent))
+            .OfType<UserMessageItem>().Any(i => !string.IsNullOrWhiteSpace(i.Text));
         // Only the Auto router's Act branch opts in. Manual modes and routed Ask/Plan
         // turns never retrieve context, even when they share the same send pipeline.
         var retrieveContext = autoAct && !compact && !planOnly && !askOnly &&
-            Codale.Search.PromptFileLocator.ShouldRetrieve(text, attachments.Count > 0);
+            Codale.Search.PromptFileLocator.ShouldRetrieve(text, attachments.Count > 0, freshSession, sent.IsNewTopic);
         _preparingTask = compact || retrieveContext ? "context" : null;
         _activeTurn!.LiveStage = compact ? "Compacting" : retrieveContext ? "Gathering context" : "";
         var contextClock = System.Diagnostics.Stopwatch.StartNew();
@@ -4311,9 +4359,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         if (!compact) RecordUserTurn(text);
 
-        // Both providers retrieve local project references before each prompt. Slash commands
-        // retain their provider syntax and do not carry a context prefix.
-        if (!compact) MarkNewTopic(text, sent);
+        // Only a fresh session or a new topic receives local project references.
         try
         {
             preparationToken.ThrowIfCancellationRequested();
@@ -5316,6 +5362,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
+        foreach (var task in RunningTasks.Where(t => t.IsWorkspaceTerminal && t.IsRunning).ToList())
+            task.Cancel?.Invoke();
         _taskCaptureTimer?.Stop();
         StopTaskHost();
 

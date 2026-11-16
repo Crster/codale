@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Text;
 using System.Text.RegularExpressions;
 using Codale.Core.Features;
@@ -36,7 +37,7 @@ public static partial class PromptFileLocator
         with(StringComparer.OrdinalIgnoreCase),
         "add", "adds", "adding", "remove", "removes", "removing", "delete", "deleting", "create", "creating",
         "insert", "move", "moving", "show", "shows", "showing", "hide", "hiding", "make", "makes", "update",
-        "updating", "enrich", "align", "display", "support", "include", "place", "allow", "enable", "disable",
+        "test", "testing", "run", "deploy", "set", "updating", "enrich", "align", "display", "support", "include", "place", "allow", "enable", "disable",
         "compact", "simplify", "refactor", "clean", "cleanup", "tidy", "polish", "tighten", "shrink", "expand",
     ];
 
@@ -44,7 +45,7 @@ public static partial class PromptFileLocator
     private static readonly HashSet<string> AlwaysWeak =
     [
         with(StringComparer.OrdinalIgnoreCase),
-        "unused", "never", "always", "should", "must", "let", "into", "instead", "properly", "correctly", "consistent",
+        "each", "other", "yet", "without", "option", "steps", "step", "go", "unused", "never", "always", "should", "must", "let", "into", "instead", "properly", "correctly", "consistent",
         "under", "below", "above", "beneath", "beside", "inside", "between", "within", "near", "over",
         "smaller", "bigger", "wider", "narrower", "faster", "shorter", "longer",
         // What is left of a contraction once the apostrophe splits it: "don't" → "don".
@@ -119,15 +120,18 @@ public static partial class PromptFileLocator
     [GeneratedRegex(@"\s+", RegexOptions.CultureInvariant)]
     private static partial Regex Spaces();
 
-    public static bool ShouldRetrieve(string prompt, bool hasAttachments)
+    public static bool ShouldRetrieve(string prompt, bool hasAttachments, bool isFreshSession, bool isNewTopic)
     {
+        if (!isFreshSession && !isNewTopic) return false;
         var text = prompt.Trim();
         if (hasAttachments || text.Length == 0 || text.StartsWith('/')) return false;
         // Operational requests already tell the CLI what to do. Diagnostics and feature
         // changes mentioning these words still benefit from source discovery.
         if (Regex.IsMatch(text, @"^(?:(?:please|now|just|then)\s+)*(?:(?:git|dotnet|npm|pnpm|yarn|cargo)\s+)?(?:commit|build|rebuild|rename|push|pull|fetch|checkout|publish|deploy|run\s+(?:the\s+)?tests?)\b",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)) return false;
-        return SearchText.RetrievalTerms(text).Count > 0;
+        if (Regex.IsMatch(text, @"(?:^|[.!?]\s+)(?:(?:please|can you|could you|now|just|also)\s+)*(?:deploy\b|test\s+(?:it|this|without|on)\b|(?:use|open)\s+(?:the\s+)?browser\b)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)) return false;
+        return SearchText.HasTopic(text);
     }
 
     /// <summary>One subject of the prompt: a word or quoted phrase, with the other words that mean it.</summary>
@@ -150,6 +154,9 @@ public static partial class PromptFileLocator
             weak.Add(concept.Weak);
         }
 
+        // Unmatched subjects still matter: "test without Recharm" must not collapse
+        // to a confident hint for an unrelated use of Regex.test().
+        var subjectCount = concepts.Count(c => !c.Weak);
         var content = Enumerable.Range(0, terms.Count).Where(i => !weak[i] && terms[i].Keys.Count > 0).ToList();
         if (content.Count == 0) return Empty;
         var contentTerms = content.Select(i => terms[i]).ToList();
@@ -174,9 +181,19 @@ public static partial class PromptFileLocator
 
         var wantsData = Word().Matches(prompt).Any(m => DataWords.Contains(m.Value));
         var wantsTests = Word().Matches(prompt).Any(m => TestWords.Contains(m.Value));
-        var need = Math.Min(2, content.Count);
+        var wantsDocs = Word().Matches(prompt).Any(m => m.Value.ToLowerInvariant() is "docs" or "documentation" or "readme" or "markdown");
+        var wantsJson = wantsData || Word().Matches(prompt).Any(m => m.Value.ToLowerInvariant() is
+            "json" or "config" or "configuration" or "package" or "dependencies" or "manifest" or "rules" or "guardrails");
+        var hints = Regex.Matches(Normal(prompt), @"[\w.-]+(?:/[\w.-]+)+")
+            .Select(m => m.Value.TrimEnd('.', '/')).ToList();
+        bool ExplicitPath(string path) => hints.Any(h => path.Equals(h, StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith(h + "/", StringComparison.OrdinalIgnoreCase));
+        bool IsAside(SourceFile file) => !ExplicitPath(Normal(file.RelativePath)) &&
+            (((!wantsData && DataPath().IsMatch(file.RelativePath)) || (!wantsJson && Path.GetExtension(file.RelativePath).Equals(".json", StringComparison.OrdinalIgnoreCase))) ||
+             (file.IsTestOrDoc && !(Path.GetExtension(file.RelativePath).Equals(".md", StringComparison.OrdinalIgnoreCase) ? wantsDocs : wantsTests)));
+        var need = Math.Min(2, subjectCount);
         var picked = new List<(SourceExplorer.Ranked Ranked, double Score, List<SourceExplorer.ResolvedTerm> Matched, double Together, Region Region)>();
-        foreach (var ranked in SourceExplorer.Rank(snapshot, terms, [], setup: false).Take(Pool))
+        foreach (var ranked in SourceExplorer.Rank(snapshot, terms, hints.Select(h => h.Replace('/', Path.DirectorySeparatorChar)).ToList(), setup: false).Where(r => !IsAside(r.File)).Take(Pool))
         {
             ct.ThrowIfCancellationRequested();
             var path = Normal(ranked.File.RelativePath);
@@ -184,31 +201,33 @@ public static partial class PromptFileLocator
             if (!ProjectKnowledgeIndex.Eligible(ranked.File.RelativePath) || !File.Exists(ranked.File.FullPath)) continue;
 
             var matched = content.Where(ranked.Matched.Contains).ToList();
-            // Named after a subject: "hiky.service.ts" for a Hiky request is evidence by itself.
+            // A filename matching a subject strengthens an otherwise relevant candidate.
             var named = matched.Any(i => terms[i].Keys.Any(k => k.Factor >= 0.85 && k.Key.Length >= 4 &&
                 ranked.File.NameKey.Contains(k.Key, StringComparison.Ordinal)));
-            if (matched.Count < need && !(named && matched.Count > 0)) continue;
+            if (matched.Count < need && !ExplicitPath(path)) continue;
 
             // Together, not scattered: "Marketing" inside navGroups answers "the marketing menu in
             // the navbar"; a file with "menu" in an import and "marketing" in a header does not.
             var matchedTerms = matched.Select(i => terms[i]).ToList();
             var region = Colocated(ranked.File, matchedTerms);
-            if (region.Count < need && !named) continue;
+            if (region.Count < need && !ExplicitPath(path)) continue;
 
-            // Data files and tests only lead a request about them: elsewhere they hold every word in passing.
-            var aside = (!wantsData && DataPath().IsMatch(path)) || (!wantsTests && ranked.File.IsTestOrDoc);
             var score = ranked.Score;
-            if (aside) score *= 0.2;
             if (lifted.Contains(path)) score *= 1.3;
             if (named) score *= 1.2;
-            var together = aside ? region.Weight * 0.5 : region.Weight;
+            if (ExplicitPath(path)) score *= 2;
+            var together = region.Weight * (ExplicitPath(path) ? 2 : 1);
             picked.Add((ranked, score, matchedTerms, together, region));
         }
 
         if (picked.Count == 0) return Empty;
         // Breadth first: a file holding more of the request's subjects in one place beats one
         // repeating fewer of them, whatever the term density. Score orders files of equal breadth.
-        picked.Sort((a, b) => Math.Abs(a.Together - b.Together) > 0.01 ? b.Together.CompareTo(a.Together) : b.Score.CompareTo(a.Score));
+        picked.Sort((a, b) =>
+        {
+            var explicitOrder = ExplicitPath(Normal(b.Ranked.File.RelativePath)).CompareTo(ExplicitPath(Normal(a.Ranked.File.RelativePath)));
+            return explicitOrder != 0 ? explicitOrder : Math.Abs(a.Together - b.Together) > 0.01 ? b.Together.CompareTo(a.Together) : b.Score.CompareTo(a.Score);
+        });
         var best = picked[0];
 
         var text = new StringBuilder();
@@ -230,7 +249,7 @@ public static partial class PromptFileLocator
 
         return files.Count == 0 ? Empty : new(
             "Likely edit sites, from a local search of the project (path:lines | matched words, then the matching lines). " +
-            "Read these ranges first; search further only if they do not cover the request.\n" + text + "\n", files);
+            "These are candidate references, not verified edit sites; check their relevance and search beyond them as needed.\n" + text + "\n", files);
     }
 
     private static FileLocatorContext Empty { get; } = new("", []);
@@ -382,9 +401,9 @@ public static partial class PromptFileLocator
 
         // One anchor per subject: its strongest line in the region.
         var anchors = new List<int>();
-        for (var t = 0; t < matched.Count && t < 31; t++)
+        for (var t = 0; t < matched.Count; t++)
         {
-            var bit = 1 << t;
+            var bit = BigInteger.One << t;
             var line = inRegion.Keys.Where(n => n < region.Present.Length && (region.Present[n] & bit) != 0)
                 .OrderByDescending(n => inRegion[n]).ThenBy(n => n).FirstOrDefault();
             if (line > 0 && !anchors.Contains(line)) anchors.Add(line);
@@ -414,7 +433,7 @@ public static partial class PromptFileLocator
             end = Math.Min(Math.Min(top.EndLine, top.MatchLines.Max() + 2), start + MaxRangeSpan);
         }
 
-        var words = matched.Select(t => concepts.FirstOrDefault(c => string.Equals(c.Text, t.Term.Text, StringComparison.OrdinalIgnoreCase))?.Text ?? t.Term.Text)
+        var words = matched.Where((_, t) => (region.Mask & (BigInteger.One << t)) != 0).Select(t => concepts.FirstOrDefault(c => string.Equals(c.Text, t.Term.Text, StringComparison.OrdinalIgnoreCase))?.Text ?? t.Term.Text)
             .Select(w => w.ToLowerInvariant()).Distinct();
         // Inside the declaration holding the anchors, the range stays within it and names it.
         var holder = anchors.Count == 0 ? null : Enclosing(file, lines, anchors.Min(), anchors.Max());
@@ -442,7 +461,7 @@ public static partial class PromptFileLocator
     private const int MaxAnchors = 3;
 
     /// <summary>Where a file holds the most subjects together, and which subjects each line holds (bit per matched term).</summary>
-    private sealed record Region(int Count, double Weight, int From, int To, int[] Present);
+    private sealed record Region(int Count, double Weight, int From, int To, BigInteger[] Present, BigInteger Mask);
 
     /// <summary>
     /// The most subjects found in one place: a declaration (its name included) or a window of
@@ -460,23 +479,23 @@ public static partial class PromptFileLocator
             var root = t.Keys.MaxBy(k => k.Factor).Key.Length;
             return t.Keys.Where(k => k.Factor >= AliasFactor || k.Key.Length <= root + 3).Select(k => k.Key).ToHashSet(StringComparer.Ordinal);
         }).ToList();
-        var present = new int[lines.Length + 1];
+        var present = new BigInteger[lines.Length + 1];
         for (var n = 1; n <= lines.Length; n++)
         {
             if (imports.Contains(n) || lines[n - 1].Length > 2000) continue;
             var tokens = SourceTokens.Count(lines[n - 1]).Keys;
-            for (var t = 0; t < keys.Count && t < 31; t++)
-                if (tokens.Any(keys[t].Contains)) present[n] |= 1 << t;
+            for (var t = 0; t < keys.Count; t++)
+                if (tokens.Any(keys[t].Contains)) present[n] |= BigInteger.One << t;
         }
 
         // The path says what the whole file is about: features/ad-spend/components/spend-tab.tsx
         // holds "ad" and "spend" on every line.
         var pathTokens = SourceTokens.Count(file.RelativePath).Keys;
-        var pathMask = 0;
-        for (var t = 0; t < keys.Count && t < 31; t++)
-            if (pathTokens.Any(keys[t].Contains)) pathMask |= 1 << t;
+        var pathMask = BigInteger.Zero;
+        for (var t = 0; t < keys.Count; t++)
+            if (pathTokens.Any(keys[t].Contains)) pathMask |= BigInteger.One << t;
 
-        var best = new Region(0, 0, 1, lines.Length, present);
+        var best = new Region(0, 0, 1, lines.Length, present, BigInteger.Zero);
         void Consider(int from, int to)
         {
             from = Math.Max(1, from);
@@ -485,10 +504,10 @@ public static partial class PromptFileLocator
             for (var n = from; n <= to; n++) mask |= present[n];
             // A rare word ("flush") places a request more surely than a common one ("line").
             var weight = 0.0;
-            for (var t = 0; t < matched.Count && t < 31; t++)
-                if ((mask & (1 << t)) != 0) weight += matched[t].Weight * Math.Clamp(matched[t].Idf / 3.0, 0.5, 1.5);
+            for (var t = 0; t < matched.Count; t++)
+                if ((mask & (BigInteger.One << t)) != 0) weight += matched[t].Weight * Math.Clamp(matched[t].Idf / 3.0, 0.5, 1.5);
             if (weight > best.Weight + 1e-9 || (Math.Abs(weight - best.Weight) <= 1e-9 && weight > 0 && to - from < best.To - best.From))
-                best = new Region(System.Numerics.BitOperations.PopCount((uint)mask), weight, from, to, present);
+                best = new Region(matched.Where((_, t) => (mask & (BigInteger.One << t)) != 0).Count(), weight, from, to, present, mask);
         }
 
         for (var n = 1; n <= lines.Length; n++)

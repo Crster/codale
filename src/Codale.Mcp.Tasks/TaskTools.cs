@@ -179,8 +179,8 @@ public static class TaskTools
 
         new McpTool(
             "run_command",
-            "Run one of the project's saved commands (see list_commands) by name in a new Codale terminal tab, as the commands menu " +
-            "does: the user watches it in the tab. Returns the terminal id and the first seconds of output; follow it with read_terminal " +
+            "Run one of the project's saved commands (see list_commands) by name as a Codale background terminal task. " +
+            "The user can click its pinned task to watch output in the side pane. Returns the terminal id and the first seconds of output; follow it with read_terminal " +
             "and end it with stop_terminal (codale-terminal). Use this for a saved command; use run_in_terminal for an arbitrary command line.",
             McpTool.Schema(
                 [
@@ -343,15 +343,15 @@ public static class TaskTools
     [
         new McpTool(
             "run_in_terminal",
-            "Run a command line in a new Codale terminal tab, for anything that keeps running or takes long: a dev server, a file watcher, " +
-            "a build in watch mode, a long test suite. The user watches it in the tab. Returns the terminal id and the first seconds of output; " +
+            "Run a command line as a Codale background terminal task, for anything that keeps running or takes long: a dev server, a file watcher, " +
+            "a build in watch mode, a long test suite. It stays hidden until the user clicks its pinned task to watch output in the side pane. Returns the terminal id and the first seconds of output; " +
             "then read_terminal to follow it and stop_terminal when you are done with it. The shell tools' background modes " +
             "(run_in_background, &, Start-Job, nohup) are blocked here: use this instead. A quick command that finishes in seconds " +
             "still belongs in the normal shell tool. To run one of the project's saved commands, use run_command (codale-command).",
             McpTool.Schema(
                 [
                     ("command", "string", "The command line to run (PowerShell syntax on Windows), started in the project directory, e.g. \"npm run dev\"."),
-                    ("name", "string", "Optional short title for the tab, e.g. \"dev server\"."),
+                    ("name", "string", "Optional short title for the task, e.g. \"dev server\"."),
                     ("wait_seconds", "integer", "Seconds to wait for early output before returning (default 3, max 60). Raise it for a server that takes a while to print its URL."),
                 ],
                 "command"),
@@ -360,7 +360,7 @@ public static class TaskTools
 
         new McpTool(
             "list_terminals",
-            "List the terminal tabs open in Codale: the user's own (plain shells and commands run from the commands menu) and the ones " +
+            "List the terminals in Codale: the user's own (plain shells and commands run from the commands menu) and the background tasks " +
             "you opened with run_in_terminal or run_command, with id, state (running, idle or exited), exit code and the command line. " +
             "Use it to find a terminal id you no longer have, to see what is still running before starting another on the same port, or " +
             "when the user says a command in their terminal failed; then read_terminal to diagnose the output.",
@@ -375,7 +375,7 @@ public static class TaskTools
 
         new McpTool(
             "read_terminal",
-            "Read what a terminal tab printed, as plain text, with its state and exit code: one you opened (is the server up, did the " +
+            "Read what a terminal printed, as plain text, with its state and exit code: a background task you started (is the server up, did the " +
             "build finish) or one of the user's (diagnose a failed build, test run or server they ran themselves). Pass the next_offset " +
             "from the previous reply as since to get only newer output; tail_chars caps the size of the reply (default 8000, the end of " +
             "the output is what you usually want).",
@@ -394,7 +394,7 @@ public static class TaskTools
 
         new McpTool(
             "stop_terminal",
-            "Stop the command running in a terminal tab you opened (run_in_terminal or run_command), as Ctrl+C would; the tab stays with " +
+            "Stop the command running in a background terminal task you started (run_in_terminal or run_command), as Ctrl+C would; the task keeps " +
             "its output. Use it when the user is done with a server or watcher you started, and before starting a replacement that needs " +
             "the same port. The user's own terminals cannot be stopped.",
             McpTool.Schema([("id", "string", "The terminal id from run_in_terminal, run_command or list_terminals.")], "id"),

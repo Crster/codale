@@ -104,6 +104,9 @@ public sealed partial class RunningTaskItem : ObservableObject
 
     public RunningTaskKind Kind { get; init; }
 
+    /// <summary>An MCP terminal owned by the workspace, independent of the provider process.</summary>
+    public bool IsWorkspaceTerminal { get; init; }
+
     public DateTimeOffset StartedAt { get; init; } = DateTimeOffset.Now;
 
     /// <summary>Command line or subagent description.</summary>

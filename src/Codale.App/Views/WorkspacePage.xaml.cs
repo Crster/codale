@@ -473,9 +473,9 @@ public sealed partial class WorkspacePage : Page
 
     private Task UpdateCliAsync(string command) => RunInNewTerminalAsync(command);
 
-    /// <summary>The agent ran a command (run_in_terminal, run_command): it gets a tab of its own, without taking the user's focus.</summary>
+    /// <summary>MCP commands run hidden and appear in their chat's background task tray.</summary>
     private void OnAgentTerminalOpened(object? sender, TerminalViewModel terminal) =>
-        DispatcherQueue.TryEnqueue(() => AddTerminalTab(terminal, select: false));
+        DispatcherQueue.TryEnqueue(() => terminal.BackgroundTaskOwner?.StartBackgroundTerminal(terminal));
 
     private Task RunInNewTerminalAsync(string command)
     {

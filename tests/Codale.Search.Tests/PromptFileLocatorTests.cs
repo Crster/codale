@@ -10,11 +10,26 @@ public sealed class PromptFileLocatorTests
     [InlineData("fix the login timeout", true)]
     [InlineData("why does the build fail on login?", true)]
     public void SkipsOperations(string prompt, bool expected) =>
-        Assert.Equal(expected, PromptFileLocator.ShouldRetrieve(prompt, false));
+        Assert.Equal(expected, PromptFileLocator.ShouldRetrieve(prompt, false, isFreshSession: true, isNewTopic: false));
 
     [Fact]
     public void AttachmentsSkipRetrieval() =>
-        Assert.False(PromptFileLocator.ShouldRetrieve("fix login timeout", true));
+        Assert.False(PromptFileLocator.ShouldRetrieve("fix login timeout", true, isFreshSession: true, isNewTopic: false));
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, true)]
+    public void RetrievesOnlyForFreshSessionsOrNewTopics(bool fresh, bool newTopic, bool expected) =>
+        Assert.Equal(expected, PromptFileLocator.ShouldRetrieve("fix login timeout", false, fresh, newTopic));
+
+    [Theory]
+    [InlineData("/compact", false)]
+    [InlineData("commit all changes", false)]
+    [InlineData("fix login timeout", true)]
+    public void NewTopicsStillRespectRetrievalExclusions(string prompt, bool attachments) =>
+        Assert.False(PromptFileLocator.ShouldRetrieve(prompt, attachments, isFreshSession: false, isNewTopic: true));
 
     [Fact]
     public async Task ReturnsLineAnchoredHintsAndExcludesKnownFiles()
@@ -150,4 +165,97 @@ public sealed class PromptFileLocatorTests
         }
         finally { SourceIndex.For(root).Dispose(); Directory.Delete(root, true); }
     }
+    [Theory]
+    [InlineData("I set the database to my localhost. can you deploy the database.")]
+    [InlineData("I dont have yet the recharm. please test without it.")]
+    [InlineData("can you use the browser and do testing End 2 End testing. so I can see how each steps work")]
+    [InlineData("test it on the live site (https://atlas.hike-footwear.com/). I also added load to the anthropic api key")]
+    public void AtlasOperationalPromptsDoNotReceiveEditHints(string prompt) =>
+        Assert.False(PromptFileLocator.ShouldRetrieve(prompt, false, true, false));
+
+    [Fact]
+    public async Task WorkflowFindsImplementationInsteadOfBroadRulesAndCanon()
+    {
+        var root = Directory.CreateTempSubdirectory("locator-workflow-").FullName;
+        void Write(string path, string text)
+        {
+            var full = Path.Combine(root, path);
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            File.WriteAllText(full, text);
+        }
+        try
+        {
+            const string prose = "editor script footage product voice duration editing library clips captions audio scenes visual quality";
+            Write("brain/canon/SKILL.md", prose);
+            Write("src/lib/guardrails/rules.json", "{ \"description\": \"" + prose + "\" }");
+            Write("src/lib/brain/editPlan.ts", "export function editPlan(script, footage, clips) { return { script, footage, clips }; }");
+            var result = await PromptFileLocator.RetrieveAsync(root,
+                "Make the editor workflow work: give editing instructions, search footage in the library, build an edit plan from the script, select clips and generate captions and audio with visual quality.");
+            Assert.Contains("src/lib/brain/editPlan.ts", result.Files);
+            Assert.DoesNotContain("brain/canon/SKILL.md", result.Files);
+            Assert.DoesNotContain("src/lib/guardrails/rules.json", result.Files);
+            var docs = await PromptFileLocator.RetrieveAsync(root, "update the documentation for footage clips");
+            Assert.Contains("brain/canon/SKILL.md", docs.Files);
+        }
+        finally { SourceIndex.For(root).Dispose(); Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task MissingSubjectDoesNotCollapseToOneUnrelatedMatch()
+    {
+        var root = Directory.CreateTempSubdirectory("locator-missing-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "Header.ts"), "export const header = 'something unrelated';");
+            var result = await PromptFileLocator.RetrieveAsync(root, "fix the recharm header");
+            Assert.Empty(result.Files);
+        }
+        finally { SourceIndex.For(root).Dispose(); Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task ExplicitDirectoryOutranksIncidentalPromptOverlap()
+    {
+        var root = Directory.CreateTempSubdirectory("locator-path-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "src/brain"));
+            File.WriteAllText(Path.Combine(root, "src/brain/plan.ts"), "export const plan = { footage: true, clips: true };");
+            File.WriteAllText(Path.Combine(root, "Other.ts"), "export const plan = { footage: true, clips: true, script: true, video: true };");
+            var result = await PromptFileLocator.RetrieveAsync(root, "fix footage clips script video in @src/brain/...");
+            Assert.True(result.Files.FirstOrDefault() == "src/brain/plan.ts", result.Text);
+        }
+        finally { SourceIndex.For(root).Dispose(); Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task LongPromptUsesSubjectsBeyondThirtyOneAndLabelsOnlyTheSelectedRegion()
+    {
+        var root = Directory.CreateTempSubdirectory("locator-long-").FullName;
+        try
+        {
+            var subjects = Enumerable.Range(0, 36).Select(i => "subject" + (char)('a' + i / 26) + (char)('a' + i % 26)).ToArray();
+            var sparse = string.Join("\n", subjects.Take(32).Select(w => "const " + w + " = true;\n" + new string('\n', 20)));
+            File.WriteAllText(Path.Combine(root, "Relevant.ts"), sparse + "\nconst selected = [" + string.Join(", ", subjects.Skip(32)) + "];");
+            var result = await PromptFileLocator.RetrieveAsync(root, "fix " + string.Join(" ", subjects));
+            Assert.Contains("Relevant.ts", result.Files);
+            Assert.Contains("| subjectbg, subjectbh, subjectbi, subjectbj", result.Text);
+            Assert.DoesNotContain("| subjectaa", result.Text);
+        }
+        finally { SourceIndex.For(root).Dispose(); Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task ConfigurationRequestsCanStillFindJson()
+    {
+        var root = Directory.CreateTempSubdirectory("locator-json-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "package.json"), "{ \"scripts\": { \"build\": \"next build\" } }");
+            var result = await PromptFileLocator.RetrieveAsync(root, "fix the package build scripts");
+            Assert.Contains("package.json", result.Files);
+        }
+        finally { SourceIndex.For(root).Dispose(); Directory.Delete(root, true); }
+    }
+
 }

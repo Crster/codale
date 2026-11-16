@@ -109,6 +109,9 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     /// <summary>True when this terminal tab was started by an agent task rather than the user.</summary>
     public bool IsAgentTerminal { get; set; }
 
+    /// <summary>The chat whose MCP tool started this hidden background terminal.</summary>
+    public ChatViewModel? BackgroundTaskOwner { get; set; }
+
     [ObservableProperty]
     public partial bool IsOpen { get; set; }
 
