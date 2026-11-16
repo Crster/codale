@@ -161,10 +161,10 @@ public sealed class AppSettingsStore(string folder) : IDisposable
         set => Set("tokens.idleCompact", value, FormatFlag);
     }
 
-    /// <summary>Idle seconds before that compaction: just under the API's 5-minute cache lifetime.</summary>
+    /// <summary>Idle seconds before that compaction: an hour, matching the 1-hour prompt cache lifetime.</summary>
     public int IdleCompactSeconds
     {
-        get => Get("tokens.idleCompactSeconds", () => Read("tokens.idleCompactSeconds", 240, ParseInt));
+        get => Get("tokens.idleCompactSeconds", () => Read("tokens.idleCompactSeconds", 3600, ParseInt));
         set => Set("tokens.idleCompactSeconds", Math.Clamp(value, 60, 3600), FormatInt);
     }
 

@@ -1812,7 +1812,7 @@ public sealed partial class CompactItem : ChatItem
 
     protected override Thickness NaturalMargin => new(0, 4, 40, 4);
 
-    /// <summary>Why it ran, e.g. "Idle for 4 min", or null for a compaction the reader asked for.</summary>
+    /// <summary>Why it ran, e.g. "Idle for 1 hr", or null for a compaction the reader asked for.</summary>
     public string? Reason { get; init; }
 
     [ObservableProperty]
@@ -1828,6 +1828,11 @@ public sealed partial class CompactItem : ChatItem
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(Detail))]
     public partial long? AfterTokens { get; set; }
+
+    /// <summary>How long the compaction took, for one Codale started and timed itself.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Detail))]
+    public partial TimeSpan? Elapsed { get; set; }
 
     public bool IsRunning => !IsDone;
 
@@ -1851,9 +1856,14 @@ public sealed partial class CompactItem : ChatItem
                 _ => null,
             };
 
-            return tokens ?? Reason ?? "Earlier messages were summarized.";
+            var summary = tokens ?? Reason ?? "Earlier messages were summarized.";
+            return Elapsed is { } took ? $"{summary} · {FormatElapsed(took)}" : summary;
         }
     }
+
+    private static string FormatElapsed(TimeSpan took) => took.TotalSeconds < 60
+        ? $"{took.TotalSeconds:0.0}s"
+        : $"{(int)took.TotalMinutes}m {took.Seconds}s";
 }
 
 /// <summary>Out-of-band information: session ended, a tool was denied, protocol drift.</summary>

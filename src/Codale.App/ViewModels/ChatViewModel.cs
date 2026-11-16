@@ -272,7 +272,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         _compactItem = new CompactItem
         {
-            Reason = $"Idle for {_smart.Settings.IdleCompactSeconds / 60.0:0.#} min",
+            Reason = _smart.Settings.IdleCompactSeconds is var idle && idle >= 3600
+                ? $"Idle for {idle / 3600.0:0.#} hr"
+                : $"Idle for {idle / 60.0:0.#} min",
             BeforeTokens = Status.ContextTokens,
         };
         Add(_compactItem);
@@ -2845,6 +2847,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     compactItem = new CompactItem { Reason = compacted.Trigger == "auto" ? "Compacted automatically" : null };
                     Add(compactItem);
                 }
+                else
+                {
+                    // Started by Codale, so its row has been up since the compaction began.
+                    compactItem.Elapsed = DateTimeOffset.Now - compactItem.Timestamp;
+                }
 
                 compactItem.BeforeTokens = compacted.PreTokens ?? compactItem.BeforeTokens;
                 compactItem.AfterTokens = compacted.PostTokens;
@@ -4286,13 +4293,19 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _activeTurn!.LiveStage = compact ? "Compacting" : retrieveContext ? "Gathering context" : "";
         var contextClock = System.Diagnostics.Stopwatch.StartNew();
         Codale.Search.FileLocatorContext? locatedContext = null;
-        // Compaction keeps its notice line; context gathering is one quiet row that
-        // finishes in place, so the reader never sees it change style mid-turn.
-        var compactStatus = compact ? new NoticeItem { Text = "Compacting…" } : null;
+        // A compaction is one row from start to finish: an idle one already added its
+        // entry, and one the reader asked for gets it here. Context gathering is one
+        // quiet row that finishes in place, so the reader never sees it change style mid-turn.
+        if (compact && _compactItem is null)
+        {
+            _compactItem = new CompactItem { BeforeTokens = Status.ContextTokens };
+            Items.Insert(Items.IndexOf(_activeTurn), _compactItem);
+        }
+
         var contextStatus = retrieveContext ? new ContextEnrichmentItem { Summary = "Gathering context…", IsPending = true } : null;
         // Activity grows inside the turn's existing row, so preparation must sit
         // before that row to remain above the work it precedes.
-        ChatItem? preparing = (ChatItem?)compactStatus ?? contextStatus;
+        ChatItem? preparing = contextStatus;
         if (preparing is not null) Items.Insert(Items.IndexOf(_activeTurn), preparing);
         Reflow();
 
@@ -4332,6 +4345,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             EndTurn(TurnOutcome.NotSent);
             if (abandoned is not null) Items.Remove(abandoned);
             if (preparing is not null) Items.Remove(preparing);
+            if (compact) DropCompactItem();
             Items.Remove(sent);
             Reflow();
             IsBusy = false;
@@ -4347,7 +4361,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         contextClock.Stop();
         var elapsed = $"{contextClock.Elapsed.TotalSeconds:0.00}s";
-        if (compactStatus is not null) CompletePreparationNotice(compactStatus, $"Compaction prepared · {elapsed}");
         if (contextStatus is not null)
         {
             var found = locatedContext?.Files.Count ?? 0;
@@ -4405,6 +4418,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             IsBusy = false;
             RestoreAfterPlanTurn();
             EndTurn(TurnOutcome.NotSent);
+            if (compact) DropCompactItem();
             Add(new NoticeItem { Text = $"Send failed: {ex.Message}", Severity = NoticeSeverity.Error });
         }
     }
