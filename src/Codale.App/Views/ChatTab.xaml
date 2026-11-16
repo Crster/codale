@@ -1439,19 +1439,62 @@
             </StackPanel>
         </DataTemplate>
 
+        <!--  Files shortlisted for the prompt: one quiet row from "Gathering context…" to its summary,
+              folded like a turn's steps; open, each file is a link with the words it matched.  -->
         <DataTemplate x:Key="ContextTemplate" x:DataType="vm:ContextEnrichmentItem">
-            <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}"
-                        Padding="12,2,12,10" Spacing="6"
-                        HorizontalAlignment="Center" MaxWidth="760">
-                <TextBlock Text="{x:Bind Summary}" TextWrapping="Wrap"
-                           TextAlignment="Center"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                           FontSize="{x:Bind S12, Mode=OneWay}" />
-                <TextBlock Text="{x:Bind Details}" TextWrapping="Wrap"
-                           TextAlignment="Center"
-                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                           IsTextSelectionEnabled="True"
-                           FontSize="{x:Bind S12, Mode=OneWay}" />
+            <StackPanel Margin="{x:Bind RowMargin, Mode=OneWay}" Spacing="2">
+                <Button Padding="4,3,8,3" Click="OnToggleContextClick"
+                        IsHitTestVisible="{x:Bind HasHints, Mode=OneWay}"
+                        Style="{StaticResource ToolToggle}" Tag="{x:Bind}"
+                        ToolTipService.ToolTip="Files suggested to the agent for this prompt">
+                    <StackPanel Orientation="Horizontal" Spacing="8" views:TextBaseline.IsAligned="True">
+                        <Grid Width="12" VerticalAlignment="Center">
+                            <ProgressRing Width="12" Height="12"
+                                          IsActive="{x:Bind IsPending, Mode=OneWay}"
+                                          Visibility="{x:Bind IsPending, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                            <FontIcon Glyph="&#xE721;" FontSize="{x:Bind S12, Mode=OneWay}"
+                                      Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                      Visibility="{x:Bind IsDone, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                        </Grid>
+                        <TextBlock Text="{x:Bind Title, Mode=OneWay}" FontSize="{x:Bind S12, Mode=OneWay}" VerticalAlignment="Center"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock VerticalAlignment="Center" FontSize="{x:Bind S11_5, Mode=OneWay}"
+                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                   Text="{x:Bind Meta, Mode=OneWay}" />
+                        <FontIcon Glyph="{x:Bind ChevronGlyph, Mode=OneWay}" FontSize="{x:Bind S8, Mode=OneWay}" VerticalAlignment="Center"
+                                  Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                  Visibility="{x:Bind HasHints, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                    </StackPanel>
+                </Button>
+                <!--  A hairline on the left ties the files to the row above, as a turn's steps are tied.  -->
+                <Border Margin="10,0,0,4" Padding="12,2,0,2"
+                        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="1,0,0,0"
+                        Visibility="{x:Bind ShowHints, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                    <ItemsControl ItemsSource="{x:Bind Hints, Mode=OneWay}" IsTabStop="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ContextHint">
+                                <Grid ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button Click="OnContextFileClick" Style="{StaticResource ToolFileChip}"
+                                            Tag="{x:Bind}" ToolTipService.ToolTip="{x:Bind Path}">
+                                        <TextBlock FontFamily="Cascadia Mono, Consolas" FontSize="{x:Bind S12_5, Mode=OneWay}"
+                                                   MaxWidth="420" TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
+                                            <Run Text="{x:Bind Name}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /><Run Text="{x:Bind Lines}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                            <Run Text="{x:Bind Directory}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                        </TextBlock>
+                                    </Button>
+                                    <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="{x:Bind S11_5, Mode=OneWay}"
+                                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                               Text="{x:Bind Keywords}" TextTrimming="CharacterEllipsis"
+                                               ToolTipService.ToolTip="Matched words" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Border>
             </StackPanel>
         </DataTemplate>
 

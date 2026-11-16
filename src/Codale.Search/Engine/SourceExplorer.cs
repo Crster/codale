@@ -740,7 +740,7 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
     /// far more surely than any file that has the four words apart. Each becomes a bonus
     /// term weighted by how many of the terms it joins.
     /// </summary>
-    private static IEnumerable<ResolvedTerm> Compounds(SourceSnapshot snapshot, IReadOnlyList<ResolvedTerm> terms)
+    internal static IEnumerable<ResolvedTerm> Compounds(SourceSnapshot snapshot, IReadOnlyList<ResolvedTerm> terms)
     {
         var parts = terms
             .Where(t => !t.Term.Bonus && t.Keys.Count > 0)
@@ -811,7 +811,7 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
     }
 
     /// <summary>Short words must start a word, longer ones may sit inside a camelCase name - <see cref="CodeDiscovery.NeedsWordStart"/>.</summary>
-    private static Regex LineMatcher(IEnumerable<string> forms, bool phrase)
+    internal static Regex LineMatcher(IEnumerable<string> forms, bool phrase)
     {
         var parts = forms.Select(f =>
         {
@@ -822,7 +822,7 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
         return new Regex(string.Join("|", parts), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
     }
 
-    private static double Idf(SourceSnapshot snapshot, string key) =>
+    internal static double Idf(SourceSnapshot snapshot, string key) =>
         Idf(snapshot.Files.Count, snapshot.DocumentFrequency(key));
 
     private static double Idf(int n, int df) => Math.Log(1 + (n - df + 0.5) / (df + 0.5));

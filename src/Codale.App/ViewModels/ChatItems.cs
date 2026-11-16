@@ -1889,10 +1889,117 @@ public sealed partial class NoticeItem : ChatItem
         _ => "",
     };
 }
-/// <summary>The exact file shortlist supplied with a prompt, retained for inspection.</summary>
+/// <summary>
+/// The exact file shortlist supplied with a prompt, retained for inspection. One row from
+/// "Gathering context…" to the finished summary: it is updated in place, never swapped.
+/// </summary>
 public sealed partial class ContextEnrichmentItem : ChatItem
 {
     public override TranscriptBlock Block => TranscriptBlock.Notice;
-    public required string Summary { get; init; }
-    public required string Details { get; init; }
+
+    protected override Thickness NaturalMargin => new(0, 4, 40, 4);
+
+    /// <summary>"Context gathered · 6 files · 1.46s" as recorded; the row splits it into title and meta.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Title), nameof(Meta))]
+    public partial string Summary { get; set; } = "";
+
+    /// <summary>The hint text sent with the prompt: a header line, then "- path:start-end | words | in symbol" rows, each followed by its anchor lines.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Hints), nameof(HasHints), nameof(ChevronGlyph))]
+    public partial string Details { get; set; } = "";
+
+    /// <summary>True while retrieval runs: a spinner instead of the expander.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsDone))]
+    public partial bool IsPending { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowHints), nameof(ChevronGlyph))]
+    public partial bool IsExpanded { get; set; }
+
+    public bool IsDone => !IsPending;
+
+    public string Title => Summary.Split(" · ", 2)[0];
+
+    public string Meta => Summary.Split(" · ", 2) is [_, var rest] ? rest : "";
+
+    public IReadOnlyList<ContextHint> Hints { get; private set; } = [];
+
+    partial void OnDetailsChanged(string value)
+    {
+        Hints = ContextHint.Parse(value);
+        foreach (var hint in Hints) hint.TextSettings = TextSettings;
+    }
+
+    /// <summary>The file rows follow the chat's text size with the row itself.</summary>
+    public override void RaiseTextScale()
+    {
+        base.RaiseTextScale();
+        foreach (var hint in Hints)
+        {
+            hint.TextSettings = TextSettings;
+            // A size change keeps the same store, so the assignment alone announces nothing.
+            hint.RaiseTextScale();
+        }
+    }
+
+    public bool HasHints => Hints.Count > 0;
+
+    public bool ShowHints => IsExpanded && HasHints;
+
+    /// <summary>Chevron right when folded, down when open; hidden without hints.</summary>
+    public string ChevronGlyph => IsExpanded ? "" : "";
+}
+
+/// <summary>One shortlisted file: its name, the folder it sits in, the lines it points at and the prompt words it matched.</summary>
+public sealed partial class ContextHint : ScaledObservable
+{
+    public required string Path { get; init; }
+    public required string Keywords { get; init; }
+
+    /// <summary>The first line of the suggested range, or 0 for a file-level hint (older transcripts).</summary>
+    public int Line { get; init; }
+    public int EndLine { get; init; }
+
+    public string Name => Path[(Path.LastIndexOf('/') + 1)..];
+
+    /// <summary>":112-128" after the name; empty without a range.</summary>
+    public string Lines => Line <= 0 ? "" : EndLine > Line ? $":{Line}-{EndLine}" : $":{Line}";
+
+    /// <summary>" src/app" for "src/app/page.tsx", spaced like a tool row's file hint; empty at the root.</summary>
+    public string Directory => Path.LastIndexOf('/') is var slash and > 0 ? " " + Path[..slash] : "";
+
+    public bool HasKeywords => Keywords.Length > 0;
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^(?<path>.+?):(?<start>\d+)(?:-(?<end>\d+))?$")]
+    private static partial System.Text.RegularExpressions.Regex Ranged();
+
+    /// <summary>
+    /// The "- path:start-end | words | in symbol" rows of the hint text; indented anchor lines
+    /// under each row are for the agent and are skipped. Older "- path | words" rows still parse.
+    /// </summary>
+    public static IReadOnlyList<ContextHint> Parse(string details)
+    {
+        var hints = new List<ContextHint>();
+        foreach (var raw in details.Split('\n'))
+        {
+            if (!raw.StartsWith("- ", StringComparison.Ordinal)) continue;
+            var parts = raw[2..].Trim().Split(" | ");
+            var path = parts[0].Trim();
+            int start = 0, end = 0;
+            if (Ranged().Match(path) is { Success: true } ranged)
+            {
+                path = ranged.Groups["path"].Value;
+                start = int.Parse(ranged.Groups["start"].Value, System.Globalization.CultureInfo.InvariantCulture);
+                end = ranged.Groups["end"].Success ? int.Parse(ranged.Groups["end"].Value, System.Globalization.CultureInfo.InvariantCulture) : start;
+            }
+
+            if (path.Length == 0) continue;
+            var keywords = string.Join(" · ", parts.Skip(1).Select(p => p.Trim()).Where(p => p.Length > 0));
+            hints.Add(new ContextHint { Path = path, Keywords = keywords, Line = start, EndLine = end });
+        }
+
+        return hints;
+    }
 }

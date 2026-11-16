@@ -1,0 +1,17 @@
+[
+  { "prompt": "Show the Smart status detail in a hover tooltip on the status bar", "files": ["src/Codale.App/Views/WorkspacePage.xaml", "src/Codale.App/Views/WorkspacePage.xaml.cs"] },
+  { "prompt": "Keep the context notice above the turn it precedes in chat", "files": ["src/Codale.App/ViewModels/ChatViewModel.cs"] },
+  { "prompt": "Use auto-suggest text boxes for AI provider models in settings", "files": ["src/Codale.App/Controls/SettingsPanel.xaml.cs", "src/Codale.App/Controls/SettingsPanel.xaml"] },
+  { "prompt": "Marshal the running command count update to the UI thread", "files": ["src/Codale.App/ViewModels/WorkspaceViewModel.cs"] },
+  { "prompt": "Code editor should use root theme brushes so light mode colors apply", "files": ["src/Codale.App/Controls/CodeEditor.xaml.cs", "src/Codale.App/Views/WorkspacePage.xaml"] },
+  { "prompt": "Composer ghost text: only spelling fixes and changed-file completion", "files": ["src/Codale.App/Services/ComposerPredictor.cs"] },
+  { "prompt": "End multi-line selections flush with each line's last character in the editor", "files": ["src/Codale.App/Controls/CodeEditor.Rendering.cs"] },
+  { "prompt": "Make files over 1 MB searchable", "files": ["src/Codale.Search/Engine/SourceFile.cs", "src/Codale.Search/Engine/SourceIndex.cs", "src/Codale.Search/WorkspaceSearch.cs"] },
+  { "prompt": "Let diff rows be selected and copied", "files": ["src/Codale.App/Views/DiffTab.xaml", "src/Codale.App/Views/DiffTab.xaml.cs"] },
+  { "prompt": "Drag a tab to split the centre view in the workspace", "files": ["src/Codale.App/Views/WorkspacePage.TabGroups.cs", "src/Codale.App/Views/WorkspacePage.xaml", "src/Codale.App/Views/WorkspacePage.xaml.cs"] },
+  { "prompt": "Find npm so the Codex update can start", "files": ["src/Codale.Agents/CliLocator.cs", "src/Codale.Agents/Codex/CodexUpdater.cs"] },
+  { "prompt": "Suppress suggestions on paste in the chat box to avoid the popup", "files": ["src/Codale.App/Views/ChatTab.xaml.cs"] },
+  { "prompt": "Don't mark resumed project sessions as isolated", "files": ["src/Codale.App/ViewModels/ChatViewModel.Features.cs"] },
+  { "prompt": "Add undo and redo to the chat draft box", "files": ["src/Codale.App/Views/ChatTab.xaml", "src/Codale.App/Views/ChatTab.xaml.cs"] },
+  { "prompt": "Expand command auto-detection to common languages, frameworks and task runners", "files": ["src/Codale.Commands/CommandCatalog.cs", "src/Codale.Commands/ProjectCommand.cs", "src/Codale.Mcp.Tasks/TaskTools.cs"] }
+]

@@ -4286,10 +4286,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _activeTurn!.LiveStage = compact ? "Compacting" : retrieveContext ? "Gathering context" : "";
         var contextClock = System.Diagnostics.Stopwatch.StartNew();
         Codale.Search.FileLocatorContext? locatedContext = null;
-        var contextStatus = new NoticeItem { Text = compact ? "Compacting…" : "Gathering context…" };
+        // Compaction keeps its notice line; context gathering is one quiet row that
+        // finishes in place, so the reader never sees it change style mid-turn.
+        var compactStatus = compact ? new NoticeItem { Text = "Compacting…" } : null;
+        var contextStatus = retrieveContext ? new ContextEnrichmentItem { Summary = "Gathering context…", IsPending = true } : null;
         // Activity grows inside the turn's existing row, so preparation must sit
         // before that row to remain above the work it precedes.
-        if (compact || retrieveContext) Items.Insert(Items.IndexOf(_activeTurn), contextStatus);
+        ChatItem? preparing = (ChatItem?)compactStatus ?? contextStatus;
+        if (preparing is not null) Items.Insert(Items.IndexOf(_activeTurn), preparing);
         Reflow();
 
         if (!compact) RecordUserTurn(text);
@@ -4327,6 +4331,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             var abandoned = _activeTurn;
             EndTurn(TurnOutcome.NotSent);
             if (abandoned is not null) Items.Remove(abandoned);
+            if (preparing is not null) Items.Remove(preparing);
             Items.Remove(sent);
             Reflow();
             IsBusy = false;
@@ -4341,8 +4346,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
 
         contextClock.Stop();
-        contextStatus = CompletePreparationNotice(contextStatus,
-            $"{(compact ? "Compaction prepared" : locatedContext?.Files.Count > 0 ? $"Context gathered · {locatedContext.Files.Count} files" : "No file hints available")} · {contextClock.Elapsed.TotalSeconds:0.00}s");
+        var elapsed = $"{contextClock.Elapsed.TotalSeconds:0.00}s";
+        if (compactStatus is not null) CompletePreparationNotice(compactStatus, $"Compaction prepared · {elapsed}");
+        if (contextStatus is not null)
+        {
+            var found = locatedContext?.Files.Count ?? 0;
+            contextStatus.Summary = found > 0
+                ? $"Context gathered · {found} {(found == 1 ? "file" : "files")} · {elapsed}"
+                : $"No matching files · {elapsed}";
+            contextStatus.IsPending = false;
+        }
 
         // "/compact" is housekeeping, not part of the conversation a resumed history replays.
         _preparingTask = null;
@@ -4376,21 +4389,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             {
                 await session.SendAsync(new UserTurn(text) { Attachments = attachments, PlanOnly = planOnly, AskOnly = askOnly, ContextPrefix = context });
                 if (locatedContext is not null) _knownContextFiles.UnionWith(locatedContext.Files);
-                if (locatedContext is { Files.Count: > 0 })
+                if (locatedContext is { Files.Count: > 0 } && contextStatus is not null)
                 {
-                    var recordedContext = new ContextEnrichmentRecorded(contextStatus.Text, locatedContext.Text)
-                        { Timestamp = contextStatus.Timestamp };
-                    _featureLog?.Append(recordedContext);
-                    var contextIndex = Items.IndexOf(contextStatus);
-                    if (contextIndex >= 0)
-                    {
-                        Items[contextIndex] = new ContextEnrichmentItem
-                        {
-                            Summary = recordedContext.Summary, Details = recordedContext.Details,
-                            Timestamp = contextStatus.Timestamp,
-                        };
-                        Reflow();
-                    }
+                    // The hints are shown only once they actually went out with the prompt.
+                    contextStatus.Details = locatedContext.Text;
+                    _featureLog?.Append(new ContextEnrichmentRecorded(contextStatus.Summary, locatedContext.Text)
+                        { Timestamp = contextStatus.Timestamp });
                 }
             }
         }

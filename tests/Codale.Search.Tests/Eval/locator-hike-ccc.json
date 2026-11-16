@@ -1,0 +1,14 @@
+[
+  { "prompt": "Add growth and ingrowth menu in the navbar under the marketing menu.", "files": ["src/lib/constants.ts"] },
+  { "prompt": "Move Projects nav group below Company", "files": ["src/lib/constants.ts"] },
+  { "prompt": "Add a Brand Health link to the sidebar under Marketing", "files": ["src/lib/constants.ts"] },
+  { "prompt": "Align Marketing permission labels with the sidebar titles", "files": ["src/model/permission.ts"] },
+  { "prompt": "Remove unused totalResolved from the agent team KPI cards", "files": ["src/features/customer-service/components/agent-team-kpi-cards.tsx"] },
+  { "prompt": "Compact the Ad Spend layout", "files": ["src/features/ad-spend/components/spend-tab.tsx", "src/features/ad-spend/components/top-ads.tsx"] },
+  { "prompt": "Make task detail a shareable route and show status and issues on it", "files": ["src/app/(dashboard)/projects/[[...slug]]/page.tsx", "src/features/projects/components/project-drawer.tsx", "src/features/projects/components/task-detail-modal.tsx", "src/features/projects/projects-page-client.tsx"] },
+  { "prompt": "Hiky should never reply blank, and gate restricted topics by permission", "files": ["src/service/hiky.service.ts"] },
+  { "prompt": "In the inventory product table, sync ?q= into search state during render instead of an effect", "files": ["src/features/inventory/components/product-table.tsx"] },
+  { "prompt": "Add employee 2FA lockout reset", "files": ["src/features/employees/components/airtable-employee-table.tsx", "src/features/permissions/recommended-grants.ts", "src/features/second-factor/second-factor.actions.ts", "src/model/permission.ts"] },
+  { "prompt": "Notify @mentioned users in project comments", "files": ["src/features/projects/components/project-comments.tsx", "src/features/projects/project-mutation.actions.ts", "src/service/project-notification.service.ts"] },
+  { "prompt": "Enrich the Creative Output and Spend KPI tiles with landing pages and early winners", "files": ["src/features/ad-spend/components/ads-launched.tsx", "src/features/ad-spend/components/spend-tab.tsx"] }
+]
