@@ -43,13 +43,6 @@ public sealed partial class CodeEditor : UserControl
     /// <summary>Whether the gutter draws line numbers (Settings).</summary>
     public bool ShowLineNumbers { get; set; } = true;
 
-    /// <summary>Whether tokens colour the text (Settings).</summary>
-    public bool EnableSyntaxHighlighting
-    {
-        get => _highlighter.Enabled;
-        set => _highlighter.Enabled = value;
-    }
-
     /// <summary>Whether long lines fold at the viewport edge instead of scrolling sideways (Settings).</summary>
     public bool WordWrap { get; set; }
 
@@ -202,13 +195,7 @@ public sealed partial class CodeEditor : UserControl
     // Menu-facing wrappers over the keyboard paths.
     public void CopyToClipboard() => CopySelection();
 
-    public void CutToClipboard() => CutSelection();
-
     public void PasteFromClipboard() => _ = PasteAsync();
-
-    public void SelectEverything() => _model.SelectAll();
-
-    public void DeleteSelection() => _model.Delete();
 
     public bool CanUndo => _model.CanUndo;
 
@@ -217,17 +204,6 @@ public sealed partial class CodeEditor : UserControl
     public void Undo() => _model.Undo();
 
     public void Redo() => _model.Redo();
-
-    /// <summary>Replaces the selections (or inserts at the carets) as one undo step.</summary>
-    public void ReplaceSelection(string text) => _model.Paste(text);
-
-    /// <summary>Swaps the whole buffer for new text as one undo step, keeping the caret near its old line.</summary>
-    public void ReplaceAllText(string text)
-    {
-        var line = _model.Primary.Caret.Line;
-        _model.ReplaceRange(default, _model.Buffer.End, text);
-        _model.SetCaret(new DocumentPosition(Math.Min(line, _model.Buffer.LineCount - 1), 0));
-    }
 
     /// <summary>Replaces the buffer. Undo history restarts; the caret goes to the top.</summary>
     public void LoadText(string text)
@@ -279,13 +255,6 @@ public sealed partial class CodeEditor : UserControl
         EnsureMetrics();
         var position = _model.Buffer.Clamp(new DocumentPosition(line, col));
         return FirstRowOf(position.Line) + RowInLineOf(position.Line, position.Col);
-    }
-
-    /// <summary>How many visual rows a logical line folds into.</summary>
-    public int VisualRowsOf(int line)
-    {
-        EnsureMetrics();
-        return RowCountOf(Math.Clamp(line, 0, _model.Buffer.LineCount - 1));
     }
 
     /// <summary>The row box a position is drawn in, relative to this control at the current scroll.</summary>

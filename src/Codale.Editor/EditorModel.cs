@@ -80,9 +80,6 @@ public sealed class EditorModel
         SelectionsChanged?.Invoke();
     }
 
-    /// <summary>Stops the next keystroke merging into the current undo step.</summary>
-    public void SealUndo() => _history.Seal();
-
     // ------------------------------------------------------------------ selections
 
     public void SetCaret(DocumentPosition caret, bool extend = false)

@@ -427,16 +427,6 @@ public sealed partial class SuggestionGlyphConverter : IValueConverter
         throw new NotSupportedException();
 }
 
-/// <summary>File name only, for chips and transcript rows.</summary>
-public sealed partial class FileNameConverter : IValueConverter
-{
-    public object Convert(object value, Type targetType, object parameter, string language) =>
-        value is string path ? Path.GetFileName(path) : value;
-
-    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
-        throw new NotSupportedException();
-}
-
 public sealed partial class TodoGlyphConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, string language) => value switch
@@ -880,8 +870,6 @@ public static class FileIcons
     {
         return isDirectory ? FolderGlyph : !string.IsNullOrEmpty(name) && TryLookup(name, out var icon) ? icon.Glyph : PageGlyph;
     }
-
-    public static string FileGlyph(string? name) => NodeGlyph(false, name);
 
     public static Brush Brush(bool isDirectory, string name)
     {

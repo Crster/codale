@@ -108,9 +108,6 @@ public sealed class FeatureLog(HistoryStore store, string featureId, string? cha
         }
     }
 
-    /// <summary>Notes the project context a prompt was enriched with; replayed as its own row, never as conversation.</summary>
-    public void AppendContext(string summary, string details) => Append(new { type = "context", summary, details, at = DateTimeOffset.Now });
-
     /// <summary>Notes that the chat's turn is over, and how it ended ("success", an error subtype, "stopped").</summary>
     public void EndTurn(string outcome) => Append(new { type = "turnEnd", outcome, at = DateTimeOffset.Now });
 

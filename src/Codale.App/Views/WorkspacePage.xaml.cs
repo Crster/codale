@@ -28,8 +28,6 @@ namespace Codale.App.Views;
 public sealed partial class WorkspacePage : Page
 {
     // The status bar's divider after the timer only earns its place when something follows it.
-    public static Visibility AnyVisible(int count, bool flag) =>
-        count > 0 || flag ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>Every open chat tab, one conversation each; they all keep running in the background.</summary>
     private readonly List<ChatTabEntry> _chatTabs = [];
@@ -96,7 +94,6 @@ public sealed partial class WorkspacePage : Page
             window.CommandsRequested += OnTitleBarCommandsRequested;
             window.McpToolsRequested += OnTitleBarMcpToolsRequested;
             window.LeftPanelToggled += OnTitleBarLeftPanelToggled;
-            window.SearchSubmitted += OnTitleBarSearchSubmitted;
             window.SetQuickSearchSource(this);
             window.ShortcutInvoked += OnShortcutInvoked;
         }
@@ -138,7 +135,6 @@ public sealed partial class WorkspacePage : Page
             window.CommandsRequested -= OnTitleBarCommandsRequested;
             window.McpToolsRequested -= OnTitleBarMcpToolsRequested;
             window.LeftPanelToggled -= OnTitleBarLeftPanelToggled;
-            window.SearchSubmitted -= OnTitleBarSearchSubmitted;
             window.SetQuickSearchSource(null);
             window.ShortcutInvoked -= OnShortcutInvoked;
             window.Activated -= OnWindowActivated;

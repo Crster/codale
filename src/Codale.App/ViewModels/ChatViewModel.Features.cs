@@ -82,12 +82,6 @@ public sealed partial class ChatViewModel
         return IsConnected;
     }
 
-    /// <summary>The feature's summary, or what it was started for while it has none.</summary>
-    public string FeatureSummary() =>
-        FeatureId is { } id && Features?.Get(id) is { } feature
-            ? feature.Summary.Length > 0 ? feature.Summary : feature.Description
-            : "";
-
     /// <summary>The last <paramref name="maxEvents"/> events of the feature's log as plain text, and whether earlier ones exist.</summary>
     public (string Text, bool HasMore) FeatureHistoryText(int maxEvents)
     {

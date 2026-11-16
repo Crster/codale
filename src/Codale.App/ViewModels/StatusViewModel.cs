@@ -207,9 +207,6 @@ public sealed partial class StatusViewModel : ObservableObject
     /// <summary>Summary beside the label: the window percentages, or empty under an override.</summary>
     public string UsageMeterText => IsOverrideCli ? "" : UsageSummary;
 
-    /// <summary>The flyout's title: the subscription windows exist only for a Claude subscription.</summary>
-    public string UsageFlyoutTitle => HasUsage ? "Usage limits" : "Context";
-
     public string ContextText => ContextWindow > 0
         ? $"{Format(ContextTokens)} / {Format(ContextWindow)}"
         : Format(ContextTokens);

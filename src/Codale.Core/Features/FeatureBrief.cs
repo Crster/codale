@@ -148,10 +148,6 @@ public static class FeatureBrief
         return text.ToString().TrimEnd();
     }
 
-    /// <summary>The file list the fallback seed gains when the exploration finished but the brief did not.</summary>
-    public static string ExploredSection(IReadOnlyList<ExploredFile> explored) =>
-        explored.Count == 0 ? "" : "## Files a search found for the request\n" + DescribeExplored(explored, 1_200).TrimEnd();
-
     /// <summary>The brief for a request.</summary>
     public static async Task<string> WriteAsync(
         IHelperModel model,

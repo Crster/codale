@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.IO.Enumeration;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 
 namespace Codale.Smart;
 
@@ -28,7 +27,6 @@ internal sealed class SmartTools(TimeSpan? commandTimeout = null)
     /// <summary>Unattended (background) work only reads: it is prompted by file contents nobody reviewed, so it never gets run_shell.</summary>
     internal static readonly object[] ReadOnlyDefinitions = Definitions[..3];
     internal static object[] For(bool background) => background ? ReadOnlyDefinitions : Definitions;
-    public static readonly string Schemas = "<tools>\n" + string.Join("\n", Definitions.Select(s => JsonSerializer.Serialize(s))) + "\n</tools>";
     internal static readonly object[] ContextDefinitions =
     [
         Schema("query_index", "Search the project index for relevant indexed source using alternative terms.",

@@ -242,8 +242,6 @@ public sealed class HexRowList(HexSource source, int bytesPerRow) : IList
         set => throw new NotSupportedException();
     }
 
-    public HexRow RowAt(long offset) => (HexRow)this[(int)(offset / BytesPerRow)]!;
-
     public void SetSelection(long start, long end)
     {
         _selStart = start;

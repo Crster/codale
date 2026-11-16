@@ -16,8 +16,6 @@ public struct CodeTokenState
     /// <summary>The grammar's rule stack when a TextMate grammar did the colouring; null otherwise.</summary>
     public object? Stack;
 
-    /// <summary>True when two states would colour the following lines identically.</summary>
-    public readonly bool SameAs(CodeTokenState other) => Mode == other.Mode && Equals(Stack, other.Stack);
 }
 
 /// <summary>

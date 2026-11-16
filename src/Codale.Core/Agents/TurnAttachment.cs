@@ -22,13 +22,6 @@ public sealed record TurnAttachment
     /// <summary>Absolute path on disk.</summary>
     public required string Path { get; init; }
 
-    /// <summary>Turns a picked file into an attachment, or null when its type is not supported.</summary>
-    public static TurnAttachment? FromPath(string path)
-    {
-        var kind = KindOf(path);
-        return kind is null ? null : new TurnAttachment { Kind = kind.Value, Name = System.IO.Path.GetFileName(path), Path = path };
-    }
-
     /// <summary>The extension decides the kind; anything else is not attachable.</summary>
     public static TurnAttachmentKind? KindOf(string path)
     {

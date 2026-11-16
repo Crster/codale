@@ -31,8 +31,6 @@ public static class SmartFeatureSettings
         (Decision, "Decision", "Fast classifier for auto mode and command risk · uses General when off", "Decision model"),
     ];
 
-    public static string LabelFor(string role) => Roles.FirstOrDefault(r => r.Id == role).Label ?? role;
-
     /// <summary>Roles that never fall back to the profile's Flash (chat) model: each needs a model of its own kind.</summary>
     public static bool RequiresDedicatedModel(string role) => role is Completion or Embedding or Decision;
     public static bool SupportsProvider(string role, string provider) => provider == "off"

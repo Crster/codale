@@ -43,8 +43,5 @@ public readonly record struct Selection(DocumentPosition Anchor, DocumentPositio
 
     public Selection Collapse(DocumentPosition at) => new(at, at);
 
-    public Selection WithCaret(DocumentPosition caret, bool extend) =>
-        new(extend ? Anchor : caret, caret);
-
     public override string ToString() => IsEmpty ? Caret.ToString() : $"{Anchor}->{Caret}";
 }

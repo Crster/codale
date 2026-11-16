@@ -567,16 +567,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>Every open editor tab's view model, so closing the window can ask about unsaved edits. The page registers and unregisters them.</summary>
     private readonly List<EditorViewModel> _editors = [];
 
-    public void RegisterEditor(EditorViewModel editor)
-    {
-        if (!_editors.Contains(editor))
-        {
-            _editors.Add(editor);
-        }
-    }
-
-    public void UnregisterEditor(EditorViewModel editor) => _editors.Remove(editor);
-
     /// <summary>True when any open editor holds edits that are not on disk.</summary>
     public bool HasDirtyEditors => _editors.Any(e => e.IsDirty && e.CanEdit);
 
@@ -628,34 +618,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
 
     /// <summary>Where the agent on the panel is working: the project.</summary>
     public string WorkingDirectory => ProjectPath;
-
-    /// <summary>Leaves history and returns to the live conversation.</summary>
-    public void ReturnToLiveSession()
-    {
-        IsViewingHistory = false;
-        HistoryTitle = null;
-        Chat.Items.Clear();
-    }
-
-    /// <summary>
-    /// Starts a brand-new session in the project directory: the running CLI is
-    /// stopped and the transcript drops. The old conversation stays reachable
-    /// through the session list, which resumes it.
-    /// </summary>
-    public async Task StartNewChatSessionAsync()
-    {
-        // The conversation in front keeps running in its own tab; the new one gets a
-        // tab of its own - unless the one in front never started anything.
-        var chat = FreshChat();
-        await ApplyDefaultsToEmptyChatAsync(chat);
-
-        ChatActivationRequested?.Invoke(this, chat);
-
-        if (!chat.IsConnected)
-        {
-            await chat.ConnectAsync();
-        }
-    }
 
     /// <summary>
     /// A reused empty chat may still carry the last session's temporary picks; mode goes

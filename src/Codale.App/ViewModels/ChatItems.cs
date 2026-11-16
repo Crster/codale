@@ -160,11 +160,6 @@ public sealed partial class ComposerAttachment
 
     public bool IsImage => Kind == TurnAttachmentKind.Image;
 
-    public bool IsPdf => Kind == TurnAttachmentKind.Pdf;
-
-    /// <summary>PDFs and text files both render with a glyph instead of a thumbnail.</summary>
-    public bool IsDocument => Kind is TurnAttachmentKind.Pdf or TurnAttachmentKind.Text;
-
     public TurnAttachment ToTurnAttachment() => new() { Kind = Kind, Name = Name, Path = Path };
 }
 
@@ -1729,15 +1724,6 @@ public sealed partial class HandoffBriefItem : ChatItem
         FilesText = string.Join("\n", result.Files.Take(12).Select(f =>
             f.Path + (f.Ranges.Count > 0 ? $":{f.Ranges[0].Start}-{f.Ranges[0].End}" : "") + (f.Reason.Length > 0 ? $" - {f.Reason}" : "")));
         SavingsText = (result.IsFallback ? "Plain handoff · " : "") + $"{Size(result.FullChars)} of history → {Size(result.Seed.Length)}";
-        IsRunning = false;
-    }
-
-    public void FinishCatchUp(FeatureCatchUpResult result)
-    {
-        Brief = result.Note;
-        SavingsText = result.IsCondensed
-            ? $"{Size(result.FullChars)} of their work → {Size(result.Note.Length)}"
-            : $"{Size(result.Note.Length)} of their work";
         IsRunning = false;
     }
 

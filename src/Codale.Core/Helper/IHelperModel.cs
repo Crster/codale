@@ -37,18 +37,6 @@ public interface IHelperModel
         CancellationToken ct = default);
 
     /// <summary>
-    /// Lets the model make several calls in one reply, for loops where independent calls
-    /// (a grep and the reads it points to) need not each cost a round trip. A model that
-    /// can only make one answers as <see cref="CallToolAsync"/>. Empty means no usable call.
-    /// </summary>
-    async Task<IReadOnlyList<ToolCall>> CallToolsAsync(
-        string systemPrompt,
-        string conversation,
-        IReadOnlyList<ToolDefinition> tools,
-        CancellationToken ct = default) =>
-        await CallToolAsync(systemPrompt, conversation, tools, ct).ConfigureAwait(false) is { } call ? [call] : [];
-
-    /// <summary>
     /// A hint that a <see cref="CallToolAsync"/> with this prompt and these tools is coming,
     /// so a model that is slow to start can get ready. Safe to call often; never blocks.
     /// </summary>

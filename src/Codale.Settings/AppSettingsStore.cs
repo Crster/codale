@@ -175,16 +175,6 @@ public sealed class AppSettingsStore(string folder) : IDisposable
         set => Set("tokens.idleCompactMinTokens", Math.Max(0, value), FormatInt);
     }
 
-    /// <summary>
-    /// Whether prompts retrieve shared project knowledge. Session history is always recorded
-    /// and never routed by topic. New installations and fresh project knowledge default to enabled.
-    /// </summary>
-    public bool ProjectKnowledge
-    {
-        get => Get("chat.projectKnowledge", () => ReadFlag("chat.projectKnowledge", true));
-        set => Set("chat.projectKnowledge", value, FormatFlag);
-    }
-
     private bool IsSmartProvider(string provider) => SmartFeatureSettings.IsProvider(provider);
 
     /// <summary>The provider a Smart model role runs on: "claude", "codex", "openai", "anthropic" or "off".</summary>
@@ -403,12 +393,6 @@ public sealed class AppSettingsStore(string folder) : IDisposable
         ReadDefault(cli, "tier") is { } saved && IsTier(saved) ? saved : "cli";
 
     public void SetDefaultTier(string cli, string? tier) => WriteDefault(cli, "tier", IsTier(tier) ? tier : "");
-
-    /// <summary>Which CLI model plays the "flash" (fast) or "pro" (capable) tier. Null means
-    /// the app guesses from the CLI's catalogue; the tier's effort is fixed per tier.</summary>
-    public string? TierModelFor(string cli, string tier) => ReadDefault(cli, tier);
-
-    public void SetTierModel(string cli, string tier, string? model) => WriteDefault(cli, tier, model);
 
     /// <summary>The provider new chats of a CLI connect through: a name from <see cref="ByokProviders"/>, or "" for the CLI's own login.</summary>
     public string CliProviderFor(string cli) =>

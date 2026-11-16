@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 
 using Codale.Core.Processes;
@@ -8,56 +7,6 @@ namespace Codale.Agents.Codex;
 /// <summary>Runs npm (or winget, for a winget install) outside Codale, after shutdown has released the Codex executable.</summary>
 public static class CodexUpdater
 {
-    public static async Task StartAfterExitAsync(string logPath)
-    {
-        var codex = CliLocator.KnownClis.Single(cli => cli.Id == "codex");
-        var winget = CliVersionCheck.WingetPackage(codex);
-        var npm = winget is not null
-            ? CliLocator.Find("winget") ?? throw new InvalidOperationException("winget was not found.")
-            : CliLocator.Find("npm")
-                ?? throw new InvalidOperationException("npm was not found. Install Node.js before updating Codex.");
-        Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
-        var readyPath = logPath + ".ready-" + Guid.NewGuid().ToString("N");
-        var script = BuildScript(Environment.ProcessId, npm, logPath, readyPath, winget: winget);
-        var start = new ProcessStartInfo
-        {
-            FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
-                "WindowsPowerShell", "v1.0", "powershell.exe"),
-            UseShellExecute = true,
-            WindowStyle = ProcessWindowStyle.Hidden,
-            WorkingDirectory = Path.GetDirectoryName(logPath)!,
-        };
-        start.ArgumentList.Add("-NoProfile");
-        start.ArgumentList.Add("-NonInteractive");
-        start.ArgumentList.Add("-EncodedCommand");
-        start.ArgumentList.Add(Convert.ToBase64String(Encoding.Unicode.GetBytes(script)));
-
-        // This process must not belong to a terminal/task job: disposing the workspace kills those.
-        using var process = await ProcessUtil.StartAsync(start)
-            ?? throw new InvalidOperationException("Could not start the Codex updater.");
-        try
-        {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            while (!File.Exists(readyPath))
-            {
-                if (process.HasExited)
-                {
-                    throw new InvalidOperationException($"The Codex updater could not start. See {logPath}.");
-                }
-
-                await Task.Delay(50, timeout.Token);
-            }
-        }
-        catch
-        {
-            ProcessUtil.TryKillTree(process);
-            throw;
-        }
-        finally
-        {
-            File.Delete(readyPath);
-        }
-    }
 
     internal static string BuildScript(int ownerPid, string npm, string logPath, string? readyPath = null,
         int shutdownTimeoutSeconds = 120, string? winget = null) => $$"""

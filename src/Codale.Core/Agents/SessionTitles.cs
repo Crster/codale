@@ -13,10 +13,6 @@ public static partial class SessionTitles
     private const int MaxWords = 6;
     private const int MaxChars = 36;
 
-    /// <summary>"/clear" (or "/reset", "/new") wipes the conversation, so it says nothing about what the session is for.</summary>
-    public static bool IsResetCommand(string? text) =>
-        text?.Trim() is "/clear" or "/reset" or "/new";
-
     public static string FromPrompt(string prompt)
     {
         var text = CodePattern().Replace(prompt, " ");

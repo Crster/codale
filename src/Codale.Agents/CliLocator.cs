@@ -67,13 +67,6 @@ public static partial class CliLocator
         System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
     private static partial Regex PromptLaunch();
 
-    [GeneratedRegex(@"^(?:PS )?[A-Za-z]:\\[^>]*>",
-        System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
-    private static partial Regex ShellPrompt();
-
-    /// <summary>True when the line starts with a default Windows shell prompt, as opposed to text typed inside a running CLI.</summary>
-    public static bool IsShellPromptLine(string line) => ShellPrompt().IsMatch(line);
-
     /// <summary>
     /// Recognises a known CLI launched on a line typed at a default Windows shell prompt
     /// ("PS C:\proj&gt; claude --resume" or "C:\proj&gt; agy"), returning the CLI and the

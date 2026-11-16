@@ -232,7 +232,6 @@ public sealed class FileSearchHit
 
     public string FullPath => Node.FullPath;
 
-    public string DirectoryTail => Directory.Length == 0 ? "" : $" {Directory}";
 }
 
 public sealed partial class FileTreeViewModel : ObservableObject, IDisposable

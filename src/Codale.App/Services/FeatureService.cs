@@ -105,9 +105,6 @@ public sealed class FeatureService : IDisposable
     /// <summary>The chat left its feature, or closed.</summary>
     public void ClearChatActivity(string chatId) => _activity.RemoveChat(chatId);
 
-    /// <summary>The other chats open on a feature right now, in any window on the project.</summary>
-    public IReadOnlyList<FeatureChat> OtherChatsOn(string featureId, string? chatId) => _activity.OthersOn(featureId, chatId);
-
     public void Rename(string id, string name)
     {
         Knowledge.RenameFeature(id, name);

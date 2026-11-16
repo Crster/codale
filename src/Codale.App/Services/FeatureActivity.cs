@@ -18,11 +18,6 @@ internal sealed class FeatureActivity
     private readonly ConcurrentDictionary<string, FeatureChat> _chats = new(StringComparer.Ordinal);
     private readonly Lock _summaryLock = new();
     private readonly HashSet<string> _summarizing = [with(StringComparer.Ordinal)];
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _summaryGates = new(StringComparer.Ordinal);
-
-    /// <summary>Serializes manual rebuilds with automatic summaries across project windows.</summary>
-    public SemaphoreSlim SummaryGate(string featureId) =>
-        _summaryGates.GetOrAdd(featureId, _ => new SemaphoreSlim(1, 1));
 
     /// <summary>Notifies every window on the project so its open chats detach from deleted history.</summary>
     public event EventHandler? HistoryDeleted;
@@ -43,9 +38,6 @@ internal sealed class FeatureActivity
     public static FeatureActivity For(string projectPath) =>
         Projects.GetOrAdd(ProjectPaths.RepositoryIdentity(projectPath), _ => new FeatureActivity());
 
-    /// <summary>Held while a feature is looked up and created, so two chats naming the same topic end on one feature.</summary>
-    public Lock CreateGate { get; } = new();
-
     /// <summary>Records where a chat is and what it is doing; replaces its earlier entry.</summary>
     public void SetChat(FeatureChat chat) => _chats[chat.ChatId] = chat;
 
@@ -57,28 +49,6 @@ internal sealed class FeatureActivity
             .Where(c => c.FeatureId == featureId && c.ChatId != chatId)
             .OrderByDescending(c => c.IsBusy)
             .ThenBy(c => c.Title, StringComparer.CurrentCultureIgnoreCase)];
-
-    /// <summary>The chats on <paramref name="featureId"/> with a turn in flight.</summary>
-    public IReadOnlySet<string> RunningOn(string featureId) =>
-        _chats.Values.Where(c => c.FeatureId == featureId && c.IsBusy).Select(c => c.ChatId).ToHashSet(StringComparer.Ordinal);
-
-    /// <summary>
-    /// Claims the right to summarise a feature. False when a summary is already being written: the
-    /// ask is then remembered, and <see cref="EndSummary"/> hands it back so it runs once that one is done.
-    /// </summary>
-    public bool TryBeginSummary(string featureId, bool force)
-    {
-        lock (_summaryLock)
-        {
-            if (_summarizing.Add(featureId))
-            {
-                return true;
-            }
-
-            _summaryAgain[featureId] = force || _summaryAgain.GetValueOrDefault(featureId);
-            return false;
-        }
-    }
 
     /// <summary>Releases the feature; returns whether a summary was asked for meanwhile, and whether forced.</summary>
     public (bool Again, bool Force) EndSummary(string featureId)

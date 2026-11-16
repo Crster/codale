@@ -21,9 +21,6 @@ public sealed partial class EditorTab : UserControl
     /// <summary>The project window that owns this view's pickers and attention feedback.</summary>
     public IWindowOwner? Owner { get; set; }
 
-    /// <summary>False for a tab started as a new file: the first save picks a path.</summary>
-    public bool IsUntitled => ViewModel.FilePath is null;
-
     /// <summary>
     /// Raised when the user changes the text or saves. The workspace listens for this
     /// to promote a preview tab to a pinned one: an edited file must survive the next
@@ -948,9 +945,6 @@ public sealed partial class EditorTab : UserControl
             }
         });
     }
-
-    /// <summary>The buffer's text, which the AI grammar generator reads a sample from.</summary>
-    public string GetEditorText() => FileEditor.GetText();
 
     /// <summary>The id of the language colouring this file, or null for plain text.</summary>
     public string? LanguageId => FileEditor.LanguageId;

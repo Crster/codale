@@ -210,15 +210,6 @@ public sealed partial class ProjectKnowledgeIndex
             .Select(x => new KnowledgeHit(x.Node.Name, x.Record!.SessionId, x.Record.Provider, x.Record.Worktree, x.Record.Revision, x.Record.Text, x.Record.Refs))];
     }
 
-    /// <summary>The files a session's findings cited, newest finding first.</summary>
-    internal IReadOnlyList<SourceReference> SessionReferences(string sessionId) =>
-        [.. db.Open("knowledge").Descendants()
-            .Select(node => node.ReadJson<KnowledgeRecord>())
-            .Where(record => record is not null && record.SessionId == sessionId)
-            .OrderByDescending(record => record!.Seq)
-            .SelectMany(record => record!.Refs)
-            .DistinctBy(reference => reference.Path, StringComparer.OrdinalIgnoreCase)];
-
     // ---- learned associations
 
     /// <summary>Associate an actual agent edit with the user request active during that turn.</summary>

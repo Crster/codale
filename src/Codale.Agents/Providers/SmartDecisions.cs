@@ -11,9 +11,6 @@ public sealed record SmartQuestion(string Type, string Instructions, object? Cri
     /// <summary>Pick one option; <paramref name="options"/> maps each option to what it means.</summary>
     public static SmartQuestion Choice(string instructions, IReadOnlyDictionary<string, string> options) => new("choice", instructions, options);
 
-    /// <summary>A yes/no question, answered with the probability of yes.</summary>
-    public static SmartQuestion YesNo(string instructions) => new("noul", instructions);
-
     /// <summary>A level on a scale; <paramref name="levels"/> lowest first.</summary>
     public static SmartQuestion Score(string instructions, IReadOnlyList<string> levels) => new("score", instructions, levels);
 

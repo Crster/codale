@@ -1,5 +1,4 @@
 using Codale.Agents;
-using Codale.Agents.Claude;
 using Codale.App.Services;
 using Codale.App.ViewModels;
 using Codale.Core.Agents;

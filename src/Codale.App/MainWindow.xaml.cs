@@ -158,7 +158,6 @@ public sealed partial class MainWindow : Window, IWindowOwner
     public event EventHandler? LeftPanelToggled;
 
     /// <summary>A search was submitted from the title bar; the workspace page runs it.</summary>
-    public event EventHandler<SearchSubmission>? SearchSubmitted;
 
     /// <summary>The user is typing a search - true when it is scoped to the open file - so the model can get ready.</summary>
 
@@ -171,10 +170,6 @@ public sealed partial class MainWindow : Window, IWindowOwner
             QuickSearchHost.Close();
         }
     }
-
-    /// <summary>A content search or question for the whole project, raised by the palette's last row.</summary>
-    public void SubmitSearch(string query, bool inFile = false) =>
-        SearchSubmitted?.Invoke(this, new SearchSubmission(query, inFile));
 
     private void OnSearchLauncherClick(object sender, RoutedEventArgs e) => FocusSearch();
 

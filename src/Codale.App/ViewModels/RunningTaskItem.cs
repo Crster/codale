@@ -316,9 +316,6 @@ public sealed partial class RunningTaskItem : ObservableObject
         }
     }
 
-    /// <summary>The header and output as one log.</summary>
-    public string FullLog => Header.Length == 0 ? Output : Output.Length == 0 ? Header : Header + Output;
-
     /// <summary>What a subagent was asked, shown as the first card of its transcript.</summary>
     public string Prompt { get; set; } = "";
 

@@ -78,14 +78,6 @@ public static class ProjectPaths
         return sb.ToString();
     }
 
-    /// <summary>
-    /// Folder of the Claude CLI's own transcripts for this project, inside Codale's Claude account
-    /// (<see cref="Agents.CodaleAccount"/>). The CLI writes these for its own resume; Codale's
-    /// history is <see cref="ProjectHistoryDirectory"/>.
-    /// </summary>
-    public static string ClaudeHistoryDirectory(string projectPath) =>
-        Path.Combine(Agents.CodaleAccount.ClaudeHome, "projects", ClaudeHistoryFolderName(projectPath));
-
     /// <summary>The project's database folder: features, summaries, findings and the source index.</summary>
     public static string FeatureDatabasePath(string projectPath) =>
         Path.Combine(KnowledgeDirectory(projectPath), "project-db");

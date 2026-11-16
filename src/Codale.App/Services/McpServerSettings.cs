@@ -92,9 +92,6 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
     /// </summary>
     public bool? NativeBrowser() => Native(BrowserMode, BrowserAvailable);
 
-    /// <summary>The CLI's own desktop control, by the same rule as <see cref="NativeBrowser"/>.</summary>
-    public bool? NativeComputer() => Native(ComputerMode, ComputerAvailable);
-
     private static bool? Native(AgentToolMode mode, bool codaleAvailable) => McpToolPolicy.Native(mode, codaleAvailable);
 
     /// <summary>Claude in Chrome: <c>--chrome</c> / <c>--no-chrome</c>.</summary>

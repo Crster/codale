@@ -184,10 +184,6 @@ public static class FeatureRouting
         return names;
     }
 
-    /// <summary>The one-line description a new feature is given: the prompt that created it.</summary>
-    public static string DescribeFrom(string message) =>
-        TextClip.Truncate(message.ReplaceLineEndings(" ").Trim(), MaxDescriptionChars);
-
     private static string Line(FeatureInfo f, bool current)
     {
         var detail = f.Summary.Length > 0 ? FirstLine(f.Summary) : f.Description;

@@ -70,7 +70,6 @@ public sealed class WorkspaceFolders(string projectPath, ApplicationDatabase dat
     }
 
     private const string RecentKey = "workspace.recent-cwds";
-    private const int MaxRecent = 6;
 
     /// <summary>Folders picked through "Choose folder…" for the status bar shell, newest first.</summary>
     public IReadOnlyList<string> RecentCwds
@@ -89,14 +88,6 @@ public sealed class WorkspaceFolders(string projectPath, ApplicationDatabase dat
                 return [];
             }
         }
-    }
-
-    public void AddRecentCwd(string path)
-    {
-        var folder = ProjectPaths.Normalize(path);
-        var recent = RecentCwds.Where(r => !string.Equals(r, folder, StringComparison.OrdinalIgnoreCase)).Prepend(folder).Take(MaxRecent);
-        using var db = _database.Open();
-        db.Project(_projectPath).Open("ui").Open(RecentKey).Write(JsonSerializer.Serialize(recent));
     }
 
     private static bool IsCovered(string folder, IEnumerable<string> roots) =>

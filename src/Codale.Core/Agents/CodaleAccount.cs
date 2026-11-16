@@ -47,13 +47,6 @@ public static class CodaleAccount
             ? UserClaudeHome
             : ClaudeHome;
 
-    /// <summary>The Codex counterpart of <see cref="HelperClaudeHome"/>.</summary>
-    public static string HelperCodexHome =>
-        !File.Exists(Path.Combine(CodexHome, "auth.json")) &&
-        File.Exists(Path.Combine(UserCodexHome, "auth.json"))
-            ? UserCodexHome
-            : CodexHome;
-
     public const string ClaudeVariable = "CLAUDE_CONFIG_DIR";
 
     public const string CodexVariable = "CODEX_HOME";

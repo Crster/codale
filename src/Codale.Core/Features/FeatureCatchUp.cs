@@ -12,8 +12,6 @@ namespace Codale.Core.Features;
 /// </summary>
 public static class FeatureCatchUp
 {
-    /// <summary>Other chats' history up to this size is passed on as it is: a model call would cost more than it saves.</summary>
-    public const int VerbatimChars = 2_500;
 
     /// <summary>What the model is shown at most.</summary>
     public const int InputChars = 40_000;
