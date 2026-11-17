@@ -1,4 +1,5 @@
 [
+  { "prompt": "adding new file in the files panel will crash the app after pressing enter", "files": ["src/Codale.App/Views/WorkspacePage.xaml.cs", "src/Codale.App/ViewModels/FileTreeViewModel.cs"] },
   { "prompt": "Show the Smart status detail in a hover tooltip on the status bar", "files": ["src/Codale.App/Views/WorkspacePage.xaml", "src/Codale.App/Views/WorkspacePage.xaml.cs"] },
   { "prompt": "Keep the context notice above the turn it precedes in chat", "files": ["src/Codale.App/ViewModels/ChatViewModel.cs"] },
   { "prompt": "Use auto-suggest text boxes for AI provider models in settings", "files": ["src/Codale.App/Controls/SettingsPanel.xaml.cs", "src/Codale.App/Controls/SettingsPanel.xaml"] },

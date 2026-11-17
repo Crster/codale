@@ -1,0 +1,469 @@
+[
+  {
+    "prompt": "can we remove that run.ps1 script and use the native dotnet run, dotnet watch, dotnet deploy etc. check how the dotnet project initialize correct solution.",
+    "files": [
+      "src/Codale.App/Properties/launchSettings.json",
+      "src/Codale.App/Build/ShellExtension.targets",
+      "src/Codale.App/Codale.App.csproj"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "good. cleanup the repo of unneeded files and fix the warnings and optimization info",
+    "files": [
+      "src/Codale.App/Build/ShellExtension.targets",
+      "src/Codale.App/Codale.App.csproj"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "remove this routing and override. and improve the account setup there should be no sign in/out and it should detect the account and removing it should signout too.",
+    "files": [
+      "src/Codale.Agents/CodaleAccountCli.cs",
+      "src/Codale.Core/Agents/CodaleAccount.cs",
+      "src/Codale.App/Controls/SettingsPanel.xaml.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "lets also remove this. move the model selection upon the account setup just like the BYOK provider setup",
+    "files": [
+      "src/Codale.App/ViewModels/ChatViewModel.cs",
+      "src/Codale.App/Controls/SettingsPanel.xaml.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "this should be no collapsed and dont have toggle or selection. show all option and make user select 1 by 1 what feature they want to enable or disable",
+    "files": [
+      "src/Codale.Smart/README.md"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "fix the chat history is not align in the middle when window is wide",
+    "files": [
+      "src/Codale.App/Views/ChatTab.xaml"
+    ],
+    "first": true
+  },
+  {
+    "prompt": "move them file toolbar below like the git toolbar, it should not inline with the Files, Git, History",
+    "files": [
+      "src/Codale.App/Views/WorkspacePage.xaml"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "add more file toolbar and bring back the filter filter search put it below the toolbar",
+    "files": [
+      "src/Codale.App/Views/WorkspacePage.xaml",
+      "src/Codale.App/Views/WorkspacePage.xaml.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "move the search on top the toolbar then put the folder name in the left and with new file, new folder, refresh, collapsed icon like vscode",
+    "files": [
+      "src/Codale.App/Views/WorkspacePage.xaml"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "next is improve this git toolbar and header. style it the same as the files toolbar. show the branch name in full with on top, then small toolbar below.",
+    "files": [
+      "src/Codale.App/Views/WorkspacePage.xaml"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "restyle it like vscode source control. and rename it source control instead of Git",
+    "files": [
+      "src/Codale.App/Views/WorkspacePage.xaml"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "this is the ui. it has duplicates label",
+    "files": [
+      "src/Codale.App/Views/WorkspacePage.xaml"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "next is make the history list wrap the title to display it fully",
+    "files": [
+      "src/Codale.App/Views/WorkspacePage.xaml"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "unstage on no commit throws error",
+    "files": [
+      "src/Codale.Git/GitRepository.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "next is in the setting. the model dropdown does not list the model",
+    "files": [
+      "src/Codale.App/Controls/SettingsPanel.xaml.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "still not listing. but I can list model in the account setup",
+    "files": [
+      "src/Codale.App/Controls/SettingsPanel.xaml.cs",
+      "src/Codale.App/Services/SmartExperienceHost.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "there are 2 default",
+    "files": [
+      "src/Codale.App/Controls/SettingsPanel.xaml.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "lets remove our own default and use what ever model the account is set in the Flash model selection",
+    "files": [
+      "src/Codale.App/Controls/SettingsPanel.xaml.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "improve the title of these menu",
+    "files": [
+      "src/Codale.App/Controls/SettingsPanel.xaml",
+      "src/Codale.App/Controls/SettingsPanel.xaml.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "no, rename it including the page headings",
+    "files": [
+      "src/Codale.App/Controls/SettingsPanel.xaml",
+      "src/Codale.App/Controls/SettingsPanel.xaml.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "change the title to a more correct term. its not common setting name you use",
+    "files": [
+      "src/Codale.App/Controls/SettingsPanel.xaml",
+      "src/Codale.App/Controls/SettingsPanel.xaml.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "also change improve the title of these settings too . and put embedding and autocomplete closer. and both need special type of model that output vector and fim pattern.",
+    "files": [
+      "src/Codale.App/Controls/SettingsPanel.xaml",
+      "src/Codale.App/Controls/SettingsPanel.xaml.cs",
+      "src/Codale.Smart/README.md"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "fix this No File is showing even if editor is not openned",
+    "files": [
+      "src/Codale.App/Views/WorkspacePage.xaml.cs",
+      "src/Codale.App/Views/WorkspacePage.xaml"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "the star icon is not correct. I want the AI star icon and the FIM is not working its showing error. and not suggesting full block",
+    "files": [
+      "src/Codale.App/Views/WorkspacePage.xaml",
+      "src/Codale.App/Views/EditorTab.xaml.cs",
+      "src/Codale.Smart/SmartExperience.cs",
+      "src/Codale.App/Controls/CodeEditor.Ghost.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "also the Smart status is long. it should be on demand status on what it is processing and dont show all status at once only what its using and what it is doing realtime",
+    "files": [
+      "src/Codale.Smart/README.md",
+      "src/Codale.App/Controls/SettingsPanel.xaml"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "smart terminal is not working. when I type on it and the Developer Tools is enable it should parse my prompt to the shell command.",
+    "files": [
+      "src/Codale.App/Views/TerminalTab.xaml.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "ok good. fix this issue in the Smart Feature setting model selection I already setup this but not showing what I set. it only correct it self if I focus click the dropdown",
+    "files": [
+      "src/Codale.App/Controls/SettingsPanel.xaml.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "fix the warnings and optimization suggestion when I build all project",
+    "files": [
+      "src/Codale.App/Services/FeatureService.cs",
+      "src/Codale.App/ViewModels/ChatViewModel.cs",
+      "src/Codale.App/ViewModels/ChatViewModel.Features.cs",
+      "src/Codale.Workspace/MemoryStore.cs",
+      "src/Codale.Commands/CommandCatalog.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "I still get warnings. here is the console log\n\nPS X:\\CrsterSite\\codale\u003E dotnet run --project src/Codale.App\\\nUsing launch settings from src\\Codale.App\\Properties\\launchSettings.json...\\\nX:\\CrsterSite\\codale\\src\\Codale.App\\Services\\FeatureService.cs(141,18): warning IDE0044: Make field readonly (https\\://learn.microsoft.com/dotnet/fundamentals/code-analysis/style-rules/ide0044)\\\nX:\\CrsterSite\\codale\\src\\Codale.App\\Services\\FeatureService.cs(142,18): warning IDE0044: Make field readonly (https\\://learn.microsoft.com/dotnet/fundamentals/code-analysis/style-rules/ide0044)\\\nX:\\CrsterSite\\codale\\src\\Codale.App\\Services\\FeatureService.cs(141,18): warning IDE0052: Private member \u0027FeatureService.\\_smartThinking\u0027 can be removed as the value assigned to it is never read (https\\://learn.microsoft.com/dotnet/fundamentals/code-analysis/style-rules/ide0052)\\\nX:\\CrsterSite\\codale\\src\\Codale.App\\Services\\FeatureService.cs(142,18): warning IDE0052: Private member \u0027FeatureService.\\_smartSummaries\u0027 can be removed as the value assigned to it is never read (https\\://learn.microsoft.com/dotnet/fundamentals/code-analysis/style-rules/ide0052)\\\nX:\\CrsterSite\\codale\\src\\Codale.App\\ViewModels\\SessionsViewModel.cs(20,29): warning IDE0052: Private member \u0027SessionsViewModel.\\_projectPath\u0027 can be removed as the value assigned to it is never read (https\\://learn.microsoft.com/dotnet/fundamentals/code-analysis/style-rules/ide0052)\\\nX:\\CrsterSite\\codale\\src\\Codale.App\\ViewModels\\ChatViewModel.Features.cs(45,39): warning IDE0052: Private member \u0027ChatViewModel.\\_routedIntent\u0027 can be removed as the value assigned to it is never read (https\\://learn.microsoft.com/dotnet/fundamentals/code-analysis/style-rules/ide0052)\\\n\u2705 BB9ADD6B-2E64-46A7-ADF5-885B70F99D51_1m8br2z9fzy12 launched (PID: 29268)",
+    "files": [
+      "src/Codale.App/ViewModels/ChatViewModel.cs",
+      "src/Codale.App/Services/FeatureService.cs",
+      "src/Codale.App/ViewModels/SessionsViewModel.cs",
+      "src/Codale.App/ViewModels/ChatViewModel.Features.cs",
+      "src/Codale.App/ViewModels/WorkspaceViewModel.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "embedding model still not showing even though I set it already. may be because its does not belong to the dropdown selection. also make it 2 row top the profile and model is below so we can show long name",
+    "files": [
+      "src/Codale.App/Controls/SettingsPanel.xaml.cs"
+    ],
+    "first": true
+  },
+  {
+    "prompt": "i think the max height of the terminal notebook is not correct. windows 11 default cmd size is **120 \u00D7 30** characters",
+    "files": [
+      "src/Codale.App/Controls/SettingsPanel.xaml"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "the popup for asking if creating new session or stay is not the same style as the other ask tool. also the understanding your prompt house the same new session or stay block above the prompt composer. replace it with the same style as used by the system and put it in the chat history ui no in the prompt composer pin top.",
+    "files": [
+      "src/Codale.App/ViewModels/ChatViewModel.cs",
+      "src/Codale.App/ViewModels/ChatViewModel.Routing.cs"
+    ],
+    "first": true
+  },
+  {
+    "prompt": "no dont put on the top of the chat history. it should be work the same as other append on the chat history",
+    "files": [
+      "src/Codale.App/ViewModels/ChatViewModel.cs",
+      "src/Codale.App/ViewModels/ChatViewModel.Routing.cs",
+      "src/Codale.App/Views/ChatTab.xaml"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "change this folders to the app data and installation path currently they\u0027re pointing the same location root @691b1d.png",
+    "files": [
+      "src/Codale.App/Controls/SettingsPanel.xaml.cs"
+    ],
+    "first": true
+  },
+  {
+    "prompt": "in the chat history can you insert what the real model in used to finish the turn. @1a022e.png",
+    "files": [
+      "src/Codale.App/ViewModels/ChatViewModel.cs",
+      "src/Codale.App/ViewModels/ChatViewModel.Replay.cs",
+      "src/Codale.App/ViewModels/ChatItems.cs",
+      "src/Codale.App/Views/ChatTab.xaml",
+      "src/Codale.Agents/Codex/CodexAgentSession.cs"
+    ],
+    "first": true
+  },
+  {
+    "prompt": "put it before the copy",
+    "files": [
+      "src/Codale.App/Views/ChatTab.xaml"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "the Auto mode in codex is asking for edit permission @e0f939.png",
+    "files": [
+      "src/Codale.Agents/Codex/CodexAgentSession.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "fix editor tab in the setting its not full like the other tab @641e38.png",
+    "files": [
+      "src/Codale.App/Controls/SettingsPanel.xaml"
+    ],
+    "first": true
+  },
+  {
+    "prompt": "detected claude cli account is not name same like codex. which is the account email",
+    "files": [
+      "src/Codale.App/Controls/SettingsPanel.xaml.cs",
+      "src/Codale.Agents/CodaleAccountCli.cs"
+    ],
+    "first": true
+  },
+  {
+    "prompt": "Please implement the plan.",
+    "files": [
+      "src/Codale.App/ViewModels/ChatViewModel.cs",
+      "src/Codale.Agents/Codex/CodexSessionOptions.cs",
+      "src/Codale.Agents/Claude/ClaudeSessionOptions.cs",
+      "src/Codale.Core/Agents/AgentPermissionMode.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "continue implementing the full refactor and dont stop until all checklist items are complete and tested",
+    "files": [
+      "src/Codale.Agents/History/CliHistoryReaderFactory.cs",
+      "src/Codale.App/Services/ApplicationServices.cs",
+      "src/Codale.App/Views/TerminalAgentSessionPanel.xaml.cs",
+      "src/Codale.Agents/History/CliResume.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "continue implementing all remaining checklist items. dont stop after each small change, only stop when the full refactor is complete and all tests pass",
+    "files": [
+      "src/Codale.Mcp.Tasks/TaskTools.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "continue implementing all remaining checklist items and testing them. dont stop after each small change, only stop when the full refactor is complete and all tests pass",
+    "files": [
+      "src/Codale.Commands/IProjectCommandDetector.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "continue implementing all remaining checklist items and fix the retrieval failure. dont stop after small changes, only stop when the full refactor is complete and all tests pass",
+    "files": [
+      "src/Codale.Search/ProjectKnowledgeIndex.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "continue implementing all remaining checklist items. dont stop after small changes, only stop when the full refactor is complete and all tests pass",
+    "files": [
+      "src/Codale.Workspace/WorkspaceData.cs",
+      "src/Codale.App/Views/WorkspacePage.Knowledge.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "continue implementing all remaining checklist items and testing them. dont stop after small changes, only stop when the full refactor is complete and all tests pass",
+    "files": [
+      "src/Codale.Core/Agents/AgentModePolicy.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "continue with the remaining composition gaps in source-inventory.md",
+    "files": [
+      "src/Codale.App/Views/WorkspacePage.xaml.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "continue with the remaining static settings/database ownership and application/window lifetime work in source-inventory.md",
+    "files": [
+      "src/Codale.Workspace/WorkspaceData.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "continue with the remaining UI/chat settings callers, shortcut caching, and syntax selection in source-inventory.md",
+    "files": [
+      "src/Codale.App/ViewModels/ChatItems.Settings.cs",
+      "src/Codale.Settings/ShortcutBindings.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "fix this context gathered entry in the chat is push to the last",
+    "files": [
+      "src/Codale.App/ViewModels/ChatViewModel.cs"
+    ],
+    "first": true
+  },
+  {
+    "prompt": "when hovered to this status bar. it should show what its problem",
+    "files": [
+      "src/Codale.App/Views/WorkspacePage.xaml.cs",
+      "src/Codale.App/Views/WorkspacePage.xaml"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "The terminal command parsing is not working.",
+    "files": [
+      "src/Codale.Smart/SmartExperience.cs",
+      "src/Codale.Smart/SmartExperience.Remote.cs"
+    ],
+    "first": true
+  },
+  {
+    "prompt": "next is switching cli issue. because it is loading and sometimes the composer is enabled but the font color is not updated yet so this issue causing typed text becomes color muted",
+    "files": [
+      "src/Codale.App/Views/ChatTab.xaml",
+      "src/Codale.App/Views/PromptEditor.cs",
+      "src/Codale.App/Views/ChatTab.xaml.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "I want to have it real function. first fix the \u0022Auto Mode\u0022 being push to the end. make sure all chat history entry are sorted on time they are added or display the correct ordering.",
+    "files": [
+      "src/Codale.App/ViewModels/ChatViewModel.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "now make \u0022Context gathered\u0022 do real context retrieval, make sure it actually gathers useful project context and sends it to the agent. dont do context gathering for simple command like commit, build, rename etc. dont do context gathering for prompt with attachment we can read the attachments. use global search method in loading context files and we also have history and index record per workspace used it to for more accurate result. do Auto mode routing first before gathering context. for context to be sent to agent cli list only files with related search keyword. the context should help agent locate the needed files faster and use less token that is the mean goal. so make the function any way you like as long as it help locate needed files faster and use less or no token for the cli Agent. verify it by check if agent no or less exploration command.",
+    "files": [
+      "src/Codale.App/ViewModels/ChatViewModel.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "make sure files read through shell commands are also excluded, and find a way to verify that the context actually reduces the agent\u0027s exploration commands.",
+    "files": [
+      "src/Codale.App/ViewModels/ChatViewModel.Features.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "the context gathered is ugly not inline with the design of the app. make it flat and centered i think and dont put in the expander and show it as muted center align panel under \u0022Auto Mode\u0022.",
+    "files": [
+      "src/Codale.App/Views/ChatTab.xaml"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "also make only Context gathering on Auto Mode act only. not in any other mode even for Auto Mode \u003E Ask and Auto Mode \u003E Plan",
+    "files": [
+      "src/Codale.App/ViewModels/ChatViewModel.cs"
+    ],
+    "first": false
+  },
+  {
+    "prompt": "fix codale context enrichment. dont send it when not new topic or not fresh session.",
+    "files": [
+      "src/Codale.App/ViewModels/ChatViewModel.cs",
+      "src/Codale.Search/PromptFileLocator.cs"
+    ],
+    "first": true
+  },
+  {
+    "prompt": "then remove the Cache Reused value in the prompt composer",
+    "files": [
+      "src/Codale.App/Views/ChatTab.xaml"
+    ],
+    "first": false
+  }
+]

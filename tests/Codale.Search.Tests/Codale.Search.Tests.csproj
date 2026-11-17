@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\src\Codale.Search\Codale.Search.csproj" />
     <ProjectReference Include="..\..\src\Codale.Db\Codale.Db.csproj" />
     <ProjectReference Include="..\..\src\Codale.Core\Codale.Core.csproj" />
+    <ProjectReference Include="..\..\src\Codale.Settings\Codale.Settings.csproj" />
   </ItemGroup>
 
 </Project>

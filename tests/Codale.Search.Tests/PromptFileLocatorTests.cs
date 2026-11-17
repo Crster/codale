@@ -61,11 +61,11 @@ public sealed class PromptFileLocatorTests
     }
 
     /// <summary>
-    /// The request behind this locator's rewrite: the old hints listed migrations ("add" in ADD
-    /// COLUMN), a dropdown "menu" and every "growth", and never the nav entries the agent edited.
+    /// The request behind the first locator rewrite: hints must never list migrations ("add" in ADD COLUMN). Which
+    /// of the code files leads is measured by the history eval; "navbar" reaching navGroups is the model's job.
     /// </summary>
     [Fact]
-    public async Task PointsAtTheNavigationEntryNotMigrationsOrDropdowns()
+    public async Task NavigationRequestNeverListsMigrations()
     {
         var root = Directory.CreateTempSubdirectory("locator-nav-").FullName;
         void Write(string path, string text)
@@ -133,12 +133,14 @@ public sealed class PromptFileLocatorTests
                 """);
 
             var result = await PromptFileLocator.RetrieveAsync(root, "Add growth and ingrowth menu in the navbar under the marketing menu.");
-
-            Assert.Equal("src/lib/constants.ts", result.Files.FirstOrDefault());
+            Assert.NotEmpty(result.Files);
             Assert.DoesNotContain(result.Files, f => f.Contains("migrations"));
-            Assert.DoesNotContain("src/model/campaign.ts", result.Files);
-            Assert.Contains("title: \"Marketing\"", result.Text);
-            Assert.True(result.Text.Contains("| in navGroups"), result.Text);
+
+            // Words the code does not use ("navbar") find nothing; the model's names for it do.
+            var expanded = await PromptFileLocator.RetrieveAsync(root, "rework the navbar",
+                smart: new ExpandingSmart(["navGroups", "NavGroup", "NavLink"]));
+            Assert.Equal("src/lib/constants.ts", expanded.Files.FirstOrDefault());
+            Assert.True(expanded.Text.Contains("navGroups"), expanded.Text);
         }
         finally { SourceIndex.For(root).Dispose(); Directory.Delete(root, true); }
     }
@@ -258,4 +260,71 @@ public sealed class PromptFileLocatorTests
         finally { SourceIndex.For(root).Dispose(); Directory.Delete(root, true); }
     }
 
+
+    [Fact]
+    public async Task FollowsTheGraphToAViewsCodeBehind()
+    {
+        var root = Directory.CreateTempSubdirectory("locator-graph-").FullName;
+        var dbPath = Directory.CreateTempSubdirectory("locator-graph-db-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "Views"));
+            File.WriteAllText(Path.Combine(root, "Views", "FilesPanel.xaml"),
+                """
+                <UserControl x:Class="App.FilesPanel">
+                  <TextBox x:Name="RenameBox" KeyDown="OnRenameKeyDown" />
+                </UserControl>
+                """);
+            File.WriteAllText(Path.Combine(root, "Views", "FilesPanel.xaml.cs"), """
+                namespace App;
+                public partial class FilesPanel
+                {
+                    private void OnRenameKeyDown(object sender, object e)
+                    {
+                        Commit();
+                    }
+                    private void Commit() { }
+                }
+                """);
+            File.WriteAllText(Path.Combine(root, "Other.cs"), "class Other { void Render() { } }");
+            using var db = new Codale.Db.CodaleDb(dbPath);
+            using var knowledge = new ProjectKnowledgeIndex(db);
+            await knowledge.RefreshAsync(root);
+
+            Assert.Contains(knowledge.RelatedFiles(root, "Views/FilesPanel.xaml"),
+                r => r.Path.EndsWith("FilesPanel.xaml.cs", StringComparison.Ordinal) && r.Relation == ProjectKnowledgeIndex.PairRelation);
+            var result = await PromptFileLocator.RetrieveAsync(root, "the rename textbox in the files panel", knowledge);
+            Assert.Contains("Views/FilesPanel.xaml", result.Files);
+            Assert.Contains("Views/FilesPanel.xaml.cs", result.Files);
+        }
+        finally
+        {
+            SourceIndex.For(root).Dispose();
+            Directory.Delete(root, true);
+            try { Directory.Delete(dbPath, true); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>A General model that answers query expansion with fixed names and nothing else.</summary>
+    private sealed class ExpandingSmart(IReadOnlyList<string> terms) : Codale.Smart.ISmartExperience
+    {
+        public Codale.Smart.SmartStatus Status => new(Codale.Smart.SmartState.Ready, "stub");
+        public event EventHandler? Changed { add { } remove { } }
+        public bool Thinking { get; set; }
+        public Task SetEnabledAsync(bool enabled, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<Codale.Smart.SmartResult<IReadOnlyList<string>>?> ExpandQueryAsync(Codale.Smart.SmartRequestContext context, string request,
+            string vocabulary, CancellationToken ct = default) =>
+            Task.FromResult<Codale.Smart.SmartResult<IReadOnlyList<string>>?>(new(terms, [], "stub"));
+        public Task<Codale.Smart.SmartResult<string>?> SummarizeAsync(Codale.Smart.SmartRequestContext context, string path, CancellationToken ct = default) =>
+            Task.FromResult<Codale.Smart.SmartResult<string>?>(null);
+        public Task<Codale.Smart.SmartResult<IReadOnlyList<string>>?> RankAsync(Codale.Smart.SmartRequestContext context, string query,
+            IReadOnlyList<Codale.Smart.SmartCandidate> candidates, CancellationToken ct = default) =>
+            Task.FromResult<Codale.Smart.SmartResult<IReadOnlyList<string>>?>(null);
+        public Task<Codale.Smart.SmartResult<Codale.Smart.SmartIntent?>?> ClassifyAsync(Codale.Smart.SmartRequestContext context, string message,
+            string? previousReply, CancellationToken ct = default) => Task.FromResult<Codale.Smart.SmartResult<Codale.Smart.SmartIntent?>?>(null);
+        public Task<Codale.Smart.SmartResult<string>?> CommitMessageAsync(Codale.Smart.SmartRequestContext context, CancellationToken ct = default) =>
+            Task.FromResult<Codale.Smart.SmartResult<string>?>(null);
+        public Task<IReadOnlyList<Codale.Smart.SmartEvidence>> DiscoveriesAsync(Codale.Smart.SmartRequestContext context, string query,
+            CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Codale.Smart.SmartEvidence>>([]);
+    }
 }

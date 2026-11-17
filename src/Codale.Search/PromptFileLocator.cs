@@ -1,18 +1,24 @@
-using System.Numerics;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
 using Codale.Core.Features;
 using Codale.Search.Engine;
+using Codale.Smart;
 
 namespace Codale.Search;
 
 public sealed record FileLocatorContext(string Text, IReadOnlyList<string> Files);
 
 /// <summary>
-/// The edit sites an Auto Act prompt most likely means, sent ahead of it so the agent opens the
-/// right lines instead of searching: a few files, each with its best line range and the one or
-/// two lines that matched. Nothing is sent unless a file holds several of the prompt's subjects
-/// together - a wrong hint costs the agent more than none.
+/// The edit sites an Auto Act prompt most likely means, sent ahead of it so the agent opens the right
+/// lines instead of searching. The whole prompt is the query: every word counts by how rare it is in the
+/// project, never by a list of words to skip. Three retrievers vote and their ranks are fused:
+/// <list type="bullet">
+/// <item>the source index (BM25 per word, files declaring or named after a word lifted);</item>
+/// <item>the project knowledge index (BM25 + embeddings over chunks, and files that answered similar requests);</item>
+/// <item>both again for names the General model expects the code to use ("files panel" → FileTree, NameEdit).</item>
+/// </list>
 /// </summary>
 public static partial class PromptFileLocator
 {
@@ -20,99 +26,29 @@ public static partial class PromptFileLocator
     private const int MaxBytes = 1800;
     private const int MaxAnchorChars = 110;
     private const int MaxRangeSpan = 24;
-    private const int Pool = 40;
-    private const double WeakWeight = 0.2;
-    private const double AliasFactor = 0.7;
-    private const double PlaceFactor = 1.5;
-    private const double KindFactor = 0.6;
-
-    /// <summary>
-    /// Verbs saying what to do to the code, not which code: "add", "remove", "compact". Weak
-    /// where they are the verb ("Update the header"); a subject where they are a noun ("the
-    /// Codex update", "the delete dialog"). Weak words still break ties, but never count as a
-    /// file matching the request.
-    /// </summary>
-    private static readonly HashSet<string> Verbs =
-    [
-        with(StringComparer.OrdinalIgnoreCase),
-        "add", "adds", "adding", "remove", "removes", "removing", "delete", "deleting", "create", "creating",
-        "insert", "move", "moving", "show", "shows", "showing", "hide", "hiding", "make", "makes", "update",
-        "test", "testing", "run", "deploy", "set", "updating", "enrich", "align", "display", "support", "include", "place", "allow", "enable", "disable",
-        "compact", "simplify", "refactor", "clean", "cleanup", "tidy", "polish", "tighten", "shrink", "expand",
-    ];
-
-    /// <summary>Words that are never the subject: positions, modality, manner, contraction leftovers.</summary>
-    private static readonly HashSet<string> AlwaysWeak =
-    [
-        with(StringComparer.OrdinalIgnoreCase),
-        "each", "other", "yet", "without", "option", "steps", "step", "go", "unused", "never", "always", "should", "must", "let", "into", "instead", "properly", "correctly", "consistent",
-        "under", "below", "above", "beneath", "beside", "inside", "between", "within", "near", "over",
-        "smaller", "bigger", "wider", "narrower", "faster", "shorter", "longer",
-        // What is left of a contraction once the apostrophe splits it: "don't" → "don".
-        "don", "doesn", "didn", "isn", "aren", "wasn", "weren", "won", "wouldn", "shouldn", "couldn", "hasn", "haven",
-    ];
-
-    /// <summary>Words after which the next word is a verb: "please add", "and show", "should hide".</summary>
-    private static readonly HashSet<string> VerbLeads =
-    [
-        with(StringComparer.OrdinalIgnoreCase),
-        "and", "or", "then", "please", "to", "should", "must", "can", "could", "would", "will", "also", "just",
-        "not", "never", "always", "t", "we", "i", "you", "it", "now", "so", "let", "lets", "us", "me",
-    ];
-
-    private static bool IsActionWord(string word) => Verbs.Contains(word) || AlwaysWeak.Contains(word);
-
-    /// <summary>Words that make test files a plausible edit site.</summary>
-    private static readonly HashSet<string> TestWords = [with(StringComparer.OrdinalIgnoreCase), "test", "tests", "spec", "specs", "unit", "e2e", "testing"];
-
-    /// <summary>
-    /// Interface words people use for the same thing a codebase names differently: a "navbar"
-    /// request edits navGroups or Sidebar. Words in one group are one subject, so a file is not
-    /// counted twice for holding two of them.
-    /// </summary>
-    private static readonly string[][] Aliases =
-    [
-        ["navbar", "nav", "navigation", "sidebar", "navmenu", "sidenav"],
-        ["modal", "dialog", "popup", "popover"],
-        ["button", "btn"],
-    ];
-
-    /// <summary>A "menu" is often the navigation, but a navbar or sidebar is never just any menu (a DropdownMenu).</summary>
-    private static readonly Dictionary<string, string[]> OneWayAliases = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["menu"] = ["nav", "navigation", "sidebar", "navbar"],
-    };
-
-    /// <summary>
-    /// What a request adds: "add a Brand Health <b>link</b>", "create a Retry <b>button</b>". The
-    /// words naming the new thing are not in the code yet, so they only find unrelated matches.
-    /// </summary>
-    private static readonly HashSet<string> NewThings =
-    [
-        with(StringComparer.OrdinalIgnoreCase),
-        "link", "links", "menu", "menus", "item", "items", "page", "pages", "tab", "tabs", "button", "buttons",
-        "column", "columns", "field", "fields", "section", "sections", "card", "cards", "tile", "tiles", "option",
-        "options", "entry", "entries", "route", "routes", "filter", "filters", "setting", "settings", "toggle",
-        "chart", "charts", "modal", "dialog", "group", "groups", "screen", "view", "views", "widget", "badge",
-        "label", "labels", "endpoint", "command", "shortcut", "report", "panel",
-    ];
-
-    private static readonly HashSet<string> Creating = [with(StringComparer.OrdinalIgnoreCase), "add", "adding", "create", "creating", "insert", "introduce", "new"];
-
-    private static readonly HashSet<string> Articles = [with(StringComparer.OrdinalIgnoreCase), "a", "an", "the", "new", "two", "three", "some", "another", "and", "or"];
-
-    /// <summary>Words that make data files (migrations, seeds, SQL) a plausible edit site.</summary>
-    private static readonly HashSet<string> DataWords =
-    [
-        with(StringComparer.OrdinalIgnoreCase),
-        "migration", "migrations", "migrate", "schema", "sql", "seed", "seeds", "prisma", "database", "db",
-        "column", "columns", "fixture", "fixtures", "snapshot", "snapshots", "lockfile",
-    ];
+    private const int MaxAnchors = 3;
+    private const int ListDepth = 30;
+    /// <summary>Reciprocal-rank constant: small, so a file leading one list stays ahead of files trailing several.</summary>
+    private const double RrfK = 8;
+    /// <summary>A file is listed only while it scores this share of the leader: a wrong hint costs the agent more than none.</summary>
+    private const double Floor = 0.5;
+    /// <summary>A file one retriever alone found must hold this share of the prompt's words.</summary>
+    private const double MinCoverage = 0.4;
+    /// <summary>...or this many of them, for a long prompt.</summary>
+    private const int MinCoveredWords = 2;
+    private static readonly TimeSpan ExpansionBudget = TimeSpan.FromSeconds(2.5);
 
     [GeneratedRegex(@"(^|[\\/])(migrations?|seeds?|seed-data|fixtures?|__snapshots__|__generated__|generated)[\\/]|" +
         @"\.(sql|prisma|lock|snap|csv|tsv|map|log)$|\.min\.(js|css)$|(^|[\\/])(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DataPath();
+
+    [GeneratedRegex(@"\b(migrations?|schema|sql|seeds?|prisma|database|fixtures?|snapshots?|lockfile|json|config(uration)?|package|manifest|dependencies)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex DataIntent();
+
+    [GeneratedRegex(@"\b(tests?|spec|specs|unit|e2e|testing|docs|documentation|readme|markdown)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex TestOrDocIntent();
 
     [GeneratedRegex(@"[\p{L}\p{N}_]*\p{L}[\p{L}\p{N}_]*", RegexOptions.CultureInvariant)]
     private static partial Regex Word();
@@ -134,308 +70,270 @@ public static partial class PromptFileLocator
         return SearchText.HasTopic(text);
     }
 
-    /// <summary>One subject of the prompt: a word or quoted phrase, with the other words that mean it.</summary>
-    private sealed record Concept(string Text, double Weight, bool Weak, bool Exact, string[] Aliases);
+    /// <summary>What a retrieval used and how long each part took, for the eval and the status row.</summary>
+    public sealed record Trace(IReadOnlyList<string> Expansion, long LexicalMs, long IndexMs, long ExpansionMs);
 
     public static async Task<FileLocatorContext> RetrieveAsync(string root, string prompt,
-        ProjectKnowledgeIndex? knowledge = null, CancellationToken ct = default, IReadOnlySet<string>? knownFiles = null)
+        ProjectKnowledgeIndex? knowledge = null, CancellationToken ct = default, IReadOnlySet<string>? knownFiles = null,
+        ISmartExperience? smart = null, Action<Trace>? trace = null, LocatorStrategy strategy = LocatorStrategy.Fusion)
     {
+        var text = SearchText.WithoutAttachments(prompt).Trim();
+        if (text.Length == 0) return Empty;
         var snapshot = await SourceIndex.For(root).GetSnapshotAsync(ct).ConfigureAwait(false);
-        var concepts = Concepts(prompt);
-        var terms = new List<SourceExplorer.ResolvedTerm>();
-        var weak = new List<bool>();
-        foreach (var concept in concepts)
-        {
-            if (Resolve(snapshot, concept) is not { } term) continue;
-            // A word spell-corrected onto another subject ("ingrowth" → growth) is that subject again.
-            var primary = term.Keys.Count == 0 ? null : term.Keys.MaxBy(k => k.Factor).Key;
-            if (primary is not null && terms.Any(t => t.Keys.Count > 0 && t.Keys.MaxBy(k => k.Factor).Key == primary)) continue;
-            terms.Add(term);
-            weak.Add(concept.Weak);
-        }
+        if (strategy == LocatorStrategy.Cascade)
+            return await CascadeAsync(root, text, snapshot, knowledge, knownFiles, smart, trace, ct).ConfigureAwait(false);
 
-        // Unmatched subjects still matter: "test without Recharm" must not collapse
-        // to a confident hint for an unrelated use of Regex.test().
-        var subjectCount = concepts.Count(c => !c.Weak);
-        var content = Enumerable.Range(0, terms.Count).Where(i => !weak[i] && terms[i].Keys.Count > 0).ToList();
-        if (content.Count == 0) return Empty;
-        var contentTerms = content.Select(i => terms[i]).ToList();
-        // Identifiers built from several subjects at once (agent + team + kpi → AgentTeamKpiCards) lift the file declaring them.
-        terms.AddRange(SourceExplorer.Compounds(snapshot, contentTerms));
+        // The knowledge index runs beside the lexical pass; it may wait briefly for a refresh.
+        var clock = Stopwatch.StartNew();
+        var indexed = knowledge is null ? null : Task.Run(() => SafeSearch(knowledge, root, text), ct);
 
-        // The project's own index adds semantic neighbours and files that answered similar
-        // requests before. Both only lift a file the words already found: neither alone is evidence.
-        var lifted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (knowledge is not null)
-        {
-            try
-            {
-                foreach (var chunk in await knowledge.SearchAsync(root, prompt, maxFiles: 12, ct: ct).ConfigureAwait(false))
-                    lifted.Add(Normal(chunk.Path));
-                foreach (var feature in knowledge.SearchFeatures(prompt, 3))
-                    foreach (var file in knowledge.FilesOf(feature.Id, 12))
-                        lifted.Add(Normal(file));
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException) { }
-        }
+        var hints = Regex.Matches(Normal(text), @"[\w.-]+(?:/[\w.-]+)+").Select(m => m.Value.TrimEnd('.', '/')).ToList();
+        var pathHints = hints.Select(h => h.Replace('/', Path.DirectorySeparatorChar)).ToList();
+        var asked = PromptTerms(text, snapshot.Contains);
+        // Every word the prompt uses, including those the project lacks: a request about "recharm" is not about
+        // any file that only shares its "header".
+        var words = asked.Where(t => !t.Exact && !t.Text.Contains(' ')).Select(t => t.Text.ToLowerInvariant()).ToHashSet();
+        var promptTerms = SourceExplorer.Resolve(snapshot, asked).Where(t => t.Keys.Count > 0).ToList();
+        var lexical = promptTerms.Count == 0 ? [] : SourceExplorer.Rank(snapshot, promptTerms, pathHints, setup: false);
+        var lexicalMs = clock.ElapsedMilliseconds;
 
-        var wantsData = Word().Matches(prompt).Any(m => DataWords.Contains(m.Value));
-        var wantsTests = Word().Matches(prompt).Any(m => TestWords.Contains(m.Value));
-        var wantsDocs = Word().Matches(prompt).Any(m => m.Value.ToLowerInvariant() is "docs" or "documentation" or "readme" or "markdown");
-        var wantsJson = wantsData || Word().Matches(prompt).Any(m => m.Value.ToLowerInvariant() is
-            "json" or "config" or "configuration" or "package" or "dependencies" or "manifest" or "rules" or "guardrails");
-        var hints = Regex.Matches(Normal(prompt), @"[\w.-]+(?:/[\w.-]+)+")
-            .Select(m => m.Value.TrimEnd('.', '/')).ToList();
+        // The model guesses the names the code uses, shown a sample of this project's own names near the prompt's matches.
+        var expansionClock = Stopwatch.StartNew();
+        IReadOnlyList<string> expansion = [];
+        if (smart is not null)
+            expansion = await ExpandAsync(smart, root, text, Vocabulary(snapshot, lexical), ct).ConfigureAwait(false);
+        var expansionMs = expansionClock.ElapsedMilliseconds;
+        var expandedIndexed = knowledge is null || expansion.Count == 0 ? null
+            : Task.Run(() => SafeSearch(knowledge, root, string.Join(' ', expansion)), ct);
+        var expansionTerms = SourceExplorer.Resolve(snapshot, expansion.Select(e => new SourceExplorer.ExploreTerm(e, IsIdentifier(e) ? 1.5 : 1.0)))
+            .Where(t => t.Keys.Count > 0).ToList();
+        var expanded = expansionTerms.Count == 0 ? [] : SourceExplorer.Rank(snapshot, expansionTerms, pathHints, setup: false);
+
+        var chunks = indexed is null ? [] : await indexed.ConfigureAwait(false);
+        var expandedChunks = expandedIndexed is null ? [] : await expandedIndexed.ConfigureAwait(false);
+        var indexMs = clock.ElapsedMilliseconds;
+        trace?.Invoke(new Trace(expansion, lexicalMs, indexMs, expansionMs));
+        ct.ThrowIfCancellationRequested();
+
+        // Data, JSON, tests and docs mention every subject; they lead only when the prompt is about them.
+        var wantsData = DataIntent().IsMatch(text);
+        var wantsTestsOrDocs = TestOrDocIntent().IsMatch(text);
         bool ExplicitPath(string path) => hints.Any(h => path.Equals(h, StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith(h + "/", StringComparison.OrdinalIgnoreCase));
-        bool IsAside(SourceFile file) => !ExplicitPath(Normal(file.RelativePath)) &&
-            (((!wantsData && DataPath().IsMatch(file.RelativePath)) || (!wantsJson && Path.GetExtension(file.RelativePath).Equals(".json", StringComparison.OrdinalIgnoreCase))) ||
-             (file.IsTestOrDoc && !(Path.GetExtension(file.RelativePath).Equals(".md", StringComparison.OrdinalIgnoreCase) ? wantsDocs : wantsTests)));
-        var need = Math.Min(2, subjectCount);
-        var picked = new List<(SourceExplorer.Ranked Ranked, double Score, List<SourceExplorer.ResolvedTerm> Matched, double Together, Region Region)>();
-        foreach (var ranked in SourceExplorer.Rank(snapshot, terms, hints.Select(h => h.Replace('/', Path.DirectorySeparatorChar)).ToList(), setup: false).Where(r => !IsAside(r.File)).Take(Pool))
+        bool Eligible(string path)
         {
-            ct.ThrowIfCancellationRequested();
-            var path = Normal(ranked.File.RelativePath);
-            if (knownFiles?.Contains(path) == true) continue;
-            if (!ProjectKnowledgeIndex.Eligible(ranked.File.RelativePath) || !File.Exists(ranked.File.FullPath)) continue;
-
-            var matched = content.Where(ranked.Matched.Contains).ToList();
-            // A filename matching a subject strengthens an otherwise relevant candidate.
-            var named = matched.Any(i => terms[i].Keys.Any(k => k.Factor >= 0.85 && k.Key.Length >= 4 &&
-                ranked.File.NameKey.Contains(k.Key, StringComparison.Ordinal)));
-            if (matched.Count < need && !ExplicitPath(path)) continue;
-
-            // Together, not scattered: "Marketing" inside navGroups answers "the marketing menu in
-            // the navbar"; a file with "menu" in an import and "marketing" in a header does not.
-            var matchedTerms = matched.Select(i => terms[i]).ToList();
-            var region = Colocated(ranked.File, matchedTerms);
-            if (region.Count < need && !ExplicitPath(path)) continue;
-
-            var score = ranked.Score;
-            if (lifted.Contains(path)) score *= 1.3;
-            if (named) score *= 1.2;
-            if (ExplicitPath(path)) score *= 2;
-            var together = region.Weight * (ExplicitPath(path) ? 2 : 1);
-            picked.Add((ranked, score, matchedTerms, together, region));
+            if (knownFiles?.Contains(path) == true) return false;
+            if (ExplicitPath(path)) return true;
+            if (!ProjectKnowledgeIndex.Eligible(path)) return false;
+            if (!wantsData && (DataPath().IsMatch(path) || path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))) return false;
+            return wantsTestsOrDocs || !CodeDiscovery.IsTestOrDoc(path);
         }
 
-        if (picked.Count == 0) return Empty;
-        // Breadth first: a file holding more of the request's subjects in one place beats one
-        // repeating fewer of them, whatever the term density. Score orders files of equal breadth.
-        picked.Sort((a, b) =>
+        var scores = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        var votes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        void Fuse(IEnumerable<string> ranked, double weight)
         {
-            var explicitOrder = ExplicitPath(Normal(b.Ranked.File.RelativePath)).CompareTo(ExplicitPath(Normal(a.Ranked.File.RelativePath)));
-            return explicitOrder != 0 ? explicitOrder : Math.Abs(a.Together - b.Together) > 0.01 ? b.Together.CompareTo(a.Together) : b.Score.CompareTo(a.Score);
-        });
-        var best = picked[0];
+            var rank = 0;
+            foreach (var path in ranked.Select(Normal).Where(Eligible).Distinct(StringComparer.OrdinalIgnoreCase).Take(ListDepth))
+            {
+                scores[path] = scores.GetValueOrDefault(path) + weight / (RrfK + ++rank);
+                votes[path] = votes.GetValueOrDefault(path) + 1;
+            }
+        }
 
-        var text = new StringBuilder();
+        Fuse(lexical.Select(r => r.File.RelativePath), 1.0);
+        Fuse(chunks.Select(c => c.Path), 1.0);
+        Fuse(expanded.Select(r => r.File.RelativePath), 0.5);
+        Fuse(expandedChunks.Select(c => c.Path), 0.35);
+        foreach (var path in scores.Keys.Where(ExplicitPath).ToList()) scores[path] *= 2;
+        if (scores.Count == 0) return Empty;
+        // A file linked to a leading one counts as a second retriever's vote.
+        if (knowledge is not null)
+            foreach (var path in FollowGraph(knowledge, root, scores, Eligible)) votes[path] = votes.GetValueOrDefault(path) + 1;
+
+        // How much of the prompt each file's own words cover, for files only one retriever found.
+        var covered = lexical.ToDictionary(r => Normal(r.File.RelativePath), r => r.Matched
+            .Select(i => promptTerms[i].Term.Text.ToLowerInvariant()).Count(words.Contains), StringComparer.OrdinalIgnoreCase);
+        // ...or of the names the model expects, which stand in for words the code does not use ("navbar").
+        var named = expanded.ToDictionary(r => Normal(r.File.RelativePath), r => r.Matched.Count, StringComparer.OrdinalIgnoreCase);
+        bool Supported(string path) => ExplicitPath(path) || votes.GetValueOrDefault(path) >= 2 ||
+            (words.Count > 0 && covered.GetValueOrDefault(path) >= Math.Min(MinCoverage * words.Count, MinCoveredWords)) ||
+            (expansionTerms.Count > 0 && named.GetValueOrDefault(path) >= Math.Max(1, Math.Min(MinCoverage * expansionTerms.Count, MinCoveredWords)));
+
+        var best = scores.Values.Max();
+        var lineTerms = promptTerms.Concat(expansionTerms).ToList();
+        var bestChunk = chunks.Concat(expandedChunks).GroupBy(c => Normal(c.Path), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        var output = new StringBuilder();
         var files = new List<string>();
-        foreach (var (ranked, score, matched, together, region) in picked)
+        foreach (var (path, score) in scores.OrderByDescending(s => s.Value))
         {
-            // As broad as the leader, or one subject short of a broad leader while scoring close
-            // to it; anything less is a guess the agent would have to rule out.
-            if (files.Count == MaxFiles) break;
-            var breadth = together / best.Together;
-            var close = breadth >= 0.99 ? score >= best.Score * 0.15 : breadth >= 0.75 && score >= best.Score * 0.6;
-            if (!close) continue;
-            if (Entry(ranked.File, Normal(ranked.File.RelativePath), matched, region, concepts, terms) is not { } entry)
-                continue;
-            if (Encoding.UTF8.GetByteCount(text.ToString() + entry) > MaxBytes) break;
-            text.Append(entry);
-            files.Add(Normal(ranked.File.RelativePath));
+            if (files.Count == MaxFiles || score < best * Floor) break;
+            if (!Supported(path)) continue;
+            var file = snapshot.Files.FirstOrDefault(f => Normal(f.RelativePath).Equals(path, StringComparison.OrdinalIgnoreCase));
+            if (file is null || !File.Exists(file.FullPath)) continue;
+            if (Entry(file, path, lineTerms, bestChunk.GetValueOrDefault(path)) is not { } entry) continue;
+            if (Encoding.UTF8.GetByteCount(output.ToString() + entry) > MaxBytes) break;
+            output.Append(entry);
+            files.Add(path);
         }
 
         return files.Count == 0 ? Empty : new(
             "Likely edit sites, from a local search of the project (path:lines | matched words, then the matching lines). " +
-            "These are candidate references, not verified edit sites; check their relevance and search beyond them as needed.\n" + text + "\n", files);
+            "These are candidate references, not verified edit sites; check their relevance and search beyond them as needed.\n" + output + "\n", files);
     }
 
     private static FileLocatorContext Empty { get; } = new("", []);
 
+    private const int GraphSeeds = 6;
+    private const double PairShare = 0.6;
+    private const double UseShare = 0.3;
+
+    /// <summary>
+    /// The leading files lend part of their score to the files linked to them in the index's graph: a view's
+    /// code-behind and a class's partial files most (one unit), the few files a specific type ties them to less.
+    /// A file takes its best lend, so a hub reached from many seeds gains nothing extra for it.
+    /// </summary>
+    private static IReadOnlyCollection<string> FollowGraph(ProjectKnowledgeIndex knowledge, string root, Dictionary<string, double> scores, Func<string, bool> eligible)
+    {
+        var lent = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (path, score) in scores.OrderByDescending(s => s.Value).Take(GraphSeeds).ToList())
+        {
+            IReadOnlyList<(string Path, string Relation)> related;
+            try { related = knowledge.RelatedFiles(root, path); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { continue; }
+            var uses = Math.Max(1, related.Count(r => r.Relation != ProjectKnowledgeIndex.PairRelation));
+            foreach (var (target, relation) in related)
+            {
+                var normal = Normal(target);
+                if (!eligible(normal)) continue;
+                var share = relation == ProjectKnowledgeIndex.PairRelation ? PairShare : UseShare / Math.Sqrt(uses);
+                lent[normal] = Math.Max(lent.GetValueOrDefault(normal), score * share);
+            }
+        }
+
+        foreach (var (path, amount) in lent) scores[path] = scores.GetValueOrDefault(path) + amount;
+        return lent.Keys;
+    }
+
     private static string Normal(string path) => path.Replace('\\', '/');
 
+    private static bool IsIdentifier(string word) => !word.Contains(' ') &&
+        (word.Skip(1).Any(char.IsUpper) || word.Contains('_') || (word.Any(char.IsDigit) && word.Any(char.IsLetter)));
+
     /// <summary>
-    /// The prompt's subjects in order: quoted text whole, identifiers above plain words, action
-    /// words weak, and words of one alias group merged. Filler ("the", "please") is dropped.
+    /// Every word of the prompt, quoted text whole. Only the generic stop words (the, and, to) go: how much a
+    /// word counts is how rare it is in this project, which the index already knows.
     /// </summary>
-    private static List<Concept> Concepts(string prompt)
+    private static List<SourceExplorer.ExploreTerm> PromptTerms(string text, Func<string, bool> known)
     {
-        var concepts = new List<Concept>();
-        var text = SearchText.WithoutAttachments(prompt);
-        foreach (var quoted in CodeDiscovery.QuotedPhrases(text).Where(q => q.Trim().Length >= 2))
-            concepts.Add(new Concept(quoted.Trim(), 1.5, false, true, []));
-
-        var unquoted = CodeDiscovery.WithoutQuoted(text);
-        var matches = Word().Matches(unquoted).ToList();
-        var (named, kinds) = NewNames(unquoted, matches);
-        var places = Places(unquoted, matches);
-        var typed = matches.Select(m => m.Value.ToLowerInvariant()).ToHashSet();
-        for (var i = 0; i < matches.Count; i++)
+        var terms = CodeDiscovery.QuotedPhrases(text).Where(q => q.Trim().Length >= 2)
+            .Select(q => new SourceExplorer.ExploreTerm(q.Trim(), 1.5, Exact: true)).ToList();
+        var words = Word().Matches(CodeDiscovery.WithoutQuoted(text)).Select(m => m.Value).ToList();
+        foreach (var word in words)
         {
-            var match = matches[i];
-            var word = match.Value;
-            var lower = word.ToLowerInvariant();
-            if (word.Length < 2 || SearchText.IsStopWord(lower)) continue;
-            // A verb at the start of a clause or after "please", "and", "should"; elsewhere a noun.
-            var verb = i == 0 || VerbLeads.Contains(matches[i - 1].Value) ||
-                unquoted[(matches[i - 1].Index + matches[i - 1].Length)..match.Index].IndexOfAny(['.', ',', ';', ':', '!', '?', '\n']) >= 0;
-            var action = AlwaysWeak.Contains(lower) || (Verbs.Contains(lower) && verb) || named.Contains(match.Index);
-            if (!action && SearchText.RetrievalTerms(word).Count == 0) continue;
-            if (concepts.Any(c => string.Equals(c.Text, word, StringComparison.OrdinalIgnoreCase))) continue;
-            if (concepts.Any(c => c.Aliases.Contains(lower))) continue;
-
-            // A word the prompt also uses on its own is its own subject: "the marketing menu in the
-            // navbar" names a menu and a navbar, and a dropdown menu is no navbar.
-            var group = action ? null : Aliases.FirstOrDefault(g => g.Contains(lower) || g.Contains(SearchText.Stem(lower)));
-            var related = group ?? (action ? null : OneWayAliases.GetValueOrDefault(SearchText.Stem(lower)));
-            var aliases = related is null ? [] : related.Where(a => a != lower && a != SearchText.Stem(lower) && !typed.Contains(a)).ToArray();
-            var identifier = word.Skip(1).Any(char.IsUpper) || word.Contains('_') || (word.Any(char.IsDigit) && word.Any(char.IsLetter));
-            // Where the change goes outweighs what it is: "in the navbar", "under Marketing" name
-            // the existing code; the kind of thing being added ("... menu") only resembles it.
-            var place = !NewThings.Contains(lower) && matches.Any(m => places.Contains(m.Index) && string.Equals(m.Value, word, StringComparison.OrdinalIgnoreCase));
-            var weight = action ? WeakWeight : (identifier ? 1.5 : 1.0) * (place ? PlaceFactor : 1) * (kinds.Contains(match.Index) ? KindFactor : 1);
-            concepts.Add(new Concept(word, weight, action, false, aliases));
+            if (word.Length < 2 || SearchText.IsStopWord(word.ToLowerInvariant())) continue;
+            if (terms.Any(t => string.Equals(t.Text, word, StringComparison.OrdinalIgnoreCase))) continue;
+            terms.Add(new SourceExplorer.ExploreTerm(word, IsIdentifier(word) ? 1.5 : 1.0));
         }
 
-        return concepts;
-    }
-
-    /// <summary>
-    /// The positions of words naming something the request creates: after "add" or "create", up
-    /// to the kind of thing it is ("growth and ingrowth" in "add growth and ingrowth menu").
-    /// Only when the run ends at such a noun - "add pagination to the table" names nothing new.
-    /// </summary>
-    private static (HashSet<int> Names, HashSet<int> Kinds) NewNames(string text, IReadOnlyList<Match> words)
-    {
-        var found = new HashSet<int>();
-        var kinds = new HashSet<int>();
+        // Prose splits the names code joins: "status bar" is StatusBar, "new file" NewFile, "chat history"
+        // ChatHistory. A run of two or three words counts as an identifier when the project has that name.
         for (var i = 0; i < words.Count; i++)
-        {
-            if (!Creating.Contains(words[i].Value)) continue;
-            var run = new List<int>();
-            for (var j = i + 1; j < words.Count && j <= i + 6; j++)
+            for (var n = 2; n <= 3 && i + n <= words.Count; n++)
             {
-                var gap = text[(words[j - 1].Index + words[j - 1].Length)..words[j].Index];
-                if (gap.IndexOfAny(['.', ',', ';', ':', '!', '?', '(', ')']) >= 0) break;
-                var word = words[j].Value;
-                if (NewThings.Contains(word))
-                {
-                    if (run.Count > 0) found.UnionWith(run);
-                    kinds.Add(words[j].Index);
-                    break;
-                }
-
-                if ((SearchText.IsStopWord(word.ToLowerInvariant()) || IsActionWord(word)) && !Articles.Contains(word)) break;
-                if (!Articles.Contains(word)) run.Add(words[j].Index);
+                var parts = words.Skip(i).Take(n).ToList();
+                if (parts.Any(p => p.Length < 2 || SearchText.IsStopWord(p.ToLowerInvariant()))) break;
+                var joined = string.Concat(parts).ToLowerInvariant();
+                var singular = SearchText.Stem(joined);
+                var name = known(joined) ? joined : known(singular) ? singular : null;
+                if (name is null || terms.Any(t => string.Equals(t.Text, name, StringComparison.OrdinalIgnoreCase))) continue;
+                terms.Add(new SourceExplorer.ExploreTerm(name, 1.0));
             }
-        }
 
-        return (found, kinds);
+        return terms;
     }
 
-    private static readonly HashSet<string> PlacePrepositions =
-        [with(StringComparer.OrdinalIgnoreCase), "in", "into", "inside", "under", "below", "above", "to", "on", "onto", "within", "beside", "near", "from"];
-
-    /// <summary>
-    /// The positions of words in location phrases - "in the navbar", "under the marketing menu",
-    /// "to the sidebar": up to four words after the preposition, to punctuation or the next one.
-    /// </summary>
-    private static HashSet<int> Places(string text, IReadOnlyList<Match> words)
+    private static IReadOnlyList<SourceChunk> SafeSearch(ProjectKnowledgeIndex knowledge, string root, string query)
     {
-        var found = new HashSet<int>();
-        for (var i = 0; i < words.Count; i++)
-        {
-            if (!PlacePrepositions.Contains(words[i].Value)) continue;
-            var taken = 0;
-            for (var j = i + 1; j < words.Count && taken < 4; j++)
-            {
-                var gap = text[(words[j - 1].Index + words[j - 1].Length)..words[j].Index];
-                if (gap.IndexOfAny(['.', ',', ';', ':', '!', '?', '(', ')']) >= 0) break;
-                var word = words[j].Value;
-                if (Articles.Contains(word) || word is "this" or "that" or "our" or "my") continue;
-                if (PlacePrepositions.Contains(word) || SearchText.IsStopWord(word.ToLowerInvariant()) || IsActionWord(word)) break;
-                found.Add(words[j].Index);
-                taken++;
-            }
-        }
-
-        return found;
+        try { return knowledge.Search(root, query, maxFiles: ListDepth, maxChunksPerFile: 1); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return []; }
     }
 
-    /// <summary>A concept as the index knows it, its aliases added as lesser keys; null when nothing in the project matches it.</summary>
-    private static SourceExplorer.ResolvedTerm? Resolve(SourceSnapshot snapshot, Concept concept)
-    {
-        var term = SourceExplorer.Resolve(snapshot, [new SourceExplorer.ExploreTerm(concept.Text, concept.Weight, Exact: concept.Exact)])
-            .FirstOrDefault(t => !t.Term.Bonus);
-        if (term is null) return null;
-        var aliases = concept.Aliases.Where(snapshot.Contains).ToList();
-        if (aliases.Count == 0) return term;
+    private static readonly ConcurrentDictionary<string, IReadOnlyList<string>> Expansions = new(StringComparer.Ordinal);
 
-        var keys = term.Keys.Concat(aliases.Select(a => (a, AliasFactor))).DistinctBy(k => k.Item1).ToList();
-        var idf = term.Keys.Count > 0 ? term.Idf : aliases.Max(a => SourceExplorer.Idf(snapshot, a));
-        var line = new Regex(term.Line + "|" + SourceExplorer.LineMatcher(aliases, phrase: false),
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
-        return term with { Keys = keys, Idf = idf, Line = line };
+    /// <summary>The model's guess at the names involved; empty when it is off, slow or fails.</summary>
+    private static async Task<IReadOnlyList<string>> ExpandAsync(ISmartExperience smart, string root, string text, string vocabulary, CancellationToken ct)
+    {
+        var key = ProjectKnowledgeIndex.Hash(root + "\n" + text);
+        if (Expansions.TryGetValue(key, out var cached)) return cached;
+        try
+        {
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            budget.CancelAfter(ExpansionBudget);
+            var context = new SmartRequestContext(root, root, "keywords", Deadline: DateTimeOffset.UtcNow + ExpansionBudget);
+            var result = await smart.ExpandQueryAsync(context, text, vocabulary, budget.Token).ConfigureAwait(false);
+            if (result?.Value is not { Count: > 0 } terms) return [];
+            if (Expansions.Count > 128) Expansions.Clear();
+            Expansions[key] = terms;
+            return terms;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return []; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return []; }
     }
 
     /// <summary>
-    /// One file's hint: "- path:start-end | words | in symbol", then its anchor lines. Both come
-    /// from the place holding the most subjects together: the anchors are the strongest line for
-    /// each subject there, the range the strongest cluster of matching lines around them.
+    /// A sample of the project's names for the model: the files the prompt's words already reach and the types and
+    /// members they declare, then the project's top folders. It teaches the model this project's naming, not the answer.
     /// </summary>
-    private static string? Entry(SourceFile file, string path, IReadOnlyList<SourceExplorer.ResolvedTerm> matched, Region region,
-        IReadOnlyList<Concept> concepts, IReadOnlyList<SourceExplorer.ResolvedTerm> all)
+    private static string Vocabulary(SourceSnapshot snapshot, IReadOnlyList<SourceExplorer.Ranked> lexical)
+    {
+        var names = new List<string>();
+        foreach (var ranked in lexical.Take(20))
+        {
+            names.Add(Path.GetFileNameWithoutExtension(ranked.File.RelativePath));
+            names.AddRange(ranked.File.Symbols.Where(s => s.Kind == SourceSymbolKind.Type).Select(s => s.Name).Take(4));
+            names.AddRange(ranked.File.Symbols.Where(s => s.Kind != SourceSymbolKind.Type).Select(s => s.Name).Take(6));
+        }
+
+        var folders = snapshot.Files.Select(f => Path.GetDirectoryName(f.RelativePath) ?? "").Where(d => d.Length > 0)
+            .GroupBy(d => Normal(d), StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()).Take(20).Select(g => g.Key);
+        return string.Join(", ", names.Concat(folders).Distinct(StringComparer.Ordinal)).Trim();
+    }
+
+    /// <summary>
+    /// One file's hint: "- path:start-end | words | in symbol", then its anchor lines - the strongest cluster of
+    /// matching lines, or the index's best chunk when the words matched none.
+    /// </summary>
+    private static string? Entry(SourceFile file, string path, IReadOnlyList<SourceExplorer.ResolvedTerm> terms, SourceChunk? chunk)
     {
         var lines = file.ReadLines();
         if (lines.Length == 0) return null;
-        var weights = SourceExplorer.LineWeights(file, lines, [.. matched, .. all.Where(t => t.Term.Bonus)], setup: false);
-        // An import names what the file uses, not where the change goes.
+        var weights = SourceExplorer.LineWeights(file, lines, terms, setup: false);
+        // An import names what the file uses, not where the change goes; comment prose mentions every subject.
         foreach (var n in ImportLines(lines)) weights.Remove(n);
-        for (var n = 1; n < region.Present.Length; n++)
-            if (region.Present[n] != 0 && !weights.ContainsKey(n)) weights[n] = 1;
-        var inRegion = weights.Where(w => w.Key >= region.From && w.Key <= region.To).ToDictionary();
-        if (inRegion.Count == 0) inRegion = weights;
-        if (inRegion.Count == 0) return null;
 
-        // One anchor per subject: its strongest line in the region.
-        var anchors = new List<int>();
-        for (var t = 0; t < matched.Count; t++)
-        {
-            var bit = BigInteger.One << t;
-            var line = inRegion.Keys.Where(n => n < region.Present.Length && (region.Present[n] & bit) != 0)
-                .OrderByDescending(n => inRegion[n]).ThenBy(n => n).FirstOrDefault();
-            if (line > 0 && !anchors.Contains(line)) anchors.Add(line);
-        }
-        foreach (var n in inRegion.OrderByDescending(w => w.Value).ThenBy(w => w.Key).Select(w => w.Key))
-        {
-            if (anchors.Count >= 2) break;
-            if (!anchors.Contains(n)) anchors.Add(n);
-        }
-        anchors = [.. anchors.OrderByDescending(n => inRegion.GetValueOrDefault(n)).Take(MaxAnchors).Order()];
-
-        // The range: the anchors with a little context when they sit close, else the strongest
-        // cluster of matching lines that holds one of them - read where it matched.
         int start, end;
-        if (anchors.Count > 0 && anchors.Max() - anchors.Min() <= MaxRangeSpan)
+        var anchors = new List<int>();
+        var ranges = weights.Count == 0 ? [] : CodeDiscovery.Slice(lines, weights).Where(r => r.MatchLines.Count > 0).ToList();
+        if (ranges.Count > 0)
         {
-            start = Math.Max(Math.Max(1, region.From), anchors.Min() - 2);
-            end = Math.Min(Math.Min(lines.Length, region.To), anchors.Max() + 2);
+            // The cluster with the most weight; the index's chunk breaks ties toward where the meaning matched.
+            bool InChunk(int n) => chunk is not null && n >= chunk.StartLine && n < chunk.StartLine + 40;
+            var top = ranges.MaxBy(r => r.MatchLines.Sum(n => weights.GetValueOrDefault(n)) + (r.MatchLines.Any(InChunk) ? 0.5 : 0))!;
+            anchors = [.. top.MatchLines.OrderByDescending(n => weights.GetValueOrDefault(n)).ThenBy(n => n).Take(MaxAnchors).Order()];
+            start = Math.Max(top.StartLine, anchors.Min() - 2);
+            end = Math.Min(Math.Min(top.EndLine, anchors.Max() + 2), start + MaxRangeSpan);
+            anchors = [.. anchors.Where(n => n >= start && n <= end)];
         }
-        else
+        else if (chunk is not null)
         {
-            var ranges = CodeDiscovery.Slice(lines, inRegion).Where(r => r.MatchLines.Count > 0).ToList();
-            if (ranges.Count == 0) return null;
-            var top = ranges.Where(r => anchors.Any(n => n >= r.StartLine && n <= r.EndLine)).DefaultIfEmpty(ranges[0])
-                .MaxBy(r => r.MatchLines.Sum(n => inRegion.GetValueOrDefault(n)))!;
-            start = Math.Max(top.StartLine, top.MatchLines.Min() - 2);
-            end = Math.Min(Math.Min(top.EndLine, top.MatchLines.Max() + 2), start + MaxRangeSpan);
+            start = Math.Clamp(chunk.StartLine, 1, lines.Length);
+            end = Math.Min(lines.Length, start + MaxRangeSpan);
+            anchors = [.. Enumerable.Range(start, end - start + 1).Where(n => lines[n - 1].Trim().Length > 3).Take(1)];
         }
+        else return null;
 
-        var words = matched.Where((_, t) => (region.Mask & (BigInteger.One << t)) != 0).Select(t => concepts.FirstOrDefault(c => string.Equals(c.Text, t.Term.Text, StringComparison.OrdinalIgnoreCase))?.Text ?? t.Term.Text)
-            .Select(w => w.ToLowerInvariant()).Distinct();
-        // Inside the declaration holding the anchors, the range stays within it and names it.
         var holder = anchors.Count == 0 ? null : Enclosing(file, lines, anchors.Min(), anchors.Max());
         if (holder is { } h)
         {
@@ -443,7 +341,10 @@ public static partial class PromptFileLocator
             end = Math.Max(start, Math.Min(end, h.End));
         }
 
-        var entry = new StringBuilder($"- {path}:{start}-{end} | {string.Join(", ", words)}");
+        var span = string.Join('\n', lines[(start - 1)..Math.Min(lines.Length, end)]);
+        var words = terms.Where(t => t.Line.IsMatch(span)).Select(t => t.Term.Text.ToLowerInvariant()).Distinct().Take(6).ToList();
+        var entry = new StringBuilder($"- {path}:{start}-{end}");
+        if (words.Count > 0) entry.Append($" | {string.Join(", ", words)}");
         if (holder is { } held) entry.Append($" | in {held.Name}");
         entry.Append('\n');
         foreach (var n in anchors)
@@ -456,75 +357,7 @@ public static partial class PromptFileLocator
         return entry.ToString();
     }
 
-    private const int Window = 12;
     private const int MaxSymbolSpan = 300;
-    private const int MaxAnchors = 3;
-
-    /// <summary>Where a file holds the most subjects together, and which subjects each line holds (bit per matched term).</summary>
-    private sealed record Region(int Count, double Weight, int From, int To, BigInteger[] Present, BigInteger Mask);
-
-    /// <summary>
-    /// The most subjects found in one place: a declaration (its name included) or a window of
-    /// nearby lines, the smaller on a tie. Lines match on identifier parts, as the index does -
-    /// navGroups holds "nav". Import lines do not count.
-    /// </summary>
-    private static Region Colocated(SourceFile file, IReadOnlyList<SourceExplorer.ResolvedTerm> matched)
-    {
-        var lines = file.ReadLines();
-        var imports = ImportLines(lines);
-        // The word, its aliases and its inflections ("menus", "projects"); not every token it
-        // prefixes - "under" is not "underline", "marketing" not "marketingCostCache".
-        var keys = matched.Select(t =>
-        {
-            var root = t.Keys.MaxBy(k => k.Factor).Key.Length;
-            return t.Keys.Where(k => k.Factor >= AliasFactor || k.Key.Length <= root + 3).Select(k => k.Key).ToHashSet(StringComparer.Ordinal);
-        }).ToList();
-        var present = new BigInteger[lines.Length + 1];
-        for (var n = 1; n <= lines.Length; n++)
-        {
-            if (imports.Contains(n) || lines[n - 1].Length > 2000) continue;
-            var tokens = SourceTokens.Count(lines[n - 1]).Keys;
-            for (var t = 0; t < keys.Count; t++)
-                if (tokens.Any(keys[t].Contains)) present[n] |= BigInteger.One << t;
-        }
-
-        // The path says what the whole file is about: features/ad-spend/components/spend-tab.tsx
-        // holds "ad" and "spend" on every line.
-        var pathTokens = SourceTokens.Count(file.RelativePath).Keys;
-        var pathMask = BigInteger.Zero;
-        for (var t = 0; t < keys.Count; t++)
-            if (pathTokens.Any(keys[t].Contains)) pathMask |= BigInteger.One << t;
-
-        var best = new Region(0, 0, 1, lines.Length, present, BigInteger.Zero);
-        void Consider(int from, int to)
-        {
-            from = Math.Max(1, from);
-            to = Math.Min(lines.Length, to);
-            var mask = pathMask;
-            for (var n = from; n <= to; n++) mask |= present[n];
-            // A rare word ("flush") places a request more surely than a common one ("line").
-            var weight = 0.0;
-            for (var t = 0; t < matched.Count; t++)
-                if ((mask & (BigInteger.One << t)) != 0) weight += matched[t].Weight * Math.Clamp(matched[t].Idf / 3.0, 0.5, 1.5);
-            if (weight > best.Weight + 1e-9 || (Math.Abs(weight - best.Weight) <= 1e-9 && weight > 0 && to - from < best.To - best.From))
-                best = new Region(matched.Where((_, t) => (mask & (BigInteger.One << t)) != 0).Count(), weight, from, to, present, mask);
-        }
-
-        for (var n = 1; n <= lines.Length; n++)
-            if (present[n] != 0) Consider(n, n + Window - 1);
-        // Innermost declarations only: a method or a navGroups literal is one place, a class
-        // holding forty methods is not - in it every word is "together".
-        var starts = file.Symbols.Select(s => s.Line).ToHashSet();
-        foreach (var symbol in file.Symbols)
-        {
-            // A declaration the scan saw as one line may open a literal: navGroups = [ ...groups... ].
-            var end = symbol.EndLine > symbol.Line ? symbol.EndLine : Extent(lines, symbol.Line);
-            if (end <= symbol.Line || end - symbol.Line > MaxSymbolSpan) continue;
-            if (starts.Any(s => s > symbol.Line && s <= end)) continue;
-            Consider(symbol.Line, end);
-        }
-        return best;
-    }
 
     /// <summary>The line closing the brackets a declaration line leaves open; the line itself when it closes them.</summary>
     private static int Extent(string[] lines, int line)
@@ -556,8 +389,7 @@ public static partial class PromptFileLocator
 
     /// <summary>
     /// Lines that are not the code a change goes into: imports (multi-line <c>import { a, b } from "x"</c>
-    /// blocks included) and whole-line comments. An import names what a file uses; comment prose
-    /// mentions every subject in passing.
+    /// blocks included) and whole-line comments.
     /// </summary>
     private static HashSet<int> ImportLines(string[] lines)
     {

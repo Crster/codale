@@ -15,7 +15,7 @@ namespace Codale.Search.Tests;
 /// </summary>
 public sealed class PromptFileLocatorEvalTests(ITestOutputHelper output) : IDisposable
 {
-    private sealed record Case(string Prompt, string[] Files);
+    private sealed record Case(string Prompt, string[] Files, bool First = false);
 
     private readonly string _work = Directory.CreateTempSubdirectory("codale-locator-eval-").FullName;
 
@@ -45,6 +45,18 @@ public sealed class PromptFileLocatorEvalTests(ITestOutputHelper output) : IDisp
         return ProjectPaths.Normalize(target);
     }
 
+    private static void CopyDirectory(string from, string to)
+    {
+        foreach (var file in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories).Where(f => Path.GetFileName(f) != "LOCK"))
+        {
+            var target = Path.Combine(to, Path.GetRelativePath(from, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            using var source = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var copy = File.Create(target);
+            source.CopyTo(copy);
+        }
+    }
+
     [Fact]
     public async Task Hints_name_the_files_a_request_edits()
     {
@@ -53,14 +65,40 @@ public sealed class PromptFileLocatorEvalTests(ITestOutputHelper output) : IDisp
         if (string.IsNullOrWhiteSpace(project) || string.IsNullOrWhiteSpace(casesPath)) return;
         var cases = JsonSerializer.Deserialize<List<Case>>(File.ReadAllText(casesPath),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+        // History cases: only prompts that opened a session, where the locator runs without earlier turns.
+        if (Environment.GetEnvironmentVariable("CODALE_LOCATOR_FIRST_ONLY") is not null) cases = [.. cases.Where(c => c.First)];
 
-        var root = CopyTracked(project);
-        using var db = new CodaleDb(Path.Combine(_work, "db"));
+        // CODALE_LOCATOR_DB: a copy of the app's project-db for this project, so vectors from the configured Embedding model
+        // are reused instead of re-embedding every chunk. The project is then searched in place (read-only).
+        var appDb = Environment.GetEnvironmentVariable("CODALE_LOCATOR_DB");
+        var root = string.IsNullOrWhiteSpace(appDb) ? CopyTracked(project) : ProjectPaths.Normalize(project);
+        if (!string.IsNullOrWhiteSpace(appDb)) CopyDirectory(appDb, Path.Combine(_work, "db"));
+        // CODALE_LOCATOR_SETTINGS: a folder holding Codale's settings.json, to use the configured General model for
+        // expansion (and, with CODALE_LOCATOR_EMBED, the Embedding model for vectors). The file is copied, never edited.
+        await using var models = SmartModels.Open(Environment.GetEnvironmentVariable("CODALE_LOCATOR_SETTINGS"), _work,
+            Environment.GetEnvironmentVariable("CODALE_LOCATOR_EMBED") is not null);
+        if (models is not null)
+        {
+            await models.StartAsync();
+            models.Experience.ActivityUpdated += a =>
+            {
+                if (a.State is "error" or "cancelled") output.WriteLine($"   smart {a.Context.Task} {a.State} after {a.ElapsedMilliseconds} ms: {a.Error}");
+            };
+        }
+        output.WriteLine(models is null ? "models: none" : $"models: general={models.GeneralModel} embedding={models.Embedder?.Model ?? "hashed"}");
+        using var db = new CodaleDb(Path.Combine(_work, "db"), new() { Embedder = models?.Embedder });
         using var knowledge = new ProjectKnowledgeIndex(db);
         var useKnowledge = Environment.GetEnvironmentVariable("CODALE_LOCATOR_NO_KNOWLEDGE") is null;
-        if (useKnowledge) await knowledge.RefreshAsync(root);
+        if (useKnowledge && string.IsNullOrWhiteSpace(appDb)) await knowledge.RefreshAsync(root);
 
-        int found = 0, listed = 0, correct = 0, top = 0;
+        // CODALE_LOCATOR_STRATEGY=cascade: model keywords → embedding → keyword-index filter → rerank.
+        var strategy = string.Equals(Environment.GetEnvironmentVariable("CODALE_LOCATOR_STRATEGY"), "cascade", StringComparison.OrdinalIgnoreCase)
+            ? LocatorStrategy.Cascade : LocatorStrategy.Fusion;
+        var coverage = knowledge.VectorCoverage(root);
+        output.WriteLine($"strategy: {strategy} · vectors {coverage.Embedded}/{coverage.Total} ({db.EmbeddingModel})");
+        int found = 0, listed = 0, correct = 0, top = 0, empty = 0;
+        double reciprocal = 0;
+        var times = new List<long>();
         long bytes = 0;
         var baseline = Environment.GetEnvironmentVariable("CODALE_LOCATOR_BASELINE") is not null;
         try
@@ -70,13 +108,18 @@ public sealed class PromptFileLocatorEvalTests(ITestOutputHelper output) : IDisp
                 var clock = Stopwatch.StartNew();
                 var result = baseline
                     ? await Baseline(root, test.Prompt, useKnowledge ? knowledge : null)
-                    : await PromptFileLocator.RetrieveAsync(root, test.Prompt, useKnowledge ? knowledge : null);
+                    : await PromptFileLocator.RetrieveAsync(root, test.Prompt, useKnowledge ? knowledge : null, smart: models?.Experience,
+                        trace: t => output.WriteLine($"   expansion [{t.ExpansionMs} ms]: {string.Join(", ", t.Expansion)}"), strategy: strategy);
                 clock.Stop();
                 var wanted = test.Files.ToHashSet(StringComparer.OrdinalIgnoreCase);
                 var hits = result.Files.Count(wanted.Contains);
                 found += hits > 0 ? 1 : 0;
                 top += result.Files.Count > 0 && wanted.Contains(result.Files[0]) ? 1 : 0;
                 listed += result.Files.Count;
+                empty += result.Files.Count == 0 ? 1 : 0;
+                var rank = result.Files.ToList().FindIndex(wanted.Contains);
+                reciprocal += rank < 0 ? 0 : 1.0 / (rank + 1);
+                times.Add(clock.ElapsedMilliseconds);
                 correct += hits;
                 bytes += System.Text.Encoding.UTF8.GetByteCount(result.Text);
                 var first = result.Files.Count > 0 && wanted.Contains(result.Files[0]) ? "✓" : "✗";
@@ -86,8 +129,11 @@ public sealed class PromptFileLocatorEvalTests(ITestOutputHelper output) : IDisp
         }
         finally { SourceIndex.For(root).Dispose(); }
 
-        output.WriteLine($"found {found}/{cases.Count} · first right {top}/{cases.Count} · precision {correct}/{listed}" +
-            $" · {bytes / Math.Max(1, cases.Count)} bytes per prompt");
+        times.Sort();
+        long Percentile(double p) => times.Count == 0 ? 0 : times[Math.Min(times.Count - 1, (int)(p * times.Count))];
+        output.WriteLine($"found {found}/{cases.Count} · first right {top}/{cases.Count} · MRR {reciprocal / Math.Max(1, cases.Count):0.000}" +
+            $" · precision {correct}/{listed} · empty {empty}/{cases.Count}" +
+            $" · {bytes / Math.Max(1, cases.Count)} bytes per prompt · p50 {Percentile(0.5)} ms · p95 {Percentile(0.95)} ms");
     }
 
     /// <summary>The locator before line-anchored hints (path | keywords, up to six files), kept to compare against.</summary>

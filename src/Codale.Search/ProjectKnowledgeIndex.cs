@@ -108,6 +108,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
                     var reChunk = SourceChunkVersion(worktree) != FileChunker.Version;
                     if (!reChunk && _snapshots.GetValueOrDefault(worktree) == snapshot.BuiltAt)
                     {
+                        RefreshGraph(worktree, snapshot);
                         // An index built before vectors existed is embedded once, without re-chunking.
                         EmbedPending(worktree);
                         WarmSummaries(worktree);
@@ -145,6 +146,8 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
                         foreach (var path in changed) log[path] = now;
                     }
                     SetSourceChunkVersion(worktree, FileChunker.Version);
+                    // Before embedding, which may wait on a remote model: the links are local and quick.
+                    RefreshGraph(worktree, snapshot);
                     if (reChunk || changed.Count > 0 || removedPaths.Length > 0 || old.Count == 0)
                         _embedded.TryRemove(worktree, out _);
                     EmbedPending(worktree);

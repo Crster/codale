@@ -47,6 +47,18 @@ public interface ISmartExperience
     /// <summary>Fill-in-the-middle at a caret (see <see cref="SmartExperience.FillInMiddleAsync"/>); null when unavailable.</summary>
     Task<string?> FillInMiddleAsync(SmartRequestContext context, string prefix, string suffix, string? fileName,
         IReadOnlyList<string>? rejected = null, CancellationToken ct = default) => Task.FromResult<string?>(null);
+    /// <summary>
+    /// Names and phrases the code a request is about likely contains (types, methods, controls, settings), in the
+    /// style of <paramref name="vocabulary"/>, a sample of the project's own names; null when unavailable.
+    /// </summary>
+    Task<SmartResult<IReadOnlyList<string>>?> ExpandQueryAsync(SmartRequestContext context, string request, string vocabulary,
+        CancellationToken ct = default) => Task.FromResult<SmartResult<IReadOnlyList<string>>?>(null);
+    /// <summary>
+    /// The request rewritten as plain search keywords: what the code it is about does or shows, without the
+    /// request's phrasing ("crash", "please", "it should"); null when unavailable.
+    /// </summary>
+    Task<SmartResult<IReadOnlyList<string>>?> SearchKeywordsAsync(SmartRequestContext context, string request,
+        CancellationToken ct = default) => Task.FromResult<SmartResult<IReadOnlyList<string>>?>(null);
     Task<IReadOnlyList<SmartEvidence>> DiscoveriesAsync(SmartRequestContext context, string query, CancellationToken ct = default);
     /// <summary>The task brief for the agent CLI (see <see cref="SmartBrief"/>), written from verified <paramref name="material"/>; null when unavailable.</summary>
     Task<SmartResult<string>?> BriefAsync(SmartRequestContext context, string request, SmartIntent intent, string material, CancellationToken ct = default) =>
