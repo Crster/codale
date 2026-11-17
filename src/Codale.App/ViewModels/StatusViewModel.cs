@@ -9,7 +9,7 @@ namespace Codale.App.ViewModels;
 
 /// <summary>
 /// Backs the status bar and the session "changes" list. Every number here comes from
-/// the CLI itself rather than being estimated: token counts and the context window from
+/// the CLI where available, with explicit fallback cost estimates: token counts and context from
 /// the turn result, subscription utilisation from rate_limit_event.
 /// </summary>
 public sealed partial class StatusViewModel : ObservableObject
@@ -75,8 +75,6 @@ public sealed partial class StatusViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasUsageMeter))]
     public partial int ContextTokens { get; set; }
 
-    partial void OnContextTokensChanged(int value) => OnPropertyChanged(nameof(CurrentTurnUsageText));
-
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ContextText))]
     [NotifyPropertyChangedFor(nameof(ContextSummary))]
@@ -88,6 +86,58 @@ public sealed partial class StatusViewModel : ObservableObject
 
     [ObservableProperty]
     public partial decimal SessionCostUsd { get; set; }
+
+    [ObservableProperty]
+    public partial decimal EstimatedCostUsd { get; set; }
+
+    public decimal UsageCostUsd => SessionCostUsd > 0 ? SessionCostUsd : EstimatedCostUsd;
+    private decimal _fallbackCostAdjustment;
+    private decimal _fallbackMaxCostAdjustment;
+    public decimal FallbackCostUsd => Math.Max(0, UsageCostUsd + _fallbackCostAdjustment);
+
+    public decimal FallbackMaxCostUsd => Math.Max(0, UsageCostUsd + _fallbackMaxCostAdjustment);
+
+    /// <summary>Calibrate the budget reading; future session spend adds to this amount.</summary>
+    public void SetFallbackUsage(decimal spentUsd)
+    {
+        _fallbackCostAdjustment = Math.Max(0, spentUsd) - UsageCostUsd;
+        NotifyFallbackUsage();
+    }
+
+    public void SetFallbackMaxUsage(decimal spentUsd)
+    {
+        _fallbackMaxCostAdjustment = Math.Max(0, spentUsd) - UsageCostUsd;
+        NotifyFallbackUsage();
+    }
+
+    public void ResetFallbackUsage()
+    {
+        SetFallbackUsage(0);
+        SetFallbackMaxUsage(0);
+    }
+
+    public bool HasFallbackUsage => !HasUsage;
+    public double FallbackUsagePercent => Math.Clamp((double)(FallbackCostUsd / 10m * 100m), 0, 100);
+    public double FallbackMaxUsagePercent => Math.Clamp((double)(FallbackMaxCostUsd / 100m * 100m), 0, 100);
+    public string FallbackUsageSummary => $"${FallbackCostUsd:0.00} \u00b7 {FallbackUsagePercent:0}%";
+    public string FallbackMaxUsageSummary => $"${FallbackMaxCostUsd:0.00} \u00b7 {FallbackMaxUsagePercent:0}%";
+
+    partial void OnSessionCostUsdChanged(decimal value) => NotifyFallbackUsage();
+    partial void OnEstimatedCostUsdChanged(decimal value) => NotifyFallbackUsage();
+    partial void OnFiveHourUtilizationChanged(double? value) => NotifyFallbackUsage();
+    partial void OnSevenDayUtilizationChanged(double? value) => NotifyFallbackUsage();
+
+    private void NotifyFallbackUsage()
+    {
+        OnPropertyChanged(nameof(HasFallbackUsage));
+        OnPropertyChanged(nameof(UsageCostUsd));
+        OnPropertyChanged(nameof(FallbackCostUsd));
+        OnPropertyChanged(nameof(FallbackMaxCostUsd));
+        OnPropertyChanged(nameof(FallbackUsagePercent));
+        OnPropertyChanged(nameof(FallbackMaxUsagePercent));
+        OnPropertyChanged(nameof(FallbackUsageSummary));
+        OnPropertyChanged(nameof(FallbackMaxUsageSummary));
+    }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasUsage))]
@@ -184,6 +234,7 @@ public sealed partial class StatusViewModel : ObservableObject
 
     partial void OnIsOverrideCliChanged(bool value)
     {
+        NotifyFallbackUsage();
         if (value)
         {
             // Windows left behind by an earlier Claude-login session are not this
@@ -201,6 +252,9 @@ public sealed partial class StatusViewModel : ObservableObject
         ContextTokens = 0;
         ContextWindow = 0;
         SessionTokens = 0;
+        SessionCostUsd = 0;
+        EstimatedCostUsd = 0;
+        ResetFallbackUsage();
         FiveHourUtilization = null;
         SevenDayUtilization = null;
         FiveHourResetsAt = null;
@@ -252,12 +306,12 @@ public sealed partial class StatusViewModel : ObservableObject
 
     public string ContextText => ContextWindow > 0
         ? $"{Format(ContextTokens)} / {Format(ContextWindow)}"
-        : Format(ContextTokens);
+        : ContextTokens == 0 ? "0 / 1.0M" : Format(ContextTokens);
 
-    /// <summary>"45k / 200k · 22%" for the session panel's context bar; a dash before the session reports anything.</summary>
+    /// <summary>"45k / 200k Â\u00b7 22%" for the session panel's context bar; a dash before the session reports anything.</summary>
     public string ContextSummary => !HasContext
-        ? "0 · 0%"
-        : HasContextWindow ? $"{ContextText} · {ContextPercentText}" : ContextText;
+        ? "0 Â\u00b7 0%"
+        : HasContextWindow ? $"{ContextText} Â\u00b7 {ContextPercentText}" : ContextText;
 
     public bool HasContextWindow => ContextWindow > 0;
 
@@ -276,31 +330,10 @@ public sealed partial class StatusViewModel : ObservableObject
     public double FiveHourPercent => Math.Clamp((FiveHourUtilization ?? 0) * 100, 0, 100);
 
     private double? _promptBaseline;
-    private int _turnContextBaseline;
-    private UsageSnapshot? _turnUsage;
-
-    public string CurrentTurnUsageText
-    {
-        get
-        {
-            if (_promptBaseline is null) return "";
-            var delta = ContextTokens - _turnContextBaseline;
-            var context = $"Context {delta:+#,0;-#,0;0}";
-            if (_turnUsage is not { } usage) return context;
-            var cache = usage.CacheUsageReported || usage.CacheReadInputTokens > 0
-                ? $"{usage.CacheReadInputTokens:N0} cached"
-                : "cache unavailable";
-            return $"↑ {usage.ContextTokens:N0} in · ↓ {usage.OutputTokens:N0} out\n{cache} · {context}";
-        }
-    }
-
     /// <summary>Marks the 5-hour usage so far as history; what is spent after this is the current prompt's.</summary>
     public void BeginPrompt()
     {
         _promptBaseline = FiveHourPercent;
-        _turnContextBaseline = ContextTokens;
-        _turnUsage = null;
-        OnPropertyChanged(nameof(CurrentTurnUsageText));
         OnPropertyChanged(nameof(PreviousFiveHourPercent));
         OnPropertyChanged(nameof(CurrentPromptPercent));
     }
@@ -349,8 +382,8 @@ public sealed partial class StatusViewModel : ObservableObject
         return "Resets in " + text;
     }
 
-    /// <summary>Status bar label: the percentages alone, e.g. "9% · 67%".</summary>
-    public string UsageSummary => string.Join(" · ", new[] { FiveHourUtilization, SevenDayUtilization }
+    /// <summary>Status bar label: the percentages alone, e.g. "9% Â\u00b7 67%".</summary>
+    public string UsageSummary => string.Join(" Â\u00b7 ", new[] { FiveHourUtilization, SevenDayUtilization }
         .Where(u => u is not null)
         .Select(u => $"{Math.Clamp(u!.Value * 100, 0, 100):0}%"));
 
@@ -358,8 +391,9 @@ public sealed partial class StatusViewModel : ObservableObject
 
     public void Apply(TurnCompleted turn)
     {
-        _turnUsage = turn.Usage;
-        OnPropertyChanged(nameof(CurrentTurnUsageText));
+        // Turn usage is cumulative across every request in the turn; price it once here.
+        if (turn.Usage is { } usage)
+            EstimatedCostUsd += (usage.ContextTokens * 2m + usage.OutputTokens * 10m) / 1_000_000m;
         if (turn.ContextWindow is { } window)
         {
             ContextWindow = window;
@@ -450,8 +484,8 @@ public sealed partial class StatusViewModel : ObservableObject
 
     public bool HasChanges => Changes.Count > 0;
 
-    /// <summary>"3 files +42 −7" for the status bar.</summary>
-    public string ChangeBarText => $"{Changes.Count} {(Changes.Count == 1 ? "file" : "files")}  +{Changes.Sum(c => c.Added)} −{Changes.Sum(c => c.Removed)}";
+    /// <summary>"3 files +42 âˆ’7" for the status bar.</summary>
+    public string ChangeBarText => $"{Changes.Count} {(Changes.Count == 1 ? "file" : "files")}  +{Changes.Sum(c => c.Added)} âˆ’{Changes.Sum(c => c.Removed)}";
 
     private void NotifyChangeBar()
     {
@@ -459,10 +493,10 @@ public sealed partial class StatusViewModel : ObservableObject
         OnPropertyChanged(nameof(ChangeBarText));
     }
 
-    /// <summary>"3 files · +42 −7" for the section header.</summary>
+    /// <summary>"3 files Â\u00b7 +42 âˆ’7" for the section header.</summary>
     public string ChangeSummary => Changes.Count == 0
         ? "The agent has not changed any files in this session."
-        : $"{Changes.Count} {(Changes.Count == 1 ? "file" : "files")} · +{Changes.Sum(c => c.Added)} −{Changes.Sum(c => c.Removed)}";
+        : $"{Changes.Count} {(Changes.Count == 1 ? "file" : "files")} Â\u00b7 +{Changes.Sum(c => c.Added)} âˆ’{Changes.Sum(c => c.Removed)}";
 
     /// <summary>Any row still lit from a change moments ago: drives the section badge's pulse.</summary>
     [ObservableProperty]

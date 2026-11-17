@@ -87,21 +87,21 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     // The rail button shows whenever there is a session, so context is always one click away.
     public bool HasUsage => Session is not null;
 
-    /// <summary>The ring: whichever quota is closest to running out (5-hour or weekly), or the token budget under an override.</summary>
+    /// <summary>The shortest reported quota window, or the $10 fallback budget.</summary>
     public double UsagePercent => Session?.Status is not { } s ? 0 :
-        s.HasFiveHour ? Math.Max(s.FiveHourPercent, s.HasSevenDay ? s.SevenDayPercent : 0) :
-        s.HasLongWindowOnly ? s.SevenDayPercent : s.HasTokenUsage ? s.TokenUsagePercent : 0;
+        s.HasFiveHour ? s.FiveHourPercent :
+        s.HasLongWindowOnly ? s.SevenDayPercent : s.FallbackUsagePercent;
 
     private string QuotaSummary => Session?.Status is not { } s ? "" :
-        s.HasFiveHour && s.HasSevenDay && s.SevenDayPercent > s.FiveHourPercent ? s.SevenDaySummary :
         s.HasFiveHour ? s.FiveHourSummary : s.HasLongWindowOnly ? s.SevenDaySummary :
-        s.HasTokenUsage ? s.TokenUsageSummary : "";
+        s.FallbackUsageSummary;
 
     public string UsageSummary => Session?.Status is not { } s ? "" :
         string.Join("\n", new[] { $"Context {s.ContextSummary}", QuotaSummary }.Where(t => t.Length > 0));
 
-    /// <summary>The figure inside the ring: how full the context is.</summary>
-    public string UsagePercentText => Session?.Status is { } s ? s.ContextPercentText : "0%";
+    public bool ShowCompactIcon => Session?.Status.ContextPercent >= 80;
+
+    public string UsagePercentText => $"{UsagePercent:0}%";
 
     /// <summary>What the current prompt cost of the 5-hour window: the measure of how expensive a call was.</summary>
     public string CurrentPromptText => Session?.Status is { HasFiveHour: true, CurrentPromptPercent: >= 0.05 } s
@@ -117,13 +117,13 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     /// <summary>Session cost and tokens as the CLI reports them; empty when it reports neither.</summary>
     public string SessionTotalsText => Session?.Status is not { } s ? "" : string.Join("  ·  ", new[]
     {
-        s.SessionCostUsd > 0 ? $"Session cost ${s.SessionCostUsd:0.00}" : null,
+        $"{(s.SessionCostUsd > 0 ? "Session cost" : "Estimated cost")} ${s.UsageCostUsd:0.00}",
         s.HasSessionTokens ? s.TokensText : null,
     }.Where(t => t is not null));
 
     private void OnStatusPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        foreach (var property in new[] { nameof(HasUsage), nameof(UsagePercent), nameof(UsageSummary), nameof(UsagePercentText), nameof(CurrentPromptText), nameof(SessionTotalsText), nameof(CanCompact) })
+        foreach (var property in new[] { nameof(HasUsage), nameof(UsagePercent), nameof(UsageSummary), nameof(UsagePercentText), nameof(ShowCompactIcon), nameof(CurrentPromptText), nameof(SessionTotalsText), nameof(CanCompact) })
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
     }
 
@@ -154,6 +154,20 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     {
         if (sender is FlyoutBase flyout && _flyoutToolTips.Remove(flyout, out var tooltip))
             ToolTipService.SetToolTip(tooltip.Anchor, tooltip.Content);
+    }
+
+    private void OnFallbackUsagePointerPressed(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { ActualWidth: > 0 } bar ||
+            Session?.Status is not { HasFallbackUsage: true } status) return;
+        var point = e.GetCurrentPoint(bar);
+        if (!point.Properties.IsLeftButtonPressed) return;
+        var fraction = Math.Clamp(point.Position.X / bar.ActualWidth, 0, 1);
+        var budget = bar.Tag as string == "100" ? 100m : 10m;
+        var spentUsd = decimal.Round((decimal)fraction * budget, 2);
+        if (budget == 100m) status.SetFallbackMaxUsage(spentUsd);
+        else status.SetFallbackUsage(spentUsd);
+        e.Handled = true;
     }
 
     private async void OnUsageDetailsClick(object sender, RoutedEventArgs e)

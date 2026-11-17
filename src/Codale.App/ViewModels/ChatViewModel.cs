@@ -5065,6 +5065,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         Status.ClearSessionChanges();
         _messageTokens.Clear();
         Status.SessionTokens = 0;
+        Status.SessionCostUsd = 0;
+        Status.EstimatedCostUsd = 0;
+        Status.ResetFallbackUsage();
         ResumeSessionId = null;
         ClearFeature();
     }

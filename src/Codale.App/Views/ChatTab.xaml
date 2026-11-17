@@ -2596,6 +2596,7 @@
 
                 <Border
                 x:Name="ComposerBorder"
+                Margin="0,0,0,10"
                 Padding="12,8,8,6"
                 Background="{ThemeResource ShellInputBackgroundBrush}"
                 BorderBrush="{ThemeResource ShellInputStrokeBrush}"

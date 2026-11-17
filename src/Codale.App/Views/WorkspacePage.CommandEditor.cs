@@ -14,39 +14,93 @@ public sealed partial class WorkspacePage
 {
     private async Task ShowCommandEditorAsync()
     {
-        var list = new ListView
-        {
-            MaxHeight = 140,
-            SelectionMode = ListViewSelectionMode.Single,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        };
-        ScrollViewer.SetVerticalScrollBarVisibility(list, ScrollBarVisibility.Auto);
+        var resources = Application.Current.Resources;
+        var iconStyle = (Style)resources["ShellIconButton"];
 
-        var name = new TextBox { Header = "Name", PlaceholderText = "dev server" };
+        // One compact row on top \u2014 pick a command, start a new one, delete the current one \u2014
+        // instead of a sidebar that sits mostly empty when a project has only a few commands.
+        var list = new ComboBox
+        {
+            PlaceholderText = "New command",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            MaxDropDownHeight = 260,
+        };
+
+        var newButton = new Button
+        {
+            Style = iconStyle,
+            Width = 32,
+            Height = 32,
+            Content = new FontIcon { Glyph = "\uE710", FontSize = 13 },
+        };
+        ToolTipService.SetToolTip(newButton, "New command");
+
+        var deleteLabel = new TextBlock { Text = "Delete", FontSize = 12, Visibility = Visibility.Collapsed };
+        var deleteButton = new Button
+        {
+            Style = iconStyle,
+            Width = double.NaN,
+            MinWidth = 32,
+            Height = 32,
+            Padding = new Thickness(9, 0, 9, 0),
+            Visibility = Visibility.Collapsed,
+            Content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 6,
+                Children = { new FontIcon { Glyph = "\uE74D", FontSize = 13 }, deleteLabel },
+            },
+        };
+        ToolTipService.SetToolTip(deleteButton, "Delete command");
+
+        var picker = new Grid { ColumnSpacing = 4 };
+        picker.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        picker.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        picker.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(newButton, 1);
+        Grid.SetColumn(deleteButton, 2);
+        picker.Children.Add(list);
+        picker.Children.Add(newButton);
+        picker.Children.Add(deleteButton);
+
+        var name = new TextBox
+        {
+            Header = "Name",
+            PlaceholderText = "dev server",
+        };
+
         var body = new TextBox
         {
-            Header = "Script",
+            // The header keeps the UI font; only the script itself is monospace.
+            Header = new TextBlock
+            {
+                Text = "Script",
+                FontFamily = (FontFamily)resources["ContentControlThemeFontFamily"],
+            },
             PlaceholderText = "npm run dev",
             AcceptsReturn = true,
             IsSpellCheckEnabled = false,
             TextWrapping = TextWrapping.Wrap,
             FontFamily = new FontFamily("Cascadia Mono, Consolas"),
-            Height = 140,
+            FontSize = 13,
+            MinHeight = 96,
+            MaxHeight = 220,
         };
         ScrollViewer.SetVerticalScrollBarVisibility(body, ScrollBarVisibility.Auto);
 
         var error = new TextBlock
         {
-            Foreground = (Brush)Application.Current.Resources["SystemFillColorCriticalBrush"],
+            Foreground = (Brush)resources["SystemFillColorCriticalBrush"],
             TextWrapping = TextWrapping.Wrap,
+            FontSize = 12,
             Visibility = Visibility.Collapsed,
         };
 
         var content = new StackPanel
         {
-            Width = 420,
-            Spacing = 10,
-            Children = { list, name, body, error },
+            Width = 440,
+            Spacing = 12,
+            Children = { picker, name, body, error },
         };
 
         var dialog = AppDialog.Apply(new ContentDialog
@@ -55,7 +109,6 @@ public sealed partial class WorkspacePage
             Title = "Project commands",
             Content = content,
             PrimaryButtonText = "Save",
-            SecondaryButtonText = "Delete",
             CloseButtonText = "Close",
             DefaultButton = ContentDialogButton.Primary,
         }, DialogTone.Info, AppDialog.Glyphs.Terminal);
@@ -76,7 +129,8 @@ public sealed partial class WorkspacePage
             if (deleteArmed)
             {
                 deleteArmed = false;
-                dialog.SecondaryButtonText = "Delete";
+                deleteLabel.Visibility = Visibility.Collapsed;
+                deleteButton.ClearValue(Control.ForegroundProperty);
             }
         }
 
@@ -87,28 +141,18 @@ public sealed partial class WorkspacePage
             var commands = ViewModel.SavedCommands();
             foreach (var command in commands)
             {
-                var title = new TextBlock { Text = command.Name, TextTrimming = TextTrimming.CharacterEllipsis };
-                var detail = new TextBlock
-                {
-                    Text = Detail(command),
-                    FontSize = 12,
-                    Opacity = 0.65,
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                };
-                var row = new StackPanel { Spacing = 2, Children = { title, detail } };
-                list.Items.Add(new ListViewItem { Content = row, Tag = command, Padding = new Thickness(10, 6, 10, 6) });
+                list.Items.Add(new ComboBoxItem { Content = command.Name, Tag = command });
             }
 
-            list.Visibility = commands.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-
-            if (select is not null && list.Items.OfType<ListViewItem>().FirstOrDefault(item =>
+            if (select is not null && list.Items.OfType<ComboBoxItem>().FirstOrDefault(item =>
                     item.Tag is ProjectCommand saved && string.Equals(saved.Name, select, StringComparison.OrdinalIgnoreCase)) is { } match)
             {
                 list.SelectedItem = match;
             }
 
             loading = false;
-            dialog.IsSecondaryButtonEnabled = originalName is not null;
+            list.IsEnabled = list.Items.Count > 0;
+            deleteButton.Visibility = originalName is not null ? Visibility.Visible : Visibility.Collapsed;
         }
 
         void Load(ProjectCommand? command)
@@ -117,18 +161,29 @@ public sealed partial class WorkspacePage
             originalName = command?.Name;
             name.Text = command?.Name ?? "";
             body.Text = command?.Script ?? command?.Command ?? "";
-            dialog.IsSecondaryButtonEnabled = originalName is not null;
+            deleteButton.Visibility = originalName is not null ? Visibility.Visible : Visibility.Collapsed;
             loading = false;
         }
 
         list.SelectionChanged += (_, _) =>
         {
-            if (!loading && list.SelectedItem is ListViewItem { Tag: ProjectCommand command })
-            {
-                DisarmDelete();
-                ClearError();
-                Load(command);
-            }
+            if (loading || list.SelectedItem is not ComboBoxItem item)
+                return;
+
+            DisarmDelete();
+            ClearError();
+            Load(item.Tag as ProjectCommand);
+        };
+
+        newButton.Click += (_, _) =>
+        {
+            DisarmDelete();
+            ClearError();
+            loading = true;
+            list.SelectedItem = null;
+            loading = false;
+            Load(null);
+            name.Focus(FocusState.Programmatic);
         };
 
         name.TextChanged += (_, _) => DisarmDelete();
@@ -143,6 +198,7 @@ public sealed partial class WorkspacePage
             if (edit.Command.Length == 0)
             {
                 error.Text = "Enter the command line or script to run.";
+                body.Focus(FocusState.Programmatic);
                 error.Visibility = Visibility.Visible;
                 args.Cancel = true;
                 return;
@@ -151,6 +207,7 @@ public sealed partial class WorkspacePage
             if (edit.Name.Length == 0)
             {
                 error.Text = "Give the command a name.";
+                name.Focus(FocusState.Programmatic);
                 error.Visibility = Visibility.Visible;
                 args.Cancel = true;
                 return;
@@ -171,19 +228,17 @@ public sealed partial class WorkspacePage
             }
         };
 
-        dialog.SecondaryButtonClick += (_, args) =>
+        deleteButton.Click += (_, _) =>
         {
             if (originalName is null)
-            {
-                args.Cancel = true;
                 return;
-            }
 
             if (!deleteArmed)
             {
                 deleteArmed = true;
-                args.Cancel = true;
-                dialog.SecondaryButtonText = "Delete now";
+                deleteLabel.Text = "Confirm";
+                deleteLabel.Visibility = Visibility.Visible;
+                deleteButton.Foreground = (Brush)resources["SystemFillColorCriticalBrush"];
                 return;
             }
 
@@ -195,26 +250,25 @@ public sealed partial class WorkspacePage
             {
                 error.Text = ex.Message;
                 error.Visibility = Visibility.Visible;
-                args.Cancel = true;
                 return;
             }
 
             DisarmDelete();
             Load(null);
             RefreshList(null);
-            args.Cancel = true;
+            if (list.Items.FirstOrDefault() is ComboBoxItem first)
+                list.SelectedItem = first;
+            else
+                name.Focus(FocusState.Programmatic);
         };
 
         RefreshList(null);
-        Load(null);
+        if (list.Items.FirstOrDefault() is ComboBoxItem first)
+            list.SelectedItem = first;
+        else
+            Load(null);
 
         await dialog.ShowAsync();
     }
 
-    /// <summary>The one-line summary under a saved command's name in the editor's list.</summary>
-    private static string Detail(ProjectCommand command)
-    {
-        var firstLine = (command.Script ?? command.Command).Split('\n')[0].Trim();
-        return firstLine;
-    }
 }

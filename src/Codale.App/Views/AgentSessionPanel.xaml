@@ -337,21 +337,25 @@
                                       Value="{x:Bind UsagePercent, Mode=OneWay}"
                                       Foreground="{x:Bind UsagePercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}" />
                         <TextBlock Text="{x:Bind UsagePercentText, Mode=OneWay}" FontSize="9" FontWeight="SemiBold"
+                                   Visibility="{x:Bind ShowCompactIcon, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}"
                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        <FontIcon Glyph="&#xE73F;" FontSize="12"
+                                  Visibility="{x:Bind ShowCompactIcon, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Grid>
                     <Button.Flyout>
                         <Flyout x:Name="UsageFlyout" AreOpenCloseAnimationsEnabled="False"
                                 Opening="OnDetailFlyoutOpening" Closed="OnDetailFlyoutClosed" Placement="LeftEdgeAlignedTop" FlyoutPresenterStyle="{StaticResource DetailFlyout}">
                             <!--  Each window: label and figure on one line, a flat 6px meter, then when it resets.
                                   The 5-hour meter shows the current prompt's share as a lighter tail.  -->
-                            <StackPanel Width="280" Spacing="16">
+                            <StackPanel Width="280" Spacing="8">
                                 <StackPanel Spacing="1">
                                     <TextBlock Text="Usage" FontSize="14" FontWeight="SemiBold" />
                                     <TextBlock Text="{x:Bind Session.Status.CliName, Mode=OneWay}" FontSize="11"
                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                                 </StackPanel>
 
-                                <StackPanel Spacing="6" Visibility="{x:Bind Session.Status.HasFiveHour, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel Spacing="3" Visibility="{x:Bind Session.Status.HasFiveHour, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                                     <Grid>
                                         <TextBlock Text="5-hour limit" FontSize="12" VerticalAlignment="Bottom" />
                                         <TextBlock HorizontalAlignment="Right" FontSize="13" FontWeight="SemiBold"
@@ -377,11 +381,9 @@
                                         <TextBlock Grid.Column="1" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                                    Text="{x:Bind CurrentPromptText, Mode=OneWay}" />
                                     </Grid>
-                                    <TextBlock FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                               Text="{x:Bind Session.Status.CurrentTurnUsageText, Mode=OneWay}" />
                                 </StackPanel>
 
-                                <StackPanel Spacing="6" Visibility="{x:Bind Session.Status.HasSevenDay, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel Spacing="3" Visibility="{x:Bind Session.Status.HasSevenDay, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                                     <Grid>
                                         <TextBlock Text="{x:Bind Session.Status.LongWindowLabel, Mode=OneWay}" FontSize="12" VerticalAlignment="Bottom" />
                                         <TextBlock HorizontalAlignment="Right" FontSize="13" FontWeight="SemiBold"
@@ -398,7 +400,46 @@
                                                Text="{x:Bind Session.Status.SevenDayResetText, Mode=OneWay}" />
                                 </StackPanel>
 
-                                <StackPanel Spacing="6">
+                                <StackPanel Spacing="3" Visibility="{x:Bind Session.Status.HasFallbackUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                    <Grid>
+                                        <TextBlock Text="Usage budget ($10)" FontSize="12" />
+                                        <TextBlock HorizontalAlignment="Right" FontSize="11"
+                                                   Text="{x:Bind Session.Status.FallbackUsageSummary, Mode=OneWay}" />
+                                    </Grid>
+                                    <Grid Height="6" CornerRadius="3" Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                          Tag="10" PointerPressed="OnFallbackUsagePointerPressed"
+                                          ToolTipService.ToolTip="Click the bar to set current usage">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="{x:Bind Star(Session.Status.FallbackUsagePercent), Mode=OneWay}" />
+                                            <ColumnDefinition Width="{x:Bind Remainder(Session.Status.FallbackUsagePercent), Mode=OneWay}" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border CornerRadius="3" Background="{x:Bind Session.Status.FallbackUsagePercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}" />
+                                    </Grid>
+                                </StackPanel>
+
+                                <StackPanel Spacing="3" Visibility="{x:Bind Session.Status.HasFallbackUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                    <Grid>
+                                        <TextBlock Text="Maximum budget ($100)" FontSize="12" />
+                                        <TextBlock HorizontalAlignment="Right" FontSize="11"
+                                                   Text="{x:Bind Session.Status.FallbackMaxUsageSummary, Mode=OneWay}" />
+                                    </Grid>
+                                    <Grid Height="6" CornerRadius="3" Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                          Tag="100" PointerPressed="OnFallbackUsagePointerPressed"
+                                          ToolTipService.ToolTip="Click the bar to set current usage">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="{x:Bind Star(Session.Status.FallbackMaxUsagePercent), Mode=OneWay}" />
+                                            <ColumnDefinition Width="{x:Bind Remainder(Session.Status.FallbackMaxUsagePercent), Mode=OneWay}" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border CornerRadius="3" Background="{x:Bind Session.Status.FallbackMaxUsagePercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}" />
+                                    </Grid>
+                                </StackPanel>
+
+                                <TextBlock Text="$2 input / $10 output per 1M tokens"
+                                           ToolTipService.ToolTip="Click a budget bar to set current spending. Further session costs add to it."
+                                           FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           Visibility="{x:Bind Session.Status.HasFallbackUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+
+                                <StackPanel Spacing="3">
                                     <Grid>
                                         <TextBlock Text="Current context" FontSize="12" VerticalAlignment="Bottom" />
                                         <TextBlock HorizontalAlignment="Right" FontSize="13" FontWeight="SemiBold"
@@ -430,7 +471,7 @@
                                 </StackPanel>
 
                                 <!--  Footer: session totals and the provider's own usage page, under a hairline.  -->
-                                <StackPanel Spacing="8">
+                                <StackPanel Spacing="4">
                                     <Border Height="1" Margin="0,0,0,2" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
                                     <Grid ColumnSpacing="8">
                                         <Grid.ColumnDefinitions>
