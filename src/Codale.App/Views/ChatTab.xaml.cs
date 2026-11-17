@@ -183,13 +183,9 @@ public sealed partial class ChatTab : UserControl
 
         Loaded += (_, _) =>
         {
-            UpdateStopPulse();
             _pinnedToBottom = true;
             FollowTranscriptEnd();
         };
-        Unloaded += (_, _) =>
-            // A background tab's forever storyboard would still tick every frame.
-            StopStopPulse();
     }
 
     private static readonly TimeSpan DoubleEscapeWindow = TimeSpan.FromMilliseconds(600);
@@ -247,7 +243,6 @@ public sealed partial class ChatTab : UserControl
             _pinnedToBottom = true;
             SessionPanel.Session = value;
             Bindings.Update();
-            UpdateStopPulse();
             FollowTranscriptEnd();
         }
     }
@@ -266,65 +261,11 @@ public sealed partial class ChatTab : UserControl
 
     private void OnFeatureJumpStayClick(object sender, RoutedEventArgs e) => AnswerFeatureJump(sender, FeatureJumpChoice.Stay);
 
-    private Storyboard? _stopPulse;
-
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is null or nameof(ChatViewModel.IsBusy) or nameof(ChatViewModel.ShowStop))
-        {
-            UpdateStopPulse();
-        }
-
         if (e.PropertyName is null or nameof(ChatViewModel.Draft))
         {
             ShowViewModelDraft();
-        }
-    }
-
-    /// <summary>
-    /// The stop button breathes red for as long as it is offered - the turn runs, or a
-    /// background subagent is still working after it - a call to act that stays visible
-    /// without shouting. Built in code because the animated target is the brush resource itself.
-    /// </summary>
-    private void UpdateStopPulse()
-    {
-        if (ViewModel?.ShowStop is true && IsLoaded)
-        {
-            if (_stopPulse is not null)
-            {
-                return;
-            }
-
-            var fade = new DoubleAnimation
-            {
-                From = 0.15,
-                To = 0.85,
-                Duration = new Duration(TimeSpan.FromMilliseconds(800)),
-            };
-            Storyboard.SetTarget(fade, StopPulse);
-            Storyboard.SetTargetProperty(fade, "Opacity");
-
-            _stopPulse = new Storyboard
-            {
-                AutoReverse = true,
-                RepeatBehavior = RepeatBehavior.Forever,
-            };
-            _stopPulse.Children.Add(fade);
-            _stopPulse.Begin();
-        }
-        else
-        {
-            StopStopPulse();
-        }
-    }
-
-    private void StopStopPulse()
-    {
-        if (_stopPulse is not null)
-        {
-            _stopPulse.Stop();
-            _stopPulse = null;
-            StopPulse.Opacity = 0;
         }
     }
 

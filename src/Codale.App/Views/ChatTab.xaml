@@ -12,8 +12,6 @@
     mc:Ignorable="d">
 
     <UserControl.Resources>
-        <!--  The stop button's pulse: animated from code-behind while a turn runs.  -->
-
         <views:BoolToVisibilityConverter x:Key="BoolToVisibility" />
         <views:NotBoolConverter x:Key="NotBool" />
         <views:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility" />
@@ -2311,20 +2309,16 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
-                <Border
-                    Width="18"
-                    Height="18"
+                <ProgressRing
+                    Width="16"
+                    Height="16"
+                    MinWidth="0"
+                    MinHeight="0"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
-                    CornerRadius="9"
-                    Background="{StaticResource StatusRunningTintBrush}"
-                    Visibility="{x:Bind ViewModel.IsWorkingOnItsOwn, Mode=OneWay}">
-                    <Ellipse
-                        Width="8"
-                        Height="8"
-                        Fill="{StaticResource StatusRunningBrush}"
-                        views:Pulse.IsActive="{x:Bind ViewModel.IsBusyWorking, Mode=OneWay}" />
-                </Border>
+                    Foreground="{StaticResource StatusRunningBrush}"
+                    IsActive="{x:Bind ViewModel.IsBusyWorking, Mode=OneWay}"
+                    Visibility="{x:Bind ViewModel.IsWorkingOnItsOwn, Mode=OneWay}" />
                 <Border
                     Width="18"
                     Height="18"
@@ -2336,8 +2330,7 @@
                     <Ellipse
                         Width="8"
                         Height="8"
-                        Fill="{StaticResource StatusWarnBrush}"
-                        views:Pulse.IsActive="{x:Bind ViewModel.IsWaitingForYou, Mode=OneWay}" />
+                        Fill="{StaticResource StatusWarnBrush}" />
                 </Border>
 
                 <!--  Inline runs share a baseline across the label, mono timer and detail.  -->
@@ -2812,8 +2805,7 @@
                                 <FontIcon FontSize="14" Glyph="&#xE74A;" />
                             </Button>
                             <Grid Visibility="{x:Bind ViewModel.ShowStop, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                <!-- Opacity is animated on the compositor; animating a brush colour redraws on the UI thread every frame. -->
-                                <Border x:Name="StopPulse" Width="32" Height="32" CornerRadius="16" IsHitTestVisible="False" Opacity="0"
+                                <Border Width="32" Height="32" CornerRadius="16" IsHitTestVisible="False" Opacity="0.85"
                                         Background="#CD5C5C" />
                             <Button
                                 Width="32"
@@ -2824,7 +2816,8 @@
                                 Style="{StaticResource ComposerIconButton}"
                                 ToolTipService.ToolTip="Stop the current turn"
                                 >
-                                <FontIcon FontSize="14" Glyph="&#xE71A;" />
+                                <Rectangle Width="10" Height="10" RadiusX="1" RadiusY="1"
+                                           Fill="{ThemeResource TextFillColorPrimaryBrush}" />
                             </Button>
                             </Grid>
                         </StackPanel>

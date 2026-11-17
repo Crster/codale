@@ -128,9 +128,37 @@ public static class KeywordHighlight
         canvas.Children.Clear();
         var wanted = (GetLines(text) ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
             .Select(value => int.TryParse(value, out var line) ? line : -1).ToHashSet();
-        EmphasizeGutter(host, text, wanted);
         var content = text.Text;
-        if (string.IsNullOrEmpty(content) || text.ActualWidth <= 0 || text.ActualHeight <= 0 || canvas.ActualWidth <= 0)
+        var laidOut = !string.IsNullOrEmpty(content) && text.ActualWidth > 0 && text.ActualHeight > 0;
+
+        // Long lines wrap, so a source line can span several visual rows: measure where
+        // each one starts and ends to size its band and pad the gutter beside it.
+        var tops = new List<double>();
+        var heights = new List<double>();
+        if (laidOut)
+        {
+            var lineHeight = CharacterRect(0).Height;
+            var start = 0;
+            while (true)
+            {
+                tops.Add(CharacterRect(start).Y);
+                var end = content.IndexOf('\n', start);
+                if (end < 0) break;
+                start = end + 1;
+            }
+            var bottom = Math.Max(tops[^1] + lineHeight, CharacterRect(content.Length, LogicalDirection.Backward).Bottom);
+            for (var i = 0; i < tops.Count; i++)
+                heights.Add(Math.Max(lineHeight, (i + 1 < tops.Count ? tops[i + 1] : bottom) - tops[i]));
+            LayoutGutter(host, text, wanted, lineHeight > 0
+                ? heights.Select(height => Math.Max(1, (int)Math.Round(height / lineHeight))).ToArray()
+                : null);
+        }
+        else
+        {
+            LayoutGutter(host, text, wanted, null);
+        }
+
+        if (!laidOut || canvas.ActualWidth <= 0)
             return;
         canvas.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, canvas.ActualWidth, canvas.ActualHeight) };
         var offset = text.TransformToVisual(canvas).TransformPoint(new Windows.Foundation.Point(0, 0));
@@ -138,22 +166,13 @@ public static class KeywordHighlight
         var matchBrush = new SolidColorBrush(SearchHighlightStyle.Match(light));
         var rowBrush = new SolidColorBrush(SearchHighlightStyle.Row(light));
         var edgeBrush = new SolidColorBrush(SearchHighlightStyle.RowEdge(light));
-        var start = 0;
-        var lineNo = 0;
-        while (start <= content.Length)
+        for (var lineNo = 0; lineNo < tops.Count; lineNo++)
         {
-            var end = content.IndexOf('\n', start);
-            if (end < 0) end = content.Length;
-            if (wanted.Contains(lineNo))
-            {
-                var rect = CharacterRect(start);
-                var top = offset.Y + rect.Y;
-                Place(0, top, canvas.ActualWidth, rect.Height, rowBrush);
-                Place(0, top, SearchHighlightStyle.RowEdgeWidth, rect.Height, edgeBrush);
-            }
-            if (end == content.Length) break;
-            start = end + 1;
-            lineNo++;
+            if (!wanted.Contains(lineNo))
+                continue;
+            var top = offset.Y + tops[lineNo];
+            Place(0, top, canvas.ActualWidth, heights[lineNo], rowBrush);
+            Place(0, top, SearchHighlightStyle.RowEdgeWidth, heights[lineNo], edgeBrush);
         }
 
         var claimed = new bool[content.Length];
@@ -192,27 +211,47 @@ public static class KeywordHighlight
         }
     }
 
-    /// <summary>The gutter's numbers for matched rows in the code's full-contrast colour; the rest stay dimmed.</summary>
-    private static void EmphasizeGutter(Grid host, TextBlock code, HashSet<int> lines)
+    // The gutter's bound numbers, and the padded text last written over them; a Text that
+    // differs from the padded one is a fresh binding and becomes the new source.
+    private static readonly DependencyProperty GutterSourceProperty = DependencyProperty.RegisterAttached(
+        "GutterSource", typeof(string), typeof(KeywordHighlight), new PropertyMetadata(null));
+    private static readonly DependencyProperty GutterShownProperty = DependencyProperty.RegisterAttached(
+        "GutterShown", typeof(string), typeof(KeywordHighlight), new PropertyMetadata(null));
+
+    /// <summary>
+    /// Pads the gutter with blank rows so each number sits beside the first row of its
+    /// (possibly wrapped) line, and shows matched numbers in the code's full-contrast
+    /// colour; the rest stay dimmed.
+    /// </summary>
+    private static void LayoutGutter(Grid host, TextBlock code, HashSet<int> lines, int[]? rows)
     {
         if (host.Children.OfType<Border>().FirstOrDefault()?.Child is not TextBlock gutter)
             return;
+        if (gutter.Text != (string?)gutter.GetValue(GutterShownProperty))
+            gutter.SetValue(GutterSourceProperty, gutter.Text);
+        var source = (string?)gutter.GetValue(GutterSourceProperty);
         gutter.TextHighlighters.Clear();
-        var content = gutter.Text;
-        if (string.IsNullOrEmpty(content) || lines.Count == 0)
+        if (string.IsNullOrEmpty(source))
             return;
+
         var highlighter = new TextHighlighter { Foreground = code.Foreground, Background = Transparent };
-        var start = 0;
-        var lineNo = 0;
-        while (start < content.Length)
+        var shown = new System.Text.StringBuilder(source.Length);
+        var numbers = source.Split('\n');
+        for (var lineNo = 0; lineNo < numbers.Length; lineNo++)
         {
-            var end = content.IndexOf('\n', start);
-            if (end < 0) end = content.Length;
-            if (lines.Contains(lineNo) && end > start)
-                highlighter.Ranges.Add(new TextRange { StartIndex = start, Length = end - start });
-            start = end + 1;
-            lineNo++;
+            if (lineNo > 0)
+                shown.Append('\n');
+            if (lines.Contains(lineNo) && numbers[lineNo].Length > 0)
+                highlighter.Ranges.Add(new TextRange { StartIndex = shown.Length, Length = numbers[lineNo].Length });
+            shown.Append(numbers[lineNo]);
+            if (rows is not null && lineNo < rows.Length && rows[lineNo] > 1)
+                shown.Append('\n', rows[lineNo] - 1);
         }
+
+        var padded = shown.ToString();
+        gutter.SetValue(GutterShownProperty, padded);
+        if (gutter.Text != padded)
+            gutter.Text = padded;
         if (highlighter.Ranges.Count > 0)
             gutter.TextHighlighters.Add(highlighter);
     }

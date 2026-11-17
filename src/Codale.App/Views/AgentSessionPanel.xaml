@@ -343,7 +343,7 @@
                         <Flyout x:Name="UsageFlyout" AreOpenCloseAnimationsEnabled="False"
                                 Opening="OnDetailFlyoutOpening" Closed="OnDetailFlyoutClosed" Placement="LeftEdgeAlignedTop" FlyoutPresenterStyle="{StaticResource DetailFlyout}">
                             <!--  Each window: label and figure on one line, a flat 6px meter, then when it resets.
-                                  The 5-hour meter shows the latest prompt's share as a lighter tail.  -->
+                                  The 5-hour meter shows the current prompt's share as a lighter tail.  -->
                             <StackPanel Width="280" Spacing="16">
                                 <StackPanel Spacing="1">
                                     <TextBlock Text="Usage" FontSize="14" FontWeight="SemiBold" />
@@ -360,7 +360,7 @@
                                     <Grid Height="6" CornerRadius="3" Background="{ThemeResource ControlFillColorSecondaryBrush}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="{x:Bind Star(Session.Status.PreviousFiveHourPercent), Mode=OneWay}" />
-                                            <ColumnDefinition Width="{x:Bind Star(Session.Status.LastPromptPercent), Mode=OneWay}" />
+                                            <ColumnDefinition Width="{x:Bind Star(Session.Status.CurrentPromptPercent), Mode=OneWay}" />
                                             <ColumnDefinition Width="{x:Bind Remainder(Session.Status.FiveHourPercent), Mode=OneWay}" />
                                         </Grid.ColumnDefinitions>
                                         <Border CornerRadius="3,0,0,3" Background="{x:Bind Session.Status.FiveHourPercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}" />
@@ -375,9 +375,10 @@
                                         <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                                    Text="{x:Bind Session.Status.FiveHourResetText, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
                                         <TextBlock Grid.Column="1" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                   Text="{x:Bind LastPromptText, Mode=OneWay}"
-                                                   ToolTipService.ToolTip="Share of the 5-hour window the latest prompt spent (the lighter end of the bar)" />
+                                                   Text="{x:Bind CurrentPromptText, Mode=OneWay}" />
                                     </Grid>
+                                    <TextBlock FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="{x:Bind Session.Status.CurrentTurnUsageText, Mode=OneWay}" />
                                 </StackPanel>
 
                                 <StackPanel Spacing="6" Visibility="{x:Bind Session.Status.HasSevenDay, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
@@ -803,7 +804,7 @@
                                             <Grid ColumnSpacing="10" Background="Transparent">
                                                 <Grid.ContextFlyout>
                                                     <MenuFlyout>
-                                                        <MenuFlyoutItem Text="Download…" Tag="{x:Bind}" Click="OnSaveArtifactClick">
+                                                        <MenuFlyoutItem Text="Downloadï¿½" Tag="{x:Bind}" Click="OnSaveArtifactClick">
                                                             <MenuFlyoutItem.Icon>
                                                                 <FontIcon Glyph="&#xE896;" />
                                                             </MenuFlyoutItem.Icon>

@@ -75,6 +75,8 @@ public sealed partial class StatusViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasUsageMeter))]
     public partial int ContextTokens { get; set; }
 
+    partial void OnContextTokensChanged(int value) => OnPropertyChanged(nameof(CurrentTurnUsageText));
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ContextText))]
     [NotifyPropertyChangedFor(nameof(ContextSummary))]
@@ -95,7 +97,7 @@ public sealed partial class StatusViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasUsageMeter))]
     [NotifyPropertyChangedFor(nameof(FiveHourPercent))]
     [NotifyPropertyChangedFor(nameof(PreviousFiveHourPercent))]
-    [NotifyPropertyChangedFor(nameof(LastPromptPercent))]
+    [NotifyPropertyChangedFor(nameof(CurrentPromptPercent))]
     [NotifyPropertyChangedFor(nameof(FiveHourText))]
     [NotifyPropertyChangedFor(nameof(FiveHourSummary))]
     [NotifyPropertyChangedFor(nameof(UsageSummary))]
@@ -274,23 +276,43 @@ public sealed partial class StatusViewModel : ObservableObject
     public double FiveHourPercent => Math.Clamp((FiveHourUtilization ?? 0) * 100, 0, 100);
 
     private double? _promptBaseline;
+    private int _turnContextBaseline;
+    private UsageSnapshot? _turnUsage;
 
-    /// <summary>Marks the 5-hour usage so far as history; what is spent after this is the latest prompt's.</summary>
+    public string CurrentTurnUsageText
+    {
+        get
+        {
+            if (_promptBaseline is null) return "";
+            var delta = ContextTokens - _turnContextBaseline;
+            var context = $"Context {delta:+#,0;-#,0;0}";
+            if (_turnUsage is not { } usage) return context;
+            var cache = usage.CacheUsageReported || usage.CacheReadInputTokens > 0
+                ? $"{usage.CacheReadInputTokens:N0} cached"
+                : "cache unavailable";
+            return $"↑ {usage.ContextTokens:N0} in · ↓ {usage.OutputTokens:N0} out\n{cache} · {context}";
+        }
+    }
+
+    /// <summary>Marks the 5-hour usage so far as history; what is spent after this is the current prompt's.</summary>
     public void BeginPrompt()
     {
         _promptBaseline = FiveHourPercent;
+        _turnContextBaseline = ContextTokens;
+        _turnUsage = null;
+        OnPropertyChanged(nameof(CurrentTurnUsageText));
         OnPropertyChanged(nameof(PreviousFiveHourPercent));
-        OnPropertyChanged(nameof(LastPromptPercent));
+        OnPropertyChanged(nameof(CurrentPromptPercent));
     }
 
     /// <summary>
-    /// The 5-hour usage before the latest prompt (the whole bar once the window has rolled over).
+    /// The 5-hour usage before the current prompt (the whole bar once the window has rolled over).
     /// Before any prompt in this run there is no baseline, so all usage counts as history.
     /// </summary>
     public double PreviousFiveHourPercent => Math.Min(_promptBaseline ?? FiveHourPercent, FiveHourPercent);
 
-    /// <summary>The share of the 5-hour window the latest prompt spent.</summary>
-    public double LastPromptPercent => FiveHourPercent - PreviousFiveHourPercent;
+    /// <summary>The share of the 5-hour window the current prompt spent.</summary>
+    public double CurrentPromptPercent => FiveHourPercent - PreviousFiveHourPercent;
 
     public double SevenDayPercent => Math.Clamp((SevenDayUtilization ?? 0) * 100, 0, 100);
 
@@ -336,6 +358,8 @@ public sealed partial class StatusViewModel : ObservableObject
 
     public void Apply(TurnCompleted turn)
     {
+        _turnUsage = turn.Usage;
+        OnPropertyChanged(nameof(CurrentTurnUsageText));
         if (turn.ContextWindow is { } window)
         {
             ContextWindow = window;

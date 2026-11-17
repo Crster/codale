@@ -103,9 +103,9 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     /// <summary>The figure inside the ring: how full the context is.</summary>
     public string UsagePercentText => Session?.Status is { } s ? s.ContextPercentText : "0%";
 
-    /// <summary>What the latest prompt cost of the 5-hour window: the measure of how expensive a call was.</summary>
-    public string LastPromptText => Session?.Status is { HasFiveHour: true, LastPromptPercent: >= 0.05 } s
-        ? $"Last prompt +{s.LastPromptPercent:0.#}%"
+    /// <summary>What the current prompt cost of the 5-hour window: the measure of how expensive a call was.</summary>
+    public string CurrentPromptText => Session?.Status is { HasFiveHour: true, CurrentPromptPercent: >= 0.05 } s
+        ? $"This turn +{s.CurrentPromptPercent:0.#}%"
         : "";
 
     /// <summary>A usage meter segment: a share of 0-100 as a star column width.</summary>
@@ -123,7 +123,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void OnStatusPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        foreach (var property in new[] { nameof(HasUsage), nameof(UsagePercent), nameof(UsageSummary), nameof(UsagePercentText), nameof(LastPromptText), nameof(SessionTotalsText), nameof(CanCompact) })
+        foreach (var property in new[] { nameof(HasUsage), nameof(UsagePercent), nameof(UsageSummary), nameof(UsagePercentText), nameof(CurrentPromptText), nameof(SessionTotalsText), nameof(CanCompact) })
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
     }
 
