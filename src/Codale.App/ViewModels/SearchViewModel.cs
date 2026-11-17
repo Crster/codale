@@ -234,6 +234,10 @@ public sealed partial class SearchViewModel : ObservableObject
                 // A references lookup lists every user, not the best few.
                 Knowledge = _knowledge,
                 UseSemanticSearch = !keywordOnly,
+                // Short code or a name typed as-is is ranked by keyword likeness in chain order over the
+                // source and semantic indexes; anything else is ranked the way context enrichment ranks a prompt.
+                ExactKeywordFirst = true,
+                FuseLikeContext = true,
                 MaxRankedResults = keywordOnly ? 40 : 12,
                 MaxRelated = naturalLanguage ? 4 : 0,
             };
@@ -252,6 +256,7 @@ public sealed partial class SearchViewModel : ObservableObject
             Show(final);
 
             var count = final.Files.Count;
+            var exact = final.IsExact;
             Status = (count switch
             {
                 0 => "Nothing found",
@@ -259,7 +264,7 @@ public sealed partial class SearchViewModel : ObservableObject
                 _ => $"{count} files",
             }) +
                      $" · {clock.Elapsed.TotalSeconds:0.0}s" +
-                     (!keywordOnly && model is null ? " · local search" : "") +
+                     (exact ? " · exact match" : !keywordOnly && model is null ? " · local search" : "") +
                      (wantsEditLocation && count > 0 && !final.Files.Any(f => f.Confirmed)
                          ? " · edit location not confirmed" : "");
         }

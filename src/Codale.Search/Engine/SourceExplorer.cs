@@ -62,6 +62,25 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
     /// <summary>How many related files (definitions used, callers) join the matches.</summary>
     public int MaxRelated { get; init; } = 4;
 
+    /// <summary>
+    /// A short keyword query (<c>public static void</c>, <c>RetryPolicy</c>) searches the source index and the
+    /// knowledge index's semantic search together and ranks by keyword likeness in chain order (the whole run,
+    /// then shorter runs, then the words apart, then semantic hits); only when neither holds anything is it interpreted.
+    /// </summary>
+    public bool ExactKeywordFirst { get; init; }
+
+    /// <summary>How many files an exact keyword search lists.</summary>
+    public int MaxExactResults { get; init; } = 40;
+
+    /// <summary>
+    /// Rank the way context enrichment does - the source and knowledge indexes vote by reciprocal rank and a
+    /// file one of them alone found must cover enough of the query - instead of listing semantic hits first.
+    /// </summary>
+    public bool FuseLikeContext { get; init; }
+
+    /// <summary>A fused file is listed while it scores this share of the leader; looser than enrichment's prompt hints.</summary>
+    private const double FusedFloor = 0.3;
+
     /// <summary>Raised with provisional results, then with each round's refinement.</summary>
     public event EventHandler<DiscoveryResult>? Progress;
 
@@ -78,10 +97,25 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
     public async Task<DiscoveryResult> RunAsync(string query, CancellationToken ct = default)
     {
         var snapshot = await _index.GetSnapshotAsync(ct).ConfigureAwait(false);
+        if (ExactKeywordFirst && SearchQueryIntent.IsShortKeywordQuery(query) &&
+            await ChainSearchAsync(snapshot, query.Trim(), ct).ConfigureAwait(false) is { } chained)
+        {
+            return chained;
+        }
+
         var literal = LiteralPhrase(snapshot, query);
         var result = await RunCoreAsync(query, snapshot, literal, ct).ConfigureAwait(false);
         return literal is null ? result : WithLiteralFirst(snapshot, result, literal);
     }
+
+    /// <summary>The files in <paramref name="ids"/>, the ones the term ranks first.</summary>
+    private static List<Ranked> LiteralRanking(SourceSnapshot snapshot, ResolvedTerm term, IReadOnlySet<int> ids, int max) =>
+        Rank(snapshot, [term], [], setup: false)
+            .Where(r => ids.Contains(snapshot.IdOf(r.File)))
+            .Concat(ids.Select(id => new Ranked(snapshot.Files[id])))
+            .DistinctBy(r => r.File.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .Take(max)
+            .ToList();
 
     private const int MaxLiteralFiles = 6;
 
@@ -110,13 +144,7 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
     /// </summary>
     private static DiscoveryResult WithLiteralFirst(SourceSnapshot snapshot, DiscoveryResult result, ResolvedTerm literal)
     {
-        var ids = literal.PhraseFiles!;
-        var ranked = Rank(snapshot, [literal], [], setup: false)
-            .Where(r => ids.Contains(snapshot.IdOf(r.File)))
-            .Concat(ids.Select(id => new Ranked(snapshot.Files[id])))
-            .DistinctBy(r => r.File.RelativePath, StringComparer.OrdinalIgnoreCase)
-            .Take(MaxLiteralFiles)
-            .ToList();
+        var ranked = LiteralRanking(snapshot, literal, literal.PhraseFiles!, MaxLiteralFiles);
 
         var existing = result.Files.ToDictionary(f => f.RelativePath, StringComparer.OrdinalIgnoreCase);
         var lead = new List<DiscoveredFile>();
@@ -160,7 +188,35 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
         var question = Resolve(snapshot, questionTerms);
         var instant = Rank(snapshot, question, [], setup);
         var enriched = false;
-        if (Knowledge is not null && UseSemanticSearch)
+        if (Knowledge is not null && UseSemanticSearch && FuseLikeContext)
+        {
+            // The ranking context enrichment uses: a file leads when both indexes agree on it, or when it
+            // holds enough of the query's own words - not because it is merely near in meaning.
+            var fusion = await PromptFileLocator.FuseAsync(_index.Root, query, snapshot, Knowledge, null, null, null, ct).ConfigureAwait(false);
+            var lexical = instant.DistinctBy(r => r.File).ToDictionary(r => r.File);
+            var retrieved = fusion.Files
+                .Where(f => f.Supported && f.Score >= fusion.Best * FusedFloor)
+                .Take(MaxRankedResults)
+                .Select(f =>
+                {
+                    var ranked = lexical.GetValueOrDefault(f.File) ?? new Ranked(f.File);
+                    ranked.SemanticLine ??= f.ChunkLine;
+                    return ranked;
+                })
+                .ToList();
+            if (retrieved.Count > 0)
+            {
+                enriched = true;
+                // The fused list is the result, as it is for enrichment: the plain lexical tail is what
+                // the gate turned down (tests, docs, files sharing one common word).
+                instant = retrieved;
+                // Mark lines with the joined names enrichment found too ("status bar" is StatusBar).
+                question = [.. question, .. fusion.LineTerms.Where(t =>
+                    !Regex.IsMatch(query, $@"\b{Regex.Escape(t.Term.Text)}\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) &&
+                    question.All(q => !string.Equals(q.Term.Text, t.Term.Text, StringComparison.OrdinalIgnoreCase)))];
+            }
+        }
+        else if (Knowledge is not null && UseSemanticSearch)
         {
             // Search committed, hash-verified chunks just as context enrichment does.
             // Search warms the index itself; cold model loading and full refreshes must

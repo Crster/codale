@@ -347,9 +347,34 @@ public sealed partial class ChatViewModel
         name.Equals("Read", StringComparison.OrdinalIgnoreCase) || name.Contains("read_file", StringComparison.OrdinalIgnoreCase) ||
         name.Contains("readfile", StringComparison.OrdinalIgnoreCase) || name.Equals("view", StringComparison.OrdinalIgnoreCase);
 
-    private void IndexWrittenFile(string path)
+    /// <summary>Files the agent wrote this turn, recorded on the history once the turn ends.</summary>
+    private readonly HashSet<string> _pendingIndexPaths = new(StringComparer.OrdinalIgnoreCase);
+    private Codale.Search.ProjectKnowledgeIndex? _heldIndex;
+
+    private void IndexWrittenFile(string path) => _pendingIndexPaths.Add(path);
+
+    partial void OnIsBusyChanged(bool value) => HoldIndexForTurn(value);
+
+    /// <summary>
+    /// A running turn holds the project index still: the agent's writes are taken in once, when it ends,
+    /// rather than re-indexed after every edit.
+    /// </summary>
+    private void HoldIndexForTurn(bool busy)
     {
-        if (FeatureId is { } id) Features?.IndexFile(id, path);
+        if (busy)
+        {
+            if (_heldIndex is not null || Features?.Knowledge is not { } knowledge) return;
+            _heldIndex = knowledge;
+            knowledge.BeginAgentTurn(ProjectPath);
+            return;
+        }
+
+        if (FeatureId is { } id && Features is { } features)
+            foreach (var path in _pendingIndexPaths) features.IndexFile(id, path);
+        _pendingIndexPaths.Clear();
+        if (_heldIndex is not { } held) return;
+        _heldIndex = null;
+        held.EndAgentTurn(ProjectPath);
     }
 
     // Final answers are lifted out of the activity timeline for both Claude and Codex.

@@ -83,6 +83,42 @@ public static partial class PromptFileLocator
         if (strategy == LocatorStrategy.Cascade)
             return await CascadeAsync(root, text, snapshot, knowledge, knownFiles, smart, trace, ct).ConfigureAwait(false);
 
+        var fused = await FuseAsync(root, text, snapshot, knowledge, knownFiles, smart, trace, ct).ConfigureAwait(false);
+        if (fused.Files.Count == 0) return Empty;
+        var best = fused.Best;
+        var output = new StringBuilder();
+        var files = new List<string>();
+        foreach (var candidate in fused.Files)
+        {
+            if (files.Count == MaxFiles || candidate.Score < best * Floor) break;
+            if (!candidate.Supported) continue;
+            if (!File.Exists(candidate.File.FullPath)) continue;
+            if (Entry(candidate.File, candidate.Path, fused.LineTerms, fused.Chunks.GetValueOrDefault(candidate.Path)) is not { } entry) continue;
+            if (Encoding.UTF8.GetByteCount(output.ToString() + entry) > MaxBytes) break;
+            output.Append(entry);
+            files.Add(candidate.Path);
+        }
+
+        return files.Count == 0 ? Empty : new(
+            "Likely edit sites, from a local search of the project (path:lines | matched words, then the matching lines). " +
+            "These are candidate references, not verified edit sites; check their relevance and search beyond them as needed.\n" + output + "\n", files);
+    }
+
+    /// <summary>One file of the fused ranking: its score, whether more than one retriever (or enough of the prompt) backs it, and the index's best chunk.</summary>
+    internal sealed record FusedFile(SourceFile File, string Path, double Score, bool Supported, int? ChunkLine);
+
+    /// <summary>The fused ranking, best first, with the terms that mark each file's lines.</summary>
+    internal sealed record Fusion(IReadOnlyList<FusedFile> Files, IReadOnlyList<SourceExplorer.ResolvedTerm> LineTerms,
+        IReadOnlyDictionary<string, SourceChunk> Chunks, double Best);
+
+    /// <summary>
+    /// The ranking context enrichment uses: the source index, the knowledge index and (when a model is given) the
+    /// names it expects vote by reciprocal rank; tests, docs and data files only when the prompt is about them.
+    /// Global search shares it so a query there finds what the same words would in a chat prompt.
+    /// </summary>
+    internal static async Task<Fusion> FuseAsync(string root, string text, SourceSnapshot snapshot,
+        ProjectKnowledgeIndex? knowledge, IReadOnlySet<string>? knownFiles, ISmartExperience? smart, Action<Trace>? trace, CancellationToken ct)
+    {
         // The knowledge index runs beside the lexical pass; it may wait briefly for a refresh.
         var clock = Stopwatch.StartNew();
         var indexed = knowledge is null ? null : Task.Run(() => SafeSearch(knowledge, root, text), ct);
@@ -146,7 +182,7 @@ public static partial class PromptFileLocator
         Fuse(expanded.Select(r => r.File.RelativePath), 0.5);
         Fuse(expandedChunks.Select(c => c.Path), 0.35);
         foreach (var path in scores.Keys.Where(ExplicitPath).ToList()) scores[path] *= 2;
-        if (scores.Count == 0) return Empty;
+        if (scores.Count == 0) return new([], [], new Dictionary<string, SourceChunk>(), 0);
         // A file linked to a leading one counts as a second retriever's vote.
         if (knowledge is not null)
             foreach (var path in FollowGraph(knowledge, root, scores, Eligible)) votes[path] = votes.GetValueOrDefault(path) + 1;
@@ -160,27 +196,20 @@ public static partial class PromptFileLocator
             (words.Count > 0 && covered.GetValueOrDefault(path) >= Math.Min(MinCoverage * words.Count, MinCoveredWords)) ||
             (expansionTerms.Count > 0 && named.GetValueOrDefault(path) >= Math.Max(1, Math.Min(MinCoverage * expansionTerms.Count, MinCoveredWords)));
 
-        var best = scores.Values.Max();
         var lineTerms = promptTerms.Concat(expansionTerms).ToList();
         var bestChunk = chunks.Concat(expandedChunks).GroupBy(c => Normal(c.Path), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
-        var output = new StringBuilder();
-        var files = new List<string>();
+        var byPath = new Dictionary<string, SourceFile>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in snapshot.Files) byPath.TryAdd(Normal(file.RelativePath), file);
+
+        var ranked = new List<FusedFile>();
         foreach (var (path, score) in scores.OrderByDescending(s => s.Value))
         {
-            if (files.Count == MaxFiles || score < best * Floor) break;
-            if (!Supported(path)) continue;
-            var file = snapshot.Files.FirstOrDefault(f => Normal(f.RelativePath).Equals(path, StringComparison.OrdinalIgnoreCase));
-            if (file is null || !File.Exists(file.FullPath)) continue;
-            if (Entry(file, path, lineTerms, bestChunk.GetValueOrDefault(path)) is not { } entry) continue;
-            if (Encoding.UTF8.GetByteCount(output.ToString() + entry) > MaxBytes) break;
-            output.Append(entry);
-            files.Add(path);
+            if (!byPath.TryGetValue(path, out var file)) continue;
+            ranked.Add(new FusedFile(file, path, score, Supported(path), bestChunk.GetValueOrDefault(path)?.StartLine));
         }
 
-        return files.Count == 0 ? Empty : new(
-            "Likely edit sites, from a local search of the project (path:lines | matched words, then the matching lines). " +
-            "These are candidate references, not verified edit sites; check their relevance and search beyond them as needed.\n" + output + "\n", files);
+        return new(ranked, lineTerms, bestChunk, scores.Values.Max());
     }
 
     private static FileLocatorContext Empty { get; } = new("", []);

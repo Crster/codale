@@ -49,6 +49,9 @@ public sealed record DiscoveryResult
 
     /// <summary>False for the provisional results streamed while the model is still working.</summary>
     public bool IsFinal { get; init; }
+
+    /// <summary>Every file holding the typed text verbatim, with nothing interpreted.</summary>
+    public bool IsExact { get; init; }
 }
 
 /// <summary>

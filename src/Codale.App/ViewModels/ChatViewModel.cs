@@ -5376,6 +5376,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             _watchingFeatures = false;
         }
 
+        HoldIndexForTurn(false);
         Features?.ClearChatActivity(_chatId);
     }
 

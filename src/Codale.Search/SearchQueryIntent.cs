@@ -44,6 +44,26 @@ public static class SearchQueryIntent
             (SentenceStarts.Contains(words[0]) || words.Any(SentenceWords.Contains));
     }
 
+    private const int MaxKeywordWords = 5;
+    private const int MaxKeywordChars = 80;
+
+    /// <summary>
+    /// A few words of code or a name typed as-is (<c>public static void</c>, <c>RetryPolicy</c>,
+    /// <c>Items.Add(</c>): searched for verbatim before anything interprets it. Questions,
+    /// sentences, quoted phrases and paths are not.
+    /// </summary>
+    public static bool IsShortKeywordQuery(string query)
+    {
+        var text = query.Trim();
+        if (text.Length < 2 || text.Length > MaxKeywordChars || text.Contains('"') ||
+            Regex.IsMatch(text, @"[\w.-]+/[\w.-]+", RegexOptions.CultureInvariant) || IsNaturalLanguage(text))
+        {
+            return false;
+        }
+
+        return text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length <= MaxKeywordWords;
+    }
+
     /// <summary>Requests for the source to edit need a verified edit site, not a file-level pick.</summary>
     public static bool WantsEditLocation(string query) => IsNaturalLanguage(query) &&
         Regex.IsMatch(CodeDiscovery.WithoutQuoted(query),

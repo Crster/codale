@@ -203,6 +203,80 @@ public sealed class SourceExplorerTests : IDisposable
     }
 
     [Fact]
+    public async Task Short_code_is_searched_verbatim_in_every_file_without_the_model()
+    {
+        for (var i = 0; i < 9; i++)
+        {
+            Write($"src/Program{i}.cs", $"class Program{i}\n{{\n    public static void Main{i}() {{ }}\n}}");
+        }
+        Write("src/Loose.cs", "// public members; static helpers; void returns\nclass Loose { }");
+
+        Write("src/Half.cs", "class Half\n{\n    static void Helper() { }\n}");
+
+        var model = new ScriptedModel(Keywords("Loose"), Pick("1"));
+        var result = await new SourceExplorer(_index, model) { ExactKeywordFirst = true, MaxRelated = 0 }
+            .RunAsync("public static void");
+
+        Assert.True(result.IsExact);
+        // The whole run first, then a run of two, then the words apart.
+        var paths = result.Files.Select(f => f.RelativePath).ToList();
+        var half = paths.IndexOf(P("src/Half.cs"));
+        var loose = paths.IndexOf(P("src/Loose.cs"));
+        Assert.True(half >= 9);
+        Assert.True(loose > half);
+        Assert.All(result.Files.Take(half), f => Assert.Contains(f.Ranges, r => r.Code.Contains("public static void")));
+        Assert.Equal(9, result.Files.Take(half).Count(f => f.RelativePath.Contains("Program")));
+        Assert.Equal(["static void"], result.Files[half].Keywords);
+        Assert.Empty(model.Seen);
+    }
+
+    [Fact]
+    public async Task Short_keywords_rank_semantic_hits_after_files_holding_the_words()
+    {
+        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
+        using var knowledge = await KnowledgeAsync(store);
+        var result = await new SourceExplorer(_index, null) { Knowledge = knowledge, ExactKeywordFirst = true, MaxRelated = 0 }
+            .RunAsync("RetryPolicy");
+        Assert.NotEmpty(result.Files);
+        Assert.Contains("RetryPolicy", result.Files[0].Ranges[0].Code);
+        var firstSemantic = result.Files.Select(f => f.Reason).ToList().IndexOf("semantic match");
+        if (firstSemantic >= 0)
+            Assert.All(result.Files.Skip(firstSemantic), f => Assert.Equal("semantic match", f.Reason));
+    }
+
+    [Fact]
+    public async Task A_short_query_neither_index_holds_is_interpreted()
+    {
+        var model = new ScriptedModel(Keywords("RetryPolicy"), Pick("1"));
+        var result = await new SourceExplorer(_index, model) { ExactKeywordFirst = true, MaxRelated = 0, MaxRounds = 1 }
+            .RunAsync("zzqxv wvvyk");
+        Assert.False(result.IsExact);
+        Assert.NotEmpty(model.Seen);
+    }
+
+    [Fact]
+    public async Task Fused_ranking_leads_with_the_file_both_indexes_agree_on()
+    {
+        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
+        using var knowledge = await KnowledgeAsync(store);
+        var result = await new SourceExplorer(_index, null) { Knowledge = knowledge, FuseLikeContext = true, MaxRelated = 0 }
+            .RunAsync("where is the retry backoff computed?");
+        Assert.Equal(P("src/RetryPolicy.cs"), result.Files[0].RelativePath);
+        Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains("Test", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("public static void", true)]
+    [InlineData("RetryPolicy", true)]
+    [InlineData("Items.Add(", true)]
+    [InlineData("where is the retry policy?", false)]
+    [InlineData("how does the app upload a file", false)]
+    [InlineData("src/Engine/SourceExplorer.cs", false)]
+    [InlineData("\"quoted phrase\"", false)]
+    public void Short_keyword_queries_are_told_apart(string query, bool expected) =>
+        Assert.Equal(expected, SearchQueryIntent.IsShortKeywordQuery(query));
+
+    [Fact]
     public async Task Sidebar_logo_edit_follows_the_component_and_marks_the_asset_source()
     {
         Write("web/Sidebar.tsx", """

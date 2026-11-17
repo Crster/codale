@@ -165,8 +165,33 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
         }
     }
 
+    /// <summary>Agent turns running per worktree; while any is, reads do not rescan it.</summary>
+    private readonly ConcurrentDictionary<string, int> _agentTurns = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// An agent turn started editing <paramref name="worktree"/>. Each of its writes marks the index stale, and every
+    /// search, ghost-text lookup and prompt enrichment would then re-chunk and re-embed mid-turn; the index instead
+    /// catches up once, at <see cref="EndAgentTurn"/>.
+    /// </summary>
+    public void BeginAgentTurn(string worktree) =>
+        _agentTurns.AddOrUpdate(ProjectPaths.Normalize(worktree), 1, (_, count) => count + 1);
+
+    /// <summary>The turn <see cref="BeginAgentTurn"/> marked is over; the last one to end refreshes the index.</summary>
+    public void EndAgentTurn(string worktree)
+    {
+        worktree = ProjectPaths.Normalize(worktree);
+        var left = _agentTurns.AddOrUpdate(worktree, 0, (_, count) => Math.Max(0, count - 1));
+        if (left > 0) return;
+        _agentTurns.TryRemove(new KeyValuePair<string, int>(worktree, 0));
+        Warm(worktree);
+    }
+
     public void Warm(string worktree)
     {
+        worktree = ProjectPaths.Normalize(worktree);
+        // Mid-turn, an index this process already built answers as it is; stale rows are dropped by hash, and a
+        // steer that needs the agent's latest edits still waits for a refresh through CaughtUp.
+        if (_agentTurns.GetValueOrDefault(worktree) > 0 && _lastRefresh.ContainsKey(worktree)) return;
         _ = RefreshAsync(worktree).ContinueWith(t => { _ = t.Exception; },
             CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
     }

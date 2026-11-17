@@ -156,15 +156,11 @@
                                                     Loaded="OnRangeLoaded"
                                                     Tag="{x:Bind}"
                                                     ToolTipService.ToolTip="Double-click to open the file here">
-                                                    <ScrollViewer
-                                                        HorizontalScrollBarVisibility="Auto"
-                                                        HorizontalScrollMode="Auto"
-                                                        VerticalScrollBarVisibility="Disabled"
-                                                        VerticalScrollMode="Disabled">
                                                         <!--  KeywordHighlight paints into the Canvas: a soft band with an
                                                               accent edge across each matched row (gutter included) and a
                                                               tint behind each keyword. Gutter numbers of matched rows are
-                                                              brought up to full contrast.  -->
+                                                              brought up to full contrast. Long lines wrap; the gutter is
+                                                              padded so each number stays beside its line's first row.  -->
                                                         <Grid>
                                                             <Grid.ColumnDefinitions>
                                                                 <ColumnDefinition Width="Auto" />
@@ -191,12 +187,12 @@
                                                                 FontSize="12"
                                                                 IsTextSelectionEnabled="True"
                                                                 Text="{x:Bind Code}"
+                                                                TextWrapping="Wrap"
                                                                 views:KeywordHighlight.Lines="{x:Bind MatchLines}"
                                                                 views:KeywordHighlight.Path="{x:Bind FilePath}"
                                                                 views:KeywordHighlight.Syntax="{x:Bind Syntax}"
                                                                 views:KeywordHighlight.Terms="{x:Bind Terms}" />
                                                         </Grid>
-                                                    </ScrollViewer>
                                                 </Border>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
