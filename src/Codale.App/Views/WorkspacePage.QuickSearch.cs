@@ -232,7 +232,7 @@ public sealed partial class WorkspacePage : IQuickSearchSource
         IReadOnlyList<Codale.Commands.ProjectCommand> commands;
         try
         {
-            commands = ViewModel.DiscoverCommands();
+            commands = ViewModel.SavedCommands();
         }
         catch (Exception)
         {

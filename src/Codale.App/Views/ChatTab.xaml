@@ -1343,7 +1343,7 @@
                 </Button>
                 <ItemsControl
                     ItemTemplateSelector="{StaticResource StepSelector}"
-                    ItemsSource="{x:Bind Steps}"
+                    ItemsSource="{x:Bind VisibleSteps}"
                     Visibility="{x:Bind IsExpanded, Mode=OneWay}" />
             </StackPanel>
         </DataTemplate>

@@ -52,21 +52,59 @@ public sealed class CommandCatalogTests : IDisposable
         Assert.Equal("npm run dev", commands[0].Command);
         Assert.Equal("web", commands[0].WorkingDirectory);
         Assert.Equal(CommandSource.Codale, commands[0].Source);
-        Assert.EndsWith("commands.json", commands[0].SourcePath);
+        Assert.Null(commands[0].SourcePath);
         Assert.Null(commands[1].WorkingDirectory);
     }
 
     [Fact]
-    public void The_edited_copy_replaces_the_saved_commands_and_accepts_a_bare_root_array()
+    public void Saving_replaces_by_name_and_a_rename_removes_the_old_entry()
     {
-        var path = CommandCatalog.ConfigOf(_root).ExportForEditing();
-        File.WriteAllText(path, """[ { "name": "build", "command": "dotnet build" }, { "command": "dotnet test" } ]""");
-        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(1));
+        CommandCatalog.Add(_root, "build", "dotnet build");
+        CommandCatalog.Save(_root, null, new ProjectCommandEdit("build", "dotnet build -c Release", "src"));
+        CommandCatalog.Save(_root, "build", new ProjectCommandEdit("release build", "dotnet build -c Release", "src"));
 
         var commands = CommandCatalog.Discover(_root);
 
-        Assert.Equal(["build", "dotnet test"], commands.Select(c => c.Name));
-        Assert.All(commands, c => Assert.Equal(CommandSource.Codale, c.Source));
+        var command = Assert.Single(commands);
+        Assert.Equal("release build", command.Name);
+        Assert.Equal("dotnet build -c Release", command.Command);
+        Assert.Equal("src", command.WorkingDirectory);
+        Assert.Equal(CommandSource.Codale, command.Source);
+    }
+
+    [Fact]
+    public void A_saved_script_is_written_to_the_data_folder_and_run_by_its_interpreter()
+    {
+        CommandCatalog.Save(_root, null, new ProjectCommandEdit("serve", "dotnet run --project app", ScriptKind: "powershell"));
+
+        var command = Assert.Single(CommandCatalog.Discover(_root));
+
+        Assert.Equal("powershell", command.ScriptKind);
+        Assert.Equal("dotnet run --project app", command.Script);
+        Assert.Contains("-ExecutionPolicy Bypass -File", command.Command);
+        Assert.Contains(".ps1", command.Command);
+        Assert.Empty(Directory.GetFileSystemEntries(_root));
+    }
+
+    [Fact]
+    public void A_removed_script_command_takes_its_script_file_with_it()
+    {
+        CommandCatalog.Save(_root, null, new ProjectCommandEdit("serve", "dotnet run", ScriptKind: "powershell"));
+        var command = Assert.Single(CommandCatalog.Discover(_root));
+        var script = command.Command.Split('"')[^2];
+        Assert.True(File.Exists(script));
+
+        Assert.True(CommandCatalog.Remove(_root, "serve"));
+        Assert.False(File.Exists(script));
+    }
+
+    [Fact]
+    public void Removing_a_saved_command_takes_it_out_of_the_menu()
+    {
+        CommandCatalog.Add(_root, "build", "dotnet build");
+        Assert.True(CommandCatalog.Remove(_root, "BUILD"));
+        Assert.Empty(CommandCatalog.Discover(_root));
+        Assert.False(CommandCatalog.Remove(_root, "build"));
     }
 
     [Fact]

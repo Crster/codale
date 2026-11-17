@@ -103,14 +103,12 @@ Use Settings to create account and endpoint profiles and select agent defaults. 
 
 ### Custom project commands
 
-Save reusable commands in `.codale/commands.json`:
-
-```json
-[
-  { "name": "dev server", "command": "npm run dev", "cwd": "frontend" },
-  { "name": "run tests", "command": "dotnet test Codale.slnx" }
-]
-```
+Open the commands menu and choose **Edit commands…** to add, change or remove saved commands in a
+dialog: give one a name, choose whether it is a command line or a PowerShell, batch or shell script,
+type the command or script, and optionally set its working directory. Saved commands live in the
+workspace database (Codale's data folder, never in the project tree); scripts are written to a
+`command-scripts` folder beside it, so they can be edited again from the same dialog. An old
+`.codale/commands.json` in the project is ignored.
 
 Command detectors also recognize Claude launch configuration, VS Code tasks/launch configuration, package scripts, .NET, Gradle, Maven, Python, Rust, Go, Composer/Laravel, Rails, Flutter, Elixir, Make, Just, Task, Docker Compose, Prisma, and root scripts. Discovery and saved-command access share `ProjectCommandService`; execution uses terminal tabs.
 

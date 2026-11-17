@@ -447,9 +447,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         UpdateRunningCommandCount();
     }
 
-    /// <summary>The commands menu's fresh read of the project's config files.</summary>
-    public IReadOnlyList<ProjectCommand> DiscoverCommands() => _commands.Discover(ProjectPath);
-
     /// <summary>Command terminals whose command is still executing; the badge and the menu read this.</summary>
     public IReadOnlyList<TerminalViewModel> RunningCommands =>
         [.. _terminals.Where(t => t.IsCommandTerminal && t.Activity == TerminalActivity.Busy)];
@@ -542,15 +539,15 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         RunningCommandCount = count;
     }
 
-    /// <summary>
-    /// The saved commands as an editable file, written fresh from the workspace database (with a starter
-    /// template when there are none). It lives in Codale's data folder, not in the project; the commands
-    /// menu reads it back the next time it opens.
-    /// </summary>
-    public string EnsureCommandsFile() => _commands.ConfigOf(ProjectPath).ExportForEditing();
+    /// <summary>The project's saved commands (not the ones discovered in project files), for the commands editor.</summary>
+    public IReadOnlyList<ProjectCommand> SavedCommands() => _commands.Saved(ProjectPath);
 
-    /// <summary>Where <see cref="EnsureCommandsFile"/> puts the editable copy.</summary>
-    public string CommandsFilePath => _commands.ConfigOf(ProjectPath).EditablePath;
+    /// <summary>Saves a command from the editor; <paramref name="originalName"/> lets a rename replace the old entry.</summary>
+    public ProjectCommand SaveCommand(string? originalName, ProjectCommandEdit edit) =>
+        _commands.Save(ProjectPath, originalName, edit);
+
+    /// <summary>Removes a saved command; false when it was already gone.</summary>
+    public bool RemoveCommand(string name) => _commands.Remove(ProjectPath, name);
 
     public GitViewModel Git { get; }
 

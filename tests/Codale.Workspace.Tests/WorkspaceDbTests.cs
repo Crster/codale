@@ -74,7 +74,7 @@ public sealed class WorkspaceDbTests : IDisposable
     }
 
     [Fact]
-    public void Config_replaces_a_command_of_the_same_name_and_reads_back_an_edited_file()
+    public void Config_replaces_a_command_of_the_same_name_and_renames_in_place()
     {
         var config = new ConfigStore(_directory);
         config.AddCommand("test", "dotnet test", "src");
@@ -83,12 +83,15 @@ public sealed class WorkspaceDbTests : IDisposable
         var saved = Assert.Single(config.Commands());
         Assert.Equal("dotnet test --no-build", saved.Command);
 
-        var path = config.ExportForEditing();
-        File.WriteAllText(path, "{ \"commands\": [ { \"name\": \"lint\", \"command\": \"npm run lint\" } ] }");
-        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(1));
-        config.SyncEdited();
+        config.SaveCommand("test", new SavedCommand("lint", "npm run lint", Shell: "shell"));
 
-        Assert.Equal(["lint"], config.Commands().Select(c => c.Name));
+        saved = Assert.Single(config.Commands());
+        Assert.Equal("lint", saved.Name);
+        Assert.Equal("shell", saved.Shell);
+
+        Assert.True(config.RemoveCommand("LINT"));
+        Assert.Empty(config.Commands());
+        Assert.False(config.RemoveCommand("lint"));
     }
 
     [Fact]

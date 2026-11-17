@@ -336,6 +336,9 @@ public sealed partial class TurnActivityItem : ChatItem
 {
     public override TranscriptBlock Block => TranscriptBlock.Tool;
 
+    private CancellationTokenSource? _expandCts;
+    private bool _isBatchExpanding;
+
     public TurnActivityItem()
     {
         Steps.CollectionChanged += (_, e) =>
@@ -344,11 +347,138 @@ public sealed partial class TurnActivityItem : ChatItem
                 foreach (ChatItem item in e.NewItems) item.TextSettings = TextSettings;
             OnPropertyChanged(nameof(HasSteps));
             OnPropertyChanged(nameof(HeaderText));
+            SyncVisibleStepsOnCollectionChanged(e);
         };
     }
 
     /// <summary>Narration (<see cref="AssistantMessageItem"/>), tool calls, explore groups and the todo row.</summary>
     public ObservableCollection<ChatItem> Steps { get; } = [];
+
+    /// <summary>Subset of <see cref="Steps"/> realized in the UI; populated in batches when expanding large turns.</summary>
+    public ObservableCollection<ChatItem> VisibleSteps { get; } = [];
+
+    partial void OnIsExpandedChanged(bool value)
+    {
+        if (value)
+        {
+            BeginPopulateVisibleSteps();
+        }
+        else
+        {
+            _expandCts?.Cancel();
+            _expandCts = null;
+            _isBatchExpanding = false;
+            if (VisibleSteps.Count > 0)
+            {
+                VisibleSteps.Clear();
+            }
+        }
+    }
+
+    private void SyncVisibleStepsOnCollectionChanged(System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (!IsExpanded || _isBatchExpanding)
+        {
+            return;
+        }
+
+        switch (e.Action)
+        {
+            case System.Collections.Specialized.NotifyCollectionChangedAction.Add when e.NewItems is not null:
+                var insertAt = e.NewStartingIndex;
+                foreach (ChatItem item in e.NewItems)
+                {
+                    if (insertAt >= 0 && insertAt <= VisibleSteps.Count)
+                    {
+                        VisibleSteps.Insert(insertAt++, item);
+                    }
+                    else
+                    {
+                        VisibleSteps.Add(item);
+                    }
+                }
+                break;
+            case System.Collections.Specialized.NotifyCollectionChangedAction.Remove when e.OldItems is not null:
+                for (var i = 0; i < e.OldItems.Count; i++)
+                {
+                    if (e.OldStartingIndex >= 0 && e.OldStartingIndex < VisibleSteps.Count)
+                    {
+                        VisibleSteps.RemoveAt(e.OldStartingIndex);
+                    }
+                }
+                break;
+            case System.Collections.Specialized.NotifyCollectionChangedAction.Replace when e.NewItems is not null && e.NewStartingIndex >= 0:
+                for (var i = 0; i < e.NewItems.Count; i++)
+                {
+                    var idx = e.NewStartingIndex + i;
+                    if (idx < VisibleSteps.Count && e.NewItems[i] is ChatItem item)
+                    {
+                        VisibleSteps[idx] = item;
+                    }
+                }
+                break;
+            case System.Collections.Specialized.NotifyCollectionChangedAction.Reset:
+                VisibleSteps.Clear();
+                foreach (var item in Steps)
+                {
+                    VisibleSteps.Add(item);
+                }
+                break;
+        }
+    }
+
+    private async void BeginPopulateVisibleSteps()
+    {
+        _expandCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _expandCts = cts;
+        var token = cts.Token;
+
+        VisibleSteps.Clear();
+        const int batchSize = 20;
+        if (Steps.Count <= batchSize)
+        {
+            _isBatchExpanding = false;
+            foreach (var item in Steps)
+            {
+                VisibleSteps.Add(item);
+            }
+            return;
+        }
+
+        _isBatchExpanding = true;
+        try
+        {
+            for (var i = 0; i < Steps.Count; i += batchSize)
+            {
+                if (token.IsCancellationRequested || !IsExpanded)
+                {
+                    return;
+                }
+
+                var end = Math.Min(i + batchSize, Steps.Count);
+                for (var j = i; j < end; j++)
+                {
+                    VisibleSteps.Add(Steps[j]);
+                }
+
+                if (end < Steps.Count)
+                {
+                    await Task.Delay(1, token);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            if (ReferenceEquals(_expandCts, cts))
+            {
+                _isBatchExpanding = false;
+            }
+        }
+    }
 
     /// <summary>Read back from history on expansion; collapsing releases its steps and restores the summary.</summary>
     public bool Loaded { get; init; }

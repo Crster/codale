@@ -40,6 +40,7 @@ public sealed record ProjectCommand
 {
     public required string Name { get; init; }
 
+    /// <summary>The line that runs; for a saved script this is the interpreter invocation of its file.</summary>
     public required string Command { get; init; }
 
     public string? WorkingDirectory { get; init; }
@@ -47,6 +48,15 @@ public sealed record ProjectCommand
     public required CommandSource Source { get; init; }
 
     public string? SourcePath { get; init; }
+
+    /// <summary>
+    /// The body of a script saved from the commands menu (<c>powershell</c>, <c>batch</c> or <c>shell</c>);
+    /// null for a plain command line and for commands discovered in project files.
+    /// </summary>
+    public string? Script { get; init; }
+
+    /// <summary>Which kind of script <see cref="Script"/> is; null when there is none.</summary>
+    public string? ScriptKind { get; init; }
 
     public string SourceLabel => Source switch
     {

@@ -2295,29 +2295,25 @@ public sealed partial class WorkspacePage : Page
             menu.Items.Add(new MenuFlyoutSeparator());
         }
 
-        var commands = ViewModel.DiscoverCommands();
+        var commands = ViewModel.SavedCommands();
         if (commands.Count == 0)
         {
-            AddFlyoutHeader(menu, "No commands found");
+            AddFlyoutHeader(menu, "No saved commands");
         }
         else
         {
-            // Discover orders by source; grouping on it keeps that order in the menu.
-            foreach (var group in commands.GroupBy(command => command.Source))
+            foreach (var command in commands)
             {
-                AddFlyoutHeader(menu, group.First().SourceLabel);
-                foreach (var command in group)
+                var item = new MenuFlyoutItem
                 {
-                    var item = new MenuFlyoutItem
-                    {
-                        Text = command.Name,
-                        Tag = command,
-                        Icon = new FontIcon { Glyph = "\uE768" },
-                    };
-                    ToolTipService.SetToolTip(item, command.Command);
-                    item.Click += OnCommandItemClick;
-                    menu.Items.Add(item);
-                }
+                    Text = command.Name,
+                    Tag = command,
+                    Icon = new FontIcon { Glyph = "\uE768" },
+                };
+                // A saved script's command line is Codale's own interpreter invocation; show the script instead.
+                ToolTipService.SetToolTip(item, command.Script ?? command.Command);
+                item.Click += OnCommandItemClick;
+                menu.Items.Add(item);
             }
         }
 
@@ -2351,25 +2347,6 @@ public sealed partial class WorkspacePage : Page
             edit.KeyboardAcceleratorTextOverride = " ";
         }
 
-        // The discovered files are editable too; the Codale file is the item above.
-        var codaleFile = ViewModel.CommandsFilePath;
-        foreach (var path in commands.Select(command => command.SourcePath).OfType<string>().Distinct())
-        {
-            if (PathsEqual(path, codaleFile))
-            {
-                continue;
-            }
-
-            var sourceItem = new MenuFlyoutItem
-            {
-                Text = $"Edit {Path.GetRelativePath(ViewModel.ProjectPath, path)}",
-                Tag = path,
-                Icon = new FontIcon { Glyph = "\uE70F" },
-            };
-            sourceItem.Click += OnEditSourceFileClick;
-            menu.Items.Add(sourceItem);
-        }
-
         _commandsFlyout = menu;
         menu.ShowAt(anchor);
     }
@@ -2394,15 +2371,11 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
-    private void OnEditCommandsClick(object sender, RoutedEventArgs e) =>
-        ShowFile(ViewModel.EnsureCommandsFile());
-
-    private void OnEditSourceFileClick(object sender, RoutedEventArgs e)
+    private void OnEditCommandsClick(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { Tag: string path })
-        {
-            ShowFile(path);
-        }
+        // The dialog must not open while the menu's popup still holds focus.
+        _commandsFlyout?.Hide();
+        _ = ShowCommandEditorAsync();
     }
 
     /// <summary>

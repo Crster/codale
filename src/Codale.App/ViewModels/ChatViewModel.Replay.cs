@@ -203,9 +203,10 @@ public sealed partial class ChatViewModel
     }
 
     /// <summary>Reads a turn's tool activity back from the history and expands it on demand.</summary>
-    public void LoadActivity(HiddenActivityItem placeholder)
+    public async void LoadActivity(HiddenActivityItem placeholder)
     {
-        if (_featureLog is null)
+        var log = _featureLog;
+        if (log is null)
         {
             return;
         }
@@ -216,7 +217,15 @@ public sealed partial class ChatViewModel
             return;
         }
 
-        var turn = TurnAround(_featureLog.ReadTail(int.MaxValue, out _), placeholder.FirstToolUseId);
+        var firstToolUseId = placeholder.FirstToolUseId;
+        var turn = await Task.Run(() => TurnAround(log.ReadTail(int.MaxValue, out _), firstToolUseId));
+
+        at = Items.IndexOf(placeholder);
+        if (at < 0)
+        {
+            return;
+        }
+
         if (turn.Count == 0)
         {
             Items.RemoveAt(at);
@@ -225,8 +234,9 @@ public sealed partial class ChatViewModel
         }
 
         var activity = BuildActivity(turn);
-        activity.IsExpanded = true;
+        activity.IsExpanded = false;
         Items[at] = activity;
         Reflow();
+        activity.IsExpanded = true;
     }
 }

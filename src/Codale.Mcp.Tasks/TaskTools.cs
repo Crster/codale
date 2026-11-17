@@ -131,7 +131,7 @@ public static class TaskTools
     [
         new McpTool(
             "list_commands",
-            "Show the project's saved and auto-detected run commands: the entries in Codale's commands menu, read from .codale/commands.json, " +
+            "Show the project's saved and auto-detected run commands: the entries in Codale's commands menu (saved in the workspace database, not in a project file), " +
             ".claude/launch.json, VS Code tasks.json/launch.json, package.json scripts, and detected project files (.NET, Gradle, Maven, Python, Cargo, Go, Composer, Laravel, Makefile, Justfile, Taskfile, Docker Compose, Prisma, etc.). One line each: name, source, command line. " +
             "Read-only. Call it before run_command to get the exact name, or before add_command to avoid saving a duplicate.",
             McpTool.Schema(),
@@ -146,7 +146,7 @@ public static class TaskTools
 
         new McpTool(
             "add_command",
-            "Save a reusable run command (build, test, dev server, lint...) to the project's commands menu in .codale/commands.json " +
+            "Save a reusable run command (build, test, dev server, lint...) to the project's commands menu (in the workspace database, not in a project file) " +
             "so the user can run it later with one click. It only saves; nothing runs. Use run_command to run it afterwards. " +
             "Saving a name that already exists replaces that entry. Not for one-off commands: run those with the shell tool or run_in_terminal.",
             McpTool.Schema(
