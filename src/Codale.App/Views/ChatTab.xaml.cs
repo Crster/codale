@@ -1688,6 +1688,16 @@ public sealed partial class ChatTab : UserControl
         Loaded += OnLoaded;
     }
 
+    internal void AppendSelectionAnnotation(string quote, string note)
+    {
+        if (_viewModel is null) return;
+        var reference = string.Join("\n", quote.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').Select(line => "> " + line));
+        var addition = $"{reference}\n{note}";
+        _viewModel.Draft = string.IsNullOrWhiteSpace(_viewModel.Draft)
+            ? addition
+            : _viewModel.Draft.TrimEnd() + "\n\n" + addition;
+    }
+
     private void OnDraftFocusChanged(object sender, RoutedEventArgs e) =>
         VisualStateManager.GoToState(
             this,
@@ -1701,6 +1711,17 @@ public sealed partial class ChatTab : UserControl
     /// </summary>
     private void OnComposerTapped(object sender, TappedRoutedEventArgs e)
     {
+        // Button Click and Tapped are separate routed events. A selector tap must
+        // not return focus to the editor while its flyout is opening.
+        for (var source = e.OriginalSource as DependencyObject; source is not null && !ReferenceEquals(source, sender);
+             source = VisualTreeHelper.GetParent(source))
+        {
+            if (source is ButtonBase)
+            {
+                return;
+            }
+        }
+
         if (_draftBox.FocusState == FocusState.Unfocused && _draftBox.IsEnabled)
         {
             _draftBox.Focus(FocusState.Pointer);

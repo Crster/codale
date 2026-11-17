@@ -267,12 +267,13 @@
             <StackPanel Padding="8,12" Spacing="10">
                 <Button x:Name="ProfileButton" Style="{StaticResource CompactAction}"
                         AutomationProperties.Name="Agent account" ToolTipService.ToolTip="{x:Bind Workspace.CliEndpoint.ActiveName, Mode=OneWay}">
-                    <Grid Width="30" Height="30">
+                    <Border Width="30" Height="30" CornerRadius="15" BorderThickness="1"
+                            BorderBrush="{x:Bind Workspace.CliEndpoint.AccountStatusBrush, Mode=OneWay}">
                         <PersonPicture Width="30" Height="30"
                                        Initials="{x:Bind Workspace.CliEndpoint.AvatarInitials, Mode=OneWay}"
                                        Foreground="{x:Bind Workspace.CliEndpoint.AccountStatusBrush, Mode=OneWay}"
                                        Background="Transparent" />
-                    </Grid>
+                    </Border>
                     <Button.Flyout>
                         <Flyout x:Name="ProfileFlyout" AreOpenCloseAnimationsEnabled="False"
                                 Opening="OnDetailFlyoutOpening" Closed="OnDetailFlyoutClosed" Placement="LeftEdgeAlignedTop" FlyoutPresenterStyle="{StaticResource DetailFlyout}">
@@ -396,7 +397,7 @@
                                                Text="{x:Bind Session.Status.SevenDayResetText, Mode=OneWay}" />
                                 </StackPanel>
 
-                                <StackPanel Spacing="6" Visibility="{x:Bind Session.Status.HasContext, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel Spacing="6">
                                     <Grid>
                                         <TextBlock Text="Current context" FontSize="12" VerticalAlignment="Bottom" />
                                         <TextBlock HorizontalAlignment="Right" FontSize="13" FontWeight="SemiBold"
@@ -409,8 +410,22 @@
                                         </Grid.ColumnDefinitions>
                                         <Border CornerRadius="3" Background="{x:Bind Session.Status.ContextPercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}" />
                                     </Grid>
-                                    <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                               Text="{x:Bind Session.Status.ContextText, Mode=OneWay}" />
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock VerticalAlignment="Center" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                   Text="{x:Bind Session.Status.ContextText, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                                        <Button Grid.Column="1" Style="{StaticResource ShellTextButton}" Click="OnCompactClick"
+                                                IsEnabled="{x:Bind CanCompact, Mode=OneWay}"
+                                                ToolTipService.ToolTip="Summarise the conversation to free up context (/compact)">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <FontIcon FontSize="10" Glyph="&#xE73F;" />
+                                                <TextBlock Text="Compact" />
+                                            </StackPanel>
+                                        </Button>
+                                    </Grid>
                                 </StackPanel>
 
                                 <!--  Footer: session totals and the provider's own usage page, under a hairline.  -->

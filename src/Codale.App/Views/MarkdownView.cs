@@ -150,9 +150,11 @@ public sealed class MarkdownView : StackPanel
         {
             var menu = new MenuFlyout();
             menu.Items.Add(CreateCopyMarkdownItem());
+            ChatSelectionAnnotation.AddTo(menu, text, () => text.SelectedText);
             text.ContextFlyout = menu;
             var selectionMenu = new MenuFlyout();
             selectionMenu.Items.Add(CreateCopyMarkdownItem());
+            ChatSelectionAnnotation.AddTo(selectionMenu, text, () => text.SelectedText);
             text.SelectionFlyout = selectionMenu;
         }
     }

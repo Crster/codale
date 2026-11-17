@@ -32,6 +32,24 @@ public sealed partial class PromptText : ContentControl
         HorizontalContentAlignment = HorizontalAlignment.Stretch;
         IsTabStop = false;
         Content = _block;
+        var menu = new MenuFlyout();
+        var copy = new MenuFlyoutItem { Text = "Copy" };
+        void CopySelection()
+        {
+            var data = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            data.SetText(_block.SelectedText is { Length: > 0 } selected ? selected : Text ?? "");
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data);
+        }
+        copy.Click += (_, _) => CopySelection();
+        menu.Items.Add(copy);
+        ChatSelectionAnnotation.AddTo(menu, _block, () => _block.SelectedText);
+        _block.ContextFlyout = menu;
+        var selectionMenu = new MenuFlyout();
+        var selectionCopy = new MenuFlyoutItem { Text = "Copy" };
+        selectionCopy.Click += (_, _) => CopySelection();
+        selectionMenu.Items.Add(selectionCopy);
+        ChatSelectionAnnotation.AddTo(selectionMenu, _block, () => _block.SelectedText);
+        _block.SelectionFlyout = selectionMenu;
         ActualThemeChanged += (_, _) => Build();
     }
 

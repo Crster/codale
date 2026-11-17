@@ -3528,7 +3528,19 @@ public sealed partial class WorkspacePage : Page
         if (e.Key == Windows.System.VirtualKey.Enter)
         {
             e.Handled = true;
-            await CommitNameEditAsync(node, box.Text);
+            var text = box.Text;
+
+            // Removing the focused row from inside its own key event tears the TextBox down
+            // mid-dispatch; let the event unwind first.
+            await Task.Yield();
+            try
+            {
+                await CommitNameEditAsync(node, text);
+            }
+            catch (Exception ex)
+            {
+                await ShowTreeErrorAsync("Could not apply the name", ex.Message);
+            }
         }
         else if (e.Key == Windows.System.VirtualKey.Escape)
         {
@@ -3552,7 +3564,16 @@ public sealed partial class WorkspacePage : Page
             return;
         }
 
-        await CommitNameEditAsync(node, box.Text);
+        var text = box.Text;
+        await Task.Yield();
+        try
+        {
+            await CommitNameEditAsync(node, text);
+        }
+        catch (Exception ex)
+        {
+            await ShowTreeErrorAsync("Could not apply the name", ex.Message);
+        }
     }
 
     private void CancelNameEdit(FileNode node)

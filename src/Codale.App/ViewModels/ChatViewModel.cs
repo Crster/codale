@@ -4362,7 +4362,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 {
                     locatedContext = await Codale.Search.PromptFileLocator.RetrieveAsync(
                         ProjectPath, text, Features?.Knowledge, retrievalBudget.Token,
-                        new HashSet<string>(_knownContextFiles, StringComparer.OrdinalIgnoreCase));
+                        new HashSet<string>(_knownContextFiles, StringComparer.OrdinalIgnoreCase),
+                        // The General model suggests the names the code likely uses ("Search keywords" feature).
+                        _smart.Settings.SmartFeatureEnabled("keywords") ? _smart.Instance : null);
                 }
                 catch (OperationCanceledException) when (!preparationToken.IsCancellationRequested) { }
                 catch (Exception ex) when (ex is not OperationCanceledException)

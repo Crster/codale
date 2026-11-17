@@ -83,13 +83,25 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         }
     }
 
-    // Context, model and permission mode stay in the composer. Only account usage lives here.
-    public bool HasUsage => Session?.Status is { } s && (s.HasFiveHour || s.HasLongWindowOnly || s.HasTokenUsage);
+    // Model and permission mode stay in the composer. Account usage and context (with Compact) live here.
+    // The rail button shows whenever there is a session, so context is always one click away.
+    public bool HasUsage => Session is not null;
+
+    /// <summary>The ring: whichever quota is closest to running out (5-hour or weekly), or the token budget under an override.</summary>
     public double UsagePercent => Session?.Status is not { } s ? 0 :
-        s.HasFiveHour ? s.FiveHourPercent : s.HasLongWindowOnly ? s.SevenDayPercent : s.TokenUsagePercent;
+        s.HasFiveHour ? Math.Max(s.FiveHourPercent, s.HasSevenDay ? s.SevenDayPercent : 0) :
+        s.HasLongWindowOnly ? s.SevenDayPercent : s.HasTokenUsage ? s.TokenUsagePercent : 0;
+
+    private string QuotaSummary => Session?.Status is not { } s ? "" :
+        s.HasFiveHour && s.HasSevenDay && s.SevenDayPercent > s.FiveHourPercent ? s.SevenDaySummary :
+        s.HasFiveHour ? s.FiveHourSummary : s.HasLongWindowOnly ? s.SevenDaySummary :
+        s.HasTokenUsage ? s.TokenUsageSummary : "";
+
     public string UsageSummary => Session?.Status is not { } s ? "" :
-        s.HasFiveHour ? s.FiveHourSummary : s.HasLongWindowOnly ? s.SevenDaySummary : s.TokenUsageSummary;
-    public string UsagePercentText => $"{UsagePercent:0}%";
+        string.Join("\n", new[] { $"Context {s.ContextSummary}", QuotaSummary }.Where(t => t.Length > 0));
+
+    /// <summary>The figure inside the ring: how full the context is.</summary>
+    public string UsagePercentText => Session?.Status is { } s ? s.ContextPercentText : "0%";
 
     /// <summary>What the latest prompt cost of the 5-hour window: the measure of how expensive a call was.</summary>
     public string LastPromptText => Session?.Status is { HasFiveHour: true, LastPromptPercent: >= 0.05 } s
@@ -111,8 +123,18 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void OnStatusPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        foreach (var property in new[] { nameof(HasUsage), nameof(UsagePercent), nameof(UsageSummary), nameof(UsagePercentText), nameof(LastPromptText), nameof(SessionTotalsText) })
+        foreach (var property in new[] { nameof(HasUsage), nameof(UsagePercent), nameof(UsageSummary), nameof(UsagePercentText), nameof(LastPromptText), nameof(SessionTotalsText), nameof(CanCompact) })
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
+    }
+
+    /// <summary>Compact is offered once there is context to free and no turn is running.</summary>
+    public bool CanCompact => Session is { IsConnected: true, IsBusy: false } s && s.Status.HasContext;
+
+    private async void OnCompactClick(object sender, RoutedEventArgs e)
+    {
+        UsageFlyout.Hide();
+        if (Session is { } session)
+            await session.CompactAsync();
     }
 
     private readonly Dictionary<FlyoutBase, (FrameworkElement Anchor, object Content)> _flyoutToolTips = [];
@@ -193,6 +215,10 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             _ = CliUpdate.RefreshAsync(PanelCli);
         }
 
+        if (e.PropertyName is nameof(ChatViewModel.IsBusy) or nameof(ChatViewModel.IsConnected))
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanCompact)));
+        }
     }
 
     private void OnWorkspacePropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -447,6 +473,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     private Flyout PickerFlyout(UIElement content) => new()
     {
         Content = content,
+        AreOpenCloseAnimationsEnabled = false,
         FlyoutPresenterStyle = (Style)Resources["PickerFlyout"],
         Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.Bottom,
     };

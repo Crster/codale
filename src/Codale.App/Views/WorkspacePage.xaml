@@ -611,7 +611,7 @@
                                                 KeyDown="OnNameEditKeyDown"
                                                 Loaded="OnNameEditLoaded"
                                                 LostFocus="OnNameEditLostFocus"
-                                                Text="{x:Bind EditText, Mode=TwoWay}">
+                                                Text="{x:Bind EditText, Mode=OneWay}">
                                                 <TextBox.Resources>
                                                     <x:Double x:Key="TextControlThemeMinHeight">22</x:Double>
                                                 </TextBox.Resources>

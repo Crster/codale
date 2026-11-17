@@ -83,10 +83,19 @@
             <Setter Property="FontSize" Value="12" />
         </Style>
 
+        <!-- Shared neutral surface for questions and session routing in history. -->
+        <Style x:Key="HistoryQuestionCard" TargetType="Border">
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="Background" Value="{StaticResource DetailSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource DetailStrokeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+        </Style>
+
         <!--  An answer on a question card: a full-width row, label over description.  -->
         <Style x:Key="OptionRow" TargetType="Button">
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="12,9" />
+            <Setter Property="Padding" Value="10,7" />
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -501,13 +510,9 @@
                     </Button>
 
                     <!--  AskUserQuestion: the question card. The turn is blocked on it,
-                          so it is the loudest thing on screen while it is open.  -->
+                          using the same neutral surface as other history prompts.  -->
                     <Border
-                        Padding="16,14"
-                        Background="{StaticResource AskSurfaceBrush}"
-                        BorderBrush="{StaticResource AskStrokeBrush}"
-                        BorderThickness="1"
-                        CornerRadius="10"
+                        Style="{StaticResource HistoryQuestionCard}"
                         KeyDown="OnQuestionCardKeyDown"
                         Loaded="OnQuestionCardLoaded"
                         Tag="{x:Bind Approval, Mode=OneWay}"
@@ -517,13 +522,12 @@
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <FontIcon
                                         FontSize="{x:Bind S13, Mode=OneWay}"
-                                        Foreground="{StaticResource KindAskBrush}"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                         Glyph="&#xE9CE;" />
                                     <TextBlock
-                                        FontFamily="Cascadia Mono, Consolas"
                                         FontSize="{x:Bind S12, Mode=OneWay}"
                                         FontWeight="SemiBold"
-                                        Foreground="{StaticResource KindAskBrush}"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                         Text="The agent needs your input" />
                                 </StackPanel>
                                 <StackPanel
@@ -532,7 +536,6 @@
                                     Spacing="8"
                                     Visibility="{x:Bind Approval.HasManyQuestions, Mode=OneWay}">
                                     <TextBlock
-                                        FontFamily="Cascadia Mono, Consolas"
                                         VerticalAlignment="Center"
                                         FontSize="{x:Bind S11, Mode=OneWay}"
                                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"
@@ -574,7 +577,6 @@
                                     Tag="{x:Bind Approval, Mode=OneWay}"
                                     ToolTipService.ToolTip="Let the agent continue without an answer (Esc)" />
                                 <TextBlock
-                                    FontFamily="Cascadia Mono, Consolas"
                                     Grid.Column="1"
                                     Margin="4,0"
                                     VerticalAlignment="Center"
@@ -1537,30 +1539,21 @@
             </Grid>
         </DataTemplate>
 
-        <!--  Auto routing wants to move a conversation under way: the question and its three answers,
-              folded to the answer once given.  -->
-        <!--  Auto routing wants to move a conversation under way: styled like the
-              AskUserQuestion card - header chip, question, answers as full rows with
-              their descriptions - folded to the answer once given.  -->
+        <!-- Session routing shares the question surface and folds to the chosen answer. -->
         <DataTemplate x:Key="FeatureJumpTemplate" x:DataType="vm:FeatureJumpItem">
             <Border
                 Margin="{x:Bind RowMargin, Mode=OneWay}"
-                Padding="16,14"
-                Background="{StaticResource AskSurfaceBrush}"
-                BorderBrush="{StaticResource AskStrokeBrush}"
-                BorderThickness="1"
-                CornerRadius="10">
+                Style="{StaticResource HistoryQuestionCard}">
                 <StackPanel Spacing="10">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon
                             FontSize="{x:Bind S13, Mode=OneWay}"
-                            Foreground="{StaticResource KindAskBrush}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Glyph="&#xE81C;" />
                         <TextBlock
-                            FontFamily="Cascadia Mono, Consolas"
                             FontSize="{x:Bind S12, Mode=OneWay}"
                             FontWeight="SemiBold"
-                            Foreground="{StaticResource KindAskBrush}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Text="The agent needs your input" />
                     </StackPanel>
                     <TextBlock
@@ -1572,7 +1565,7 @@
                             <Button
                                 Margin="0,0,0,6"
                                 BorderBrush="{StaticResource DetailStrokeBrush}"
-                                Background="{StaticResource DetailSurfaceBrush}"
+                                Background="Transparent"
                                 Click="OnFeatureJumpClick"
                                 Style="{StaticResource OptionRow}"
                                 Tag="{x:Bind}"
@@ -1586,7 +1579,7 @@
                                         Margin="0,2,0,0"
                                         VerticalAlignment="Top"
                                         FontSize="{x:Bind S14, Mode=OneWay}"
-                                        Foreground="{StaticResource KindAskBrush}"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                         Glyph="&#xE111;" />
                                     <StackPanel Grid.Column="1" Spacing="2">
                                         <TextBlock
@@ -1604,7 +1597,7 @@
                             <Button
                                 Margin="0,0,0,6"
                                 BorderBrush="{StaticResource DetailStrokeBrush}"
-                                Background="{StaticResource DetailSurfaceBrush}"
+                                Background="Transparent"
                                 Click="OnFeatureJumpNewClick"
                                 Style="{StaticResource OptionRow}"
                                 Tag="{x:Bind}">
@@ -1617,7 +1610,7 @@
                                         Margin="0,2,0,0"
                                         VerticalAlignment="Top"
                                         FontSize="{x:Bind S14, Mode=OneWay}"
-                                        Foreground="{StaticResource KindAskBrush}"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                         Glyph="&#xE710;" />
                                     <StackPanel Grid.Column="1" Spacing="2">
                                         <TextBlock
@@ -1635,7 +1628,7 @@
                             <Button
                                 Margin="0,0,0,6"
                                 BorderBrush="{StaticResource DetailStrokeBrush}"
-                                Background="{StaticResource DetailSurfaceBrush}"
+                                Background="Transparent"
                                 Click="OnFeatureJumpStayClick"
                                 Style="{StaticResource OptionRow}"
                                 Tag="{x:Bind}">
@@ -1648,7 +1641,7 @@
                                         Margin="0,2,0,0"
                                         VerticalAlignment="Top"
                                         FontSize="{x:Bind S14, Mode=OneWay}"
-                                        Foreground="{StaticResource KindAskBrush}"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                         Glyph="&#xE73E;" />
                                     <StackPanel Grid.Column="1" Spacing="2">
                                         <TextBlock
@@ -1670,7 +1663,7 @@
                         Visibility="{x:Bind IsOpen, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
                         <FontIcon
                             FontSize="{x:Bind S12, Mode=OneWay}"
-                            Foreground="{StaticResource KindAskBrush}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Glyph="&#xE73E;" />
                         <TextBlock
                             FontSize="{x:Bind S12, Mode=OneWay}"
@@ -2771,6 +2764,8 @@
                             Spacing="2">
                             <Button
                                 x:Name="ComposerModelButton"
+                                Height="32"
+                                MinWidth="64"
                                 Click="OnComposerModelClick"
                                 IsEnabled="{x:Bind ViewModel.CanChangeMode, Mode=OneWay}"
                                 Style="{StaticResource ShellTextButton}"
@@ -2786,6 +2781,8 @@
                             </Button>
                             <Button
                                 x:Name="ComposerModeButton"
+                                Height="32"
+                                MinWidth="64"
                                 Click="OnComposerModeClick"
                                 IsEnabled="{x:Bind ViewModel.CanChangeMode, Mode=OneWay}"
                                 Style="{StaticResource ShellTextButton}"
@@ -2796,15 +2793,6 @@
                                     <FontIcon FontSize="8" Glyph="&#xE70D;" Opacity="0.7" />
                                 </StackPanel>
                             </Button>
-                            <!--  Context used, as a quiet figure; the panel has the detail.  -->
-                            <TextBlock
-                                Margin="6,0,2,0"
-                                VerticalAlignment="Center"
-                                FontSize="11.5"
-                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                ToolTipService.ToolTip="{x:Bind ViewModel.Status.ContextSummary, Mode=OneWay}">
-                                <Run Text="{x:Bind ViewModel.Status.ContextPercentText, Mode=OneWay}" /><Run Text=" context" />
-                            </TextBlock>
                         </StackPanel>
 
 
