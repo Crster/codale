@@ -77,6 +77,16 @@ public sealed class CliEndpointSettings(AppSettingsStore settings)
             ["ANTHROPIC_AUTH_TOKEN"] = Clean(active.ApiKey),
         };
 
+        // Claude can select these aliases for background tasks independently of --model.
+        if (active.ResolveEndpointModel(null) is { } flash)
+        {
+            var pro = active.ModelForTier("pro") ?? flash;
+            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = flash;
+            env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = pro;
+            env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = pro;
+            env["CLAUDE_CODE_SUBAGENT_MODEL"] = pro;
+        }
+
         // The CLI abandons a request after 10 minutes by default; a slow provider or a long
         // reasoning pass can outlast that. A value the user set wins.
         if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("API_TIMEOUT_MS")))

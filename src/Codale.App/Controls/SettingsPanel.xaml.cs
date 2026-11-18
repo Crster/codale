@@ -791,7 +791,7 @@ public sealed partial class SettingsPanel : UserControl
             return box;
         }
 
-        ModelField("Flash model", provider.IsAccount ? "CLI default" : "Select a model", provider.FlashModel, v => provider.FlashModel = v);
+        ModelField("Flash model", provider.IsAccount ? "CLI default" : "Select or enter a model ID", provider.FlashModel, v => provider.FlashModel = v);
         ModelField("Pro model", "Flash model when blank", provider.ProModel, v => provider.ProModel = v);
 
         if (provider.IsAccount)
@@ -877,6 +877,12 @@ public sealed partial class SettingsPanel : UserControl
             }
 
             using var response = await ModelHttp.SendAsync(request);
+            if (anthropicOnly && response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                foreach (var box in boxes) box.ItemsSource = null;
+                SetModelStatus(boxes, "This endpoint did not provide a model list. Enter a model ID supported by your provider.");
+                return;
+            }
             var body = await response.Content.ReadAsStringAsync();
             response.EnsureSuccessStatusCode();
             using var doc = System.Text.Json.JsonDocument.Parse(body);

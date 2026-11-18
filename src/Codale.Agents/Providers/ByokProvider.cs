@@ -39,6 +39,16 @@ public sealed class ByokProvider
         tier == "pro" && !string.IsNullOrWhiteSpace(ProModel) ? ProModel.Trim() :
         !string.IsNullOrWhiteSpace(FlashModel) ? FlashModel.Trim() : null;
 
+    /// <summary>Keep a configured model pick, otherwise use the provider's first configured model.</summary>
+    public string? ResolveEndpointModel(string? requested)
+    {
+        var flash = ModelForTier("flash");
+        var pro = ModelForTier("pro");
+        return pro is not null && string.Equals(pro, requested, StringComparison.OrdinalIgnoreCase)
+            ? pro
+            : flash ?? pro;
+    }
+
     /// <summary>Context windows discovered from each model's metadata, in tokens.</summary>
     public Dictionary<string, int> ModelContextWindows { get; set; } = [with(StringComparer.OrdinalIgnoreCase)];
 

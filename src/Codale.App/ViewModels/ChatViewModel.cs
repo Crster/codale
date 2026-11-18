@@ -2058,7 +2058,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 _smart.Settings.SetModelPreference(CliId, RequestedModel, RequestedEffort);
         }
         var model = LaunchValue(RequestedModel);
-        if (model is not null && catalogue.Count > 0 &&
+        if (endpointEnv is not null)
+        {
+            model = _smart.Settings.FindByok(EndpointName)?.ResolveEndpointModel(model);
+            if (model is null)
+            {
+                Add(new NoticeItem { Text = $"Set a Flash or Pro model for {ProviderName} in Settings → AI & Providers before starting a chat.", Severity = NoticeSeverity.Error });
+                return;
+            }
+        }
+        else if (model is not null && catalogue.Count > 0 &&
             !catalogue.Any(m => string.Equals(m.Id, model, StringComparison.OrdinalIgnoreCase)))
         {
             model = null;
@@ -4605,6 +4614,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         try
         {
             model = LaunchValue(model);
+            if (Status.IsCustomProvider)
+            {
+                model = _smart.Settings.FindByok(EndpointName)?.ResolveEndpointModel(model);
+                if (model is null)
+                {
+                    return false;
+                }
+            }
             effort = LaunchValue(effort);
             var applied = await session.TrySetModelEffortAsync(model ?? "", effort);
 
