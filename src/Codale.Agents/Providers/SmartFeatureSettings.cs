@@ -26,7 +26,7 @@ public static class SmartFeatureSettings
     public static readonly (string Id, string Label, string Description, string Placeholder)[] Roles =
     [
         (General, "General", "Commit messages, session names, search keywords", "Flash model"),
-        (Completion, "Auto Complete", "Fill-in-the-middle for editor, composer and shell", "FIM model"),
+        (Completion, "Auto Complete", "Editor suggestions from FIM or chat models · also used by composer and shell", "Completion model"),
         (Embedding, "Embedding", "Vectors for indexing and search", "Embedding model"),
         (Decision, "Decision", "Fast classifier for auto mode and command risk · uses General when off", "Decision model"),
     ];

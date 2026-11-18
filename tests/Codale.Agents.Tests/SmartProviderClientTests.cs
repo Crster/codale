@@ -21,37 +21,133 @@ public sealed class SmartProviderClientTests
             Assert.Equal("https://openrouter.ai/api/v1/chat/completions", request.RequestUri!.AbsoluteUri);
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             Assert.Equal("qwen/code-instruct", body.RootElement.GetProperty("model").GetString());
-            // The file with a caret marker, its quotes as written (a JSON string would send ", which models copy back).
             var user = body.RootElement.GetProperty("messages")[1].GetProperty("content").GetString()!;
             Assert.Contains("File: src/calc.js", user);
-            Assert.Contains("say(\"<CURSOR>\")\n}", user);
-            Assert.Contains("<CURSOR>", body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString());
+            Assert.Contains("- hello", user);
+            Assert.EndsWith("<PREFIX>say(\"</PREFIX><SUFFIX>\")\n}</SUFFIX><MIDDLE>", user);
+            Assert.Contains("<MIDDLE>", body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString());
+            Assert.False(body.RootElement.TryGetProperty("reasoning", out _));
             return Json("{\"choices\":[{\"message\":{\"content\":\"\\n    return a + b;\"}}]}");
         }));
         var profile = Profile(); profile.BaseUrl = "https://openrouter.ai/api/v1";
         var client = new SmartProviderClient(Completion, "openai", profile, "qwen/code-instruct", http);
-        var input = JsonSerializer.Serialize(new { fileName = "src\\calc.js", prefix = "say(\"", suffix = "\")\n}" });
+        var input = JsonSerializer.Serialize(new { fileName = "src\\calc.js", prefix = "say(\"", suffix = "\")\n}", rejected = new[] { "hello" } });
         Assert.Equal("\n    return a + b;", await client.CompleteAsync("completion", "", input, 48, default));
     }
 
-    [Fact]
-    public async Task Code_completion_uses_fim_prefix_and_suffix_and_preserves_inserted_whitespace()
+    [Theory]
+    [InlineData("https://example.test/v1", "fim-code-model")]
+    [InlineData("https://api.openai.com/v1", "gpt-3.5-turbo-instruct")]
+    public async Task Code_completion_uses_fim_prefix_and_suffix_and_preserves_inserted_whitespace(string endpoint, string model)
     {
         using var http = new HttpClient(new Handler(async request =>
         {
-            Assert.Equal("https://example.test/v1/completions", request.RequestUri!.AbsoluteUri);
+            Assert.Equal(endpoint + "/completions", request.RequestUri!.AbsoluteUri);
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             var root = body.RootElement;
-            Assert.Equal("fim-code-model", root.GetProperty("model").GetString());
+            Assert.Equal(model, root.GetProperty("model").GetString());
             Assert.Equal("function test() {", root.GetProperty("prompt").GetString());
             Assert.Equal("\n}", root.GetProperty("suffix").GetString());
             Assert.Equal(128, root.GetProperty("max_tokens").GetInt32());
             Assert.False(root.TryGetProperty("messages", out _));
             return Json(JsonSerializer.Serialize(new { choices = new[] { new { text = "\n    return 1;" } } }));
         }));
-        var client = new SmartProviderClient(Completion, "openai", Profile(), "fim-code-model", http);
+        var profile = Profile();
+        profile.BaseUrl = endpoint;
+        var client = new SmartProviderClient(Completion, "openai", profile, model, http);
         var input = JsonSerializer.Serialize(new { prefix = "function test() {", suffix = "\n}", fileName = "test.js" });
         Assert.Equal("\n    return 1;", await client.CompleteAsync("completion", "ignored chat instructions", input, 128, default));
+    }
+
+    [Theory]
+    [InlineData("https://api.openai.com/v1", "gpt-6-luna", "max_completion_tokens", "reasoning_effort", "\"none\"")]
+    [InlineData("https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.5-flash", "max_tokens", "reasoning_effort", "\"none\"")]
+    [InlineData("https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3.1-pro", "max_tokens", "reasoning_effort", "\"low\"")]
+    [InlineData("https://openrouter.ai/api/v1", "openai/gpt-6-luna", "max_tokens", "reasoning", "{\"effort\":\"none\"}")]
+    [InlineData("https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1", "qwen3.6-flash", "max_tokens", "enable_thinking", "false")]
+    public async Task Editor_chat_uses_supported_reasoning_parameters(string endpoint, string model, string limit, string reasoning, string expected)
+    {
+        using var http = new HttpClient(new Handler(async request =>
+        {
+            Assert.Equal(endpoint + "/chat/completions", request.RequestUri!.AbsoluteUri);
+            using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            var root = json.RootElement;
+            Assert.Equal(model, root.GetProperty("model").GetString());
+            Assert.Equal(96, root.GetProperty(limit).GetInt32());
+            Assert.Equal(expected, root.GetProperty(reasoning).GetRawText());
+            Assert.False(root.TryGetProperty("thinking_budget", out _));
+            return Json("""{"choices":[{"message":{"content":" value"}}]}""");
+        }));
+        var profile = Profile();
+        profile.BaseUrl = endpoint;
+        var client = new SmartProviderClient(Completion, "openai", profile, model, http);
+        Assert.Equal(" value", await client.CompleteAsync("completion", "", """{"prefix":"return","suffix":";"}""", 128, default));
+    }
+
+    [Fact]
+    public async Task Editor_chat_fallback_is_cached_for_editor_only()
+    {
+        var paths = new List<string>();
+        using var http = new HttpClient(new Handler(request =>
+        {
+            paths.Add(request.RequestUri!.AbsolutePath);
+            return Task.FromResult(paths.Count switch
+            {
+                1 => new HttpResponseMessage(HttpStatusCode.BadRequest)
+                {
+                    Content = new StringContent("""{"error":{"message":"The suffix parameter is not supported"}}"""),
+                },
+                4 => Json("""{"choices":[{"text":" value"}]}"""),
+                _ => Json("""{"choices":[{"message":{"content":" value"}}]}"""),
+            });
+        }));
+        var client = new SmartProviderClient(Completion, "openai", Profile(), "custom", http);
+        const string input = """{"prefix":"return","suffix":";"}""";
+        Assert.Equal(" value", await client.CompleteAsync("completion", "", input, 96, default));
+        Assert.Equal(" value", await client.CompleteAsync("completion", "", input, 96, default));
+        Assert.Equal(" value", await client.CompleteAsync("shell-completion", "", input, 96, default));
+        Assert.Equal(["/v1/completions", "/v1/chat/completions", "/v1/chat/completions", "/v1/completions"], paths);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, "unsupported_operation")]
+    [InlineData(HttpStatusCode.TooManyRequests, "unsupported_operation")]
+    [InlineData(HttpStatusCode.InternalServerError, "unsupported_operation")]
+    [InlineData(HttpStatusCode.NotFound, "model_not_found")]
+    [InlineData(HttpStatusCode.BadRequest, "invalid credentials")]
+    public async Task Editor_chat_fallback_skips_other_errors(HttpStatusCode status, string error)
+    {
+        var requests = 0;
+        using var http = new HttpClient(new Handler(_ =>
+        {
+            requests++;
+            return Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(error) });
+        }));
+        var client = new SmartProviderClient(Completion, "openai", Profile(), "custom", http);
+        var failure = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            client.CompleteAsync("completion", "", """{"prefix":"return"}""", 96, default));
+        Assert.Equal(status, failure.StatusCode);
+        Assert.Equal(1, requests);
+    }
+
+    [Fact]
+    public async Task Editor_chat_fallback_honors_cancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var requests = 0;
+        using var http = new HttpClient(new Handler(_ =>
+        {
+            requests++;
+            cancellation.Cancel();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent("unsupported_endpoint"),
+            });
+        }));
+        var client = new SmartProviderClient(Completion, "openai", Profile(), "custom", http);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            client.CompleteAsync("completion", "", """{"prefix":"return"}""", 96, cancellation.Token));
+        Assert.Equal(1, requests);
     }
 
     [Fact]
