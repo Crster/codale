@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
 
-using Codale.Agents.Claude;
 using Codale.Agents.Providers;
 
 
@@ -217,7 +216,6 @@ public sealed class AppSettingsStore(string folder) : IDisposable
     /// <summary>Whether any role the task can run on is configured.</summary>
     public bool SmartFeatureEnabled(string task) => SmartFeatureSettings.RolesFor(task).Any(SmartRoleEnabled)
         || SmartFeatureSettings.IsDecisionTask(task) && SmartRoleEnabled(SmartFeatureSettings.Decision);
-    public bool SmartSummaries => SmartFeatureEnabled("summary");
     public bool SmartThinking => false;
     public bool SmartCompletions => SmartFeatureEnabled("completion");
     /// <summary>Whether the editor draws the gutter with line numbers.</summary>
@@ -394,6 +392,16 @@ public sealed class AppSettingsStore(string folder) : IDisposable
 
     public void SetDefaultTier(string cli, string? tier) => WriteDefault(cli, "tier", IsTier(tier) ? tier : "");
 
+    public (bool HasValue, string? Model, string? Effort) ModelPreferenceFor(string cli) =>
+        (ReadDefault(cli, "modelChosen") == "true", ReadDefault(cli, "model"), ReadDefault(cli, "effort"));
+
+    public void SetModelPreference(string cli, string? model, string? effort)
+    {
+        WriteDefault(cli, "model", model);
+        WriteDefault(cli, "effort", effort);
+        WriteDefault(cli, "modelChosen", "true");
+    }
+
     /// <summary>The provider new chats of a CLI connect through: a name from <see cref="ByokProviders"/>, or "" for the CLI's own login.</summary>
     public string CliProviderFor(string cli) =>
         ReadDefault(cli, "provider") is { } name && FindByok(name)?.Supports(cli) == true ? name : "";
@@ -451,24 +459,6 @@ public sealed class AppSettingsStore(string folder) : IDisposable
     }
 
     public void SetDefaultMode(string cli, string? value) => WriteDefault(cli, "mode", IsChatMode(value) ? value : "");
-
-    private string ClaudeWindowKey(string model) => $"claude.contextWindow.{ClaudeContextProbe.ModelKey(model)}";
-
-    /// <summary>
-    /// The context window last seen for a Claude model, or null. A terminal CLI's transcript
-    /// never says (its 1M pick is logged under the bare id), so the terminal panel measures
-    /// against what a chat's CLI reported, or what an earlier session proved by passing 200K.
-    /// </summary>
-    public int? ClaudeContextWindowFor(string model) =>
-        Get(ClaudeWindowKey(model), () => Read(ClaudeWindowKey(model), 0, ParseInt)) is var window and > 0 ? window : null;
-
-    public void RememberClaudeContextWindow(string model, int window)
-    {
-        if (model.Length > 0 && window > 0)
-        {
-            Set(ClaudeWindowKey(model), window, FormatInt);
-        }
-    }
 
     /// <summary>Seconds between the git panel's working-tree checks.</summary>
     public int GitPollSeconds

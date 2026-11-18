@@ -119,7 +119,7 @@ public sealed partial class ChatViewModel
         // Mid-turn there is nothing to restart without killing the running turn: the
         // request still goes out in plan mode, and the effort lands on the next turn.
         if (!IsBusy && !string.Equals(_liveEffort, planEffort, StringComparison.OrdinalIgnoreCase) &&
-            !await TryApplyModelEffortLiveAsync(RequestedModel, planEffort))
+            !await TryApplyModelEffortLiveAsync(_effectiveModel ?? (Status.HasModel ? Status.Model : null), planEffort))
         {
             await RestartWithCurrentConfigAsync();
         }
@@ -231,7 +231,7 @@ public sealed partial class ChatViewModel
         }
 
         // When the live switch is refused the next spawn picks the effort up.
-        _ = Task.Run(() => TryApplyModelEffortLiveAsync(RequestedModel, effort));
+        _ = Task.Run(() => TryApplyModelEffortLiveAsync(_effectiveModel ?? (Status.HasModel ? Status.Model : null), effort));
     }
 
     /// <summary>Ends a plan turn: hands the session back its previous permission mode.</summary>

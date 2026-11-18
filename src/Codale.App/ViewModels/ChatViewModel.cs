@@ -160,7 +160,19 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             OnPropertyChanged(nameof(EndpointName));
         }
 
-        (RequestedModel, RequestedEffort) = TierConfig(_smart.Settings.DefaultTierFor(CliId));
+        RestoreModelPreference();
+    }
+
+    private string _selectedTier = "cli";
+    private string? _effectiveModel;
+
+    private void RestoreModelPreference()
+    {
+        _selectedTier = _smart.Settings.DefaultTierFor(CliId);
+        var saved = _smart.Settings.ModelPreferenceFor(CliId);
+        (RequestedModel, RequestedEffort) = saved.HasValue
+            ? (saved.Model, saved.Effort)
+            : TierConfig(_selectedTier);
     }
 
     /// <summary>The CLI descriptor behind <see cref="CliId"/>.</summary>
@@ -185,7 +197,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         // A new chat starts where the user last left this CLI: the saved tier (resolved
         // to model/effort), or the CLI's own default when nothing has been chosen yet.
-        (RequestedModel, RequestedEffort) = TierConfig(_smart.Settings.DefaultTierFor(CliId));
+        RestoreModelPreference();
 
         // The session panel shows its live sections (tasks, changes, subagents) only once
         // there is a conversation; a chat opened empty from history gains one later.
@@ -1394,6 +1406,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public Codale.Agents.CliDescriptor? TerminalCli { get; init; }
 
+    internal string TerminalLaunchKey { get; } = Guid.NewGuid().ToString("N");
+
     /// <summary>True for a terminal CLI's session, which gets the simple panel.</summary>
     public bool IsTerminalSession => TerminalCli is not null;
 
@@ -1669,26 +1683,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _ => (null, null),
     };
 
-    /// <summary>The tier matching the current model/effort pick, or "cli" when none does.</summary>
-    public string CurrentTier
-    {
-        get
-        {
-            // Lite temporarily becomes Flash while planning. Other tiers keep their
-            // chosen label during the existing high-effort planning override.
-            var shownEffort = _planEffort.ShownEffort(RequestedEffort);
-            foreach (var tier in ModelTiers)
-            {
-                var (model, effort) = TierConfig(tier);
-                if (string.Equals(model, RequestedModel, StringComparison.OrdinalIgnoreCase) && effort == shownEffort)
-                {
-                    return tier;
-                }
-            }
-
-            return "cli";
-        }
-    }
+    /// <summary>The user's tier choice, independent of temporary planning effort or profile fallback.</summary>
+    public string CurrentTier => _selectedTier;
 
     /// <summary>
     /// Applies a tier pick: the model/effort it resolves to goes to the running session
@@ -1698,14 +1694,17 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         if (IsBusy || IsConnecting) return;
         var (model, effort) = TierConfig(tier);
-        if (RequestedModel == model && RequestedEffort == effort)
+        if (_selectedTier == tier && RequestedModel == model && RequestedEffort == effort)
         {
             return;
         }
 
         Status.PrepareCache(CacheContinuationPlan.Create(CliId, EndpointName, "", CliId, EndpointName, "", modelChanged: true).Explanation);
+        _selectedTier = tier;
         RequestedModel = model;
         RequestedEffort = effort;
+        _smart.Settings.SetModelPreference(CliId, model, effort);
+        NotifyModelDisplays();
         _smart.Settings.SetDefaultTier(CliId, tier);
 
         if (!IsConnected)
@@ -1713,7 +1712,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        if (await TryApplyModelEffortLiveAsync(model, effort))
+        var liveModel = AvailableModels.Count > 0 && model is not null &&
+            !AvailableModels.Any(m => string.Equals(m.Id, model, StringComparison.OrdinalIgnoreCase)) ? null : model;
+        if (await TryApplyModelEffortLiveAsync(liveModel, effort))
         {
             return;
         }
@@ -1955,8 +1956,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 if (cli != CliId)
                 {
                     CliId = cli;
-                    RequestedModel = null;
                     AvailableModels = [];
+                    RestoreModelPreference();
                     HasModelCatalog = false;
                     OnPropertyChanged(nameof(AvailableModels));
                     OnPropertyChanged(nameof(HasModelCatalog));
@@ -2037,16 +2038,33 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             NotifyModelDisplays();
         }
 
-        var model = endpointModels.Count > 0 || endpointEnv is not null
-            ? EndpointModelFor(RequestedModel, endpointModels)
-            : LaunchValue(RequestedModel);
-
-        // A stale Claude alias (sonnet, opus...) the provider does not serve is replaced by the
-        // model it maps to, so the picker shows what the session really runs.
-        if (endpointModels.Count > 0 && model is not null && RequestedModel is { Length: > 0 } && RequestedModel != model)
+        // Resolve availability for this profile without changing the user's saved choice.
+        var catalogue = endpointEnv is not null ? endpointModels
+            : KnownCatalogue(CliId, _smart.Settings.FindByok(EndpointName)?.AccountId)
+                ?? await FetchCatalogueAsync(_agentSessions, CliId, _smart.Settings.FindByok(EndpointName)?.AccountId);
+        if (endpointEnv is null)
         {
-            RequestedModel = model;
+            AvailableModels = catalogue;
+            HasModelCatalog = catalogue.Count > 0;
+            OnPropertyChanged(nameof(AvailableModels));
+            OnPropertyChanged(nameof(HasModelCatalog));
+            OnPropertyChanged(nameof(CanPickModel));
         }
+        // Legacy tier-only settings are resolved once a catalogue is available.
+        if (!_smart.Settings.ModelPreferenceFor(CliId).HasValue)
+        {
+            (RequestedModel, RequestedEffort) = TierConfig(_selectedTier);
+            if (RequestedModel is not null || _selectedTier == "cli")
+                _smart.Settings.SetModelPreference(CliId, RequestedModel, RequestedEffort);
+        }
+        var model = LaunchValue(RequestedModel);
+        if (model is not null && catalogue.Count > 0 &&
+            !catalogue.Any(m => string.Equals(m.Id, model, StringComparison.OrdinalIgnoreCase)))
+        {
+            model = null;
+        }
+        _effectiveModel = model;
+        NotifyModelDisplays();
 
         // A custom endpoint's models are unknown to the effort tables, so they get only a pick.
         var effort = IsCodexSession
@@ -2232,28 +2250,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>The MCP servers the running session was started with; their auto-approved tools skip the prompt outside Manual.</summary>
     private IReadOnlyList<McpServerSpec> _sessionMcpServers = [];
-
-    /// <summary>
-    /// A saved pick such as "sonnet" or "claude-opus-5-5" means nothing to a custom provider:
-    /// opus / fable become its pro model, anything else not on its list its default model.
-    /// </summary>
-    internal static string? EndpointModelFor(string? requested, IReadOnlyList<AgentModelInfo> endpointModels)
-    {
-        if (endpointModels.Count == 0)
-        {
-            return string.IsNullOrEmpty(requested) ? null : requested;
-        }
-
-        if (!string.IsNullOrEmpty(requested) && endpointModels.Any(m => m.Id == requested))
-        {
-            return requested;
-        }
-
-        var smart = requested is not null &&
-            (requested.Contains("opus", StringComparison.OrdinalIgnoreCase) || requested.Contains("fable", StringComparison.OrdinalIgnoreCase));
-        var fallback = smart ? endpointModels.FirstOrDefault(m => !m.IsDefault) : null;
-        return (fallback ?? endpointModels.FirstOrDefault(m => m.IsDefault) ?? endpointModels[0]).Id;
-    }
 
     /// <summary>The endpoint's default and pro model as a catalogue; empty when it is off or has no names.</summary>
     private IReadOnlyList<AgentModelInfo> EndpointModels() => _endpointSettings?.Models(EndpointName) ?? [];
@@ -2651,9 +2647,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 // call), so the meter moves while the turn runs, not just when it lands.
                 Status.Apply(usage.Usage);
 
-                // The CLI's own window size, only when the provider settings publish none
-                // for this model: a configured size is the better-informed number.
-                if (usage.ContextWindow is int reportedWindow && Status.ContextWindow <= 0)
+                // Codex reports the effective window for each request, which can change
+                // after a live model switch. Other CLIs only fill in a missing window.
+                if (usage.ContextWindow is > 0 and int reportedWindow &&
+                    (IsCodexSession || Status.ContextWindow <= 0))
                 {
                     Status.ContextWindow = reportedWindow;
                 }
@@ -2674,12 +2671,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 if (!IsCodexSession && !Status.IsOverrideCli)
                 {
                     RunInBackground(LoadUsageAsync);
-                }
-
-                // The terminal panel cannot read the window from a transcript; it borrows this one.
-                if (!IsCodexSession && turn.ContextWindow is int turnWindow && Status.Model is { Length: > 0 } turnModel && turnModel != StatusViewModel.NotConnected)
-                {
-                    _smart.Settings.RememberClaudeContextWindow(turnModel, turnWindow);
                 }
 
                 // The context window reading comes from the last assistant message, not
@@ -4615,10 +4606,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             model = LaunchValue(model);
             effort = LaunchValue(effort);
-            var applied = await session.TrySetModelEffortAsync(model, effort);
+            var applied = await session.TrySetModelEffortAsync(model ?? "", effort);
 
             if (applied)
             {
+                _effectiveModel = model;
                 _liveEffort = effort;
                 if (_endpointSettings?.ContextWindowFor(EndpointName, model) is { } window && window > 0)
                 {
@@ -4664,7 +4656,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         if (IsBusy || IsTerminalSession || IsConnecting) return;
         if (cli == CliId) { await SetEndpointAsync(name); return; }
-        var tier = CurrentTier;
         var mode = PermissionMode;
         var continuation = CacheContinuationPlan.Create(CliId, EndpointName, "", cli, name, "");
         Status.PrepareCache(continuation.Explanation);
@@ -4677,13 +4668,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         CliId = cli;
         EndpointName = name;
         OnPropertyChanged(nameof(EndpointName));
-        // Resolve the shared tier against the destination account, never carry a
-        // provider-specific model id (or the old account's catalogue) across CLIs.
+        // Each CLI retains its own explicit model preference across profile switches.
         var accountId = _smart.Settings.FindByok(name)?.AccountId;
         AvailableModels = KnownCatalogue(cli, accountId)
             ?? await FetchCatalogueAsync(_agentSessions, cli, accountId);
         HasModelCatalog = AvailableModels.Count > 0;
-        (RequestedModel, RequestedEffort) = TierConfig(tier);
+        RestoreModelPreference();
         PermissionMode = mode;
         OnPropertyChanged(nameof(AvailableModels));
         OnPropertyChanged(nameof(HasModelCatalog));
@@ -4724,7 +4714,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             if (!IsConnected && !IsConnecting)
             {
-                RequestedModel = null;
                 AvailableModels = [];
                 HasModelCatalog = false;
                 OnPropertyChanged(nameof(AvailableModels));
@@ -4740,8 +4729,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        // The old endpoint's model names mean nothing to the new one (and vice versa).
-        RequestedModel = null;
+        // Refresh availability while retaining the preferred model for a later return.
         AvailableModels = [];
         HasModelCatalog = false;
         OnPropertyChanged(nameof(AvailableModels));

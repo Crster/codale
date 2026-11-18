@@ -315,8 +315,6 @@ public sealed class PromptFileLocatorTests
         public Task<Codale.Smart.SmartResult<IReadOnlyList<string>>?> ExpandQueryAsync(Codale.Smart.SmartRequestContext context, string request,
             string vocabulary, CancellationToken ct = default) =>
             Task.FromResult<Codale.Smart.SmartResult<IReadOnlyList<string>>?>(new(terms, [], "stub"));
-        public Task<Codale.Smart.SmartResult<string>?> SummarizeAsync(Codale.Smart.SmartRequestContext context, string path, CancellationToken ct = default) =>
-            Task.FromResult<Codale.Smart.SmartResult<string>?>(null);
         public Task<Codale.Smart.SmartResult<IReadOnlyList<string>>?> RankAsync(Codale.Smart.SmartRequestContext context, string query,
             IReadOnlyList<Codale.Smart.SmartCandidate> candidates, CancellationToken ct = default) =>
             Task.FromResult<Codale.Smart.SmartResult<IReadOnlyList<string>>?>(null);

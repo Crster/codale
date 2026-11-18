@@ -1,11 +1,12 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 using Codale.Core.Agents;
 
 namespace Codale.Agents.Codex;
 
 /// <summary>What a Codex rollout last reported: the prompt's size, the model's window, and the account's windows.</summary>
-public readonly record struct CodexContextReading(int ContextTokens, int? ContextWindow, RateLimitSnapshot? Limits);
+public readonly record struct CodexContextReading(int? ContextTokens, int? ContextWindow, RateLimitSnapshot? Limits);
 
 /// <summary>
 /// Reads how full the context is for a Codex CLI running in a terminal, from the rollout the CLI
@@ -13,16 +14,20 @@ public readonly record struct CodexContextReading(int ContextTokens, int? Contex
 /// the last request's usage, the model's window and the account's rate limits. Read-only, and only
 /// as fresh as the CLI's last model call.
 /// </summary>
-public static class CodexContextProbe
+public static partial class CodexContextProbe
 {
     private const int TailBytes = 256 * 1024;
 
-    /// <summary>
-    /// The newest reading of a terminal session in <paramref name="projectPath"/> written since
-    /// <paramref name="since"/>, or null. Codale's own chats share the folder only under Codale's
-    /// account, but their rollouts (originator "codale") are skipped regardless.
-    /// </summary>
-    public static CodexContextReading? Read(string sessionsRoot, string projectPath, DateTime since)
+    // Codex abbreviates the session-id title item by adding an ellipsis.
+    [GeneratedRegex(@"\A([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{5,11})(?:…|\.\.\.)\z", RegexOptions.IgnoreCase)]
+    private static partial Regex AbbreviatedId();
+
+    public static string? SessionIdFromTitle(string title) =>
+        Guid.TryParseExact(title, "D", out var id) ? id.ToString("D") :
+        AbbreviatedId().Match(title) is { Success: true } match ? match.Groups[1].Value : null;
+
+    /// <summary>Reads only the uniquely identified rollout for the active terminal thread.</summary>
+    public static CodexContextReading? Read(string sessionsRoot, string sessionId)
     {
         try
         {
@@ -31,20 +36,17 @@ public static class CodexContextProbe
                 return null;
             }
 
-            var candidates = new DirectoryInfo(sessionsRoot)
-                .EnumerateFiles("rollout-*.jsonl", SearchOption.AllDirectories)
-                .Where(f => f.LastWriteTimeUtc >= since)
-                .OrderByDescending(f => f.LastWriteTimeUtc);
-
-            foreach (var file in candidates)
+            // Validate before using an id from terminal output in a search pattern.
+            if (SessionIdFromTitle(sessionId) != sessionId && SessionIdFromTitle(sessionId + "…") != sessionId)
             {
-                if (IsTerminalSessionOf(file.FullName, projectPath))
-                {
-                    return ReadLatest(file.FullName);
-                }
+                return null;
             }
 
-            return null;
+            var matches = Directory.EnumerateFiles(sessionsRoot, $"rollout-*-{sessionId}*.jsonl", SearchOption.AllDirectories)
+                .Where(file => IsSession(file, sessionId))
+                .Take(2)
+                .ToArray();
+            return matches.Length == 1 ? ReadLatest(matches[0]) : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -52,7 +54,7 @@ public static class CodexContextProbe
         }
     }
 
-    private static bool IsTerminalSessionOf(string path, string projectPath)
+    private static bool IsSession(string path, string sessionId)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         using var reader = new StreamReader(stream);
@@ -64,19 +66,16 @@ public static class CodexContextProbe
         try
         {
             using var doc = JsonDocument.Parse(first);
-            if (!doc.RootElement.TryGetProperty("payload", out var meta))
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty("payload", out var meta))
             {
                 return false;
             }
 
-            var originator = meta.TryGetProperty("originator", out var o) ? o.GetString() : null;
-            var cwd = meta.TryGetProperty("cwd", out var c) ? c.GetString() : null;
-            return !string.Equals(originator, "codale", StringComparison.OrdinalIgnoreCase) &&
-                cwd is not null &&
-                string.Equals(
-                    Path.TrimEndingDirectorySeparator(cwd.Replace('/', '\\')),
-                    Path.TrimEndingDirectorySeparator(projectPath.Replace('/', '\\')),
-                    StringComparison.OrdinalIgnoreCase);
+            return meta.ValueKind == JsonValueKind.Object &&
+                meta.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String &&
+                Guid.TryParseExact(id.GetString(), "D", out var rolloutId) &&
+                rolloutId.ToString("D").StartsWith(sessionId, StringComparison.OrdinalIgnoreCase);
         }
         catch (JsonException)
         {
@@ -102,7 +101,11 @@ public static class CodexContextProbe
             try
             {
                 using var doc = JsonDocument.Parse(line);
-                if (!doc.RootElement.TryGetProperty("payload", out var payload))
+                if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                    !doc.RootElement.TryGetProperty("payload", out var payload) ||
+                    payload.ValueKind != JsonValueKind.Object ||
+                    !payload.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String ||
+                    !type.ValueEquals("token_count"))
                 {
                     continue;
                 }
@@ -115,11 +118,11 @@ public static class CodexContextProbe
 
                 if (payload.TryGetProperty("info", out var info) && info.ValueKind == JsonValueKind.Object &&
                     info.TryGetProperty("last_token_usage", out var last) &&
-                    Count(last, "input_tokens") is var input and > 0)
+                    last.ValueKind == JsonValueKind.Object)
                 {
                     // Codex's input already includes the cached part: it is the whole prompt.
-                    int? window = info.TryGetProperty("model_context_window", out var w) && w.TryGetInt32(out var size) && size > 0 ? size : null;
-                    reading = new CodexContextReading(input, window, null);
+                    int? window = Count(info, "model_context_window") is var size and > 0 ? size : null;
+                    reading = new CodexContextReading(Count(last, "input_tokens"), window, null);
                 }
             }
             catch (JsonException)
@@ -128,7 +131,7 @@ public static class CodexContextProbe
             }
         }
 
-        return reading is { } found ? found with { Limits = limits } : limits is { } only ? new CodexContextReading(0, null, only) : null;
+        return reading is { } found ? found with { Limits = limits } : limits is { } only ? new CodexContextReading(null, null, only) : null;
     }
 
     /// <summary>The rollout's snake_case windows: the five-hour one at or under ten hours, the long one beyond.</summary>

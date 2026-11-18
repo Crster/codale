@@ -83,6 +83,21 @@ public sealed class HistoryStore(string directory, WorkspaceDatabasePool? databa
         return (IReadOnlyList<string>)lines;
     });
 
+    public IReadOnlyList<(long NextOffset, string Line)> Page(string feature, string generation, long offset, int limit) =>
+        (databases ?? WorkspaceDb.Shared).Use(directory, db =>
+        {
+            var node = Node(db, feature, generation);
+            var page = new List<(long, string)>(limit);
+            // The log is keyed by adjacent byte offsets. Reading the next key directly
+            // avoids sorting every key in the archive on every backfill page.
+            while (page.Count < limit && node.Open(Offset(offset)).Read() is { } line)
+            {
+                offset += SizeOf(line);
+                page.Add((offset, line));
+            }
+            return (IReadOnlyList<(long, string)>)page;
+        });
+
     /// <summary>
     /// Archives the first <paramref name="offset"/> bytes and starts the new current list with whatever was
     /// appended past them, so no record ever lands in an archive unsummarised.

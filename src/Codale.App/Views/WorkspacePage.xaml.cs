@@ -1884,8 +1884,6 @@ public sealed partial class WorkspacePage : Page
     private async Task ShowSearchResultAsync(SearchOpenRequest request, SearchViewModel? source = null)
     {
         var query = (source ?? ViewModel.Search).Query;
-        // Only the project's own search teaches ranking: the references list is not an answer to a question.
-        if (source is null) ViewModel.Features?.RecordSearchOpen(query, request.FilePath);
         var entry = await ShowFileTabAsync(request.FilePath);
         var count = request.Spans.Count;
 

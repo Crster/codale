@@ -8,7 +8,7 @@ namespace Codale.Search;
 /// indexing on a background thread never queues behind the UI thread's writes). Layout:
 /// <list type="bullet">
 /// <item><c>feature.ID</c> = the feature (keyword field <c>feature</c>); <c>feature.ID.file.PATH</c> = when the agent last wrote that file.</item>
-/// <item><c>session.ID</c> = the provider conversation behind a feature; <c>delivered.PROVIDERSESSION.KEY</c> = context it already has.</item>
+/// <item><c>session.ID</c> = the provider conversation behind a feature.</item>
 /// </list>
 /// </summary>
 public sealed partial class ProjectKnowledgeIndex
@@ -87,21 +87,11 @@ public sealed partial class ProjectKnowledgeIndex
         });
     }
 
-    /// <summary>Removes a feature with its files and everything recorded for its session; its log folder is the caller's.</summary>
+    /// <summary>Removes a feature with its files and provider session; its log folder and turn topics are the caller's.</summary>
     public void DeleteFeature(string id) => db.Batch(() =>
     {
         FeatureRoot.Open(id).Remove();
-
-        var session = db.Open("session").Open(id);
-        if (session.ReadJson<ProviderSession>() is { } provider) db.Open("delivered").Open(provider.ProviderSessionId).Remove();
-        session.Remove();
-
-        foreach (var node in db.Open("knowledge").Descendants())
-            if (node.ReadJson<KnowledgeRecord>()?.SessionId == id) node.Remove();
-        foreach (var node in db.Open("learned").Descendants())
-            if (node.ReadJson<LearnedRecord>()?.SessionId == id) node.Remove();
-        foreach (var node in db.Open("retrieval").Descendants())
-            if (node.ReadJson<RetrievalRecord>()?.SessionId == id) node.Remove();
+        db.Open("session").Open(id).Remove();
     });
 
     /// <summary>Features most likely to own <paramref name="text"/>, best match first.</summary>
@@ -149,17 +139,4 @@ public sealed partial class ProjectKnowledgeIndex
     public void SetProviderSession(ProviderSession session) => db.Open("session").Open(session.SessionId).WriteJson(session);
 
     public ProviderSession? GetProviderSession(string id) => db.Open("session").Open(id).ReadJson<ProviderSession>();
-
-    public IReadOnlyList<string> DeliveredContext(string providerSessionId) => db.Open("delivered").Open(providerSessionId).Children();
-
-    public void MarkContextDelivered(string providerSessionId, IReadOnlyList<string> keys)
-    {
-        var delivered = db.Open("delivered").Open(providerSessionId);
-        db.Batch(() =>
-        {
-            foreach (var key in keys.Where(k => k.Length > 0)) delivered.Open(key).Write("1");
-        });
-    }
-
-    public void ClearDeliveredContext(string providerSessionId) => db.Open("delivered").Open(providerSessionId).Remove();
 }

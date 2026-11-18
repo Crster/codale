@@ -32,6 +32,7 @@ public sealed partial class CliTerminalTab : UserControl, ITerminalHost
         Terminal.SubmitRewriter = line => _viewModel?.RewriteSubmitted(line);
         Terminal.Resized += (_, size) => _viewModel?.Resize((short)size.Cols, (short)size.Rows);
         Terminal.LinkActivated += (_, link) => LinkActivated?.Invoke(this, link);
+        Terminal.TitleChanged += (_, title) => SessionPanel.ObserveTerminalTitle(title);
 
         SessionPanel.FileDiffRequested += (_, path) => FileDiffRequested?.Invoke(this, path);
         SessionPanel.ArtifactRequested += (_, artifact) => ArtifactRequested?.Invoke(this, artifact);
@@ -75,6 +76,7 @@ public sealed partial class CliTerminalTab : UserControl, ITerminalHost
         {
             UnsubscribeFromViewModel();
             _viewModel = value;
+            SessionPanel.ClaudeContextPath = value.ClaudeContextPath;
             SessionPanel.Session = _viewModel?.AgentSession;
         }
     }

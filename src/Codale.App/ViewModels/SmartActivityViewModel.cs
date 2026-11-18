@@ -29,18 +29,14 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
     private readonly SmartExperience _smart;
     private int _refreshing, _dirty;
     private bool _disposed;
-    private (int Done, int Total) _summary;
     private Codale.Search.ProjectKnowledgeIndex? _knowledge;
     public void ObserveIndex(Codale.Search.ProjectKnowledgeIndex knowledge)
     {
         _knowledge = knowledge;
         knowledge.IndexingChanged += OnIndexingChanged;
-        knowledge.SummaryProgressChanged += SetSummaryProgress;
         Refresh();
     }
     private void OnIndexingChanged() => Refresh();
-    /// <summary>Progress of the background file summaries; called from any thread.</summary>
-    public void SetSummaryProgress(int done, int total) { _summary = (done, total); Refresh(); }
     public SmartActivityViewModel(string project, SmartExperience smart)
     {
         _project = project;
@@ -53,15 +49,15 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
     [ObservableProperty] public partial string Title { get; set; } = "";
     public ObservableCollection<SmartActivityItem> Runs { get; } = [];
     private void OnChanged(object? sender, EventArgs e) => Refresh();
-    // The latest prompt: routing and discovery run together, so show them as one. Anything else is a single task.
+    // The latest prompt: routing and search keywords run together, so show them as one. Anything else is a single task.
     private static IReadOnlyList<SmartActivity> LatestPrompt(IReadOnlyList<SmartActivity> all)
     {
         if (all.Count == 0) return [];
         var newest = all.OrderByDescending(a => a.StartedAt).First();
-        if (newest.Context.Task is not ("routing" or "context")) return [newest];
+        if (newest.Context.Task is not ("routing" or "keywords")) return [newest];
         var routing = all.Where(a => a.Context.Task == "routing").OrderByDescending(a => a.StartedAt).FirstOrDefault();
         var from = routing?.StartedAt ?? newest.StartedAt;
-        return [.. all.Where(a => a.Context.Task is "routing" or "context" && a.StartedAt >= from).OrderBy(a => a.StartedAt)];
+        return [.. all.Where(a => a.Context.Task is "routing" or "keywords" && a.StartedAt >= from).OrderBy(a => a.StartedAt)];
     }
     private static string Short(string text, int max) { text = text.ReplaceLineEndings(" "); return text.Length <= max ? text : text[..max] + "…"; }
     private static string Seconds(long ms) =>
@@ -69,8 +65,6 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
     private static string TaskLabel(string task) => task switch
     {
         "routing" => "Choosing the best agent",
-        "context" => "Finding relevant code",
-        "summary" => "Summarizing files",
         "title" => "Naming the session",
         "keywords" => "Choosing search keywords",
         "commit" => "Writing a commit message",
@@ -82,7 +76,6 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
     };
     private static string ToolLabel(string tool) => tool switch
     {
-        "read_index" => "Looked at a code match",
         "read_file" => "Read",
         "list_directory" => "Browsed",
         "search_files" => "Searched for",
@@ -114,7 +107,7 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
             "list_directory" => ShortPath(Arg("path") ?? tool.WorkingDirectory),
             "search_files" => Arg("pattern") ?? "",
             "run_shell" => Short(Arg("command") ?? "", 60),
-            "read_index" or "parse" => "",
+            "parse" => "",
             _ => Short(tool.Arguments, 60)
         };
         i.Meta = (tool.State is "running" ? "running" : tool.ExitCode is { } code and not 0 ? $"exit {code}" : "") is { Length: > 0 } w ? $"{w} · {Seconds(tool.ElapsedMilliseconds)}" : Seconds(tool.ElapsedMilliseconds);
@@ -139,14 +132,11 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
                 {
                     if (_disposed) return;
                     var running = _smart.CurrentActivity;
-                    var (sumDone, sumTotal) = _summary;
                     Text = _smart.Status.State switch
                     {
                         SmartState.Disabled => "Smart off",
                         SmartState.Error => "Smart error",
-                        SmartState.Ready when running is { Context.Task: "summary" } => sumTotal > 0 ? $"Smart · summarizing {Math.Min(sumDone + 1, sumTotal)}/{sumTotal}" : "Smart · summarizing",
                         SmartState.Ready when running is not null => $"Smart · {running.Context.Task}",
-                        SmartState.Ready when sumTotal > 0 => $"Smart · summarizing {Math.Min(sumDone + 1, sumTotal)}/{sumTotal}",
                         SmartState.Ready when _knowledge?.IsIndexing == true => "Smart · indexing",
                         SmartState.Ready when activities.FirstOrDefault()?.State == "error" => "Smart · last task failed",
                         SmartState.Ready => "Smart ready",
@@ -193,7 +183,6 @@ public sealed partial class SmartActivityViewModel : ObservableObject, IDisposab
         if (_knowledge is { } knowledge)
         {
             knowledge.IndexingChanged -= OnIndexingChanged;
-            knowledge.SummaryProgressChanged -= SetSummaryProgress;
         }
     }
 }

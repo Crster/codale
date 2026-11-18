@@ -70,33 +70,18 @@ public sealed class SmartTests
     }
 
     [Fact]
-    public void Summary_cache_rejects_changed_source_and_isolates_worktrees()
-    {
-        var folder = Path.Combine(Path.GetTempPath(), "codale-smart-test-" + Guid.NewGuid());
-        try
-        {
-            var cache = new SummaryCache(folder);
-            cache.Put("tree-a", "file.cs", "hash-a", "summary");
-            Assert.Equal("summary", cache.Get("tree-a", "file.cs", "hash-a"));
-            Assert.Null(cache.Get("tree-a", "file.cs", "hash-b"));
-            Assert.Null(cache.Get("tree-b", "file.cs", "hash-a"));
-            cache.Prune("tree-a", new HashSet<string>());
-            Assert.Null(cache.Get("tree-a", "file.cs", "hash-a"));
-        }
-        finally { Directory.Delete(folder, true); }
-    }
-
-    [Fact]
-    public async Task Interactive_request_preempts_a_running_summary()
+    public async Task Interactive_request_preempts_running_background_work()
     {
         var runtime = new BlockingRuntime();
         await using var smart = new SmartExperience(() => runtime, (_, _) => Task.FromResult("model"));
         await smart.SetEnabledAsync(true);
-        var background = smart.SummarizeAsync(Context("summary"), "file.cs");
+        Task<SmartResult<string>?> Background() =>
+            smart.GenerateAsync(Context("compose-completion"), BlockingRuntime.Hold, "{}", 16, text => text, background: true);
+        var background = Background();
         await runtime.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        Assert.Equal("summary", smart.CurrentActivity?.Context.Task);
-        // A second project's optional work is dropped instead of piling up behind the busy runtime.
-        Assert.Null(await smart.SummarizeAsync(Context("summary"), "other.cs").WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.Equal("compose-completion", smart.CurrentActivity?.Context.Task);
+        // A second request for optional work is dropped instead of piling up behind the busy runtime.
+        Assert.Null(await Background().WaitAsync(TimeSpan.FromSeconds(2)));
         var intent = await smart.ClassifyAsync(Context(), "plan this", null).WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Equal(SmartIntent.Plan, intent?.Value);
         Assert.Null(await background);
@@ -106,6 +91,7 @@ public sealed class SmartTests
 
     private sealed class BlockingRuntime : ISmartRuntime
     {
+        public const string Hold = "hold the runtime";
         public readonly TaskCompletionSource Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _active;
         public int MaxActive;
@@ -117,7 +103,7 @@ public sealed class SmartTests
             MaxActive = Math.Max(MaxActive, active);
             try
             {
-                if (prompt.Contains("Summarize this file"))
+                if (prompt.Contains(Hold))
                 {
                     Started.SetResult();
                     ct.WaitHandle.WaitOne(); ct.ThrowIfCancellationRequested();

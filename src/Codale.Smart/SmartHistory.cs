@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace Codale.Smart;
@@ -8,7 +10,8 @@ public sealed class SmartHistory(string directory)
     public const int MaxRuns = 10;
     public const long MaxBytes = 1024 * 1024;
     private readonly Lock _gate = new();
-    private string Folder(string project) => Path.Combine(directory, SummaryCache.Hash(Path.GetFullPath(project).ToUpperInvariant()));
+    private string Folder(string project) => Path.Combine(directory, Hash(Path.GetFullPath(project).ToUpperInvariant()));
+    private static string Hash(string source) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)));
 
     public void Save(SmartActivity activity)
     {

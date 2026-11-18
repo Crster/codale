@@ -260,7 +260,7 @@ public sealed class SmartProviderClientTests
             completion: new(Completion, "openai", Profile(), "fim", http));
         Assert.True(router.HasGeneration);
         Assert.True(router.IsFeatureEnabled("commit"));
-        Assert.True(router.IsFeatureEnabled("summary"));
+        Assert.True(router.IsFeatureEnabled("title"));
         Assert.False(router.IsFeatureEnabled("embedding"));
         Assert.Equal("general", await router.CompleteAsync("commit", "s", "p", 64, default));
         Assert.Equal("general", await router.CompleteAsync("shell", "s", "p", 64, default));
@@ -291,8 +291,8 @@ public sealed class SmartProviderClientTests
 
     [Theory]
     [InlineData("commit")]
-    [InlineData("summary")]
-    [InlineData("context")]
+    [InlineData("ranking")]
+    [InlineData("brief")]
     [InlineData("title")]
     public void General_tasks_never_run_on_decision(string task)
     {

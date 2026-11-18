@@ -75,15 +75,25 @@ public sealed class KnowledgeLifetimeTests : IDisposable
     }
 
     [Fact]
-    public void ARetrievalAfterDisposeAnswersWithoutThrowing()
+    public void ASearchAfterDisposeAnswersWithoutThrowing()
     {
         using var store = new CodaleDb(Path.Combine(_directory, "project.db"));
         var index = new ProjectKnowledgeIndex(store);
         index.Dispose();
 
-        var result = index.Retrieve(_root, "class C1", "", new HashSet<string>());
+        Assert.NotNull(index.Search(_root, "class C1"));
+    }
 
-        Assert.NotNull(result);
+    [Fact]
+    public async Task IndexingReportsBusyThenIdleEvenWhenTheSnapshotIsReused()
+    {
+        using var store = new CodaleDb(Path.Combine(_directory, "busy.db"));
+        using var index = new ProjectKnowledgeIndex(store);
+        var states = new List<bool>();
+        index.IndexingChanged += () => states.Add(index.IsIndexing);
+        await index.RefreshAsync(_root);
+        await index.RefreshAsync(_root);
+        Assert.Equal(new[] { true, false, true, false }, states);
     }
 
     [Fact]

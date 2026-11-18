@@ -27,13 +27,6 @@ internal sealed class SmartTools(TimeSpan? commandTimeout = null)
     /// <summary>Unattended (background) work only reads: it is prompted by file contents nobody reviewed, so it never gets run_shell.</summary>
     internal static readonly object[] ReadOnlyDefinitions = Definitions[..3];
     internal static object[] For(bool background) => background ? ReadOnlyDefinitions : Definitions;
-    internal static readonly object[] ContextDefinitions =
-    [
-        Schema("query_index", "Search the project index for relevant indexed source using alternative terms.",
-            new { query = new { type = "string" } }, ["query"]),
-        Schema("read_index", "Inspect the indexed source excerpt for a candidate ID returned by the index.",
-            new { id = new { type = "string" } }, ["id"])
-    ];
 
     public static string Resolve(SmartRequestContext context, string? path) =>
         Path.GetFullPath(string.IsNullOrWhiteSpace(path) ? "." : path, context.WorkingDirectory);

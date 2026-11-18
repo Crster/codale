@@ -34,36 +34,4 @@ public sealed class FeatureSearchTests
     {
         Assert.Null(SearchText.ToMatchQuery("the and to"));
     }
-
-    [Fact]
-    public void A_file_is_cut_into_overlapping_chunks_that_cover_it()
-    {
-        var content = string.Join('\n', Enumerable.Range(1, 100).Select(i => $"line {i}"));
-
-        var chunks = FileChunker.Chunk(content);
-
-        Assert.True(chunks.Count >= 3);
-        Assert.Equal(1, chunks[0].StartLine);
-        Assert.Contains("line 100", chunks[^1].Text);
-        Assert.All(chunks, c => Assert.True(c.Text.Length <= FileChunker.MaxChars + 50));
-        Assert.True(chunks[1].StartLine < 41, "chunks overlap");
-    }
-
-    [Fact]
-    public void Binary_and_oversized_content_is_not_indexable()
-    {
-        Assert.False(FileChunker.IsIndexable("a\0b"));
-        Assert.False(FileChunker.IsIndexable(new string('x', FileChunker.MaxFileBytes + 1)));
-        Assert.False(FileChunker.IsIndexable(""));
-        Assert.True(FileChunker.IsIndexable("class A {}"));
-    }
-
-    [Fact]
-    public void Chunk_line_numbers_match_source_even_after_leading_blank_lines()
-    {
-        const string content = "\n\n    public void RefreshToken() {}\n\n";
-        var chunk = Assert.Single(FileChunker.Chunk(content));
-        Assert.Equal(3, chunk.StartLine);
-        Assert.Equal("    public void RefreshToken() {}", chunk.Text);
-    }
 }

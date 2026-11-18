@@ -1,99 +1,44 @@
+using System.Text;
 using System.Text.Json;
 
 namespace Codale.Agents.Claude;
 
-/// <summary>The tokens of a terminal session's last prompt, and the model that answered it.</summary>
-public readonly record struct ClaudeContextReading(int Tokens, string? Model);
+public readonly record struct ClaudeContextReading(int Tokens, int ContextWindow);
 
-/// <summary>
-/// Reads how full the context is for a Claude CLI running in a terminal, from the transcript the
-/// CLI keeps: the newest assistant message's usage is the prompt it last sent. Read-only, and
-/// only as fresh as the CLI's last turn.
-/// </summary>
+/// <summary>Exchanges the active terminal's context counters through a per-launch status-line file.</summary>
 public static class ClaudeContextProbe
 {
-    private const int TailBytes = 256 * 1024;
+    public static string StatusLineCommand(string path)
+    {
+        var destination = Convert.ToBase64String(Encoding.UTF8.GetBytes(path));
+        var script = $$"""
+            $ProgressPreference = 'SilentlyContinue'
+            $path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{{destination}}'))
+            $context = ([Console]::In.ReadToEnd() | ConvertFrom-Json).context_window
+            $reading = @{
+                tokens = [int]$context.total_input_tokens + [int]$context.total_output_tokens
+                window = [int]$context.context_window_size
+            }
+            [IO.File]::WriteAllText($path, ($reading | ConvertTo-Json -Compress))
+            """;
+        return "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand " +
+            Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+    }
 
-    /// <summary>
-    /// The last prompt of the session transcript touched since <paramref name="since"/>, or null.
-    /// <paramref name="directory"/> is the project's transcript folder under the account the CLI runs
-    /// on: a terminal CLI keeps the default one (~/.claude), not Codale's own.
-    /// </summary>
-    public static ClaudeContextReading? Read(string directory, DateTime since)
+    public static ClaudeContextReading? Read(string path)
     {
         try
         {
-            if (!Directory.Exists(directory))
-            {
-                return null;
-            }
-
-            var newest = new DirectoryInfo(directory).EnumerateFiles("*.jsonl")
-                .Where(f => f.LastWriteTimeUtc >= since)
-                .OrderByDescending(f => f.LastWriteTimeUtc)
-                .FirstOrDefault();
-            if (newest is null)
-            {
-                return null;
-            }
-
-            using var stream = new FileStream(newest.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            stream.Seek(Math.Max(0, stream.Length - TailBytes), SeekOrigin.Begin);
-            using var reader = new StreamReader(stream);
-            ClaudeContextReading? reading = null;
-            while (reader.ReadLine() is { } line)
-            {
-                if (line.Length == 0 || line[0] != '{' || !line.Contains("\"usage\"", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    using var doc = JsonDocument.Parse(line);
-                    var root = doc.RootElement;
-                    if (root.TryGetProperty("isSidechain", out var side) && side.ValueKind == JsonValueKind.True ||
-                        !root.TryGetProperty("message", out var message) ||
-                        !message.TryGetProperty("usage", out var usage))
-                    {
-                        continue;
-                    }
-
-                    var sum = Count(usage, "input_tokens") + Count(usage, "cache_read_input_tokens") + Count(usage, "cache_creation_input_tokens");
-                    if (sum > 0)
-                    {
-                        reading = new ClaudeContextReading(sum, message.TryGetProperty("model", out var model) && model.ValueKind == JsonValueKind.String ? model.GetString() : null);
-                    }
-                }
-                catch (JsonException)
-                {
-                    // The first line of a tail read is usually cut mid-record.
-                }
-            }
-
-            return reading;
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var doc = JsonDocument.Parse(stream);
+            var data = doc.RootElement;
+            return data.Int("tokens") is >= 0 and int tokens && data.Int("window") is >= 0 and int window
+                ? new ClaudeContextReading(tokens, window)
+                : null;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             return null;
         }
     }
-
-    /// <summary>
-    /// The window to measure against. The transcript never records it (a "[1m]" pick is logged
-    /// under the bare model id), so <paramref name="known"/> is the window last seen for the
-    /// model; without one it is a guess: 200K, or 1M once a session is already past 200K.
-    /// </summary>
-    public static int WindowFor(int tokens, int? known = null) =>
-        Math.Max(known ?? 0, tokens > 200_000 ? 1_000_000 : 200_000);
-
-    /// <summary>The model id windows are remembered under: "claude-sonnet-5-5[1m]" and "claude-sonnet-5-5" are one model.</summary>
-    public static string ModelKey(string model)
-    {
-        var bracket = model.IndexOf('[');
-        return (bracket > 0 ? model[..bracket] : model).Trim().ToLowerInvariant();
-    }
-
-    private static int Count(JsonElement usage, string name) =>
-        usage.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var n) ? n : 0;
 }

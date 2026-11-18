@@ -93,7 +93,10 @@ public sealed class SourceIndex : IDisposable
 
         if (Shared.Count > MaxShared)
         {
-            foreach (var stale in Shared.OrderBy(e => e.Value.Used).Take(Shared.Count - MaxShared).ToList())
+            // ToArray is an atomic snapshot; ordering the live dictionary copies into a buffer sized by an earlier
+            // Count, and a concurrent removal leaves empty entries with null keys.
+            var shared = Shared.ToArray();
+            foreach (var stale in shared.OrderBy(e => e.Value.Used).Take(shared.Length - MaxShared).ToList())
             {
                 if (stale.Key != key && Shared.TryRemove(stale.Key, out var removed))
                 {

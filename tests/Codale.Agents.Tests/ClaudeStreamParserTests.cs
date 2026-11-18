@@ -86,6 +86,28 @@ public sealed class ClaudeStreamParserTests
     }
 
     [Fact]
+    public void Turn_context_window_follows_the_main_model_after_a_switch()
+    {
+        var parser = new ClaudeStreamParser();
+        parser.Parse("""{"type":"system","subtype":"init","model":"claude-haiku-4-5"}""");
+        parser.Parse("""
+            {"type":"assistant","message":{"model":"claude-sonnet-5-5","usage":{"input_tokens":12000}}}
+            """);
+        parser.Parse("""
+            {"type":"assistant","parent_tool_use_id":"subagent","message":{"model":"claude-haiku-4-5","usage":{"input_tokens":3000}}}
+            """);
+
+        var result = Assert.IsType<TurnCompleted>(Assert.Single(parser.Parse("""
+            {"type":"result","subtype":"success","modelUsage":{
+                "claude-sonnet-5-5-snapshot":{"canonicalModel":"claude-sonnet-5-5","contextWindow":1000000},
+                "claude-haiku-4-5":{"contextWindow":200000}
+            }}
+            """)));
+
+        Assert.Equal(1_000_000, result.ContextWindow);
+    }
+
+    [Fact]
     public void Rate_limit_event_drives_the_status_bar_remaining_indicator()
     {
         var limits = Replay("approval-denied.jsonl").OfType<RateLimitUpdated>().First().Limits;
@@ -298,6 +320,35 @@ public sealed class ClaudeStreamParserTests
 
         Assert.IsType<CliMessageIgnored>(Assert.Single(parser.Parse(
             """{"type":"system","subtype":"hook_response","hook_name":"SessionStart:startup","exit_code":0,"outcome":"success"}""")));
+    }
+
+    [Fact]
+    public void Published_code_change_is_an_informational_notice()
+    {
+        var parser = new ClaudeStreamParser();
+        var notice = Assert.IsType<CliInformation>(Assert.Single(parser.Parse(
+            """{"type":"system","subtype":"code_change_published","provider":"github","url":"https://github.com/Hike-Footwear/atlas/pull/2","repo":"Hike-Footwear/atlas","identifier":"2","session_id":"session-1","uuid":"event-1"}""")));
+
+        Assert.Equal("Code change published: https://github.com/Hike-Footwear/atlas/pull/2", notice.Text);
+        Assert.False(notice.IsWarning);
+        Assert.Equal("session-1", notice.SessionId);
+        Assert.Equal("event-1", notice.Uuid);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"url\":null}")]
+    [InlineData("{\"url\":\"   \"}")]
+    public void Published_code_change_without_a_url_is_recognised(string fields)
+    {
+        var parser = new ClaudeStreamParser();
+        var json = "{\"type\":\"system\",\"subtype\":\"code_change_published\",\"details\":" + fields + "}";
+        using var document = System.Text.Json.JsonDocument.Parse(fields);
+        if (document.RootElement.TryGetProperty("url", out var url))
+            json = "{\"type\":\"system\",\"subtype\":\"code_change_published\",\"url\":" + url.GetRawText() + "}";
+
+        var ignored = Assert.IsType<CliMessageIgnored>(Assert.Single(parser.Parse(json)));
+        Assert.Equal("system/code_change_published", ignored.Kind);
     }
 
     [Fact]

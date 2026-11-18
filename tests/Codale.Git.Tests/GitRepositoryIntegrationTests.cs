@@ -6,6 +6,35 @@ namespace Codale.Git.Tests;
 /// </summary>
 public sealed class GitRepositoryIntegrationTests : IDisposable
 {
+    [Fact]
+    public async Task File_history_follows_a_rename_and_reports_commit_scope()
+    {
+        Git(_root, "init -b main");
+        Git(_root, "config user.email codale@example.test");
+        Git(_root, "config user.name Codale");
+        File.WriteAllText(Path.Combine(_root, "old.cs"), "class Writer {}");
+        File.WriteAllText(Path.Combine(_root, "other.cs"), "class Other {}");
+        Git(_root, "add .");
+        Git(_root, "commit -m Introduce writer");
+        Git(_root, "mv old.cs new.cs");
+        Git(_root, "commit -m Rename writer");
+
+        var history = await GitFileHistory.ReadAsync(_root, "new.cs", CancellationToken.None);
+
+        Assert.Collection(history,
+            commit => Assert.Equal("Rename writer", commit.Subject),
+            commit =>
+            {
+                Assert.Equal("Introduce writer", commit.Subject);
+                Assert.Equal(2, commit.FilesChanged);
+            });
+        Assert.Empty(await GitFileHistory.ReadAsync(_root, "untracked.cs", CancellationToken.None));
+
+        Git(_root, "clone --depth 1 --no-local . shallow");
+        var shallow = await GitFileHistory.ReadAsync(Path.Combine(_root, "shallow"), "new.cs", CancellationToken.None);
+        Assert.Equal("Rename writer", Assert.Single(shallow).Subject);
+    }
+
     private readonly string _root = Directory.CreateTempSubdirectory("codale-git-").FullName;
 
     private static void Git(string workingDirectory, string arguments)

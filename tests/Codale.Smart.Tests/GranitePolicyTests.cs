@@ -57,8 +57,8 @@ public sealed class GranitePolicyTests : IDisposable
     [InlineData("assess", true, SmartReasoning.Off)]
     [InlineData("commit", false, SmartReasoning.Low)]
     [InlineData("commit", true, SmartReasoning.Low)]
-    [InlineData("summary", true, SmartReasoning.Full)]
-    [InlineData("context", true, SmartReasoning.Full)]
+    [InlineData("ranking", true, SmartReasoning.Full)]
+    [InlineData("brief", true, SmartReasoning.Full)]
     [InlineData("brief", false, SmartReasoning.Off)]
     public void Reasoning_follows_the_task(string task, bool thinking, SmartReasoning expected) =>
         Assert.Equal(expected, SmartExperience.ReasoningFor(task, thinking));
@@ -215,7 +215,7 @@ public sealed class GranitePolicyTests : IDisposable
     }
 
     [Fact]
-    public async Task Fill_in_the_middle_never_waits_for_interactive_work_but_preempts_summaries()
+    public async Task Fill_in_the_middle_never_waits_for_interactive_work_but_preempts_background_work()
     {
         var release = new ManualResetEventSlim();
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -227,7 +227,7 @@ public sealed class GranitePolicyTests : IDisposable
                 started.TrySetResult();
                 WaitHandle.WaitAny([release.WaitHandle, ct.WaitHandle]);
                 ct.ThrowIfCancellationRequested();
-                return c.Prompt.Contains("Summarize") ? "Summary." : "{\"intent\":\"ask\"}";
+                return "{\"intent\":\"ask\"}";
             }
         };
         await using var smart = await Ready(runtime);
@@ -239,10 +239,10 @@ public sealed class GranitePolicyTests : IDisposable
 
         release.Reset();
         started = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        var summary = smart.SummarizeAsync(Context("summary"), "file.cs");
+        var background = smart.GenerateAsync(Context("compose-completion"), "hold", "{}", 16, text => text, background: true);
         await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Equal("x", await smart.FillInMiddleAsync(Context("completion"), "a", "b", null).WaitAsync(TimeSpan.FromSeconds(3)));
-        Assert.Null(await summary);
+        Assert.Null(await background);
     }
 
     [Theory]

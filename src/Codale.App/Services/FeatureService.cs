@@ -11,10 +11,10 @@ namespace Codale.App.Services;
 /// <summary>
 /// One repository's session history and shared knowledge. Each entry keeps its own log and provider
 /// mapping; project context is retrieved independently of those session boundaries. Owns the project's
-/// <see cref="CodaleDb"/>; every call is safe from any thread, and indexing and summaries
-/// run in the background so the chat never waits for them.
+/// <see cref="CodaleDb"/>; every call is safe from any thread, and indexing runs in the
+/// background so the chat never waits for it.
 /// </summary>
-public sealed class FeatureService : IDisposable
+public sealed partial class FeatureService : IDisposable
 {
     private readonly string _projectPath;
     private readonly IWorkspaceData _data;
@@ -28,13 +28,11 @@ public sealed class FeatureService : IDisposable
     private readonly FeatureActivity _activity;
 
     private readonly SmartEmbedder _embedder;
-    private readonly SmartExperienceHost _smart;
 
     public FeatureService(string projectPath, SmartExperienceHost smart, IWorkspaceData data)
     {
         _projectPath = projectPath;
         _data = data;
-        _smart = smart;
         _embedder = new SmartEmbedder(smart);
         try
         {
@@ -47,17 +45,15 @@ public sealed class FeatureService : IDisposable
         }
         Knowledge = new ProjectKnowledgeIndex(_db)
         {
-            Smart = smart.Instance,
-            SmartProjectRoot = projectPath
+            CompactEmbeddingsEnabled = () => _embedder.UsesModel,
+            ReadFileHistory = ReadGitFileHistoryAsync
         };
-        UpdateSummaryCache();
-        Knowledge.SummariesEnabled = () => _smart.Settings.SmartSummaries;
-        _smart.Settings.Changed += OnAppSettingsChanged;
         _activity = FeatureActivity.For(projectPath);
         _activity.HistoryDeleted += OnHistoryDeleted;
         _historyRefresh = new Timer(_ => Changed?.Invoke(this, EventArgs.Empty));
         // Any change to the feature list (a chat appended to a feature, a summary written) refreshes the history list.
         _databaseWatch = _db.Open("feature").Watch(_ => ScheduleHistoryRefresh());
+        Knowledge.Warm(projectPath);
     }
 
     private void ScheduleHistoryRefresh()
@@ -113,8 +109,13 @@ public sealed class FeatureService : IDisposable
 
     public void Delete(string id)
     {
-        Knowledge.DeleteFeature(id);
-        LogOf(id).Delete();
+        lock (_topicGate)
+        {
+            Knowledge.DeleteFeature(id);
+            LogOf(id).Delete();
+            Knowledge.RemoveTurnTopics(id);
+            _db.Open("turn-checkpoint-v1").Open(id).Remove();
+        }
         _activity.NotifyHistoryDeleted(id);
     }
 
@@ -137,19 +138,6 @@ public sealed class FeatureService : IDisposable
     }
 
 
-    private string? _summaryIdentity;
-    private string SummaryIdentity() => _smart.CreateRouter().ClientFor("summary")?.FeatureIdentity ?? "off";
-    private void UpdateSummaryCache()
-    {
-        _summaryIdentity = SummaryIdentity();
-        Knowledge.Summaries = new Codale.Smart.SummaryCache(Path.Combine(ProjectPaths.KnowledgeDirectory(_projectPath), "smart-summaries"), _summaryIdentity);
-    }
-
-    private void OnAppSettingsChanged(object? sender, EventArgs e)
-    {
-        if (_summaryIdentity != SummaryIdentity()) UpdateSummaryCache();
-    }
-
     /// <summary>
     /// Credits a finished turn with every file whose content changed on disk while it ran, including
     /// edits made through the shell, which never arrive as a tool's file change. Re-indexes first, so
@@ -169,40 +157,6 @@ public sealed class FeatureService : IDisposable
         }
     });
 
-    public void RecordRetrieval(string retrievalId, string sessionId, RetrievalResult result) => Knowledge.RecordRetrieval(retrievalId, sessionId, result);
-    public void RecordExploration(string retrievalId) => Knowledge.RecordExploration(retrievalId);
-    public void RecordLearnedEdit(string sessionId, string worktree, string path, string prompt) =>
-        RecordLearned(sessionId, worktree, path, prompt, LearnedKind.Edit);
-
-    public void RecordLearned(string sessionId, string worktree, string path, string prompt, string kind)
-    {
-        if (string.IsNullOrWhiteSpace(prompt)) return;
-        var root = ProjectPaths.Normalize(worktree);
-        var full = Path.GetFullPath(path, root);
-        if (!ProjectPaths.IsInside(root, full)) return;
-        var relative = Path.GetRelativePath(root, full);
-        if (ProjectKnowledgeIndex.Eligible(relative)) Knowledge.RecordLearned(sessionId, root, relative, prompt, kind);
-    }
-
-    /// <summary>The user opened a global-search result: choosing it from that query is the clearest sign it was the answer.</summary>
-    public void RecordSearchOpen(string query, string filePath) =>
-        RecordLearned("global-search", _projectPath, filePath, query, LearnedKind.Open);
-
-    public void RecordUsage(string retrievalId, int inputTokens, int outputTokens) => Knowledge.RecordUsage(retrievalId, inputTokens, outputTokens);
-
-    public void RecordFinding(string sessionId, string provider, string worktree, string text, IReadOnlyList<SourceReference> references)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return;
-        try
-        {
-            Knowledge.PutKnowledge(new KnowledgeHit(Guid.NewGuid().ToString("N"), sessionId, provider,
-                ProjectPaths.Normalize(worktree), ProjectKnowledgeIndex.Revision(worktree), text.Length > 2400 ? text[..2400] : text, references));
-        }
-        catch (Exception ex) when (ex is IOException)
-        {
-        }
-    }
-
     public void IndexFile(string sessionId, string path)
     {
         var root = Knowledge.GetProviderSession(sessionId)?.Worktree ?? _projectPath;
@@ -212,10 +166,10 @@ public sealed class FeatureService : IDisposable
 
     public void Dispose()
     {
+        StopTopicBackfill();
         _databaseWatch.Dispose();
         _historyRefresh.Dispose();
         _activity.HistoryDeleted -= OnHistoryDeleted;
-        _smart.Settings.Changed -= OnAppSettingsChanged;
         Knowledge.Dispose();
         _db.Dispose();
         _embedder.Dispose();

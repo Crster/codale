@@ -155,12 +155,12 @@ try
         foreach (var thinking in new[] { false, true })
         {
             smart.Thinking = thinking;
-            SmartRequestContext Context(string task) => new(fixture.FullName, fixture.FullName, task, Deadline: DateTimeOffset.UtcNow.AddSeconds(task == "summary" ? Math.Min(20, taskBudget) : taskBudget));
+            SmartRequestContext Context(string task) => new(fixture.FullName, fixture.FullName, task, Deadline: DateTimeOffset.UtcNow.AddSeconds(taskBudget));
             var intent = await smart.ClassifyAsync(Context("routing"), "Please plan the migration before implementing anything.", null);
             Console.WriteLine($"Intent (thinking={thinking}): {intent?.Value}");
             if (intent?.Value != SmartIntent.Plan) throw new InvalidDataException("Intent classification failed.");
             SmartCandidate[] candidates = [new("1", "theme.cs"), new("2", "git.cs")];
-            var ranking = await smart.RankAsync(Context("context"), "git commit message; inspect the candidate files", candidates);
+            var ranking = await smart.RankAsync(Context("ranking"), "git commit message; inspect the candidate files", candidates);
             Console.WriteLine($"Ranking: {string.Join(',', ranking?.Value ?? [])}");
             if (ranking?.Value is null || ranking.Value[0] != "2") throw new InvalidDataException("Candidate ranking failed.");
             var commit = await smart.CommitMessageAsync(Context("commit"));
@@ -168,8 +168,6 @@ try
             if (string.IsNullOrWhiteSpace(commit?.Value)) throw new InvalidDataException("Commit generation failed.");
             if (!commit.Evidence.Any(e => e.Kind == "command" && e.Command?.Contains("git diff --cached", StringComparison.Ordinal) == true))
                 throw new InvalidDataException("Commit generation did not inspect the staged diff.");
-            var summary = await smart.SummarizeAsync(Context("summary"), "MathHelpers.cs");
-            Console.WriteLine($"Summary: {summary?.Value}");
             var shell = await smart.ShellCommandAsync(Context("shell"), "show git status", "powershell.exe");
             Console.WriteLine($"Shell command: {shell?.Value}");
             if (string.IsNullOrWhiteSpace(shell?.Value)) throw new InvalidDataException("Shell translation failed.");
@@ -177,8 +175,6 @@ try
                 "MathHelpers.cs:1-1\npublic class MathHelpers { public static int Add(int a, int b) => a + b; }");
             Console.WriteLine($"Brief: {brief?.Value}");
             if (string.IsNullOrWhiteSpace(brief?.Value)) throw new InvalidDataException("Brief generation failed.");
-            if (string.IsNullOrWhiteSpace(summary?.Value) || !summary.Evidence.Any(e => e.Kind == "file"))
-                throw new InvalidDataException("File summary tool round trip failed.");
         }
     }
     finally

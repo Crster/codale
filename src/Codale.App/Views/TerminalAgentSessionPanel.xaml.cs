@@ -30,7 +30,7 @@ public sealed partial class UsageMeter(string label, string summary, double perc
     [NotifyPropertyChangedFor(nameof(PercentText))]
     public partial double Percent { get; set; } = percent;
 
-    /// <summary>The rail ring's tooltip, e.g. "Context: 42K / 200K".</summary>
+    /// <summary>The rail ring's tooltip, e.g. "Context: 42,000 / 200,000".</summary>
     public string Tip => $"{char.ToUpperInvariant(Label[0])}{Label[1..].ToLowerInvariant()}: {Summary}";
 
     public string PercentText => $"{Percent:0}%";
@@ -63,12 +63,12 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
     private static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(10);
     private const int UsageEveryTicks = 30;
 
-    private readonly DateTime _openedAtUtc = DateTime.UtcNow.AddMinutes(-1);
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _timer;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _elapsedTimer;
     private ICliHistoryReader? _reader;
     private int _ticks;
     private bool _probing;
+    private string? _codexSessionId;
     private FileSystemWatcher? _watcher;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _historyDebounce;
 
@@ -114,6 +114,8 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     public bool HasVitals => Vitals.Count > 0;
 
+    public string? ClaudeContextPath { get; set; }
+
     public ChatViewModel? Session
     {
         get;
@@ -130,6 +132,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
             }
 
             field = value;
+            _codexSessionId = null;
             _reader = null;
             StopWatchingHistory();
 
@@ -281,14 +284,26 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
     #region Vitals
 
+    public void ObserveTerminalTitle(string title)
+    {
+        if (Session is not { TerminalCli.Id: "codex" } session ||
+            CodexContextProbe.SessionIdFromTitle(title) is not { } id || id == _codexSessionId)
+        {
+            return;
+        }
+
+        _codexSessionId = id;
+        session.Status.ContextTokens = 0;
+        session.Status.ContextWindow = 0;
+        OnTick();
+    }
+
     /// <summary>
-    /// Context and usage are read from outside the CLI, so they are only offered where that is
-    /// dependable: Claude's own transcript for the context, and the account's usage windows. The
-    /// bars appear once there is something real to show and never block the terminal.
+    /// Poll the active CLI's own context reading and the account's usage windows.
     /// </summary>
     private async void OnTick()
     {
-        if (_probing || Session is not { TerminalCli.Id: "claude" or "codex" } session || _reader?.HistorySourcePath is not { Length: > 0 } source)
+        if (_probing || Session is not { TerminalCli.Id: "claude" or "codex" } session)
         {
             return;
         }
@@ -296,17 +311,16 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
         _probing = true;
         try
         {
-            var since = _openedAtUtc;
             if (session.TerminalCli.Id == "codex")
             {
-                // Codex's rollout carries its own window size and the account's windows.
-                var path = ProjectPath;
-                if (await Task.Run(() => CodexContextProbe.Read(source, path, since)) is { } reading)
+                if (_codexSessionId is { } id &&
+                    await Task.Run(() => CodexContextProbe.Read(Path.Combine(CodaleAccount.UserCodexHome, "sessions"), id)) is { } reading &&
+                    ReferenceEquals(Session, session) && _codexSessionId == id)
                 {
-                    if (reading.ContextTokens > 0)
+                    if (reading.ContextTokens is int tokens)
                     {
-                        session.Status.ContextTokens = reading.ContextTokens;
-                        session.Status.ContextWindow = reading.ContextWindow ?? ClaudeContextProbe.WindowFor(reading.ContextTokens);
+                        session.Status.ContextTokens = tokens;
+                        session.Status.ContextWindow = reading.ContextWindow ?? 0;
                     }
 
                     if (reading.Limits is { } codexLimits)
@@ -317,19 +331,12 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
             }
             else
             {
-                if (await Task.Run(() => ClaudeContextProbe.Read(source, since)) is { } reading)
+                if (ClaudeContextPath is { } path &&
+                    await Task.Run(() => ClaudeContextProbe.Read(path)) is { } reading &&
+                    ReferenceEquals(Session, session))
                 {
-                    var known = reading.Model is { Length: > 0 } model ? Workspace!.Smart.Settings.ClaudeContextWindowFor(model) : null;
-                    var window = ClaudeContextProbe.WindowFor(reading.Tokens, known);
                     session.Status.ContextTokens = reading.Tokens;
-                    session.Status.ContextWindow = window;
-
-                    // A session past 200K proves the model's window, so the next session (or
-                    // this one after a compact) does not fall back to 200K.
-                    if (reading.Model is { Length: > 0 } seen && window > (known ?? 200_000))
-                    {
-                        Workspace!.Smart.Settings.RememberClaudeContextWindow(seen, window);
-                    }
+                    session.Status.ContextWindow = reading.ContextWindow;
                 }
 
                 if (_ticks++ >= UsageEveryTicks)
@@ -369,9 +376,9 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
 
         var desired = new List<(string Label, string Summary, double Percent)>();
 
-        if (status.HasContext && status.HasContextWindow)
+        if (status.HasContextWindow)
         {
-            desired.Add(("CONTEXT", status.ContextSummary, status.ContextPercent));
+            desired.Add(("CONTEXT", $"{status.ContextTokens:N0} / {status.ContextWindow:N0} · {status.ContextPercentText}", status.ContextPercent));
         }
 
         // Only show one usage bar: the rate limit quota closest to exhaustion (least remaining quota).

@@ -26,24 +26,6 @@ public sealed class SmartRoleTests
         Assert.Equal("error", outcome.State);
     }
 
-    [Fact]
-    public async Task Background_summary_never_runs_a_shell_command_the_model_asks_for()
-    {
-        await using var smart = Create();
-        var systems = new List<string>();
-        var rounds = 0;
-        await smart.ConfigureRemoteAsync("test", (_, system, _, _, _) =>
-        {
-            systems.Add(system);
-            return Task.FromResult(rounds++ == 0
-                ? "<tool_call><function=run_shell><parameter=command>echo injected</parameter></function></tool_call>"
-                : "A summary of the file.");
-        });
-        var result = await smart.SummarizeAsync(Context(), "file.cs");
-        Assert.Equal("A summary of the file.", result?.Value);
-        Assert.DoesNotContain("run_shell", systems[0]);
-    }
-
     [Theory]
     [InlineData("Login Form Validation", "Login Form Validation")]
     [InlineData("\"Fix Flaky Upload Test.\"", "Fix Flaky Upload Test")]

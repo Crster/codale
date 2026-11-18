@@ -269,10 +269,11 @@
                         AutomationProperties.Name="Agent account" ToolTipService.ToolTip="{x:Bind Workspace.CliEndpoint.ActiveName, Mode=OneWay}">
                     <Border Width="30" Height="30" CornerRadius="15" BorderThickness="1"
                             BorderBrush="{x:Bind Workspace.CliEndpoint.AccountStatusBrush, Mode=OneWay}">
-                        <PersonPicture Width="30" Height="30"
-                                       Initials="{x:Bind Workspace.CliEndpoint.AvatarInitials, Mode=OneWay}"
-                                       Foreground="{x:Bind Workspace.CliEndpoint.AccountStatusBrush, Mode=OneWay}"
-                                       Background="Transparent" />
+                        <TextBlock Text="{x:Bind Workspace.CliEndpoint.AvatarInitials, Mode=OneWay}"
+                                   FontSize="12" LineHeight="16" LineStackingStrategy="BlockLineHeight"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   TextAlignment="Center"
+                                   Foreground="{x:Bind Workspace.CliEndpoint.AccountStatusBrush, Mode=OneWay}" />
                     </Border>
                     <Button.Flyout>
                         <Flyout x:Name="ProfileFlyout" AreOpenCloseAnimationsEnabled="False"
@@ -339,7 +340,7 @@
                         <TextBlock Text="{x:Bind UsagePercentText, Mode=OneWay}" FontSize="9" FontWeight="SemiBold"
                                    Visibility="{x:Bind ShowCompactIcon, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}"
                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        <FontIcon Glyph="&#xE73F;" FontSize="12"
+                        <FontIcon Glyph="&#xF133;" FontSize="12"
                                   Visibility="{x:Bind ShowCompactIcon, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"
                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Grid>
@@ -463,7 +464,7 @@
                                                 IsEnabled="{x:Bind CanCompact, Mode=OneWay}"
                                                 ToolTipService.ToolTip="Summarise the conversation to free up context (/compact)">
                                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <FontIcon FontSize="10" Glyph="&#xE73F;" />
+                                                <FontIcon FontSize="10" Glyph="&#xF133;" />
                                                 <TextBlock Text="Compact" />
                                             </StackPanel>
                                         </Button>
@@ -473,21 +474,15 @@
                                 <!--  Footer: session totals and the provider's own usage page, under a hairline.  -->
                                 <StackPanel Spacing="4">
                                     <Border Height="1" Margin="0,0,0,2" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
-                                    <Grid ColumnSpacing="8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock VerticalAlignment="Center" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                   Text="{x:Bind SessionTotalsText, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
-                                        <Button Grid.Column="1" Style="{StaticResource ShellTextButton}" Click="OnUsageDetailsClick"
-                                                ToolTipService.ToolTip="Open the usage page in your browser">
-                                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <TextBlock Text="Usage details" />
-                                                <FontIcon FontSize="10" Glyph="&#xE8A7;" />
-                                            </StackPanel>
-                                        </Button>
-                                    </Grid>
+                                    <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                               Text="{x:Bind SessionTotalsText, Mode=OneWay}" TextWrapping="Wrap" />
+                                    <Button HorizontalAlignment="Right" Style="{StaticResource ShellTextButton}" Click="OnUsageDetailsClick"
+                                            ToolTipService.ToolTip="Open the usage page in your browser">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Text="Usage details" />
+                                            <FontIcon FontSize="10" Glyph="&#xE8A7;" />
+                                        </StackPanel>
+                                    </Button>
                                 </StackPanel>
                             </StackPanel>
                         </Flyout>

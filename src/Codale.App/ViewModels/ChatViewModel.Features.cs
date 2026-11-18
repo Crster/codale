@@ -12,7 +12,7 @@ namespace Codale.App.ViewModels;
 
 /// <summary>The active choices carried when continuing a message in another history.</summary>
 public sealed record ChatContinuationSelection(string CliId, string EndpointName, string? Model, string? Effort, string Mode,
-    IReadOnlyList<AgentModelInfo> Models);
+    IReadOnlyList<AgentModelInfo> Models, string Tier = "cli");
 
 /// <summary>Explicit session history and project-wide context, independent of conversation topic.</summary>
 public sealed partial class ChatViewModel
@@ -34,7 +34,6 @@ public sealed partial class ChatViewModel
     private readonly string _chatId = Guid.NewGuid().ToString("N");
     private string? _featureRequest;
     private CancellationTokenSource? _briefing;
-    private readonly Dictionary<string, SourceReference> _turnReferences = [with(StringComparer.OrdinalIgnoreCase)];
     private readonly HashSet<string> _knownContextFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (string Command, string? Cwd)> _pendingShellReads = [];
     private readonly HashSet<string> _turnEditedPaths = [with(StringComparer.OrdinalIgnoreCase)];
@@ -43,14 +42,13 @@ public sealed partial class ChatViewModel
     private const int MaxLearnedReads = 6;
     /// <summary>When the current turn's request went out; files changed on disk since then are the turn's work.</summary>
     private DateTime? _turnStartedUtc;
-    private readonly StringBuilder _turnFindings = new();
 
     /// <summary>The prompt Auto already put in the transcript before routing, with the composer attachments to restore if it never goes out.</summary>
     private (UserMessageItem Item, List<ComposerAttachment> Composer)? _preShown;
     private string? _handoffContext;
 
     public ChatContinuationSelection ContinuationSelection =>
-        new(CliId, EndpointName, RequestedModel, RequestedEffort, PermissionMode, AvailableModels);
+        new(CliId, EndpointName, RequestedModel, RequestedEffort, PermissionMode, AvailableModels, CurrentTier);
 
     public void ApplyContinuationSelection(ChatContinuationSelection selection)
     {
@@ -61,6 +59,7 @@ public sealed partial class ChatViewModel
         OnPropertyChanged(nameof(AvailableModels));
         OnPropertyChanged(nameof(HasModelCatalog));
         OnPropertyChanged(nameof(CanPickModel));
+        _selectedTier = selection.Tier;
         RequestedModel = selection.Model;
         RequestedEffort = selection.Effort;
         PermissionMode = selection.Mode;
@@ -212,8 +211,6 @@ public sealed partial class ChatViewModel
         _featureRequest = null;
         _knownContextFiles.Clear();
         _pendingShellReads.Clear();
-        _turnFindings.Clear();
-        _turnReferences.Clear();
         _turnEditedPaths.Clear();
         _turnReadPaths.Clear();
         _turnStartedUtc = null;
@@ -233,7 +230,11 @@ public sealed partial class ChatViewModel
 
     private void EndFeatureTurn(string outcome)
     {
-        if (_recording) _featureLog?.EndTurn(outcome);
+        if (_recording && _featureLog is { } log)
+        {
+            log.EndTurn(outcome, ProjectPath, _turnEditedPaths, _turnReadPaths);
+            if (FeatureId is { } id) Features?.QueueTopicBackfill(id);
+        }
         PublishFeatureActivity(false);
     }
 
@@ -261,15 +262,13 @@ public sealed partial class ChatViewModel
         PublishFeatureActivity(true);
     }
 
+    /// <summary>A file the agent already has in its conversation; the locator does not hint it again.</summary>
     private void CaptureReference(string path)
     {
-        var root = ProjectPath;
         try
         {
-            var relative = Path.IsPathRooted(path) ? Path.GetRelativePath(root, path) : path;
+            var relative = Path.IsPathRooted(path) ? Path.GetRelativePath(ProjectPath, path) : path;
             _knownContextFiles.Add(relative.Replace('\\', '/'));
-            if (ProjectKnowledgeIndex.ReadSource(root, relative) is { } content)
-                _turnReferences[relative] = new SourceReference(relative, ProjectKnowledgeIndex.Hash(content));
         }
         catch (ArgumentException) { }
     }
@@ -311,30 +310,12 @@ public sealed partial class ChatViewModel
                 foreach (var changed in done.FileChanges ?? []) { CaptureReference(changed.FilePath); _turnEditedPaths.Add(changed.FilePath); }
             }
         }
-        if (e is AssistantMessageCompleted { ParentToolUseId: null } reply && _turnFindings.Length < 6000)
-        {
-            _turnFindings.AppendLine(reply.Text);
-        }
         if (e is TurnCompleted completed)
         {
             EndFeatureTurn(completed.Subtype);
-            if (FeatureId is { } id)
-            {
-                foreach (var path in _turnEditedPaths)
-                    features.RecordLearnedEdit(id, ProjectPath, path, _featureRequest ?? "");
-                // A file the agent had to open to do the work is evidence for the next similar request, weaker than an edit.
-                foreach (var path in _turnReadPaths.Where(p => !_turnEditedPaths.Contains(p)))
-                    features.RecordLearned(id, ProjectPath, path, _featureRequest ?? "", LearnedKind.Read);
-                // Shell edits (sed, scripts) only show on disk: credit them to this history's working set.
-                if (_turnStartedUtc is { } started)
-                    _ = features.RecordTurnChangesAsync(id, ProjectPath, started);
-                foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
-                    _turnFindings.ToString(), @"(?:[A-Za-z0-9_.-]+[/\\])+[A-Za-z0-9_.-]+")) CaptureReference(match.Value);
-                features.RecordFinding(id, CliId, ProjectPath,
-                    _featureRequest + "\n" + _turnFindings, [.. _turnReferences.Values]);
-            }
-            _turnFindings.Clear();
-            _turnReferences.Clear();
+            // Shell edits that have no structured tool change still count in the history's working set.
+            if (FeatureId is { } changedFeature && _turnStartedUtc is { } started)
+                _ = features.RecordTurnChangesAsync(changedFeature, ProjectPath, started);
             _turnEditedPaths.Clear();
             _turnReadPaths.Clear();
             _turnStartedUtc = null;

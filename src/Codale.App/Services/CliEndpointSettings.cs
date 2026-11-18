@@ -128,11 +128,11 @@ public sealed class CliEndpointSettings(AppSettingsStore settings)
             WireApi: "responses");
     }
 
-    /// <summary>A model's published context size, falling back to <see cref="ByokProvider.DefaultContextWindow"/>.</summary>
+    /// <summary>A custom endpoint's context size. Signed-in accounts use the CLI's model settings.</summary>
     public int? ContextWindowFor(string providerName, string? model)
     {
         var active = settings.FindByok(providerName);
-        return active is null
+        return active is null || active.IsAccount
             ? null
             : Clean(model) is { Length: > 0 } id &&
             active.ModelContextWindows is not null &&

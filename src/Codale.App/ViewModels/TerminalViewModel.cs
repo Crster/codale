@@ -106,6 +106,8 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
     /// </summary>
     public ChatViewModel? AgentSession { get; init; }
 
+    public string? ClaudeContextPath { get; init; }
+
     /// <summary>True when this terminal tab was started by an agent task rather than the user.</summary>
     public bool IsAgentTerminal { get; set; }
 

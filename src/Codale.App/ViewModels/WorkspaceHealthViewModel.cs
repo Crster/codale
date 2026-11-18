@@ -14,7 +14,6 @@ public sealed partial class WorkspaceHealthViewModel : ObservableObject, IDispos
     private readonly SynchronizationContext? _ui;
 
     private readonly ProjectKnowledgeIndex? _knowledge;
-    private (int Done, int Total) _summary;
 
     public WorkspaceHealthViewModel(string projectPath, ProjectKnowledgeIndex? knowledge = null)
     {
@@ -23,11 +22,7 @@ public sealed partial class WorkspaceHealthViewModel : ObservableObject, IDispos
         _knowledge = knowledge;
 
         _index.StateChanged += OnIndexStateChanged;
-        if (_knowledge is not null)
-        {
-            _knowledge.IndexingChanged += OnIndexStateChanged;
-            _knowledge.SummaryProgressChanged += OnSummaryProgress;
-        }
+        if (_knowledge is not null) _knowledge.IndexingChanged += OnIndexStateChanged;
 
         _index.Warm();
         Refresh();
@@ -40,12 +35,6 @@ public sealed partial class WorkspaceHealthViewModel : ObservableObject, IDispos
     public partial string IndexTooltip { get; set; } = "";
 
     private void OnIndexStateChanged() => OnUi(Refresh);
-
-    private void OnSummaryProgress(int done, int total)
-    {
-        _summary = (done, total);
-        OnUi(Refresh);
-    }
 
     /// <summary>Scans and jobs report from background threads; the text is set on the UI thread.</summary>
     private void OnUi(Action action)
@@ -65,12 +54,9 @@ public sealed partial class WorkspaceHealthViewModel : ObservableObject, IDispos
         var snapshot = _index.Current;
         var model = _index.Model;
 
-        var (done, total) = _summary;
         IndexText = _index.IsScanning || _knowledge?.IsIndexing == true
             ? "Indexing…"
-            : total > 0 && done < total
-                ? $"Summarizing {Math.Min(done + 1, total)}/{total}"
-                : snapshot is null ? "Index not built" : $"{snapshot.Files.Count:N0} files indexed";
+            : snapshot is null ? "Index not built" : $"{snapshot.Files.Count:N0} files indexed";
 
         IndexTooltip = snapshot is null
             ? "The project index is built when the workspace opens."
@@ -83,10 +69,6 @@ public sealed partial class WorkspaceHealthViewModel : ObservableObject, IDispos
     public void Dispose()
     {
         _index.StateChanged -= OnIndexStateChanged;
-        if (_knowledge is not null)
-        {
-            _knowledge.IndexingChanged -= OnIndexStateChanged;
-            _knowledge.SummaryProgressChanged -= OnSummaryProgress;
-        }
+        if (_knowledge is not null) _knowledge.IndexingChanged -= OnIndexStateChanged;
     }
 }

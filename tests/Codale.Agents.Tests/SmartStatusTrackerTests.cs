@@ -13,7 +13,7 @@ public sealed class SmartStatusTrackerTests
     public void Simultaneous_requests_show_only_the_latest_feature_then_resume_remaining_work()
     {
         var tracker = Create();
-        tracker.Start("a", "summary"); tracker.Start("b", "embedding"); tracker.Start("c", "completion");
+        tracker.Start("a", "keywords"); tracker.Start("b", "embedding"); tracker.Start("c", "completion");
         Assert.True(tracker.Snapshot().Visible);
         Assert.Equal("Smart: Suggesting", tracker.Snapshot().Text);
         tracker.Finish("a", "completed"); tracker.Finish("c", "completed");
@@ -28,7 +28,7 @@ public sealed class SmartStatusTrackerTests
     {
         var tracker = Create();
         tracker.Start("a", "completion"); tracker.Finish("a", "error", "HTTP 401");
-        tracker.Start("b", "summary");
+        tracker.Start("b", "keywords");
         Assert.Equal("Smart: Processing", tracker.Snapshot().Text);
         tracker.Finish("b", "completed");
         tracker.Start("c", "completion"); tracker.Finish("c", "cancelled");

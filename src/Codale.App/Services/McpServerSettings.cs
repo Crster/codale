@@ -288,12 +288,13 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
     /// subcommands and pipes).
     /// </summary>
     /// <remarks>
+    /// Claude and Codex also publish the active terminal's context telemetry through session-local settings.
     /// Claude: <c>--mcp-config</c>. Copilot: <c>--additional-mcp-config</c>. Codex: <c>-c mcp_servers.*</c> overrides.
     /// Gemini CLI and Qwen Code: a system settings file named by <c>GEMINI_CLI_SYSTEM_SETTINGS_PATH</c> /
     /// <c>QWEN_CODE_SYSTEM_SETTINGS_PATH</c>, built on the machine's own system settings so none are lost.
     /// OpenCode: a config file named by <c>OPENCODE_CONFIG</c>, merged with the user's and project's.
     /// </remarks>
-    public string? RewriteCliLaunch(string promptLine, IReadOnlyList<McpServerSpec> sessionServers, string key)
+    public string? RewriteCliLaunch(string promptLine, IReadOnlyList<McpServerSpec> sessionServers, string key, bool powershell)
     {
         try
         {
@@ -304,12 +305,11 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
             }
 
             var servers = ForTerminal(sessionServers);
-            if (servers.Count == 0)
+            if (servers.Count == 0 && cli.Id is not ("claude" or "codex"))
             {
                 return null;
             }
 
-            var powershell = promptLine.StartsWith("PS ", StringComparison.Ordinal);
             var tail = rest.TrimEnd();
             var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
 
@@ -318,7 +318,9 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
                 // Last, because --mcp-config takes any number of values and would swallow a trailing prompt.
                 "claude" => StageClaude(key, servers, tail, powershell),
                 "copilot" => $"copilot --additional-mcp-config {McpConfigText.Quote(powershell, "@" + Stage("copilot", key, McpConfigText.CopilotConfig(servers)))}{tail}",
-                "codex" => $"codex {McpConfigText.CodexOverrides(powershell, servers)}{McpConfigText.CodexFeatureOverrides(powershell, CodexFeatures())}{tail}",
+                "codex" => $"codex -c {McpConfigText.Quote(powershell, "tui.terminal_title=['session-id']")} " +
+                    McpConfigText.CodexOverrides(powershell, servers) +
+                    (servers.Count > 0 ? McpConfigText.CodexFeatureOverrides(powershell, CodexFeatures()) : "") + tail,
                 "gemini" => McpConfigText.WithEnv(powershell, "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
                     StageSettings("gemini", key, servers, Path.Combine(programData, "gemini-cli", "settings.json"), "GEMINI_CLI_SYSTEM_SETTINGS_PATH"),
                     "gemini" + tail),
@@ -345,15 +347,23 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
 
     private string StageClaude(string key, IReadOnlyList<McpServerSpec> servers, string tail, bool powershell)
     {
-        var configPath = Stage("claude", key, McpServerSpec.ToClaudeConfig(servers)!);
-        var settingsPath = StagedPath("claude-settings", key);
-        File.WriteAllText(settingsPath, McpServerSpec.ToClaudeSettings(servers, new ClaudeHookSettings()) ?? "{}");
+        var settings = System.Text.Json.Nodes.JsonNode.Parse(McpServerSpec.ToClaudeSettings(servers, new ClaudeHookSettings()) ?? "{}")!.AsObject();
+        settings["statusLine"] = System.Text.Json.JsonSerializer.SerializeToNode(new
+        {
+            type = "command",
+            command = Codale.Agents.Claude.ClaudeContextProbe.StatusLineCommand(ClaudeTerminalContextPath(key)),
+        });
+        var settingsPath = Stage("claude-settings", key, settings.ToJsonString());
 
         var sb = new System.Text.StringBuilder();
         sb.Append("claude");
         sb.Append(tail);
-        sb.Append(" --mcp-config ");
-        sb.Append(McpConfigText.Quote(powershell, configPath));
+        if (McpServerSpec.ToClaudeConfig(servers) is { } config)
+        {
+            sb.Append(" --mcp-config ");
+            sb.Append(McpConfigText.Quote(powershell, Stage("claude", key, config)));
+        }
+
         sb.Append(" --settings ");
         sb.Append(McpConfigText.Quote(powershell, settingsPath));
         if (ClaudeChrome() is { } chrome)
@@ -369,6 +379,8 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
 
         return sb.ToString();
     }
+
+    public string ClaudeTerminalContextPath(string key) => StagedPath("claude-context", key);
 
     /// <summary>One file per project and session: each CLI carries its own pipe and token, so two launches must not share one.</summary>
     private string StagedPath(string cli, string key)

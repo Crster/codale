@@ -138,43 +138,8 @@ public sealed class ProjectMemoryTests : IDisposable
         using var db = new CodaleDb(Folder);
         using var index = new ProjectKnowledgeIndex(db);
         index.RecordSessionFile("global-search", "src/Auth.cs");
-        index.RecordLearned("global-search", "w", "src/Auth.cs", "refresh the token", LearnedKind.Open);
 
         Assert.Empty(index.ListFeatures());
-    }
-
-    [Fact]
-    public void A_stronger_association_replaces_a_weaker_one_and_never_the_other_way_round()
-    {
-        using var db = new CodaleDb(Folder);
-        using var index = new ProjectKnowledgeIndex(db);
-        index.RecordLearned("s", "w", "a.cs", "fix the owner picker", LearnedKind.Read);
-        index.RecordLearned("s", "w", "a.cs", "fix the owner picker", LearnedKind.Edit);
-        index.RecordLearned("s", "w", "a.cs", "fix the owner picker", LearnedKind.Read);
-        index.RecordLearned("s", "w", "b.cs", "fix the owner picker", LearnedKind.Read);
-        index.RecordLearned("s", "w", "b.cs", "fix the owner picker", LearnedKind.Open);
-
-        var kinds = index.LearnedAssociations("w").ToDictionary(x => x.Path, x => x.Kind);
-        Assert.Equal(2, kinds.Count);
-        Assert.Equal(LearnedKind.Edit, kinds["a.cs"]);
-        Assert.Equal(LearnedKind.Open, kinds["b.cs"]);
-        Assert.Empty(index.LearnedAssociations("other"));
-        index.RecordLearned("s", "w", "c.cs", "the", LearnedKind.Edit);   // no topic words: nothing to learn from
-        Assert.Equal(2, index.LearnedAssociations("w").Count);
-    }
-
-    [Fact]
-    public void Learned_associations_are_found_by_the_words_of_their_prompt_and_survive_reopening()
-    {
-        using (var db = new CodaleDb(Folder))
-        using (var index = new ProjectKnowledgeIndex(db))
-            index.RecordLearned("s", "w", "src/Picker.cs", "show the projects owner picker", LearnedKind.Edit);
-
-        using var reopened = new CodaleDb(Folder);
-        using var again = new ProjectKnowledgeIndex(reopened);
-        Assert.Equal("src/Picker.cs".Replace('/', Path.DirectorySeparatorChar),
-            Assert.Single(again.SearchLearnedEdits("w", "owner picker")).Path);
-        Assert.Empty(again.SearchLearnedEdits("other", "owner picker"));
     }
 
     [Theory]
@@ -188,127 +153,27 @@ public sealed class ProjectMemoryTests : IDisposable
         {
             sessionId = index.CreateFeature("First prompt", "").Id;
             index.SetProviderSession(new ProviderSession(sessionId, provider, "native", "checkout", "endpoint"));
-            index.MarkContextDelivered("native", ["reference", "reference"]);
         }
 
         using var reopenedDb = new CodaleDb(Folder);
         using var reopened = new ProjectKnowledgeIndex(reopenedDb);
         Assert.Equal(new ProviderSession(sessionId, provider, "native", "checkout", "endpoint"), reopened.GetProviderSession(sessionId));
-        Assert.Equal(["reference"], reopened.DeliveredContext("native"));
-        reopened.ClearDeliveredContext("native");
-        Assert.Empty(reopened.DeliveredContext("native"));
         reopened.SetProviderSession(new ProviderSession(sessionId, provider, "replacement", "checkout", "endpoint2"));
         Assert.Equal("replacement", reopened.GetProviderSession(sessionId)!.ProviderSessionId);
-        Assert.Empty(reopened.DeliveredContext("replacement"));
         Assert.Single(reopened.ListFeatures());
     }
 
     [Fact]
-    public void Deleting_a_session_removes_its_derived_memory_but_preserves_the_project_source_index()
+    public void Deleting_a_session_removes_its_provider_mapping()
     {
         using var db = new CodaleDb(Folder);
         using var index = new ProjectKnowledgeIndex(db);
         var session = index.CreateFeature("Session", "");
         index.SetProviderSession(new ProviderSession(session.Id, "codex", "native", "checkout", ""));
-        index.MarkContextDelivered("native", ["key"]);
-        index.PutKnowledge(new KnowledgeHit("finding", session.Id, "codex", "checkout", "rev", "authentication finding", []));
-        index.RecordLearned(session.Id, "checkout", "Auth.cs", "refresh the authentication token", LearnedKind.Edit);
-        index.ReplaceSource("checkout", "Auth.cs", "hash", [(1, "class Authentication {}", "")]);
 
         index.DeleteFeature(session.Id);
 
         Assert.Null(index.GetProviderSession(session.Id));
-        Assert.Empty(index.SearchKnowledge("authentication"));
-        Assert.Empty(index.DeliveredContext("native"));
-        Assert.Empty(index.LearnedAssociations("checkout"));
-        Assert.Single(index.SearchSource("Authentication", "checkout"));
-    }
-
-    [Fact]
-    public async Task Concurrent_worktrees_keep_all_source_and_findings()
-    {
-        using var db = new CodaleDb(Folder);
-        using var index = new ProjectKnowledgeIndex(db);
-        await Task.WhenAll(Task.Run(() => Write("one")), Task.Run(() => Write("two")));
-        Assert.Equal(10, index.SourceHashes("one").Count);
-        Assert.Equal(10, index.SourceHashes("two").Count);
-        Assert.Equal(20, index.SearchKnowledge("finding", 30).Count);
-
-        void Write(string root)
-        {
-            for (var i = 0; i < 10; i++)
-            {
-                index.ReplaceSource(root, $"File{i}.cs", $"hash{i}", [(1, "class Authentication {}", "")]);
-                index.PutKnowledge(new KnowledgeHit(root + i, root, "codex", root, "rev", "finding Authentication", []));
-            }
-        }
-    }
-
-    [Fact]
-    public void A_search_excluding_a_session_still_fills_the_limit_from_the_others()
-    {
-        using var db = new CodaleDb(Folder);
-        using var index = new ProjectKnowledgeIndex(db);
-        for (var i = 0; i < 5; i++)
-            index.PutKnowledge(new KnowledgeHit("mine" + i, "me", "codex", "w", "r", "authentication finding " + i, []));
-        index.PutKnowledge(new KnowledgeHit("theirs", "other", "codex", "w", "r", "authentication finding", []));
-
-        var hits = index.SearchKnowledge("authentication", 3, excludeSessionId: "me");
-
-        Assert.Equal("theirs", Assert.Single(hits).Id);
-    }
-
-    [Fact]
-    public void Replacing_a_file_swaps_its_chunks_and_forgetting_it_removes_them()
-    {
-        using var db = new CodaleDb(Folder);
-        using var index = new ProjectKnowledgeIndex(db);
-        index.ReplaceSource("w", "Auth.cs", "h1", [(1, "old marker alpha", ""), (20, "other beta", "")]);
-        index.ReplaceSource("w", "Auth.cs", "h2", [(1, "new marker gamma", "")]);
-
-        Assert.Empty(index.SearchSource("alpha", "w"));
-        var chunk = Assert.Single(index.SearchSource("gamma", "w"));
-        Assert.Equal("h2", chunk.Hash);
-        Assert.Equal("Auth.cs", chunk.Path);
-        Assert.Equal("h2", index.SourceHashes("w")["Auth.cs"]);
-
-        index.ReplaceSource("w", "Auth.cs", null, []);
-        Assert.Empty(index.SearchSource("gamma", "w"));
-        Assert.Empty(index.SourceHashes("w"));
-        Assert.Empty(index.SourceChunksForPath("w", "Auth.cs"));
-    }
-
-    [Fact]
-    public void Chunks_are_listed_in_line_order_and_ids_stay_unique_across_reopening()
-    {
-        long lastId;
-        using (var db = new CodaleDb(Folder))
-        using (var index = new ProjectKnowledgeIndex(db))
-        {
-            index.ReplaceSource("w", "A.cs", "h", [(30, "third", ""), (2, "first", ""), (11, "second", "")]);
-            var chunks = index.SourceChunksForPath("w", "A.cs", limit: 10);
-            Assert.Equal([2, 11, 30], chunks.Select(c => c.StartLine));
-            lastId = chunks.Max(c => c.Id);
-        }
-
-        using var reopened = new CodaleDb(Folder);
-        using var again = new ProjectKnowledgeIndex(reopened);
-        again.ReplaceSource("w", "B.cs", "h", [(1, "more", "")]);
-        Assert.True(Assert.Single(again.SourceChunksForPath("w", "B.cs")).Id > lastId);
-        Assert.Equal(3, again.SourceChunksForPath("w", "A.cs", limit: 10).Count);
-    }
-
-    [Fact]
-    public void Chunk_ids_from_a_search_resolve_back_to_their_chunks_until_the_file_is_reindexed()
-    {
-        using var db = new CodaleDb(Folder);
-        using var index = new ProjectKnowledgeIndex(db);
-        index.ReplaceSource("w", "A.cs", "h", [(1, "class Authentication {}", "Authentication")]);
-        var found = Assert.Single(index.SearchSource("authentication", "w"));
-
-        Assert.Equal(found, Assert.Single(index.SourceChunks([found.Id])));
-
-        index.ReplaceSource("w", "A.cs", "h2", [(1, "class Other {}", "")]);
-        Assert.Empty(index.SourceChunks([found.Id]));
+        Assert.Empty(index.ListFeatures());
     }
 }

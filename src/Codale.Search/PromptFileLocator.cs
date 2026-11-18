@@ -75,16 +75,14 @@ public static partial class PromptFileLocator
 
     public static async Task<FileLocatorContext> RetrieveAsync(string root, string prompt,
         ProjectKnowledgeIndex? knowledge = null, CancellationToken ct = default, IReadOnlySet<string>? knownFiles = null,
-        ISmartExperience? smart = null, Action<Trace>? trace = null, LocatorStrategy strategy = LocatorStrategy.Fusion)
+        ISmartExperience? smart = null, Action<Trace>? trace = null)
     {
         var text = SearchText.WithoutAttachments(prompt).Trim();
         if (text.Length == 0) return Empty;
         var snapshot = await SourceIndex.For(root).GetSnapshotAsync(ct).ConfigureAwait(false);
-        if (strategy == LocatorStrategy.Cascade)
-            return await CascadeAsync(root, text, snapshot, knowledge, knownFiles, smart, trace, ct).ConfigureAwait(false);
-
         var fused = await FuseAsync(root, text, snapshot, knowledge, knownFiles, smart, trace, ct).ConfigureAwait(false);
-        if (fused.Files.Count == 0) return Empty;
+        // With the index, history evidence for a file that no longer exists can still be worth saying.
+        if (fused.Files.Count == 0 && knowledge is null) return Empty;
         var best = fused.Best;
         var output = new StringBuilder();
         var files = new List<string>();
@@ -99,7 +97,17 @@ public static partial class PromptFileLocator
             files.Add(candidate.Path);
         }
 
-        return files.Count == 0 ? Empty : new(
+        if (knowledge is not null)
+        {
+            var selected = files.Select(path => fused.Chunks.GetValueOrDefault(path)).OfType<SourceChunk>().ToArray();
+            foreach (var (_, evidence) in knowledge.CompactProvenance(root, text, null, selected).Take(4))
+            {
+                var entry = "- Project evidence: " + evidence + "\n";
+                if (Encoding.UTF8.GetByteCount(output.ToString() + entry) <= MaxBytes) output.Append(entry);
+            }
+        }
+
+        return output.Length == 0 ? Empty : new(
             "Likely edit sites, from a local search of the project (path:lines | matched words, then the matching lines). " +
             "These are candidate references, not verified edit sites; check their relevance and search beyond them as needed.\n" + output + "\n", files);
     }
@@ -119,9 +127,7 @@ public static partial class PromptFileLocator
     internal static async Task<Fusion> FuseAsync(string root, string text, SourceSnapshot snapshot,
         ProjectKnowledgeIndex? knowledge, IReadOnlySet<string>? knownFiles, ISmartExperience? smart, Action<Trace>? trace, CancellationToken ct)
     {
-        // The knowledge index runs beside the lexical pass; it may wait briefly for a refresh.
         var clock = Stopwatch.StartNew();
-        var indexed = knowledge is null ? null : Task.Run(() => SafeSearch(knowledge, root, text), ct);
 
         var hints = Regex.Matches(Normal(text), @"[\w.-]+(?:/[\w.-]+)+").Select(m => m.Value.TrimEnd('.', '/')).ToList();
         var pathHints = hints.Select(h => h.Replace('/', Path.DirectorySeparatorChar)).ToList();
@@ -132,6 +138,9 @@ public static partial class PromptFileLocator
         var promptTerms = SourceExplorer.Resolve(snapshot, asked).Where(t => t.Keys.Count > 0).ToList();
         var lexical = promptTerms.Count == 0 ? [] : SourceExplorer.Rank(snapshot, promptTerms, pathHints, setup: false);
         var lexicalMs = clock.ElapsedMilliseconds;
+        // The index reuses that ranking instead of making its own, and runs beside the model's expansion; it may
+        // wait briefly for a source snapshot.
+        var indexed = knowledge is null ? null : Task.Run(() => SafeSearch(knowledge, root, text, lexical), ct);
 
         // The model guesses the names the code uses, shown a sample of this project's own names near the prompt's matches.
         var expansionClock = Stopwatch.StartNew();
@@ -192,7 +201,11 @@ public static partial class PromptFileLocator
             .Select(i => promptTerms[i].Term.Text.ToLowerInvariant()).Count(words.Contains), StringComparer.OrdinalIgnoreCase);
         // ...or of the names the model expects, which stand in for words the code does not use ("navbar").
         var named = expanded.ToDictionary(r => Normal(r.File.RelativePath), r => r.Matched.Count, StringComparer.OrdinalIgnoreCase);
-        bool Supported(string path) => ExplicitPath(path) || votes.GetValueOrDefault(path) >= 2 ||
+        // A file an earlier turn on this topic edited or read is backed by that history, though it shares no words.
+        var remembered = knowledge is not null
+            ? knowledge.TurnEvidence(root, text).Select(Normal).ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : [];
+        bool Supported(string path) => ExplicitPath(path) || votes.GetValueOrDefault(path) >= 2 || remembered.Contains(path) ||
             (words.Count > 0 && covered.GetValueOrDefault(path) >= Math.Min(MinCoverage * words.Count, MinCoveredWords)) ||
             (expansionTerms.Count > 0 && named.GetValueOrDefault(path) >= Math.Max(1, Math.Min(MinCoverage * expansionTerms.Count, MinCoveredWords)));
 
@@ -254,7 +267,7 @@ public static partial class PromptFileLocator
     /// Every word of the prompt, quoted text whole. Only the generic stop words (the, and, to) go: how much a
     /// word counts is how rare it is in this project, which the index already knows.
     /// </summary>
-    private static List<SourceExplorer.ExploreTerm> PromptTerms(string text, Func<string, bool> known)
+    internal static List<SourceExplorer.ExploreTerm> PromptTerms(string text, Func<string, bool> known)
     {
         var terms = CodeDiscovery.QuotedPhrases(text).Where(q => q.Trim().Length >= 2)
             .Select(q => new SourceExplorer.ExploreTerm(q.Trim(), 1.5, Exact: true)).ToList();
@@ -283,9 +296,15 @@ public static partial class PromptFileLocator
         return terms;
     }
 
-    private static IReadOnlyList<SourceChunk> SafeSearch(ProjectKnowledgeIndex knowledge, string root, string query)
+    private static IReadOnlyList<SourceChunk> SafeSearch(ProjectKnowledgeIndex knowledge, string root, string query,
+        IReadOnlyList<SourceExplorer.Ranked>? lexical = null)
     {
-        try { return knowledge.Search(root, query, maxFiles: ListDepth, maxChunksPerFile: 1); }
+        try
+        {
+            return lexical is null
+                ? knowledge.Search(root, query, maxFiles: ListDepth, maxChunksPerFile: 1)
+                : knowledge.Search(root, query, ListDepth, 1, lexical);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException) { return []; }
     }
 

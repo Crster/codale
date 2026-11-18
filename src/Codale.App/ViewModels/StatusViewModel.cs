@@ -193,7 +193,7 @@ public sealed partial class StatusViewModel : ObservableObject
 
     public bool HasSessionTokens => SessionTokens > 0;
 
-    public string TokensText => $"{Format((int)Math.Min(SessionTokens, int.MaxValue))} tokens";
+    public string TokensText => $"{Format((int)Math.Min(SessionTokens, int.MaxValue))} session tokens";
 
     /// <summary>
     /// What a full usage bar stands for under an override. The endpoint publishes no quota

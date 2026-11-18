@@ -99,7 +99,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     public string UsageSummary => Session?.Status is not { } s ? "" :
         string.Join("\n", new[] { $"Context {s.ContextSummary}", QuotaSummary }.Where(t => t.Length > 0));
 
-    public bool ShowCompactIcon => Session?.Status.ContextPercent >= 80;
+    public bool ShowCompactIcon => CanCompact && Session?.Status.ContextPercent >= 80;
 
     public string UsagePercentText => $"{UsagePercent:0}%";
 
@@ -232,6 +232,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         if (e.PropertyName is nameof(ChatViewModel.IsBusy) or nameof(ChatViewModel.IsConnected))
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanCompact)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowCompactIcon)));
         }
     }
 

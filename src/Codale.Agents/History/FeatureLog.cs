@@ -109,7 +109,33 @@ public sealed class FeatureLog(HistoryStore store, string featureId, string? cha
     }
 
     /// <summary>Notes that the chat's turn is over, and how it ended ("success", an error subtype, "stopped").</summary>
-    public void EndTurn(string outcome) => Append(new { type = "turnEnd", outcome, at = DateTimeOffset.Now });
+    public void EndTurn(string outcome, string? worktree = null, IReadOnlyCollection<string>? edited = null,
+        IReadOnlyCollection<string>? read = null) =>
+        Append(new { type = "turnEnd", outcome, worktree, edited, read, turnId = Guid.NewGuid().ToString("N"), at = DateTimeOffset.Now });
+
+    public (LogPosition Next, IReadOnlyList<JsonElement> Records) ReadIndexPage(LogPosition position, int limit)
+    {
+        lock (Gate)
+        {
+            var current = Generation;
+            var name = position.Generation < current ? $"arc.{position.Generation + 1}" : HistoryStore.Current;
+            var records = new List<JsonElement>();
+            var page = _store.Page(featureId, name, position.Offset, limit);
+            foreach (var (nextOffset, line) in page)
+            {
+                position = position with { Offset = nextOffset };
+                try
+                {
+                    using var doc = JsonDocument.Parse(line);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Object) records.Add(doc.RootElement.Clone());
+                }
+                catch (JsonException) { }
+            }
+            if (position.Generation < current && page.Count < limit)
+                position = new(position.Generation + 1, 0);
+            return (position, records);
+        }
+    }
 
     /// <summary>Notes the main conversation's replies; tool calls, subagents and stream plumbing are not history.</summary>
     public void Append(AgentEvent e)

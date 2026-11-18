@@ -2,20 +2,6 @@ namespace Codale.Smart.Tests;
 
 public sealed class RemoteExperienceTests
 {
-    [Fact]
-    public void Summaries_are_invalidated_when_provider_or_model_changes()
-    {
-        var root = Path.Combine(Path.GetTempPath(), "codale-summary-model-" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            var original = new SummaryCache(root, "provider-a:model-a");
-            original.Put(root, "file.cs", "hash", "Original summary.");
-            Assert.Equal("Original summary.", original.Get(root, "file.cs", "hash"));
-            Assert.Null(new SummaryCache(root, "provider-b:model-b").Get(root, "file.cs", "hash"));
-        }
-        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
-    }
-
     private static SmartExperience Create() => new(
         () => throw new InvalidOperationException("Native runtime must not be created."),
         (_, _) => throw new InvalidOperationException("Models must not be downloaded."));
@@ -100,7 +86,7 @@ public sealed class RemoteExperienceTests
     }
 
     [Fact]
-    public async Task Remote_summary_reads_a_real_file_and_records_fresh_evidence()
+    public async Task Remote_brief_reads_a_real_file_and_records_fresh_evidence()
     {
         var root = Path.Combine(Path.GetTempPath(), "codale-remote-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -111,14 +97,14 @@ public sealed class RemoteExperienceTests
             int calls = 0;
             await smart.ConfigureRemoteAsync("test", (feature, system, input, cap, ct) =>
             {
-                Assert.Equal("summary", feature);
+                Assert.Equal("brief", feature);
                 calls++;
                 if (calls == 1) return Task.FromResult("<tool_call><function=read_file><parameter=path>sample.cs</parameter></function></tool_call>");
                 Assert.Contains("public class Sample", input);
-                return Task.FromResult("Defines the Sample class.");
+                return Task.FromResult("Task: Explain Sample\nWhere:\n- sample.cs:1 defines the Sample class");
             });
-            var result = await smart.SummarizeAsync(new(root, root, "summary"), "sample.cs");
-            Assert.Equal("Defines the Sample class.", result?.Value);
+            var result = await smart.BriefAsync(new(root, root, "brief"), "explain Sample", SmartIntent.Ask, "material");
+            Assert.Equal("Task: Explain Sample\nWhere:\n- sample.cs:1 defines the Sample class", result?.Value);
             var evidence = Assert.Single(result!.Evidence);
             Assert.Equal("file", evidence.Kind);
             Assert.True(await evidence.IsFreshAsync());

@@ -29,42 +29,6 @@ public sealed class ExplorationTests : IDisposable
     }
 
     [Fact]
-    public async Task Context_exploration_queries_index_and_exposes_only_read_only_index_tools()
-    {
-        var calls = 0;
-        var runtime = new Runtime((prompt, _) => ++calls switch
-        {
-            1 => Call("query_index", ("query", "CommitMessage binding")),
-            2 => Call("read_index", ("id", "view")),
-            _ => "[\"view\",\"model\"]"
-        });
-        await using var smart = await Ready(runtime);
-        var result = await smart.ExploreContextAsync(Context("context", deadline: DateTimeOffset.UtcNow.AddSeconds(-1)), "loading", "recent",
-            [new("model", "GitViewModel.cs", "GenerateCommitMessage")],
-            (query, _) => Task.FromResult<IReadOnlyList<SmartCandidate>>([new("view", "Workspace.xaml", "Binding CommitMessage", 12, 12)]));
-        Assert.Equal(["view", "model"], result!.Value);
-        Assert.Contains("query_index", runtime.Prompts[0].Prompt);
-        Assert.DoesNotContain("run_shell", runtime.Prompts[0].Prompt);
-        Assert.Contains("Binding CommitMessage", runtime.Prompts[^1].Prompt);
-        Assert.Contains("view", runtime.Prompts[^1].Grammar);
-        Assert.Contains("model", runtime.Prompts[^1].Grammar);
-        Assert.Equal(["query_index", "read_index"], smart.Activities(_root)[0].Tools!.Select(t => t.Tool));
-    }
-
-    [Fact]
-    public async Task Context_exploration_accepts_an_empty_selection()
-    {
-        var runtime = new Runtime((_, _) => "[]");
-        await using var smart = await Ready(runtime);
-        var result = await smart.ExploreContextAsync(Context("context"), "unrelated", "",
-            [new("model", "GitViewModel.cs", "commit")],
-            (_, _) => Task.FromResult<IReadOnlyList<SmartCandidate>>([]));
-        Assert.NotNull(result?.Value);
-        Assert.Empty(result.Value);
-        Assert.Equal("completed", smart.Activities(_root)[0].State);
-    }
-
-    [Fact]
     public void Parser_handles_multiple_calls_and_rejects_malformed_arguments()
     {
         var calls = SmartConversation.Parse(Call("read_file", ("path", "a.cs")) + Call("run_shell", ("command", "echo hello")));
@@ -77,29 +41,22 @@ public sealed class ExplorationTests : IDisposable
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Every_task_can_explore_then_emit_a_validated_final_answer(bool thinking)
+    public async Task An_exploring_task_reads_then_emits_a_validated_final_answer(bool thinking)
     {
         FileAt("sample.cs", "public class Sample { public bool Thinking; }");
-        foreach (var task in new[] { "summary" })
-        {
-            int round = 0;
-            var runtime = new Runtime((_, grammar) => grammar is null && round++ == 0
-                ? (thinking ? "Consider inspecting the file.</think>" : "") + Call("read_file", ("path", "sample.cs"))
-                : grammar is null ? "</think>Ready." : task switch
-                { "routing" => "{\"intent\":\"plan\"}", "context" => "[\"a\"]", "commit" => "feat: add thinking", _ => "Summary." });
-            await using var smart = await Ready(runtime); smart.Thinking = thinking;
-            IReadOnlyList<SmartEvidence>? evidence;
-            if (task == "routing") { var result = await smart.ClassifyAsync(Context(task), "plan thinking", null); Assert.Equal(SmartIntent.Plan, result?.Value); evidence = result?.Evidence; }
-            else if (task == "context") { var result = await smart.RankAsync(Context(task), "thinking", [new("a", "sample.cs")]); Assert.Equal("a", result?.Value?[0]); evidence = result?.Evidence; }
-            else if (task == "summary") { var result = await smart.SummarizeAsync(Context(task), "sample.cs"); Assert.NotNull(result?.Value); evidence = result?.Evidence; }
-            else { var result = await smart.CommitMessageAsync(Context(task)); Assert.Equal("feat: add thinking", result?.Value); evidence = result?.Evidence; }
-            Assert.Single(evidence!);
-            Assert.Contains("public class Sample", evidence![0].Text);
-            Assert.EndsWith(thinking ? "<think>\n" : "<think></think>", runtime.Prompts[0].Prompt);
-            Assert.Contains("<tool_response>", runtime.Prompts[^1].Prompt);
-            Assert.DoesNotContain("public class Sample", runtime.Prompts[0].Prompt);
-            Assert.Equal("completed", smart.Activities(_root)[0].State);
-        }
+        int round = 0;
+        var runtime = new Runtime((_, grammar) => grammar is null && round++ == 0
+            ? (thinking ? "Consider inspecting the file.</think>" : "") + Call("read_file", ("path", "sample.cs"))
+            : "</think>Task: Explain the Thinking flag\nWhere:\n- sample.cs:1 declares Sample.Thinking");
+        await using var smart = await Ready(runtime); smart.Thinking = thinking;
+        var result = await smart.BriefAsync(Context("brief"), "explain thinking", SmartIntent.Ask, "material");
+        Assert.Equal("Task: Explain the Thinking flag\nWhere:\n- sample.cs:1 declares Sample.Thinking", result?.Value);
+        var evidence = Assert.Single(result!.Evidence);
+        Assert.Contains("public class Sample", evidence.Text);
+        Assert.EndsWith(thinking ? "<think>\n" : "<think></think>", runtime.Prompts[0].Prompt);
+        Assert.Contains("<tool_response>", runtime.Prompts[^1].Prompt);
+        Assert.DoesNotContain("public class Sample", runtime.Prompts[0].Prompt);
+        Assert.Equal("completed", smart.Activities(_root)[0].State);
     }
 
     [Fact]
@@ -153,29 +110,6 @@ public sealed class ExplorationTests : IDisposable
         Assert.Equal(directory, result.Evidence.Single().Path);
         Assert.Contains(directory, result.Evidence[0].Text); Assert.Contains("truncated", result.Evidence[0].Text);
         Assert.True(Encoding.UTF8.GetByteCount(result.Output) <= SmartTools.OutputBytes);
-    }
-
-    [Fact]
-    public async Task Interactive_request_preempts_a_background_shell_and_disable_cancels_queued_work()
-    {
-        if (!OperatingSystem.IsWindows()) return;
-        var commandStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var runtime = new Runtime((prompt, grammar) => prompt.Contains("Summarize this file")
-            ? Call("run_shell", ("command", "Write-Output 'started'; Start-Sleep -Seconds 90"))
-            : "{\"intent\":\"plan\"}");
-        await using var smart = await Ready(runtime);
-        smart.ActivityChanged += (_, _) =>
-        {
-            if (smart.Activities(_root).Any(a => a.Tools?.Any(t => t.Tool == "run_shell" && t.State == "running") == true)) commandStarted.TrySetResult();
-        };
-        var summary = smart.SummarizeAsync(Context("summary"), "any.cs");
-        await commandStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
-        var interactive = smart.ClassifyAsync(Context(), "plan", null);
-        Assert.Equal(SmartIntent.Plan, (await interactive.WaitAsync(TimeSpan.FromSeconds(5)))?.Value);
-        Assert.Null(await summary.WaitAsync(TimeSpan.FromSeconds(5)));
-        Assert.Contains(smart.Activities(_root), a => a.Context.Task == "summary" && a.State == "cancelled");
-        await smart.SetEnabledAsync(false);
-        Assert.Null(await smart.ClassifyAsync(Context(), "plan", null));
     }
 
     [Fact]
@@ -270,13 +204,13 @@ public sealed class ExplorationTests : IDisposable
     }
 
     [Fact]
-    public async Task Routing_and_context_ranking_never_call_tools()
+    public async Task Routing_and_ranking_never_call_tools()
     {
         FileAt("sample.cs", "public class Sample { }");
         var runtime = new Runtime((_, grammar) => { Assert.NotNull(grammar); return grammar.Contains("intent") ? "{\"intent\":\"plan\"}" : "[\"a\"]"; });
         await using var smart = await Ready(runtime);
         Assert.Equal(SmartIntent.Plan, (await smart.ClassifyAsync(Context("routing"), "plan thinking", null))?.Value);
-        Assert.Equal("a", (await smart.RankAsync(Context("context"), "thinking", [new("a", "sample.cs")]))?.Value?[0]);
+        Assert.Equal("a", (await smart.RankAsync(Context("ranking"), "thinking", [new("a", "sample.cs")]))?.Value?[0]);
         Assert.All(smart.Activities(_root), a => Assert.Empty(a.Tools ?? []));
     }
 
@@ -301,11 +235,12 @@ public sealed class ExplorationTests : IDisposable
     }
 
     [Fact]
-    public async Task History_reuses_background_findings_only_in_the_same_worktree_and_rechecks_hashes()
+    public async Task History_reuses_findings_only_in_the_same_worktree_and_rechecks_hashes()
     {
         var path = FileAt("widget.cs", "public class RenderWidget {}"); int calls = 0;
-        var runtime = new Runtime((_, _) => calls++ == 0 ? Call("read_file", ("path", path)) : "Summary.");
-        await using (var smart = await Ready(runtime, history: true)) Assert.NotNull(await smart.SummarizeAsync(Context("summary"), path));
+        var runtime = new Runtime((_, _) => calls++ == 0 ? Call("read_file", ("path", path)) : "Task: Explain the widget\nWhere:\n- widget.cs:1 RenderWidget");
+        await using (var smart = await Ready(runtime, history: true))
+            Assert.NotNull(await smart.BriefAsync(Context("brief"), "explain the widget", SmartIntent.Ask, "material"));
         await using var reopened = await Ready(new Runtime((_, _) => "unused"), history: true);
         Assert.Single(await reopened.DiscoveriesAsync(Context(), "RenderWidget"));
         Assert.Empty(await reopened.DiscoveriesAsync(Context(tree: Path.Combine(_root, "other")), "RenderWidget"));
@@ -322,18 +257,6 @@ public sealed class ExplorationTests : IDisposable
         Assert.DoesNotContain(evidence[0].Key, result.Keys); Assert.Contains("Historical command observation", result.Text);
         Assert.DoesNotContain("�", result.Text);
         Assert.Empty((await SmartContext.BuildAsync(evidence.Take(2), evidence.Select(e => e.Key).ToHashSet(), "", [])).Keys);
-    }
-
-    [Fact]
-    public async Task Summary_dependencies_and_thinking_setting_invalidate_cached_entries()
-    {
-        var path = FileAt("dependency.cs", "original");
-        var dependency = await SmartTools.ReadAsync(path, 1, 10, default);
-        var cache = new SummaryCache(Path.Combine(_root, "summaries"));
-        cache.Put(_root, "target.cs", "targethash", "summary", dependencies: [dependency]);
-        Assert.Equal("summary", cache.Get(_root, "target.cs", "targethash"));
-        Assert.Null(cache.Get(_root, "target.cs", "targethash", thinking: true));
-        File.WriteAllText(path, "changed"); Assert.Null(cache.Get(_root, "target.cs", "targethash"));
     }
 
     [Fact]

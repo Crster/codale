@@ -103,7 +103,7 @@ public sealed class IndexQualityTests(ITestOutputHelper output) : IDisposable
             ("workspace model suggest prefix", "WorkspaceModel"),
             ("search view model run query", "SearchViewModel"),
             ("completion context header declarations", "CompletionContext"),
-            ("file chunker splits text into chunks", "FileChunker"),
+            ("compact source profile of each file", "ProjectKnowledgeIndex.Compact"),
             ("git diff gutter markers", "DiffGutter"),
             ("terminal view", "TerminalView"),
         };

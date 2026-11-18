@@ -178,7 +178,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         }
 
         TerminalSessions.Remove(session);
-        _mcp.ClearStaged(SessionKey(session));
+        _mcp.ClearStaged(session.TerminalLaunchKey);
         await session.DisposeAsync();
     }
 
@@ -198,12 +198,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// Adds this session's Codale MCP servers to an agent CLI launch typed at a terminal prompt (its own pipe,
     /// so what the CLI reports lands in its own panel); null when the line is not one.
     /// </summary>
-    public string? RewriteCliLaunch(string promptLine, ChatViewModel session) =>
-        _mcp.RewriteCliLaunch(promptLine, session.ServersForTerminalCli(), SessionKey(session));
-
-    /// <summary>Names one session's staged launch files.</summary>
-    private static string SessionKey(ChatViewModel session) =>
-        System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(session).ToString("x8", System.Globalization.CultureInfo.InvariantCulture);
+    public string? RewriteCliLaunch(string promptLine, ChatViewModel session)
+    {
+        var shell = Codale.Terminal.TerminalSession.ResolveShell(Smart.Settings.TerminalShell);
+        var powershell = Path.GetFileName(shell).ToLowerInvariant() is "pwsh.exe" or "powershell.exe";
+        return _mcp.RewriteCliLaunch(promptLine, session.ServersForTerminalCli(), session.TerminalLaunchKey, powershell);
+    }
 
     /// <summary>
     /// Opens a dedicated terminal for an agent CLI session: the shell runs only the CLI and exits
@@ -211,7 +211,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// </summary>
     public TerminalViewModel RunCliTerminal(string command, Codale.Agents.CliDescriptor cli, string directory, ChatViewModel session)
     {
-        var terminal = new TerminalViewModel(Smart.Settings, _commandHistory, directory, command, cli.DisplayName, cli.Id) { AgentSession = session };
+        var terminal = new TerminalViewModel(Smart.Settings, _commandHistory, directory, command, cli.DisplayName, cli.Id)
+        {
+            AgentSession = session,
+            ClaudeContextPath = cli.Id == "claude" ? _mcp.ClaudeTerminalContextPath(session.TerminalLaunchKey) : null,
+        };
         terminal.PropertyChanged += OnCommandTerminalPropertyChanged;
         lock (_terminals)
         {

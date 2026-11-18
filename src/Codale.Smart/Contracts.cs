@@ -35,11 +35,7 @@ public interface ISmartExperience
     event EventHandler? Changed;
     bool Thinking { get; set; }
     Task SetEnabledAsync(bool enabled, CancellationToken ct = default);
-    Task<SmartResult<string>?> SummarizeAsync(SmartRequestContext context, string path, CancellationToken ct = default);
     Task<SmartResult<IReadOnlyList<string>>?> RankAsync(SmartRequestContext context, string query, IReadOnlyList<SmartCandidate> candidates, CancellationToken ct = default);
-    Task<SmartResult<IReadOnlyList<string>>?> ExploreContextAsync(SmartRequestContext context, string query, string recent,
-        IReadOnlyList<SmartCandidate> candidates, Func<string, CancellationToken, Task<IReadOnlyList<SmartCandidate>>> search, CancellationToken ct = default) =>
-        RankAsync(context, query, candidates, ct);
     Task<SmartResult<SmartIntent?>?> ClassifyAsync(SmartRequestContext context, string message, string? previousReply, CancellationToken ct = default);
     Task<SmartResult<string>?> CommitMessageAsync(SmartRequestContext context, CancellationToken ct = default);
     Task<SmartResult<string>?> ShellCommandAsync(SmartRequestContext context, string request, string shell, CancellationToken ct = default) =>

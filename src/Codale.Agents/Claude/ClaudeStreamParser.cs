@@ -10,12 +10,13 @@ namespace Codale.Agents.Claude;
 /// <see cref="AgentEvent"/>s.
 /// </summary>
 /// <remarks>
-/// Deliberately pure and stateless: it takes a string and returns events, so the
-/// whole protocol surface can be tested by replaying recorded transcripts with no
-/// child process, no network and no tokens. See <c>tests/fixtures/claude/</c>.
+/// Keep one parser per stream so turn results can be matched to the main model.
+/// Recorded streams can be replayed without a CLI. See <c>tests/fixtures/claude/</c>.
 /// </remarks>
 public sealed class ClaudeStreamParser
 {
+    private string? _mainModel;
+
     /// <summary>
     /// System subtypes that are real protocol members but carry nothing the UI needs.
     /// Listed explicitly so anything genuinely new still surfaces as <see cref="UnknownEvent"/>.
@@ -110,6 +111,16 @@ public sealed class ClaudeStreamParser
 
         foreach (var e in events)
         {
+            if (e is SessionInitialized init)
+            {
+                _mainModel = init.Model;
+            }
+            else if (e is AssistantMessageCompleted { ParentToolUseId: null, Usage: not null } message &&
+                message.Model is not ("unknown" or "<synthetic>"))
+            {
+                _mainModel = message.Model;
+            }
+
             yield return e with { SessionId = sessionId, Uuid = uuid, Timestamp = timestamp };
         }
     }
@@ -230,6 +241,14 @@ public sealed class ClaudeStreamParser
 
             case "vcs_state_changed":
                 yield return new VcsStateChanged();
+                break;
+
+            case "code_change_published":
+                // The CLI detected a published review in command output. Its URL is
+                // informational, not proof of a trusted host or a successful merge.
+                yield return root.Str("url") is { } reviewUrl && !string.IsNullOrWhiteSpace(reviewUrl)
+                    ? new CliInformation($"Code change published: {reviewUrl.Trim()}")
+                    : new CliMessageIgnored("system/code_change_published", Truncate(raw));
                 break;
 
             case "task_started" or "task_notification":
@@ -377,19 +396,9 @@ public sealed class ClaudeStreamParser
         }
     }
 
-    private static AgentEvent ParseResult(JsonElement root)
+    private AgentEvent ParseResult(JsonElement root)
     {
         var usage = ParseUsage(root.Prop("usage"));
-        int? contextWindow = null;
-
-        // modelUsage is keyed by model id; the turn's context window lives there.
-        if (root.Prop("modelUsage") is { ValueKind: JsonValueKind.Object } modelUsage)
-        {
-            foreach (var entry in modelUsage.EnumerateObject())
-            {
-                contextWindow = entry.Value.Int("contextWindow") ?? contextWindow;
-            }
-        }
 
         return new TurnCompleted
         {
@@ -398,11 +407,41 @@ public sealed class ClaudeStreamParser
             ApiDuration = root.Int("duration_api_ms") is { } ms ? TimeSpan.FromMilliseconds(ms) : null,
             StopReason = root.Str("stop_reason"),
             Usage = usage,
-            ContextWindow = contextWindow,
+            ContextWindow = ReadContextWindow(root),
 
             // "[ede_diagnostic] ..." entries are the CLI's debugging breadcrumbs, not reasons.
             Errors = [.. root.StrArray("errors").Where(e => !e.StartsWith('[')).Select(RepairMojibake)],
         };
+    }
+
+    private int? ReadContextWindow(JsonElement root)
+    {
+        if (root.Prop("modelUsage") is not { ValueKind: JsonValueKind.Object } modelUsage)
+        {
+            return null;
+        }
+
+        if (_mainModel is { Length: > 0 } model && modelUsage.TryGetProperty(model, out var exact))
+        {
+            return exact.Int("contextWindow") is > 0 and int window ? window : null;
+        }
+
+        // Result keys can include a snapshot date or a context variant. Accept a single
+        // matching entry so a secondary model can never win by appearing later in JSON.
+        var key = _mainModel is { Length: > 0 } main && main != "unknown" ? ModelKey(main) : null;
+        var matches = modelUsage.EnumerateObject().Where(entry => key is null ||
+            ModelKey(entry.Name) == key ||
+            (entry.Value.Str("canonicalModel") is { } canonical && ModelKey(canonical) == key))
+            .Take(2).ToArray();
+        return matches.Length == 1 && matches[0].Value.Int("contextWindow") is > 0 and int matchedWindow
+            ? matchedWindow
+            : null;
+    }
+
+    private static string ModelKey(string model)
+    {
+        var bracket = model.IndexOf('[');
+        return (bracket > 0 ? model[..bracket] : model).Trim().ToLowerInvariant();
     }
 
     /// <summary>

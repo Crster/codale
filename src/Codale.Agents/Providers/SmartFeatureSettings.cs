@@ -25,7 +25,7 @@ public static class SmartFeatureSettings
 
     public static readonly (string Id, string Label, string Description, string Placeholder)[] Roles =
     [
-        (General, "General", "Commit messages, session names, summaries", "Flash model"),
+        (General, "General", "Commit messages, session names, search keywords", "Flash model"),
         (Completion, "Auto Complete", "Fill-in-the-middle for editor, composer and shell", "FIM model"),
         (Embedding, "Embedding", "Vectors for indexing and search", "Embedding model"),
         (Decision, "Decision", "Fast classifier for auto mode and command risk · uses General when off", "Decision model"),
@@ -68,7 +68,7 @@ public static class SmartFeatureSettings
     public const string DecideTask = "decide";
 
     /// <summary>Background work reads code; every other task answers the person who is waiting on it.</summary>
-    public static bool IsBackgroundTask(string task) => Normalize(task) is "summary" or "context" or "embedding" or "keywords";
+    public static bool IsBackgroundTask(string task) => Normalize(task) is "embedding" or "keywords";
 
     public static bool IsProvider(string provider) => provider is "claude" or "codex" or "openai" or "anthropic";
 
@@ -106,8 +106,7 @@ public static class SmartFeatureSettings
 
     public static readonly (string Id, string Label)[] Features =
     [
-        ("commit", "Commit messages"), ("title", "Session names"), ("summary", "File summaries"),
-        ("context", "Context exploration"), ("ranking", "Search ranking"), ("brief", "Agent briefs"),
+        ("commit", "Commit messages"), ("title", "Session names"), ("ranking", "Search ranking"), ("brief", "Agent briefs"),
         ("shell", "Run shell parser"), ("keywords", "Search keywords"), ("assess", "Command risk assessment"),
         ("routing", "Auto mode routing"), ("completion", "Code autocomplete"), ("compose-completion", "Composer autocomplete"),
         ("shell-completion", "Shell autocomplete"), ("embedding", "Embeddings"),

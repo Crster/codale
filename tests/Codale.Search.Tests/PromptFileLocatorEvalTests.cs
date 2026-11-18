@@ -91,11 +91,7 @@ public sealed class PromptFileLocatorEvalTests(ITestOutputHelper output) : IDisp
         var useKnowledge = Environment.GetEnvironmentVariable("CODALE_LOCATOR_NO_KNOWLEDGE") is null;
         if (useKnowledge && string.IsNullOrWhiteSpace(appDb)) await knowledge.RefreshAsync(root);
 
-        // CODALE_LOCATOR_STRATEGY=cascade: model keywords → embedding → keyword-index filter → rerank.
-        var strategy = string.Equals(Environment.GetEnvironmentVariable("CODALE_LOCATOR_STRATEGY"), "cascade", StringComparison.OrdinalIgnoreCase)
-            ? LocatorStrategy.Cascade : LocatorStrategy.Fusion;
-        var coverage = knowledge.VectorCoverage(root);
-        output.WriteLine($"strategy: {strategy} · vectors {coverage.Embedded}/{coverage.Total} ({db.EmbeddingModel})");
+        output.WriteLine($"embedding: {db.EmbeddingModel}");
         int found = 0, listed = 0, correct = 0, top = 0, empty = 0;
         double reciprocal = 0;
         var times = new List<long>();
@@ -109,7 +105,7 @@ public sealed class PromptFileLocatorEvalTests(ITestOutputHelper output) : IDisp
                 var result = baseline
                     ? await Baseline(root, test.Prompt, useKnowledge ? knowledge : null)
                     : await PromptFileLocator.RetrieveAsync(root, test.Prompt, useKnowledge ? knowledge : null, smart: models?.Experience,
-                        trace: t => output.WriteLine($"   expansion [{t.ExpansionMs} ms]: {string.Join(", ", t.Expansion)}"), strategy: strategy);
+                        trace: t => output.WriteLine($"   expansion [{t.ExpansionMs} ms]: {string.Join(", ", t.Expansion)}"));
                 clock.Stop();
                 var wanted = test.Files.ToHashSet(StringComparer.OrdinalIgnoreCase);
                 var hits = result.Files.Count(wanted.Contains);
