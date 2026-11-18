@@ -90,14 +90,20 @@ public sealed class SmartProviderClientTests
         Assert.Null(Router(http, general: new(General, "openai", Profile(), "general-model", http)).ClientFor("shell-completion"));
     }
 
-    [Fact]
-    public async Task Decision_model_answers_through_the_decisions_api()
+    [Theory]
+    [InlineData("https://openrouter.ai/api/v1", "https://openrouter.ai/api/alpha/decisions", "perplexity/decider", false)]
+    [InlineData("https://generativelanguage.googleapis.com/v1beta/openai/", "https://generativelanguage.googleapis.com/v1beta/decisions", "gemini-decision-1", true)]
+    public async Task Decision_model_answers_through_the_decisions_api(string baseUrl, string url, string model, bool gemini)
     {
         using var http = new HttpClient(new Handler(async request =>
         {
-            Assert.Equal("https://openrouter.ai/api/alpha/decisions", request.RequestUri!.AbsoluteUri);
+            Assert.Equal(url, request.RequestUri!.AbsoluteUri);
+            Assert.Equal(gemini, request.Headers.Contains("x-goog-api-key"));
+            Assert.Equal(gemini ? null : "Bearer", request.Headers.Authorization?.Scheme);
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
-            Assert.Equal("perplexity/decider", body.RootElement.GetProperty("model").GetString());
+            Assert.Equal(model, body.RootElement.GetProperty("model").GetString());
+            Assert.Equal(gemini ? JsonValueKind.String : JsonValueKind.Object,
+                body.RootElement.GetProperty(gemini ? "input" : "state").ValueKind);
             var intent = body.RootElement.GetProperty("questions").GetProperty("intent");
             Assert.Equal("choice", intent.GetProperty("type").GetString());
             Assert.True(intent.GetProperty("criteria").TryGetProperty("plan", out _));
@@ -105,8 +111,9 @@ public sealed class SmartProviderClientTests
             return Json("{\"answers\":{\"intent\":{\"type\":\"choice\",\"choice\":\"ask\",\"probabilities\":{\"ask\":0.84,\"plan\":0.09,\"act\":0.07},\"confidence\":0.76}," +
                 "\"risk\":{\"type\":\"score\",\"score\":1.94,\"probabilities\":{\"0\":0.01,\"1\":0.05,\"2\":0.94}},\"other\":{\"type\":\"refusal\"}}}");
         }));
-        var profile = Profile(); profile.BaseUrl = "https://openrouter.ai/api/v1";
-        var decider = new SmartProviderClient(Decision, "openai", profile, "perplexity/decider", http);
+        var profile = Profile(); profile.BaseUrl = baseUrl;
+        var decider = new SmartProviderClient(Decision, "openai", profile, model, http);
+        if (gemini) Assert.Equal(new[] { model }, await decider.ModelsAsync(default));
         var answers = await decider.DecideAsync(new { message = "show me how the router works" }, new Dictionary<string, SmartQuestion>
         {
             ["intent"] = SmartDecisions.IntentQuestion(),
@@ -118,6 +125,46 @@ public sealed class SmartProviderClientTests
         Assert.False(answers.ContainsKey("other"));
         // A decision model never writes text.
         await Assert.ThrowsAsync<InvalidOperationException>(() => decider.CompleteAsync("routing", "s", "p", 64, default));
+    }
+
+    [Fact]
+    public async Task OpenAi_Decision_suggests_Luna_and_uses_named_questions_and_answers()
+    {
+        using var http = new HttpClient(new Handler(async request =>
+        {
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("https://api.openai.com/v1/decisions", request.RequestUri!.AbsoluteUri);
+            Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            var root = body.RootElement;
+            Assert.Equal("gpt-6-luna", root.GetProperty("model").GetString());
+            Assert.Equal(JsonValueKind.String, root.GetProperty("input").ValueKind);
+            var questions = root.GetProperty("questions").EnumerateArray().ToDictionary(q => q.GetProperty("name").GetString()!);
+            Assert.Contains(questions["intent"].GetProperty("choices").EnumerateArray(), c => c.GetProperty("value").GetString() == "ask");
+            Assert.Equal("2", questions["risk"].GetProperty("levels")[2].GetProperty("label").GetString());
+            Assert.Equal("predicate", questions["yes"].GetProperty("type").GetString());
+            return Json("""
+                {"answers":[
+                    {"name":"risk","type":"score","score":2.8,"probabilities":[{"label":"2","value":3,"probability":0.8}]},
+                    {"name":"yes","type":"predicate","probability":0.95},
+                    {"name":"intent","type":"choice","choice":"ask","probabilities":[{"value":"ask","probability":0.84}]},
+                    {"name":"other","type":"refusal"}]}
+                """);
+        }));
+        var profile = Profile();
+        profile.BaseUrl = "https://api.openai.com/v1/";
+        var decider = new SmartProviderClient(Decision, "openai", profile, "gpt-6-luna", http);
+        Assert.Equal(new[] { "gpt-6-luna" }, await decider.ModelsAsync(default));
+        var answers = await decider.DecideAsync(new { message = "hello" }, new Dictionary<string, SmartQuestion>
+        {
+            ["intent"] = SmartDecisions.IntentQuestion(),
+            ["risk"] = SmartDecisions.RiskQuestion(),
+            ["yes"] = new("noul", "Is this a greeting?"),
+        }, default);
+        Assert.Equal("danger", SmartDecisions.ToRisk(answers["risk"]));
+        Assert.Equal(0.95, answers["yes"].Yes);
+        Assert.Equal(0.84, answers["intent"].Certainty);
+        Assert.False(answers.ContainsKey("other"));
     }
 
     [Fact]

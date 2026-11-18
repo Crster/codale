@@ -89,8 +89,17 @@ public sealed class SmartProviderClient(string role, string provider, ByokProvid
 
     public async Task<string[]> ModelsAsync(CancellationToken ct)
     {
-        // Decision models are listed apart from chat models.
-        using var request = Request(RequireProfile(), Role == SmartFeatureSettings.Decision ? "models?output_modalities=decisions" : "models");
+        var profile = RequireProfile();
+        if (Role == SmartFeatureSettings.Decision)
+        {
+            ct.ThrowIfCancellationRequested();
+            switch (EndpointHost(profile))
+            {
+                case "api.openai.com": return ["gpt-6-luna"];
+                case "generativelanguage.googleapis.com": return ["gemini-decision-1"];
+            }
+        }
+        using var request = Request(profile, Role == SmartFeatureSettings.Decision ? "models?output_modalities=decisions" : "models");
         request.Method = HttpMethod.Get;
         using var json = await SendAsync(request, ct).ConfigureAwait(false);
         return [.. json.RootElement.GetProperty("data").EnumerateArray().Select(m => m.GetProperty("id").GetString()!)
@@ -196,7 +205,7 @@ public sealed class SmartProviderClient(string role, string provider, ByokProvid
     }
 
     /// <summary>
-    /// Asks a decision model (OpenRouter's Decisions API, the "System One" models) the given questions about
+    /// Asks a decision model the given questions about
     /// <paramref name="state"/> in one request. Each question is a choice (criteria: option → meaning), a yes/no
     /// ("noul", answered as the probability of yes) or a score (criteria: levels, lowest first).
     /// </summary>
@@ -204,28 +213,62 @@ public sealed class SmartProviderClient(string role, string provider, ByokProvid
         IReadOnlyDictionary<string, SmartQuestion> questions, CancellationToken ct)
     {
         if (!IsEnabled || Role != SmartFeatureSettings.Decision) throw new InvalidOperationException("The Decision model is off.");
-        using var request = DecisionsRequest(RequireProfile());
-        request.Content = JsonContent.Create(new
+        var profile = RequireProfile();
+        var host = EndpointHost(profile);
+        using var request = DecisionsRequest(profile, host);
+        request.Content = host switch
         {
-            model = Model,
-            state,
-            questions = questions.ToDictionary(q => q.Key, q => q.Value.ToJson()),
-        });
+            "api.openai.com" => JsonContent.Create(new
+            {
+                model = Model, input = JsonSerializer.Serialize(state),
+                questions = questions.Select(q => q.Value.ToOpenAiJson(q.Key)).ToArray(),
+            }),
+            "generativelanguage.googleapis.com" => JsonContent.Create(new
+            {
+                model = Model, input = JsonSerializer.Serialize(state),
+                questions = questions.ToDictionary(q => q.Key, q => q.Value.ToJson()),
+            }),
+            _ => JsonContent.Create(new
+            {
+                model = Model, state,
+                questions = questions.ToDictionary(q => q.Key, q => q.Value.ToJson()),
+            }),
+        };
         using var json = await SendAsync(request, ct).ConfigureAwait(false);
         var answers = new Dictionary<string, SmartDecision>(StringComparer.Ordinal);
-        foreach (var answer in json.RootElement.GetProperty("answers").EnumerateObject())
-            if (SmartDecision.Parse(answer.Value) is { } parsed) answers[answer.Name] = parsed;
+        var result = json.RootElement.GetProperty("answers");
+        if (host == "api.openai.com")
+        {
+            foreach (var answer in result.EnumerateArray())
+                if (answer.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String
+                    && SmartDecision.Parse(answer) is { } parsed) answers[name.GetString()!] = parsed;
+        }
+        else
+        {
+            foreach (var answer in result.EnumerateObject())
+                if (SmartDecision.Parse(answer.Value) is { } parsed) answers[answer.Name] = parsed;
+        }
         return answers;
     }
 
-    /// <summary>OpenRouter serves decisions beside its OpenAI-compatible API (…/api/v1 → …/api/alpha/decisions); other endpoints at …/decisions.</summary>
-    private static HttpRequestMessage DecisionsRequest(ByokProvider profile)
+    private static string? EndpointHost(ByokProvider profile) =>
+        Uri.TryCreate(profile.BaseUrl.Trim(), UriKind.Absolute, out var endpoint) ? endpoint.Host : null;
+
+    private static HttpRequestMessage DecisionsRequest(ByokProvider profile, string? host)
     {
-        var root = profile.BaseUrl.TrimEnd('/');
+        var root = profile.BaseUrl.Trim().TrimEnd('/');
         if (root.Length == 0) throw new InvalidOperationException("The profile does not support this API.");
-        var url = root.EndsWith("/api/v1", StringComparison.OrdinalIgnoreCase) ? root[..^"/v1".Length] + "/alpha/decisions" : root + "/decisions";
+        var url = host switch
+        {
+            "openrouter.ai" => "https://openrouter.ai/api/alpha/decisions",
+            "api.openai.com" => "https://api.openai.com/v1/decisions",
+            "generativelanguage.googleapis.com" => "https://generativelanguage.googleapis.com/v1beta/decisions",
+            _ when root.EndsWith("/api/v1", StringComparison.OrdinalIgnoreCase) => root[..^"/v1".Length] + "/alpha/decisions",
+            _ => root + "/decisions",
+        };
         var request = new HttpRequestMessage(HttpMethod.Post, url);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", profile.ApiKey);
+        if (host == "generativelanguage.googleapis.com") request.Headers.Add("x-goog-api-key", profile.ApiKey);
+        else request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", profile.ApiKey);
         return request;
     }
 

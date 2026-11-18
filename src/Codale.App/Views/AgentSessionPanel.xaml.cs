@@ -173,7 +173,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     private async void OnUsageDetailsClick(object sender, RoutedEventArgs e)
     {
         var codex = Session?.Status.CliName.Contains("Codex", StringComparison.OrdinalIgnoreCase) == true;
-        var url = codex ? "https://chatgpt.com/codex/settings/usage" : "https://claude.ai/settings/usage";
+        var url = codex ? "https://chatgpt.com/settings/usage?tab=overview" : "https://claude.ai/new#settings/usage";
         UsageFlyout.Hide();
         await Windows.System.Launcher.LaunchUriAsync(new Uri(url));
     }

@@ -15,6 +15,22 @@ public sealed record SmartQuestion(string Type, string Instructions, object? Cri
     public static SmartQuestion Score(string instructions, IReadOnlyList<string> levels) => new("score", instructions, levels);
 
     public object ToJson() => Criteria is null ? new { type = Type, instructions = Instructions } : new { type = Type, instructions = Instructions, criteria = Criteria };
+
+    internal object ToOpenAiJson(string name) => (Type, Criteria) switch
+    {
+        ("choice", IReadOnlyDictionary<string, string> options) => new
+        {
+            name, type = Type, instructions = Instructions,
+            choices = options.Select(option => new { value = option.Key, description = option.Value }).ToArray(),
+        },
+        ("score", IReadOnlyList<string> levels) => new
+        {
+            name, type = Type, instructions = Instructions,
+            levels = levels.Select((description, index) => new { label = index.ToString(System.Globalization.CultureInfo.InvariantCulture), description }).ToArray(),
+        },
+        ("noul", _) => new { name, type = "predicate", instructions = Instructions },
+        _ => throw new InvalidOperationException($"Invalid OpenAI Decision question type or criteria: {Type}."),
+    };
 }
 
 /// <summary>A decision model's answer: the picked option, the probability of yes, or the scored level, with its confidence.</summary>
@@ -37,11 +53,17 @@ public sealed record SmartDecision(string Type, string? Choice, double? Yes, dou
         if (answer.TryGetProperty("probabilities", out var p) && p.ValueKind == JsonValueKind.Object)
             foreach (var option in p.EnumerateObject())
                 if (option.Value.ValueKind == JsonValueKind.Number) probabilities[option.Name] = option.Value.GetDouble();
+        if (p.ValueKind == JsonValueKind.Array)
+            foreach (var option in p.EnumerateArray())
+                if ((option.TryGetProperty("label", out var value) || option.TryGetProperty("value", out value))
+                    && Number(option, "probability") is { } probability)
+                    probabilities[value.ToString()] = probability;
         return type.GetString() switch
         {
             "choice" when answer.TryGetProperty("choice", out var c) && c.ValueKind == JsonValueKind.String =>
                 new("choice", c.GetString(), null, null, probabilities, Number(answer, "confidence")),
             "noul" when Number(answer, "noul") is { } yes => new("noul", null, yes, null, probabilities, Number(answer, "confidence")),
+            "predicate" when Number(answer, "probability") is { } yes => new("noul", null, yes, null, probabilities, null),
             "score" when Number(answer, "score") is { } score => new("score", null, null, score, probabilities, Number(answer, "confidence")),
             _ => null, // a refusal, or a type this client does not ask
         };
