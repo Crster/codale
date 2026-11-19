@@ -465,10 +465,21 @@ public sealed partial class SmartExperience(Func<ISmartRuntime> factory, Func<Sm
         "Include the request's own key nouns when they are likely names. No generic words (app, code, file, fix, bug). " +
         "Return only JSON: {\"terms\":[\"...\"]} with 6 to 12 items, each under 40 characters.";
 
+    public const string ExpandSnippetInstructions = ExpandInstructions +
+        " The snippets field is the project code a semantic search found nearest the request (path:line, then code): " +
+        "prefer the exact identifiers, classes, CSS classes and file names written there that the request's words explain, " +
+        "and leave out names the snippets and vocabulary do not show.";
+
     public Task<SmartResult<IReadOnlyList<string>>?> ExpandQueryAsync(SmartRequestContext context, string request, string vocabulary,
-        CancellationToken ct = default) =>
-        RunAsync<IReadOnlyList<string>>(context with { Task = "keywords" }, ExpandInstructions,
-            JsonSerializer.Serialize(new { request = Bound(request, 3000), vocabulary = Bound(vocabulary, 3000) }), 220, false, ct, ParseTerms,
+        CancellationToken ct = default) => ExpandQueryAsync(context, request, vocabulary, "", ct);
+
+    public Task<SmartResult<IReadOnlyList<string>>?> ExpandQueryAsync(SmartRequestContext context, string request, string vocabulary,
+        string snippets, CancellationToken ct = default) =>
+        RunAsync<IReadOnlyList<string>>(context with { Task = "keywords" }, snippets.Length == 0 ? ExpandInstructions : ExpandSnippetInstructions,
+            snippets.Length == 0
+                ? JsonSerializer.Serialize(new { request = Bound(request, 3000), vocabulary = Bound(vocabulary, 3000) })
+                : JsonSerializer.Serialize(new { request = Bound(request, 3000), snippets = Bound(snippets, 3500), vocabulary = Bound(vocabulary, 1500) }),
+            220, false, ct, ParseTerms,
             grammar: """
             root ::= "{\"terms\":" ws "[" ws item (ws "," ws item){0,11} ws "]" ws "}"
             item ::= "\"" char{1,40} "\""

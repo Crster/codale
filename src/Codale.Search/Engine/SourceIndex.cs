@@ -245,7 +245,7 @@ public sealed class SourceIndex : IDisposable
         var read = 0;
         long retained = previous?.Files.Where(f => f.IsRetained).Sum(f => (long)f.Length) ?? 0;
 
-        Parallel.For(0, paths.Count, new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 4, 1, 2) }, i =>
+        Parallel.For(0, paths.Count, new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 4, 2, 4) }, i =>
         {
             var relative = paths[i];
             var full = Path.Combine(Root, relative);

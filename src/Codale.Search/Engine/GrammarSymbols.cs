@@ -30,15 +30,23 @@ internal static class GrammarSymbols
         }
 
         var tokenizer = worker.Tokenizer!;
+        // The file's own grammar answers when it recognised anything, even with no declarations (Markdown, JSON, YAML):
+        // re-tokenising those with the C++ grammar finds only noise. The C++ fallback is for files no grammar claims,
+        // and for a grammar that failed or matched nothing at all.
         if (language is not null && tokenizer.Supports(language) &&
-            TryExtract(language, text, pool, tokenizer) is { Length: > 0 } symbols) return symbols;
+            TryExtract(language, text, pool, tokenizer, out var recognised) is { } symbols && recognised) return symbols;
         return language != "cpp" && tokenizer.Supports("cpp")
-            ? TryExtract("cpp", text, pool, tokenizer) ?? []
+            ? TryExtract("cpp", text, pool, tokenizer, out _) ?? []
             : [];
     }
 
-    private static SourceSymbol[]? TryExtract(string language, string text, StringPool? pool, GrammarTokenizer tokenizer)
+    /// <summary>
+    /// The declarations under <paramref name="language"/>'s grammar, or null when a line cannot be tokenised.
+    /// <paramref name="recognised"/> is true when the grammar scoped any token beyond its root scope.
+    /// </summary>
+    private static SourceSymbol[]? TryExtract(string language, string text, StringPool? pool, GrammarTokenizer tokenizer, out bool recognised)
     {
+        recognised = false;
         var symbols = new List<SourceSymbol>();
         object? state = null;
         var tokens = new List<CodeToken>();
@@ -57,6 +65,7 @@ internal static class GrammarSymbols
             {
                 var token = tokens[tokenIndex];
                 var scopes = token.ScopeStack?.Split('\u001f') ?? [];
+                if (scopes.Length > 1) recognised = true;
                 var leaf = scopes.LastOrDefault() ?? "";
                 if (scopes.Any(s => IsScope(s, "comment") || IsScope(s, "string") || IsScope(s, "variable.language"))) continue;
                 var kind = Kind(leaf);

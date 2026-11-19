@@ -34,6 +34,26 @@ public class LinkFinderTests
         Assert.Equal(end, link.EndLine);
     }
 
+    [Theory]
+    [InlineData("src/app/(workspace)/page.tsx:43-47", "src/app/(workspace)/page.tsx", 43, 47)]
+    [InlineData("src/app/(editing)/editor/[id]/AssetsPanel.tsx", "src/app/(editing)/editor/[id]/AssetsPanel.tsx", 0, 0)]
+    [InlineData("src/app/docs/[...slug]/[id].tsx:9", "src/app/docs/[...slug]/[id].tsx", 9, 0)]
+    public void FindsFrameworkRoutePaths(string input, string path, int line, int endLine)
+    {
+        var link = LinkFinder.AsFileReference(input);
+        Assert.NotNull(link);
+        Assert.Equal(path, link.Path);
+        Assert.Equal(line, link.Line);
+        Assert.Equal(endLine, link.EndLine);
+    }
+
+    [Fact]
+    public void ParenthesisedProsePathKeepsOnlyThePath()
+    {
+        var link = Assert.Single(LinkFinder.Find("(see src/lib/avatars.ts)"));
+        Assert.Equal("src/lib/avatars.ts", link.Path);
+    }
+
     [Fact]
     public void CodeSpanAllowsCustomExtensionAndSeveralRanges()
     {

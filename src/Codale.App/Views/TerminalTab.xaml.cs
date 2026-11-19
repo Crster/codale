@@ -52,12 +52,10 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
     private int _suggestionIndex;
 
     private readonly SmartExperienceHost _smart;
-    private readonly SmartInlineCompletion _completion;
 
     public TerminalTab(SmartExperienceHost smart)
     {
         _smart = smart;
-        _completion = new SmartInlineCompletion(smart);
         InitializeComponent();
         Loaded += OnLoaded;
 
@@ -883,18 +881,6 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
                 await Task.Delay(90, cancel.Token);
                 line = await PowerShellCompletionHost.For(shell, _smart.Settings.TerminalLoadProfile)
                     .CompleteLineAsync(typed, cwd, cancel.Token);
-            }
-
-            if (line is null && typed.Trim().Length >= 2 && _completion.IsEnabled("shell-completion") &&
-                Codale.Core.Shell.ShellCommandClassifier.IsShellCommand(typed, cwd))
-            {
-                var recent = viewModel.History.Recent(viewModel.HistoryKey).Take(8).Reverse();
-                var prefix = $"# Shell: {Path.GetFileNameWithoutExtension(shell)} on Windows\n# Directory: {cwd}\n" +
-                    string.Concat(recent.Select(c => $"> {c}\n")) + "> " + typed;
-                if (await _completion.SuggestAsync("shell-completion", cwd, prefix, cancel.Token) is { Length: > 0 } rest)
-                {
-                    line = typed + rest;
-                }
             }
 
             if (cancel.IsCancellationRequested || !IsLoaded || !ReferenceEquals(_viewModel, viewModel) ||

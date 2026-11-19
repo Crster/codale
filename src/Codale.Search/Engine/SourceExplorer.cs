@@ -78,8 +78,8 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
     /// </summary>
     public bool FuseLikeContext { get; init; }
 
-    /// <summary>A fused file is listed while it scores this share of the leader; looser than enrichment's prompt hints.</summary>
-    private const double FusedFloor = 0.3;
+    /// <summary>A fused file is listed while it scores this share of the leader: the expanded terms make the leaders clear, so loose tails are cut.</summary>
+    private const double ModelFusedFloor = 0.5;
 
     /// <summary>Raised with provisional results, then with each round's refinement.</summary>
     public event EventHandler<DiscoveryResult>? Progress;
@@ -188,14 +188,24 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
         var question = Resolve(snapshot, questionTerms);
         var instant = Rank(snapshot, question, [], setup);
         var enriched = false;
+        var fusedByModel = false;
         if (Knowledge is not null && UseSemanticSearch && FuseLikeContext)
         {
             // The ranking context enrichment uses: a file leads when both indexes agree on it, or when it
             // holds enough of the query's own words - not because it is merely near in meaning.
-            var fusion = await PromptFileLocator.FuseAsync(_index.Root, query, snapshot, Knowledge, null, null, null, ct).ConfigureAwait(false);
+            // Semantic search goes first and its nearest snippets are read by the Smart model (or, when it is off, mined
+            // for names) to compose the terms the final search uses. Nothing is shown before that and no later pass
+            // re-sorts what was shown.
+            var fusion = await PromptFileLocator.FuseAsync(_index.Root, query, snapshot, Knowledge, null, null, null, ct,
+                (vocabulary, snippets, token) => ExpandKeywordsAsync(query, vocabulary, snippets, token)).ConfigureAwait(false);
             var lexical = instant.DistinctBy(r => r.File).ToDictionary(r => r.File);
+            // A file listed must hold the query's own words (at least half of them): meaning alone is not a match.
+            var needed = Math.Max(1, (int)Math.Ceiling(question.Count(t => !t.Term.Bonus) / 2.0));
+            bool HoldsWords(Ranked r) => r.Matched.Count(i => i < question.Count && !question[i].Term.Bonus) >= needed ||
+                fusion.Named?.GetValueOrDefault(r.File.RelativePath.Replace('\\', '/')) > 0;
             var retrieved = fusion.Files
-                .Where(f => f.Supported && f.Score >= fusion.Best * FusedFloor)
+                .Where(f => f.Supported && f.Score >= fusion.Best * ModelFusedFloor)
+                .Where(f => query.Length == 0 || (instant.FirstOrDefault(r => r.File == f.File) is { } r && HoldsWords(r)))
                 .Take(MaxRankedResults)
                 .Select(f =>
                 {
@@ -207,6 +217,7 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
             if (retrieved.Count > 0)
             {
                 enriched = true;
+                fusedByModel = _model is not null;
                 // The fused list is the result, as it is for enrichment: the plain lexical tail is what
                 // the gate turned down (tests, docs, files sharing one common word).
                 instant = retrieved;
@@ -240,6 +251,9 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
             // The typed text found verbatim outranks anything semantically near it.
             instant = [.. instant.OrderBy(r => literalFiles.Contains(snapshot.IdOf(r.File)) ? 0 : 1)];
         }
+
+        if (fusedByModel)
+            return Build(snapshot, [.. instant.Take(MaxRankedResults)], question, confirmed: false, round: 1, isFinal: true, setup);
 
         void Report(DiscoveryResult result) =>
             Progress?.Invoke(this, literal is null ? result : WithLiteralFirst(snapshot, result, literal));
@@ -293,7 +307,11 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
 
         for (var round = 1; round <= MaxRounds && !budget.IsCancellationRequested; round++)
         {
-            var fresh = keywords.Where(tried.Add).Take(10).ToList();
+            // A model's loose associations ("ref", "were" for "chat view") only add matches that are not the query's.
+            // Typed keywords the code holds are what the user wants found; a question, or words the code lacks,
+            // needs the model's own vocabulary.
+            var queryInCode = !SearchQueryIntent.IsNaturalLanguage(query) && instant.Any(r => r.Matched.Count > 0);
+            var fresh = keywords.Where(k => !queryInCode || NearQuery(k, questionTerms)).Where(tried.Add).Take(10).ToList();
             if (fresh.Count == 0)
             {
                 break;
@@ -373,6 +391,28 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
         return allTerms.Count == 0
             ? latest with { IsFinal = true }
             : Build(snapshot, [.. best.Take(MaxUnconfirmed)], bestTerms, confirmed: false, latest.Round, isFinal: true, setup);
+    }
+
+    /// <summary>
+    /// Whether a model keyword is the query's own word or nearly it: the same word, its stem, a longer or shorter
+    /// form sharing a four-letter start, one typo away, or a name built from it ("chat" in ChatView, "side bar" as Sidebar).
+    /// </summary>
+    internal static bool NearQuery(string keyword, IReadOnlyList<ExploreTerm> query)
+    {
+        var words = query.SelectMany(q => Regex.Matches(q.Text, @"[\p{L}\p{N}]+").Select(m => m.Value.ToLowerInvariant())).ToList();
+        var forms = new List<string>(words);
+        for (var i = 0; i + 1 < words.Count; i++)
+        {
+            forms.Add(words[i] + words[i + 1]);
+            if (i + 2 < words.Count) forms.Add(words[i] + words[i + 1] + words[i + 2]);
+        }
+
+        static bool Similar(string token, string form) =>
+            token == form || Stem(token) == Stem(form) ||
+            (Math.Min(token.Length, form.Length) >= 4 && (token.StartsWith(form, StringComparison.Ordinal) || form.StartsWith(token, StringComparison.Ordinal))) ||
+            (token.Length >= 5 && form.Length >= 5 && EditDistance(token, form, 1) <= 1);
+
+        return SourceTokens.Of(keyword).Any(token => forms.Any(form => Similar(token, form)));
     }
 
     private static List<Ranked> Pick(ToolCall? call, IReadOnlyList<Ranked> candidates) =>

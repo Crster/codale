@@ -46,6 +46,14 @@ public sealed class GrammarSymbolTests
     }
 
     [Fact]
+    public void Recognised_language_without_declarations_is_not_reread_as_cpp()
+    {
+        // Markdown's grammar scopes the heading, so its answer stands: the prose "class" is not a C++ declaration.
+        var symbols = GrammarSymbols.Extract("notes.md", "# Overview\n\nclass Widget { void Run() {} }\n", null).ToArray();
+        Assert.DoesNotContain(symbols, s => s.Name is "Widget" or "Run");
+    }
+
+    [Fact]
     public void Cpp_fallback_preserves_multiline_comment_state()
     {
         var symbols = GrammarSymbols.Extract("a.unknown", "/*\nclass Fake {};\nvoid FakeMethod() {}\n*/\n" + FallbackSource, null).ToArray();

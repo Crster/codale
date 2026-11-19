@@ -208,10 +208,7 @@ public static class KeywordHighlight
 
         Windows.Foundation.Rect CharacterRect(int offset, LogicalDirection direction = LogicalDirection.Forward)
         {
-            // Text is a single Run. Start within it to exclude inline boundary symbols.
-            var origin = text.Inlines.OfType<Run>().FirstOrDefault()?.ContentStart ?? text.ContentStart;
-            return origin.GetPositionAtOffset(offset, direction)?
-                .GetCharacterRect(direction) ?? default;
+            return PositionAt(text, offset, direction)?.GetCharacterRect(direction) ?? default;
         }
 
         void Place(double x, double y, double width, double height, Brush brush, double radius = 0)
@@ -221,6 +218,32 @@ public static class KeywordHighlight
             Canvas.SetTop(mark, y);
             canvas.Children.Add(mark);
         }
+    }
+
+    /// <summary>
+    /// The pointer at a character index of the plain text. TextPointer offsets count every run boundary as a
+    /// position, and syntax colouring splits the text into many runs, so the index is resolved inside the run
+    /// that holds it instead of being added to the first run's start.
+    /// </summary>
+    private static TextPointer? PositionAt(TextBlock text, int index, LogicalDirection direction)
+    {
+        Run? last = null;
+        var start = 0;
+        if (index <= 0) return text.Inlines.OfType<Run>().FirstOrDefault(r => r.Text?.Length > 0)?.ContentStart ?? text.ContentStart;
+        foreach (var run in text.Inlines.OfType<Run>())
+        {
+            var length = run.Text?.Length ?? 0;
+            if (length == 0) continue;
+            last = run;
+            // An index on a boundary belongs to the next run when looking forward, to this one when looking back.
+            var inside = direction == LogicalDirection.Backward
+                ? index > start && index <= start + length
+                : index >= start && index < start + length;
+            if (inside) return run.ContentStart.GetPositionAtOffset(index - start, direction);
+            start += length;
+        }
+
+        return last?.ContentEnd ?? text.ContentStart;
     }
 
     // The gutter's bound numbers, and the padded text last written over them; a Text that

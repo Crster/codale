@@ -50,6 +50,12 @@ public interface ISmartExperience
     Task<SmartResult<IReadOnlyList<string>>?> ExpandQueryAsync(SmartRequestContext context, string request, string vocabulary,
         CancellationToken ct = default) => Task.FromResult<SmartResult<IReadOnlyList<string>>?>(null);
     /// <summary>
+    /// The same, reading <paramref name="snippets"/> too: the project code a semantic search found nearest the
+    /// request ("path:line" and code), so the names come from what the project really writes.
+    /// </summary>
+    Task<SmartResult<IReadOnlyList<string>>?> ExpandQueryAsync(SmartRequestContext context, string request, string vocabulary,
+        string snippets, CancellationToken ct = default) => ExpandQueryAsync(context, request, vocabulary, ct);
+    /// <summary>
     /// The request rewritten as plain search keywords: what the code it is about does or shows, without the
     /// request's phrasing ("crash", "please", "it should"); null when unavailable.
     /// </summary>

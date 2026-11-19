@@ -22,14 +22,23 @@ public sealed partial class SourceExplorer
     [GeneratedRegex(@"[\p{L}\p{N}_]+", RegexOptions.CultureInvariant)]
     private static partial Regex ChainWord();
 
+    /// <summary>The words inside an identifier: ChatView, chat_view and HTTPServer are chat+view / chat+view / http+server.</summary>
+    [GeneratedRegex(@"\p{Lu}+(?!\p{Ll})|\p{Lu}?\p{Ll}+|\p{N}+", RegexOptions.CultureInvariant)]
+    private static partial Regex SubWord();
+
     /// <summary>One file's likeness: its longest in-order run, the words it holds, and the lines holding the run.</summary>
     private sealed record ChainScore(SourceFile File, int Chain, int Words, int ChainLines, string Run, Dictionary<int, int> Weights);
 
     /// <summary>The ranked files; null when neither index holds anything for the query.</summary>
     private async Task<DiscoveryResult?> ChainSearchAsync(SourceSnapshot snapshot, string text, CancellationToken ct)
     {
-        var words = ChainWord().Matches(text).Select(m => m.Value.ToLowerInvariant()).ToArray();
+        // "ChatView" typed is chat and view: a file holding them as chat view, ChatView or chat_view answers it.
+        var typed = ChainWord().Matches(text).Select(m => m.Value).ToArray();
+        var words = typed.SelectMany(w => SubWord().Matches(w).Select(m => m.Value.ToLowerInvariant())).ToArray();
         if (words.Length == 0) return null;
+        // With several words, only files holding two or more of them together count: the same words on lines
+        // apart ("chat" here, "view" far below) are not the thing typed, and neither is a file near in meaning only.
+        var together = words.Length > 1 ? 2 : 1;
 
         // Semantic retrieval runs beside the keyword pass.
         var semanticTask = Knowledge is not null && UseSemanticSearch
@@ -82,7 +91,7 @@ public sealed partial class SourceExplorer
             .Select((r, i) => (r.File, i)).ToDictionary(p => p.File, p => p.i);
 
         var ordered = scores
-            .Where(s => s.Chain > 0 || semanticRank.ContainsKey(s.File))
+            .Where(s => s.Chain >= together || (together == 1 && semanticRank.ContainsKey(s.File)))
             .OrderByDescending(s => s.Chain)
             .ThenByDescending(s => s.Words)
             .ThenByDescending(s => s.ChainLines)
@@ -145,23 +154,24 @@ public sealed partial class SourceExplorer
         {
             var line = lines[n];
             if (!words.Any(w => line.Contains(w, StringComparison.OrdinalIgnoreCase))) continue;
-            var matches = ChainWord().Matches(line);
-            var tokens = matches.Select(m => m.Value.ToLowerInvariant()).ToArray();
+            var tokens = new List<(string Text, int Start, int End)>();
+            foreach (Match m in ChainWord().Matches(line))
+                foreach (Match part in SubWord().Matches(m.Value))
+                    tokens.Add((part.Value.ToLowerInvariant(), m.Index + part.Index, m.Index + part.Index + part.Length));
             var lineBest = 0;
-            for (var t = 0; t < tokens.Length; t++)
+            for (var t = 0; t < tokens.Count; t++)
             {
                 for (var q = 0; q < words.Length; q++)
                 {
-                    if (tokens[t] != words[q]) continue;
+                    if (tokens[t].Text != words[q]) continue;
                     present.Add(words[q]);
                     var k = 1;
-                    while (t + k < tokens.Length && q + k < words.Length && tokens[t + k] == words[q + k]) k++;
+                    while (t + k < tokens.Count && q + k < words.Length && tokens[t + k].Text == words[q + k]) k++;
                     if (k > lineBest) lineBest = k;
                     if (k > best)
                     {
                         // The run as the source writes it ("Items.Add"), so it is what gets highlighted.
-                        var last = matches[t + k - 1];
-                        (best, run) = (k, line[matches[t].Index..(last.Index + last.Length)]);
+                        (best, run) = (k, line[tokens[t].Start..tokens[t + k - 1].End]);
                     }
                 }
             }

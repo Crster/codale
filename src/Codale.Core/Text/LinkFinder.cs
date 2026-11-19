@@ -38,7 +38,7 @@ public static partial class LinkFinder
     // Drive or UNC-rooted, or a relative path with at least one separator; a name.ext
     // pair alone is matched only when the caller asks for it (a code span, not prose).
     [GeneratedRegex(
-        @"(?<![\w/\\.:-])(?<path>(?:[A-Za-z]:[\\/]|\\\\|\.{1,2}[\\/]|~[\\/])(?:[\w@.+\- ]+[\\/])*[\w@.+\-]+|(?:[\w@.+\-]+[\\/])+[\w@.+\-]*\.[A-Za-z0-9]{1,8})(?:(?::(?<line>\d+)(?:(?::(?<col>\d+)(?:-(?:(?<endline2>\d+):)?(?<endcol>\d+))?)|(?:-(?<num2>\d+)(?::(?<endcol2>\d+))?))?)|(?:\((?<line2>\d+)(?:(?:,\s*(?<col2>\d+)(?:(?:,\s*(?<endline3>\d+),\s*|-(?:(?<endline4>\d+):)?)(?<endcol3>\d+))?)|(?:-(?<num3>\d+)(?::(?<endcol4>\d+))?))?\)))?",
+        @"(?<![\w/\\.:-])(?<path>(?:[A-Za-z]:[\\/]|\\\\|\.{1,2}[\\/]|~[\\/])(?:[\w@.+\- ]+[\\/])*[\w@.+\-]+|(?:(?:[\w@.+\-]|\([\w.\-]+\)|\[\.{0,3}[\w.\-]+\])+[\\/])+(?:[\w@.+\-]|\([\w.\-]+\)|\[\.{0,3}[\w.\-]+\])*\.[A-Za-z0-9]{1,8})(?:(?::(?<line>\d+)(?:(?::(?<col>\d+)(?:-(?:(?<endline2>\d+):)?(?<endcol>\d+))?)|(?:-(?<num2>\d+)(?::(?<endcol2>\d+))?))?)|(?:\((?<line2>\d+)(?:(?:,\s*(?<col2>\d+)(?:(?:,\s*(?<endline3>\d+),\s*|-(?:(?<endline4>\d+):)?)(?<endcol3>\d+))?)|(?:-(?<num3>\d+)(?::(?<endcol4>\d+))?))?\)))?",
         RegexOptions.None,
         matchTimeoutMilliseconds: MatchTimeoutMs)]
     private static partial Regex PathPattern();

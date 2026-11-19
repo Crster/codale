@@ -112,43 +112,66 @@ public sealed partial class ProjectKnowledgeIndex
         }
         var directory = CompactRoot(root);
         var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in snapshot.Files)
+        // Profile writes are committed in groups: one batch per file takes the database's write lock and commits
+        // once per file, which costs more than the profiling itself on a large first scan.
+        var pending = new List<Action>();
+        void Flush()
         {
-            _stopping.Token.ThrowIfCancellationRequested();
-            var path = file.RelativePath;
-            if (!Eligible(path) || file.Length > MaxFileBytes) continue;
-            present.Add(path);
-            var identity = root + "\n" + path;
-            if (_indexedFiles.TryGetValue(identity, out var old) && ReferenceEquals(old, file)) continue;
-            var source = ReadSource(root, path);
-            if (source is null) { present.Remove(path); continue; }
-            var node = directory.Open(path);
-            var previous = node.ReadJson<CompactFile>();
-            var hash = Hash(source);
-            if (previous?.Hash != hash)
-            {
-                var subjects = Regex.Matches(source, """(?m)^[ \t]*(?:///|//|/\*+|\*|#+|"{3}|'{3})[ \t]*(?:<summary>[ \t]*)?([^<\r\n]+)""")
-                    .Select(m => Clip(m.Groups[1].Value.Trim(), 140)).Where(s => s.Length > 0).Distinct().Take(12).ToArray();
-                var record = new CompactFile(previous?.Id ?? NextId(), path, hash, [.. file.Symbols], subjects);
-                db.Batch(() =>
-                {
-                    node.Remove();
-                    node.WriteJson(record);
-                    node.Index("profile", SearchText.Tokens(ProfileText(record)).Select(SearchText.Stem).Distinct());
-                });
-                if (previous is not null) changed.Add(path);
-            }
-            _indexedFiles[identity] = file;
+            if (pending.Count == 0) return;
+            var writes = pending.ToArray();
+            pending.Clear();
+            db.Batch(() => { foreach (var write in writes) write(); });
         }
-        foreach (var path in directory.Children().Where(p => !present.Contains(p)))
+        try
         {
-            directory.Open(path).Remove();
-            _indexedFiles.TryRemove(root + "\n" + path, out _);
+            foreach (var file in snapshot.Files)
+            {
+                _stopping.Token.ThrowIfCancellationRequested();
+                var path = file.RelativePath;
+                if (!Eligible(path) || file.Length > MaxFileBytes) continue;
+                present.Add(path);
+                var identity = root + "\n" + path;
+                if (_indexedFiles.TryGetValue(identity, out var old) && ReferenceEquals(old, file)) continue;
+                var source = ReadSource(root, path);
+                if (source is null) { present.Remove(path); continue; }
+                var node = directory.Open(path);
+                var previous = node.ReadJson<CompactFile>();
+                var hash = Hash(source);
+                if (previous?.Hash != hash)
+                {
+                    var subjects = Regex.Matches(source, """(?m)^[ \t]*(?:///|//|/\*+|\*|#+|"{3}|'{3})[ \t]*(?:<summary>[ \t]*)?([^<\r\n]+)""")
+                        .Select(m => Clip(m.Groups[1].Value.Trim(), 140)).Where(s => s.Length > 0).Distinct().Take(12).ToArray();
+                    var record = new CompactFile(previous?.Id ?? NextId(), path, hash, [.. file.Symbols], subjects);
+                    pending.Add(() =>
+                    {
+                        node.Remove();
+                        node.WriteJson(record);
+                        node.Index("profile", SearchText.Tokens(ProfileText(record)).Select(SearchText.Stem).Distinct());
+                    });
+                    if (pending.Count >= ProfileBatch) Flush();
+                    if (previous is not null) changed.Add(path);
+                }
+                _indexedFiles[identity] = file;
+            }
+            Flush();
+            foreach (var path in directory.Children().Where(p => !present.Contains(p)))
+            {
+                directory.Open(path).Remove();
+                _indexedFiles.TryRemove(root + "\n" + path, out _);
+            }
+        }
+        finally
+        {
+            // Files already marked as profiled must reach the database even when the refresh is cancelled part-way.
+            Flush();
         }
         _snapshots[root] = snapshot.BuiltAt;
         QueueCompactVectors(root);
         return changed;
     }
+
+    /// <summary>Profile writes committed per database batch during a refresh.</summary>
+    private const int ProfileBatch = 256;
 
     private static string ProfileText(CompactFile file) =>
         file.Path + "\n" + string.Join(' ', file.Symbols.Select(s => s.Name)) + "\n" + string.Join(' ', file.Subjects);

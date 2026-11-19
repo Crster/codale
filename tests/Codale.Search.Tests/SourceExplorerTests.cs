@@ -218,12 +218,11 @@ public sealed class SourceExplorerTests : IDisposable
             .RunAsync("public static void");
 
         Assert.True(result.IsExact);
-        // The whole run first, then a run of two, then the words apart.
+        // The whole run first, then a run of two; the words apart (Loose) are not what was typed.
         var paths = result.Files.Select(f => f.RelativePath).ToList();
         var half = paths.IndexOf(P("src/Half.cs"));
-        var loose = paths.IndexOf(P("src/Loose.cs"));
         Assert.True(half >= 9);
-        Assert.True(loose > half);
+        Assert.DoesNotContain(P("src/Loose.cs"), paths);
         Assert.All(result.Files.Take(half), f => Assert.Contains(f.Ranges, r => r.Code.Contains("public static void")));
         Assert.Equal(9, result.Files.Take(half).Count(f => f.RelativePath.Contains("Program")));
         Assert.Equal(["static void"], result.Files[half].Keywords);
@@ -396,6 +395,48 @@ public sealed class SourceExplorerTests : IDisposable
         Assert.Equal([6], Assert.Single(file.Ranges).MatchLines);
         Assert.Equal(["public static void Execute"], file.Keywords);
     }
+
+    [Fact]
+    public async Task Review_rows_far_from_the_question_words_are_dropped_and_generic_words_not_highlighted()
+    {
+        Write("web/editor.css", """
+            .atlas-event__media { width: 100%; max-height: 260px; }
+            .tl-marker { outline: 2px solid red; }
+            .atlas-chat { display: flex; background: var(--surface); border: 1px solid var(--line); }
+            .nle__top { gap: 8px; padding: 10px; }
+            """);
+        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
+        using var knowledge = await KnowledgeAsync(store);
+        var model = new ScriptedModel(Review([new
+        {
+            path = "web/editor.css",
+            locations = new[]
+            {
+                new { startLine = 1, endLine = 1, keywords = new[] { "max-height" } },
+                new { startLine = 3, endLine = 3, keywords = new[] { "background", "border" } },
+                new { startLine = 4, endLine = 4, keywords = new[] { "padding" } },
+            },
+        }]));
+        var result = await new SourceExplorer(_index, model) { Knowledge = knowledge, MaxRelated = 0 }.RunAsync("atlas chat view");
+
+        var file = Assert.Single(result.Files, f => f.RelativePath == P("web/editor.css"));
+        Assert.Equal([3], Assert.Single(file.Ranges).MatchLines);
+        Assert.DoesNotContain("padding", file.Keywords);
+        Assert.DoesNotContain("max-height", file.Keywords);
+        Assert.DoesNotContain("background", file.Keywords);
+        Assert.Contains(file.Keywords, k => k.Equals("chat", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("ChatView", true)]
+    [InlineData("chats", true)]
+    [InlineData("Component", true)]
+    [InlineData("ChatViewComponent", true)]
+    [InlineData("useRef", false)]
+    [InlineData("were", false)]
+    [InlineData("TimelineView", true)]
+    public void Model_keywords_must_be_the_query_words_or_near_them(string keyword, bool kept) =>
+        Assert.Equal(kept, SourceExplorer.NearQuery(keyword, SourceExplorer.QueryTerms("chat view component")));
 
     [Fact]
     public async Task A_review_with_invented_words_keeps_the_retrieved_results()

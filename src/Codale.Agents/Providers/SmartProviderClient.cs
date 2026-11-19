@@ -155,6 +155,8 @@ public sealed class SmartProviderClient(string role, string provider, ByokProvid
             ["messages"] = new[] { new { role = "system", content = system }, new { role = "user", content = input } },
         };
         var id = model.ToLowerInvariant();
+        // Google lists models as "models/gemini-…"; the prefix must not hide the family from the checks below.
+        if (host == "generativelanguage.googleapis.com" && id.StartsWith("models/", StringComparison.Ordinal)) id = id["models/".Length..];
         if (host == "api.openai.com" && (id.StartsWith("gpt-6", StringComparison.Ordinal)
             || id.StartsWith("gpt-5.1", StringComparison.Ordinal) || id.StartsWith("gpt-5.2", StringComparison.Ordinal))
             && !id.Contains("-pro", StringComparison.Ordinal) && !id.Contains("-codex", StringComparison.Ordinal))

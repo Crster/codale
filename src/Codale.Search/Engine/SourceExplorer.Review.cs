@@ -185,11 +185,13 @@ public sealed partial class SourceExplorer
 
             var groups = new List<List<int>>();
             var words = new List<string>();
+            var located = new List<(List<int> Rows, List<string> Keywords)>();
             foreach (var location in Locations(item).Take(MaxLocationsPerFile))
+                if (AlignLocation(lines, location, evidence[file.RelativePath]) is { } aligned) located.Add(aligned);
+            foreach (var (rows, keywords) in FocusOnQuery(lines, located, terms))
             {
-                if (AlignLocation(lines, location, evidence[file.RelativePath]) is not { } aligned) continue;
-                groups.Add(aligned.Rows);
-                words.AddRange(aligned.Keywords);
+                groups.Add(rows);
+                words.AddRange(keywords);
             }
 
             if (groups.Count > 0)
@@ -223,6 +225,39 @@ public sealed partial class SourceExplorer
             Round = round,
             IsFinal = true,
         };
+    }
+
+    /// <summary>A location that holds less than this share of the best one's query weight is a stray row.</summary>
+    private const double StrayShare = 0.75;
+
+    /// <summary>
+    /// The provider's rows checked against the question's own words. A word it marks must be in the file, but a
+    /// generic one (<c>max-height</c>, <c>padding</c>) is in every rule: when some location holds the question's
+    /// words, locations holding far less are dropped, and the highlight is the words the question used. A file
+    /// where no location holds any of them (the code names things differently) keeps the provider's answer.
+    /// </summary>
+    private static List<(List<int> Rows, List<string> Keywords)> FocusOnQuery(string[] lines,
+        List<(List<int> Rows, List<string> Keywords)> located, IReadOnlyList<ResolvedTerm> terms)
+    {
+        if (located.Count == 0 || terms.Count == 0) return located;
+        var weights = located.Select(l => terms.Where(t => l.Rows.Any(n => t.Line.IsMatch(lines[n - 1])))
+            .Sum(t => t.Weight * Math.Max(t.Idf, 0.2))).ToList();
+        var best = weights.Max();
+        if (best <= 0) return located;
+
+        var focused = new List<(List<int> Rows, List<string> Keywords)>();
+        for (var i = 0; i < located.Count; i++)
+        {
+            if (weights[i] < best * StrayShare) continue;
+            var (rows, keywords) = located[i];
+            var onQuery = keywords.Where(k => terms.Any(t => t.Line.IsMatch(k))).ToList();
+            if (onQuery.Count == 0)
+                onQuery = [.. terms.SelectMany(t => rows.Select(n => t.Line.Match(lines[n - 1])))
+                    .Where(m => m.Success && m.Length > 0).Select(m => m.Value).Distinct(StringComparer.OrdinalIgnoreCase)];
+            focused.Add((rows, onQuery.Count > 0 ? onQuery : keywords));
+        }
+
+        return focused;
     }
 
     /// <summary>An item's locations; a flat {path, startLine, endLine, keywords} item is its own one location.</summary>

@@ -117,7 +117,7 @@ public static partial class PromptFileLocator
 
     /// <summary>The fused ranking, best first, with the terms that mark each file's lines.</summary>
     internal sealed record Fusion(IReadOnlyList<FusedFile> Files, IReadOnlyList<SourceExplorer.ResolvedTerm> LineTerms,
-        IReadOnlyDictionary<string, SourceChunk> Chunks, double Best);
+        IReadOnlyDictionary<string, SourceChunk> Chunks, double Best, IReadOnlyDictionary<string, int>? Named = null);
 
     /// <summary>
     /// The ranking context enrichment uses: the source index, the knowledge index and (when a model is given) the
@@ -125,7 +125,8 @@ public static partial class PromptFileLocator
     /// Global search shares it so a query there finds what the same words would in a chat prompt.
     /// </summary>
     internal static async Task<Fusion> FuseAsync(string root, string text, SourceSnapshot snapshot,
-        ProjectKnowledgeIndex? knowledge, IReadOnlySet<string>? knownFiles, ISmartExperience? smart, Action<Trace>? trace, CancellationToken ct)
+        ProjectKnowledgeIndex? knowledge, IReadOnlySet<string>? knownFiles, ISmartExperience? smart, Action<Trace>? trace, CancellationToken ct,
+        Func<string, string, CancellationToken, Task<IReadOnlyList<string>>>? expander = null)
     {
         var clock = Stopwatch.StartNew();
 
@@ -145,8 +146,17 @@ public static partial class PromptFileLocator
         // The model guesses the names the code uses, shown a sample of this project's own names near the prompt's matches.
         var expansionClock = Stopwatch.StartNew();
         IReadOnlyList<string> expansion = [];
+        // The semantic pass goes first: the code it found nearest tells the model (or, without one, the name miner) which
+        // names this project really writes for what the prompt says.
+        var nearest = indexed is null ? [] : await indexed.ConfigureAwait(false);
+        var snippets = Snippets(nearest);
         if (smart is not null)
-            expansion = await ExpandAsync(smart, root, text, Vocabulary(snapshot, lexical), ct).ConfigureAwait(false);
+            expansion = await ExpandAsync(smart, root, text, Vocabulary(snapshot, lexical), snippets, ct).ConfigureAwait(false);
+        else if (expander is not null)
+            expansion = await expander(Vocabulary(snapshot, lexical), snippets, ct).ConfigureAwait(false);
+        // No model, or none answered: a short prompt's own words explain names the snippets show (AtlasChat for "chat").
+        if (expansion.Count == 0 && expander is null && snippets.Length > 0 && words.Count > 0 && words.Count <= MaxMinedWords)
+            expansion = SourceExplorer.SnippetNames(snippets, asked);
         var expansionMs = expansionClock.ElapsedMilliseconds;
         var expandedIndexed = knowledge is null || expansion.Count == 0 ? null
             : Task.Run(() => SafeSearch(knowledge, root, string.Join(' ', expansion)), ct);
@@ -222,8 +232,17 @@ public static partial class PromptFileLocator
             ranked.Add(new FusedFile(file, path, score, Supported(path), bestChunk.GetValueOrDefault(path)?.StartLine));
         }
 
-        return new(ranked, lineTerms, bestChunk, scores.Values.Max());
+        return new(ranked, lineTerms, bestChunk, scores.Values.Max(), named);
     }
+
+    /// <summary>Names are mined from the nearest code only for prompts this short; a long request would match too much.</summary>
+    private const int MaxMinedWords = 6;
+    private const int SnippetCount = 5;
+    private const int SnippetChars = 700;
+
+    /// <summary>The nearest chunks, best first, as "path:line" and their code: what the expander reads.</summary>
+    internal static string Snippets(IReadOnlyList<SourceChunk> chunks) => string.Join("\n---\n", chunks.Take(SnippetCount)
+        .Select(c => $"{Normal(c.Path)}:{c.StartLine}\n{(c.Text.Length > SnippetChars ? c.Text[..SnippetChars] : c.Text).Trim()}"));
 
     private static FileLocatorContext Empty { get; } = new("", []);
 
@@ -311,7 +330,7 @@ public static partial class PromptFileLocator
     private static readonly ConcurrentDictionary<string, IReadOnlyList<string>> Expansions = new(StringComparer.Ordinal);
 
     /// <summary>The model's guess at the names involved; empty when it is off, slow or fails.</summary>
-    private static async Task<IReadOnlyList<string>> ExpandAsync(ISmartExperience smart, string root, string text, string vocabulary, CancellationToken ct)
+    private static async Task<IReadOnlyList<string>> ExpandAsync(ISmartExperience smart, string root, string text, string vocabulary, string snippets, CancellationToken ct)
     {
         var key = ProjectKnowledgeIndex.Hash(root + "\n" + text);
         if (Expansions.TryGetValue(key, out var cached)) return cached;
@@ -320,7 +339,7 @@ public static partial class PromptFileLocator
             using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
             budget.CancelAfter(ExpansionBudget);
             var context = new SmartRequestContext(root, root, "keywords", Deadline: DateTimeOffset.UtcNow + ExpansionBudget);
-            var result = await smart.ExpandQueryAsync(context, text, vocabulary, budget.Token).ConfigureAwait(false);
+            var result = await smart.ExpandQueryAsync(context, text, vocabulary, snippets, budget.Token).ConfigureAwait(false);
             if (result?.Value is not { Count: > 0 } terms) return [];
             if (Expansions.Count > 128) Expansions.Clear();
             Expansions[key] = terms;
