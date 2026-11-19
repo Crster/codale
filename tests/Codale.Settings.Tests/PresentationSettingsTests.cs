@@ -57,6 +57,26 @@ public sealed class PresentationSettingsTests
     }
 
     [Fact]
+    public void EnvDetectionRespectsExplicitPerFileOverrides()
+    {
+        var root = Directory.CreateTempSubdirectory("codale-env-settings-").FullName;
+        using var settings = new AppSettingsStore(root);
+        var syntax = new SyntaxSelection(settings, root);
+        syntax.Store.Add(new Codale.Core.Syntax.LanguageEntry
+        {
+            Id = "dotenv", Name = "dotEnv", ScopeName = "source.dotenv", Source = Codale.Core.Syntax.GrammarSource.Downloaded,
+        }, """{ "scopeName": "source.dotenv", "patterns": [] }""");
+        var file = Path.Combine(root, ".env.production");
+        Assert.Equal("dotenv", syntax.IdFor(file));
+        syntax.SetOverride(file, SyntaxSelection.PlainText);
+        Assert.Null(syntax.IdFor(file));
+        syntax.SetOverride(file, "json");
+        Assert.Equal("json", syntax.IdFor(file));
+        syntax.SetOverride(file, null);
+        Assert.Equal("dotenv", syntax.IdFor(file));
+    }
+
+    [Fact]
     public void InstalledGrammarsStayInTheirInjectedCatalog()
     {
         var root = Directory.CreateTempSubdirectory("codale-syntax-catalogs-").FullName;

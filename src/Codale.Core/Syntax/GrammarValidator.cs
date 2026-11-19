@@ -3,7 +3,11 @@ using System.Text.Json;
 namespace Codale.Core.Syntax;
 
 /// <summary>What a grammar says about itself; used to describe an imported or downloaded language.</summary>
-public sealed record GrammarMeta(string ScopeName, string? Name, string[] FileTypes, string? FirstLineMatch);
+public sealed record GrammarMeta(string ScopeName, string? Name, string[] FileTypes, string? FirstLineMatch)
+{
+    public string[] Filenames { get; init; } = [];
+    public string[] FilenamePatterns { get; init; } = [];
+}
 
 /// <summary>
 /// Checks a TextMate grammar before it is stored. Grammars come from the network or a model,
@@ -14,6 +18,12 @@ public static class GrammarValidator
 {
     /// <summary>Returns null when the grammar is usable, otherwise a message fit to show the user.</summary>
     public static string? Validate(string json, out GrammarMeta meta, string? sample = null)
+    {
+        var error = ReadMetadata(json, out meta);
+        return error ?? GrammarTokenizer.TrialTokenize(json, meta.ScopeName, sample ?? "// sample 123 \"text\"\nfoo(bar);");
+    }
+
+    internal static string? ReadMetadata(string json, out GrammarMeta meta)
     {
         meta = new GrammarMeta("", null, [], null);
         if (string.IsNullOrWhiteSpace(json))
@@ -54,13 +64,20 @@ public static class GrammarValidator
                 scope.GetString()!,
                 root.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null,
                 fileTypes,
-                root.TryGetProperty("firstLineMatch", out var f) && f.ValueKind == JsonValueKind.String ? f.GetString() : null);
+                root.TryGetProperty("firstLineMatch", out var f) && f.ValueKind == JsonValueKind.String ? f.GetString() : null)
+            {
+                Filenames = Strings(root, "filenames"),
+                FilenamePatterns = Strings(root, "filenamePatterns"),
+            };
         }
         catch (JsonException ex)
         {
             return $"The grammar is not valid JSON: {ex.Message}";
         }
 
-        return GrammarTokenizer.TrialTokenize(json, meta.ScopeName, sample ?? "// sample 123 \"text\"\nfoo(bar);");
+        return null;
     }
+
+    private static string[] Strings(JsonElement root, string name) => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Array
+        ? value.EnumerateArray().Where(v => v.ValueKind == JsonValueKind.String).Select(v => v.GetString()!).ToArray() : [];
 }

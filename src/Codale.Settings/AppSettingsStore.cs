@@ -232,6 +232,18 @@ public sealed class AppSettingsStore(string folder) : IDisposable
         set => Set("editor.highlighting", value, FormatFlag);
     }
 
+    public string EditorDarkSyntaxTheme
+    {
+        get => Get("editor.darkSyntaxTheme", () => Read("editor.darkSyntaxTheme", ""));
+        set => Set("editor.darkSyntaxTheme", value, FormatText);
+    }
+
+    public string EditorLightSyntaxTheme
+    {
+        get => Get("editor.lightSyntaxTheme", () => Read("editor.lightSyntaxTheme", ""));
+        set => Set("editor.lightSyntaxTheme", value, FormatText);
+    }
+
     /// <summary>Whether long editor lines fold at the viewport edge instead of scrolling sideways.</summary>
     public bool EditorWordWrap
     {

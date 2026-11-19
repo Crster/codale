@@ -70,6 +70,9 @@ public sealed class SyntaxStore
 
     /// <summary>Installs (or replaces) a language. The grammar must already have passed validation.</summary>
     public LanguageEntry Add(LanguageEntry entry, string grammarJson)
+        => Add(entry, grammarJson, notify: true);
+
+    internal LanguageEntry Add(LanguageEntry entry, string grammarJson, bool notify)
     {
         var id = Slug(entry.Id.Length > 0 ? entry.Id : entry.Name);
         if (id.Length == 0)
@@ -94,7 +97,7 @@ public sealed class SyntaxStore
             Persist();
         }
 
-        RaiseChanged();
+        if (notify) RaiseChanged();
         return saved;
     }
 
@@ -135,7 +138,7 @@ public sealed class SyntaxStore
         var stem = Path.GetFileName(path);
         var dot = stem.IndexOf('.');
         var name = meta.Name ?? (dot > 0 ? stem[..dot] : stem);
-        return Add(new LanguageEntry
+        return Add(LanguageAssociations.Enrich(new LanguageEntry
         {
             Id = name,
             Name = name,
@@ -143,7 +146,7 @@ public sealed class SyntaxStore
             Extensions = meta.FileTypes,
             FirstLine = meta.FirstLineMatch,
             Source = source,
-        }, json);
+        }, meta, null, null), json);
     }
 
     private void Load()

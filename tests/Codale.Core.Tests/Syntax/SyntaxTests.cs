@@ -55,6 +55,49 @@ public sealed class SyntaxTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData(".env")]
+    [InlineData(".env.local")]
+    [InlineData(".env.production.local")]
+    [InlineData(".env.example")]
+    [InlineData(".ENV.TEST")]
+    [InlineData("application.env")]
+    [InlineData("application.env.production")]
+    [InlineData("config/.env.json")]
+    public void Env_file_variants_use_existing_dotenv_downloads_even_without_file_metadata(string path)
+    {
+        SyntaxService.Store.Add(new LanguageEntry
+        {
+            Id = "downloaded-dotenv", Name = "dotEnv", ScopeName = "source.dotenv", Source = GrammarSource.Downloaded,
+        }, """{ "scopeName": "source.dotenv", "patterns": [] }""");
+
+        Assert.Equal("downloaded-dotenv", SyntaxService.Catalog.ForFile(path)?.Id);
+    }
+
+    [Fact]
+    public void Env_files_use_an_existing_ini_install_when_dotenv_is_not_installed()
+    {
+        SyntaxService.Store.Add(new LanguageEntry
+        {
+            Id = "downloaded-ini", Name = "INI", ScopeName = "source.ini", Source = GrammarSource.Downloaded,
+        }, """{ "scopeName": "source.ini", "patterns": [] }""");
+        Assert.Equal("downloaded-ini", SyntaxService.Catalog.ForFile(".env.local")?.Id);
+        Assert.DoesNotContain(SyntaxService.Catalog.All, l => l.Id == "dotenv" && l.IsBuiltin);
+    }
+
+    [Theory]
+    [InlineData(".environment")]
+    [InlineData("file.envy")]
+    [InlineData(".envrc")]
+    public void Env_detection_does_not_claim_unrelated_names(string path)
+    {
+        SyntaxService.Store.Add(new LanguageEntry
+        {
+            Id = "dotenv", Name = "dotEnv", ScopeName = "source.dotenv", Source = GrammarSource.Downloaded,
+        }, """{ "scopeName": "source.dotenv", "patterns": [] }""");
+        Assert.NotEqual("dotenv", SyntaxService.Catalog.ForFile(path)?.Id);
+    }
+
     [Fact]
     public void A_csharp_line_colours_keywords_strings_and_comments()
     {
@@ -65,6 +108,8 @@ public sealed class SyntaxTests : IDisposable
         Assert.Contains(tokens, t => t.Kind == CodeTokenKind.Keyword && line.Substring(t.Start, t.Length) == "public");
         Assert.Contains(tokens, t => t.Kind == CodeTokenKind.String);
         Assert.Contains(tokens, t => t.Kind == CodeTokenKind.Comment && line.Substring(t.Start, t.Length).Contains("note"));
+        Assert.All(tokens, t => Assert.NotNull(t.ScopeStack));
+        Assert.Contains(tokens, t => t.Kind == CodeTokenKind.Plain && t.ScopeStack!.Contains("source.cs"));
     }
 
     [Fact]
@@ -148,6 +193,7 @@ public sealed class SyntaxTests : IDisposable
         Assert.Equal(CodeTokenKind.String, ScopeMapper.Map(["source.cs", "string.quoted.double.cs", "punctuation.definition.string.begin.cs"]));
         Assert.Equal(CodeTokenKind.Number, ScopeMapper.Map(["source.cs", "constant.numeric.decimal.cs"]));
         Assert.Equal(CodeTokenKind.Tag, ScopeMapper.Map(["text.xml", "meta.tag.xml", "entity.name.tag.xml"]));
+        Assert.Equal(CodeTokenKind.Property, ScopeMapper.Map(["source.dotenv", "variable.key.dotenv"]));
         Assert.Equal(CodeTokenKind.Plain, ScopeMapper.Map(["source.cs", "variable.other.readwrite.cs"]));
         Assert.Equal(CodeTokenKind.Plain, ScopeMapper.Map(["source.cs"]));
     }

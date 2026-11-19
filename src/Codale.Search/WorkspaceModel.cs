@@ -23,7 +23,7 @@ public static class ModelChannels
     public static IReadOnlyDictionary<string, int> Current { get; } = new Dictionary<string, int>
     {
         [Terms] = 1,
-        [Symbols] = 1,
+        [Symbols] = 4,
         [Transitions] = 1,
     };
 }

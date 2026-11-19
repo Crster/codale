@@ -21,7 +21,7 @@ public sealed class WorkspaceModelTests : IDisposable
             keys,
             counts,
             total,
-            SourceSymbols.Extract(text),
+            SourceSymbols.Extract(text, path: relative),
             SourceTokens.Transitions(text));
     }
 
@@ -130,7 +130,7 @@ public sealed class WorkspaceModelTests : IDisposable
         first.Save();
 
         var json = File.ReadAllText(path);
-        File.WriteAllText(path, json.Replace("\"symbols\":1", "\"symbols\":0", StringComparison.Ordinal));
+        File.WriteAllText(path, json.Replace("\"symbols\":4", "\"symbols\":0", StringComparison.Ordinal));
 
         var reloaded = new WorkspaceModel(path);
         reloaded.Load();

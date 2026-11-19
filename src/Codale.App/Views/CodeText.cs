@@ -56,7 +56,7 @@ public static class CodeText
     /// <summary>Longest block, in characters, the grammar will colour; past it the text stays plain so a huge paste cannot stall the UI.</summary>
     private const int MaxGrammarChars = 100_000;
 
-    private static readonly Dictionary<(CodeTokenKind Kind, bool Light), Brush> GrammarBrushes = [];
+    private static readonly Dictionary<uint, Brush> GrammarBrushes = [];
 
     /// <summary>The syntax value that colours a block with the grammar for <paramref name="languageId"/>.</summary>
     public static string ForLanguage(string languageId) => LanguagePrefix + languageId;
@@ -93,6 +93,7 @@ public static class CodeText
         }
 
         text.Inlines.Clear();
+        text.TextHighlighters.Clear();
 
         if (GetCode(text) is not { Length: > 0 } code)
         {
@@ -158,6 +159,7 @@ public static class CodeText
         var tokens = new List<CodeToken>();
         object? state = null;
         var lines = code.Split('\n');
+        var lineOffset = 0;
         for (var i = 0; i < lines.Length; i++)
         {
             if (i > 0)
@@ -180,7 +182,15 @@ public static class CodeText
                     runs.Add(new Run { Text = line[at..token.Start] });
                 }
 
-                runs.Add(new Run { Text = line.Substring(token.Start, token.Length), Foreground = BrushFor(token.Kind) });
+                var style = CodePalette.Style(token, CodePalette.Light);
+                runs.Add(StyledRun(line.Substring(token.Start, token.Length), style));
+                if (style.Background is { } background)
+                {
+                    var highlighter = new TextHighlighter { Background = BrushFor(background) };
+                    if (style.Foreground is { } foreground) highlighter.Foreground = BrushFor(foreground);
+                    highlighter.Ranges.Add(new TextRange { StartIndex = lineOffset + token.Start, Length = token.Length });
+                    text.TextHighlighters.Add(highlighter);
+                }
                 at = token.Start + token.Length;
             }
 
@@ -188,6 +198,7 @@ public static class CodeText
             {
                 runs.Add(new Run { Text = line[at..] });
             }
+            lineOffset += line.Length + 1;
         }
 
         foreach (var run in runs)
@@ -198,15 +209,27 @@ public static class CodeText
         return true;
     }
 
-    private static Brush BrushFor(CodeTokenKind kind)
+    internal static Run StyledRun(string text, SyntaxTokenStyle style)
     {
-        var key = (kind, CodePalette.Light);
-        if (!GrammarBrushes.TryGetValue(key, out var brush))
+        var run = new Run
         {
-            brush = new SolidColorBrush(CodePalette.Get(kind));
-            GrammarBrushes[key] = brush;
-        }
+            Text = text,
+            FontWeight = style.FontStyle.HasFlag(SyntaxFontStyle.Bold) ? Microsoft.UI.Text.FontWeights.Bold : Microsoft.UI.Text.FontWeights.Normal,
+            FontStyle = style.FontStyle.HasFlag(SyntaxFontStyle.Italic) ? Windows.UI.Text.FontStyle.Italic : Windows.UI.Text.FontStyle.Normal,
+            TextDecorations = (style.FontStyle.HasFlag(SyntaxFontStyle.Underline) ? Windows.UI.Text.TextDecorations.Underline : 0)
+                | (style.FontStyle.HasFlag(SyntaxFontStyle.Strikethrough) ? Windows.UI.Text.TextDecorations.Strikethrough : 0),
+        };
+        if (style.Foreground is { } foreground) run.Foreground = BrushFor(foreground);
+        return run;
+    }
 
+    private static Brush BrushFor(uint color)
+    {
+        if (!GrammarBrushes.TryGetValue(color, out var brush))
+        {
+            if (GrammarBrushes.Count >= 1024) GrammarBrushes.Clear();
+            brush = GrammarBrushes[color] = new SolidColorBrush(CodePalette.Color(color));
+        }
         return brush;
     }
 

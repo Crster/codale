@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 
 using TextMateSharp.Grammars;
 using TextMateSharp.Internal.Grammars.Reader;
@@ -14,9 +15,9 @@ namespace Codale.Core.Syntax;
 /// not thread-safe, so tokenizing is serialized; each line is time-limited so a pathological
 /// regex costs a plain line rather than a frozen editor.
 /// </summary>
-public sealed class GrammarTokenizer(SyntaxStore store, LanguageCatalog catalog, RegistryOptions builtin)
+public sealed class GrammarTokenizer(SyntaxStore store, LanguageCatalog catalog, RegistryOptions builtin, TimeSpan? lineBudget = null)
 {
-    private static readonly TimeSpan LineBudget = TimeSpan.FromMilliseconds(20);
+    private readonly TimeSpan _lineBudget = lineBudget ?? TimeSpan.FromMilliseconds(20);
 
     private readonly SyntaxStore _store = store;
     private readonly LanguageCatalog _catalog = catalog;
@@ -42,7 +43,7 @@ public sealed class GrammarTokenizer(SyntaxStore store, LanguageCatalog catalog,
 
     /// <summary>
     /// Tokenizes <paramref name="line"/>. <paramref name="tokens"/> is cleared and filled with the
-    /// coloured (non-plain) spans. Returns false when the language has no usable grammar, in which
+    /// scope-bearing spans, including plain tokens. Returns false when the language has no usable grammar, in which
     /// case the caller falls back to plain text or its own scanner.
     /// </summary>
     public bool TryTokenizeLine(string languageId, string line, object? stateIn, List<CodeToken> tokens, out object? stateOut)
@@ -60,7 +61,7 @@ public sealed class GrammarTokenizer(SyntaxStore store, LanguageCatalog catalog,
                 }
 
                 var result = stateIn is IStateStack stack
-                    ? grammar.TokenizeLine(line, stack, LineBudget)
+                    ? grammar.TokenizeLine(line, stack, _lineBudget)
                     : grammar.TokenizeLine(line);
                 Collect(result.Tokens, line.Length, tokens);
                 stateOut = result.RuleStack;
@@ -156,19 +157,16 @@ public sealed class GrammarTokenizer(SyntaxStore store, LanguageCatalog catalog,
             }
 
             var kind = ScopeMapper.Map(token.Scopes);
-            if (kind == CodeTokenKind.Plain)
-            {
-                continue;
-            }
+            var scopes = string.Join('\u001f', token.Scopes);
 
-            // Merge neighbours of one kind so a long comment is one span, not one per word.
-            if (tokens.Count > 0 && tokens[^1] is { } last && last.Kind == kind && last.Start + last.Length == start)
+            // Merge only identical scopes: two tokens of one semantic kind may have different theme styles.
+            if (tokens.Count > 0 && tokens[^1] is { } last && last.Kind == kind && last.ScopeStack == scopes && last.Start + last.Length == start)
             {
                 tokens[^1] = last with { Length = last.Length + (end - start) };
             }
             else
             {
-                tokens.Add(new CodeToken(start, end - start, kind));
+                tokens.Add(new CodeToken(start, end - start, kind) { ScopeStack = scopes });
             }
         }
     }
@@ -205,11 +203,50 @@ public sealed class GrammarTokenizer(SyntaxStore store, LanguageCatalog catalog,
                 return _builtin.GetGrammar(scopeName);
             }
 
-            using var reader = new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(json)));
+            using var reader = new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(NormalizeCaptureMaps(json))));
             return GrammarReader.ReadGrammarSync(reader);
         }
 
-        public ICollection<string> GetInjections(string scopeName) => _builtin.GetInjections(scopeName);
+        // Tolerate upstream capture-map metadata and begin-only rules that TextMateSharp
+        // cannot read directly. The original downloaded payload remains unchanged on disk.
+        private static string NormalizeCaptureMaps(string json)
+        {
+            var root = JsonNode.Parse(json, documentOptions: new() { AllowTrailingCommas = true, CommentHandling = System.Text.Json.JsonCommentHandling.Skip });
+            static void Visit(JsonNode? node)
+            {
+                if (node is JsonObject obj)
+                {
+                    foreach (var (key, value) in obj.ToArray())
+                    {
+                        if (key == "repository" && value is JsonObject repository)
+                            foreach (var rule in repository.ToArray())
+                                if (rule.Value is JsonArray patterns)
+                                    repository[rule.Key] = new JsonObject { ["patterns"] = patterns.DeepClone() };
+                        if (key is "captures" or "beginCaptures" or "endCaptures" or "whileCaptures" && value is JsonObject captures)
+                            foreach (var capture in captures.ToArray())
+                                if (!int.TryParse(capture.Key, out _) || capture.Value is not JsonObject)
+                                {
+                                    // Recover misplaced rule fields (notably XML's comment end/name).
+                                    if (capture.Key is "end" or "name" && !obj.ContainsKey(capture.Key))
+                                        obj[capture.Key] = capture.Value?.DeepClone();
+                                    captures.Remove(capture.Key);
+                                }
+                        Visit(value);
+                    }
+                    // A begin-only TextMate rule stays open until EOF; TextMateSharp needs an explicit end.
+                    if (obj.ContainsKey("begin") && !obj.ContainsKey("end") && !obj.ContainsKey("while"))
+                        obj["end"] = "(?!)";
+                }
+                else if (node is JsonArray array) foreach (var value in array) Visit(value);
+            }
+            Visit(root);
+            return root!.ToJsonString();
+        }
+
+        public ICollection<string> GetInjections(string scopeName) =>
+            (_builtin.GetInjections(scopeName) ?? []).Concat(
+                _store?.Languages.Where(l => l.InjectionScopes.Contains(scopeName)).Select(l => l.ScopeName) ?? [])
+                .Distinct().ToArray();
 
         public IRawTheme GetTheme(string scopeName) => _builtin.GetTheme(scopeName);
 

@@ -25,6 +25,7 @@ public sealed class LanguageCatalog(SyntaxStore store, RegistryOptions builtin)
     private readonly Lock _gate = new();
     private List<LanguageInfo> _all = [];
     private int _version = -1;
+    private readonly Dictionary<string, (DateTime Stamp, long Length, GrammarMeta? Metadata)> _metadataCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>All languages, installed ones first so they win every lookup tier.</summary>
     public IReadOnlyList<LanguageInfo> All
@@ -62,7 +63,7 @@ public sealed class LanguageCatalog(SyntaxStore store, RegistryOptions builtin)
             ?? all.FirstOrDefault(l => l.Extensions.Any(e => string.Equals(e, key.TrimStart('.'), StringComparison.OrdinalIgnoreCase)));
     }
 
-    /// <summary>Picks the language for a file: exact file name, then extension, then a first-line match.</summary>
+    /// <summary>Picks the language by exact filename, dotenv family, filename pattern, longest extension, then first line.</summary>
     public LanguageInfo? ForFile(string path, string? firstLine = null)
     {
         var name = Path.GetFileName(path);
@@ -76,6 +77,22 @@ public sealed class LanguageCatalog(SyntaxStore store, RegistryOptions builtin)
 
         // Try the longest dotted suffix first so "foo.d.ts" or "x.tar.gz" can match a multi-part extension.
         var lower = name.ToLowerInvariant();
+        if (lower.EndsWith(".env", StringComparison.Ordinal) || lower.Contains(".env.", StringComparison.Ordinal))
+        {
+            // Environment suffixes (.env.local, app.env.production, .env.example) are not
+            // language extensions. Resolve the dotenv family before trying their last suffix.
+            // Older downloads may have no fileTypes in their manifest. Recognize their scope
+            // as well as their id so they work without reinstalling or fetching anything.
+            return all.FirstOrDefault(l => !l.IsBuiltin && (string.Equals(l.Id, "dotenv", StringComparison.OrdinalIgnoreCase) || l.ScopeName == "source.dotenv"))
+                ?? all.FirstOrDefault(l => !l.IsBuiltin && l.Extensions.Contains("env", StringComparer.OrdinalIgnoreCase))
+                ?? all.FirstOrDefault(l => !l.IsBuiltin && l.ScopeName == "source.ini")
+                ?? ById("dotenv") ?? ById("ini");
+        }
+        var byPattern = all.SelectMany(l => l.FilenamePatterns.Select(p => (Language: l, Pattern: p)))
+            .OrderBy(p => p.Language.IsBuiltin)
+            .ThenByDescending(p => p.Pattern.Count(c => c is not ('*' or '?' or '{' or '}')))
+            .FirstOrDefault(p => FilenamePattern.Matches(p.Pattern, path)).Language;
+        if (byPattern is not null) return byPattern;
         for (var dot = lower.IndexOf('.'); dot >= 0; dot = lower.IndexOf('.', dot + 1))
         {
             var suffix = lower[(dot + 1)..];
@@ -84,7 +101,7 @@ public sealed class LanguageCatalog(SyntaxStore store, RegistryOptions builtin)
                 break;
             }
 
-            var hit = all.FirstOrDefault(l => l.Extensions.Contains(suffix));
+            var hit = all.FirstOrDefault(l => l.Extensions.Contains(suffix, StringComparer.OrdinalIgnoreCase));
             if (hit is not null)
             {
                 return hit;
@@ -114,25 +131,10 @@ public sealed class LanguageCatalog(SyntaxStore store, RegistryOptions builtin)
 
     private List<LanguageInfo> Build()
     {
-        var list = new List<LanguageInfo>();
-        foreach (var entry in _store.Languages)
-        {
-            list.Add(new LanguageInfo(
-                entry.Id,
-                entry.Name,
-                entry.ScopeName,
-                entry.Extensions,
-                entry.Filenames,
-                entry.Aliases,
-                entry.FirstLine,
-                entry.Source));
-        }
-
-        var installedIds = list.Select(l => l.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var shadowed = list.SelectMany(l => l.Extensions).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var shipped = new List<LanguageInfo>();
         foreach (var language in _builtin.GetAvailableLanguages())
         {
-            if (string.IsNullOrEmpty(language.Id) || installedIds.Contains(language.Id))
+            if (string.IsNullOrEmpty(language.Id))
             {
                 continue;
             }
@@ -146,26 +148,49 @@ public sealed class LanguageCatalog(SyntaxStore store, RegistryOptions builtin)
             var extensions = (language.Extensions ?? [])
                 .Select(e => e.TrimStart('.').ToLowerInvariant())
                 .Concat(ExtraExtensions.Where(x => x.LanguageId == language.Id).Select(x => x.Extension))
-                .Where(e => e.Length > 0 && !shadowed.Contains(e))
+                .Where(e => e.Length > 0)
                 .Distinct()
                 .ToArray();
             var aliases = language.Aliases ?? [];
-            list.Add(new LanguageInfo(
-                language.Id,
-                aliases.FirstOrDefault() ?? language.Id,
-                scope,
-                extensions,
-                [],
-                aliases,
-                null,
-                GrammarSource.Builtin));
+            var entry = new LanguageEntry { Id = language.Id, Name = aliases.FirstOrDefault() ?? language.Id,
+                ScopeName = scope, Extensions = extensions, Aliases = [.. aliases], Source = GrammarSource.Builtin };
+            shipped.Add(Info(LanguageAssociations.Enrich(entry, null, CatalogEntryFor(entry), null)));
         }
-
-        foreach (var bundled in BundledGrammars.Languages.Where(b => !installedIds.Contains(b.Id) && list.All(l => l.Id != b.Id)))
+        shipped.AddRange(BundledGrammars.Languages.Where(b => shipped.All(l => l.Id != b.Id)));
+        var list = new List<LanguageInfo>();
+        foreach (var entry in _store.Languages.Where(e => !e.IsDependency))
         {
-            list.Add(bundled with { Extensions = [.. bundled.Extensions.Where(e => !shadowed.Contains(e))] });
+            var builtin = shipped.FirstOrDefault(l => l.Id == entry.Id && l.ScopeName == entry.ScopeName)
+                ?? shipped.FirstOrDefault(l => l.ScopeName == entry.ScopeName);
+            list.Add(Info(LanguageAssociations.Enrich(entry, ReadMetadata(entry), CatalogEntryFor(entry), builtin)));
         }
-
+        var installedIds = list.Select(l => l.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var shadowed = list.SelectMany(l => l.Extensions).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        list.AddRange(shipped.Where(l => !installedIds.Contains(l.Id))
+            .Select(l => l with { Extensions = [.. l.Extensions.Where(e => !shadowed.Contains(e))] }));
         return list;
     }
+
+    private static CatalogEntry? CatalogEntryFor(LanguageEntry entry) =>
+        SyntaxCatalogClient.Entries.FirstOrDefault(e => !e.Hidden && string.Equals(e.Id, entry.Id, StringComparison.OrdinalIgnoreCase) && e.ScopeName == entry.ScopeName)
+        ?? SyntaxCatalogClient.Entries.FirstOrDefault(e => !e.Hidden && e.ScopeName == entry.ScopeName);
+
+    private GrammarMeta? ReadMetadata(LanguageEntry entry)
+    {
+        try
+        {
+            var path = _store.GrammarPath(entry);
+            var file = new FileInfo(path);
+            if (!file.Exists || file.Length > SyntaxStore.MaxGrammarBytes) return null;
+            if (_metadataCache.TryGetValue(path, out var cached) && cached.Stamp == file.LastWriteTimeUtc && cached.Length == file.Length) return cached.Metadata;
+            var json = _store.ReadGrammar(entry);
+            var metadata = json is not null && GrammarValidator.ReadMetadata(json, out var parsed) is null && parsed.ScopeName == entry.ScopeName ? parsed : null;
+            _metadataCache[path] = (file.LastWriteTimeUtc, file.Length, metadata);
+            return metadata;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    private static LanguageInfo Info(LanguageEntry entry) => new(entry.Id, entry.Name, entry.ScopeName,
+        entry.Extensions, entry.Filenames, entry.Aliases, entry.FirstLine, entry.Source) { FilenamePatterns = entry.FilenamePatterns };
 }

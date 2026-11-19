@@ -82,6 +82,7 @@ public sealed partial class TerminalAgentSessionPanel : UserControl, INotifyProp
         _elapsedTimer.Interval = TimeSpan.FromSeconds(1);
         _elapsedTimer.Tick += (_, _) =>
         {
+            DeterminateRingSync.Refresh(VitalsRings);
             foreach (var task in Session?.RunningTasks.Where(t => t.IsRunning).ToList() ?? [])
             {
                 task.RefreshElapsed();

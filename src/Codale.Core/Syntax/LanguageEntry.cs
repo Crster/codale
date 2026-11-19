@@ -22,9 +22,12 @@ public sealed record LanguageEntry
     public string ScopeName { get; init; } = "";
     public string[] Extensions { get; init; } = [];
     public string[] Filenames { get; init; } = [];
+    public string[] FilenamePatterns { get; init; } = [];
     public string[] Aliases { get; init; } = [];
     public string? FirstLine { get; init; }
     public string GrammarFile { get; init; } = "";
+    public bool IsDependency { get; init; }
+    public string[] InjectionScopes { get; init; } = [];
 
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public GrammarSource Source { get; init; } = GrammarSource.Imported;
@@ -42,4 +45,5 @@ public sealed record LanguageInfo(
     GrammarSource Source)
 {
     public bool IsBuiltin => Source == GrammarSource.Builtin;
+    public IReadOnlyList<string> FilenamePatterns { get; init; } = [];
 }

@@ -1,5 +1,7 @@
 using System.Diagnostics;
 
+using Codale.App.Controls.Editing;
+
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Brushes;
 using Microsoft.Graphics.Canvas.Text;
@@ -230,12 +232,14 @@ public sealed partial class CodeEditor
         var focused = FocusState != FocusState.Unfocused;
         var originX = (float)(textLeft - _scrollX);
 
+        ds.FillRectangle(0, 0, (float)gutter, (float)height, Brush(_gutterColor));
         // Line bands under everything: the caret lines and bookmarked lines, full width.
         DrawLineBands(ds, firstLine, lastLine, width, focused);
 
         // The text area is clipped so sideways scrolling never paints over the gutter.
         using (ds.CreateLayer(1f, new Windows.Foundation.Rect(gutter, 0, Math.Max(0, width - gutter), height)))
         {
+            DrawTokenBackgrounds(ds, firstLine, lastLine);
             DrawPinnedWords(ds, firstLine, lastLine);
             DrawResultHighlights(ds, firstLine, lastLine);
             DrawOccurrences(ds, firstLine, lastLine);
@@ -257,6 +261,16 @@ public sealed partial class CodeEditor
     }
 
     // ------------------------------------------------------------------ layers
+
+    private void DrawTokenBackgrounds(CanvasDrawingSession ds, int firstLine, int lastLine)
+    {
+        if (CodePalette.Theme(_light) is null) return;
+        for (var line = firstLine; line <= lastLine; line++)
+            if (GetVisual(line).Tokens is { } tokens)
+                foreach (var token in tokens)
+                    if (CodePalette.Style(token, _light).Background is { } background)
+                        FillSpan(ds, line, token.Start, token.Start + token.Length, CodePalette.Color(background), pastEnd: false, inset: 0);
+    }
 
     private float RowY(int row) => (float)(row * _lineHeight - VerticalScroll);
 

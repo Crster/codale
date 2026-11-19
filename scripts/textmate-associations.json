@@ -1,0 +1,5127 @@
+{
+  "abap": {
+    "extensions": [
+      ".abap"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "ABAP"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "actionscript-3": {
+    "extensions": [
+      ".as"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "ActionScript",
+      "actionscript 3",
+      "actionscript3",
+      "as3"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "ada": {
+    "extensions": [
+      ".ada",
+      ".adb",
+      ".adc",
+      ".ads"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Ada",
+      "ada95",
+      "ada2005",
+      "ada"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/AdaCore/ada_language_server/e984d2233630f0a3ea422e86bfa97b36f80fe038/integration/vscode/ada/package.json"
+    ]
+  },
+  "ahk": {
+    "extensions": [
+      ".ahk",
+      ".ext",
+      ".ah1",
+      ".ahk1"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "AutoHotkey",
+      "ahk",
+      "AutoHotkey v1",
+      "autohotkey"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/mark-wiemer/ahkpp/63c1fd4d675e9ea98f60083786afe94505bdd57b/package.json"
+    ]
+  },
+  "ahk2": {
+    "extensions": [
+      ".ahk",
+      ".ah2",
+      ".ahk2"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "AutoHotkey2",
+      "autohotkey2",
+      "ahk2"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/thqby/vscode-autohotkey2-lsp/60b30aa89671198bca0d3ba9777008f8c2b2983e/package.json"
+    ]
+  },
+  "angular-html": {
+    "extensions": [
+      ".html",
+      ".htm",
+      ".shtml",
+      ".xhtml",
+      ".mdoc",
+      ".jsp",
+      ".asp",
+      ".aspx",
+      ".jshtm",
+      ".volt",
+      ".ejs",
+      ".rhtml"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "HTML",
+      "htm",
+      "html",
+      "xhtml"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/onivim/vscode-exthost/cfc2a2212de9ea10943af58ebd1817a5ad196463/extensions/html/package.json"
+    ]
+  },
+  "angular-ts": {
+    "extensions": [
+      ".ts",
+      ".cts",
+      ".mts"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "TypeScript",
+      "ts",
+      "typescript"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/microsoft/vscode/210541906e5a96ab39f9c753f921b1bd35f4138b/extensions/typescript-basics/package.json"
+    ]
+  },
+  "apache": {
+    "extensions": [
+      ".apacheconf",
+      ".vhost"
+    ],
+    "filenames": [
+      ".htaccess",
+      "apache2.conf",
+      "httpd.conf"
+    ],
+    "filenamePatterns": [],
+    "aliases": [
+      "ApacheConf",
+      "aconf",
+      "apache"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "apex": {
+    "extensions": [
+      ".cls",
+      ".apex",
+      ".trigger"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "Apex"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "apl": {
+    "extensions": [
+      ".dyalog",
+      ".dyapp",
+      ".apl",
+      ".aplf",
+      ".aplo",
+      ".aplc",
+      ".apli",
+      ".apln",
+      ".apla",
+      ".mipage"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": "[⌶-⍺]|^\\#!.*(?:\\s|\\/|(?<=!)\\b)(?:gnu[-._]?apl|aplx?|dyalog)(?:$|\\s)|-\\*-(?:\\s*(?=[^:;\\s]+\\s*-\\*-)|(?:.*?[;\\s]|(?<=-\\*-))mode\\s*:\\s*)apl(?=[\\s;]|(?<![-*])-\\*-).*?-\\*-|(?:(?:\\s|^)vi(?:m[<=>]?\\d+|m)?|\\sex)(?=:(?=\\s*set?\\s[^\\n:]+:)|:(?!\\s* set?\\s))(?:(?:\\s|\\s*:\\s*)\\w*(?:\\s*=(?:[^\\n\\\\\\s]|\\\\.)*)?)*[\\s:](?:filetype|ft|syntax)\\s*=apl(?=\\s|:|$)",
+    "aliases": [
+      "APL",
+      "dyalog"
+    ],
+    "interpreters": [
+      "apl",
+      "aplx",
+      "dyalog",
+      "dyalogscript"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/kimmolinna/vscode-apl-language/13541242d9ffae225e89ebba23f9abaa4c60697e/package.json"
+    ]
+  },
+  "applescript": {
+    "extensions": [
+      ".applescript",
+      ".scpt"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "AppleScript",
+      "apples",
+      "osascript"
+    ],
+    "interpreters": [
+      "osascript"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "ara": {
+    "extensions": [
+      ".ara"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Ara",
+      "ara",
+      "ARA"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/ara-lang/highlighting/ed1dbedcf03d0b67207e41fe2e11218cc925dc0d/package.json"
+    ]
+  },
+  "asciidoc": {
+    "extensions": [
+      ".adoc",
+      ".ad",
+      ".asciidoc",
+      ".asc"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "AsciiDoc",
+      "Asciidoctor"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/asciidoctor/asciidoctor-vscode/09c406fcd67a300cfc1f49267c70cc97db978986/package.json"
+    ]
+  },
+  "asm": {
+    "extensions": [
+      ".asm",
+      ".nasm",
+      ".yasm",
+      ".inc",
+      ".s"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Assembly",
+      "asm",
+      "nasm",
+      "x86 and x86_64 Assembly",
+      "asm-intel-x86-generic"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/13xforever/x86_64-assembly-vscode/5c1958f4283d260f5dc88fa4f5f31c620e061a5a/package.json"
+    ]
+  },
+  "astro": {
+    "extensions": [
+      ".astro"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Astro"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/withastro/language-tools/8e55c37cbcf134dedf0068781245da5a9d46d081/packages/vscode/package.json"
+    ]
+  },
+  "awk": {
+    "extensions": [
+      ".awk"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Awk",
+      "AWK",
+      "awk"
+    ],
+    "interpreters": [
+      "awk",
+      "gawk",
+      "mawk",
+      "nawk"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/luggage66/vscode-awk/eff8c0f160ae16592c8d9963fd77046137fd2612/package.json"
+    ]
+  },
+  "ballerina": {
+    "extensions": [
+      ".bal"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "Ballerina"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "bat": {
+    "extensions": [
+      ".bat",
+      ".cmd"
+    ],
+    "filenames": [
+      "gradlew.bat",
+      "mvnw.cmd"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Batchfile",
+      "bat",
+      "batch",
+      "dosbatch",
+      "winbatch",
+      "Batch"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/df15c8e832a341633acd2e9bb26e1b275d09cfe0/extensions/bat/package.json"
+    ]
+  },
+  "beancount": {
+    "extensions": [
+      ".beancount",
+      ".bean"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Beancount",
+      "beancount"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/Lencerf/vscode-beancount/60dcdbd3af273aca0ff628220f2828483101ca47/package.json"
+    ]
+  },
+  "berry": {
+    "extensions": [
+      ".be"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Berry",
+      "be",
+      "berry"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/berry-lang/berry/74611286b8d2d2c2ee16ea187029f2a9c4257f5f/tools/plugins/vscode/skiars.berry-1.2.0/package.json"
+    ]
+  },
+  "bibtex": {
+    "extensions": [
+      ".bib"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "BibTeX",
+      "bibtex"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/9a2c94d213696a4453b6d9988b003d98e7646e75/extensions/latex/package.json"
+    ]
+  },
+  "bicep": {
+    "extensions": [
+      ".bicep",
+      ".bicepparam"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "Bicep"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "bird2": {
+    "extensions": [],
+    "filenames": [
+      "bird.conf"
+    ],
+    "filenamePatterns": [],
+    "aliases": [
+      "BIRD2",
+      "bird",
+      "bird3"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "blade": {
+    "extensions": [
+      ".blade.php"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Blade",
+      "blade"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/laravel/vs-code-extension/80726f64975dc935d6b925d8230cdc1ea075802a/package.json"
+    ]
+  },
+  "bsl": {
+    "extensions": [
+      ".bsl",
+      ".os"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "1C Enterprise",
+      "1C (BSL)",
+      "BSL"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/1c-syntax/vsc-language-1c-bsl/c93f87c76d8a536a494039e9dc78a684b14b4e4c/package.json"
+    ]
+  },
+  "c": {
+    "extensions": [
+      ".c",
+      ".i"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "C",
+      "c"
+    ],
+    "interpreters": [
+      "tcc"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/bd1abe08c38bb5deccf65610f8f3c03d2338d20d/extensions/cpp/package.json"
+    ]
+  },
+  "c3": {
+    "extensions": [
+      ".c3",
+      ".c3i",
+      ".c3t"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "C3",
+      "c3"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/c3lang/vscode-c3/38dcc9ae665da32dea3e391f342478668d44e16f/package.json"
+    ]
+  },
+  "cadence": {
+    "extensions": [
+      ".cdc"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Cadence"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/onflow/vscode-cadence/bc7e5d3bb613e01789584283d7911cfd6b616dc4/package.json"
+    ]
+  },
+  "cairo": {
+    "extensions": [
+      ".cairo"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Cairo",
+      "cairo"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/starkware-libs/cairo-lang/4ea4fe8e167845a3402ae2ea0a8b6004aad18dd5/src/starkware/cairo/lang/ide/vscode-cairo/package.json"
+    ]
+  },
+  "chapel": {
+    "extensions": [
+      ".chpl"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Chapel",
+      "chpl",
+      "chapel"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/chapel-lang/chapel-vscode/c933a6c379df844d564644ee6c6df4e6055ceb33/package.json"
+    ]
+  },
+  "clarity": {
+    "extensions": [
+      ".clar"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "Clarity"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "clojure": {
+    "extensions": [
+      ".clj",
+      ".cljs",
+      ".cljc",
+      ".cljx",
+      ".clojure",
+      ".edn"
+    ],
+    "filenames": [
+      "riemann.config"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Clojure",
+      "clojure"
+    ],
+    "interpreters": [
+      "bb"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/a1a4c0a63b1ad59e84f54b874744fe35dea9abe1/extensions/clojure/package.json"
+    ]
+  },
+  "cmake": {
+    "extensions": [
+      ".cmake"
+    ],
+    "filenames": [
+      "CMakeLists.txt",
+      "CMakelists.txt"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "CMake"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/twxs/vs.language.cmake/19b1b8fe2d68d72cf294d0c3c22f0a3fc54f8f6f/package.json"
+    ]
+  },
+  "cobol": {
+    "extensions": [
+      ".cbl",
+      ".cobol",
+      ".cblsrce",
+      ".cblcpy",
+      ".pdv",
+      ".cpy",
+      ".copybook",
+      ".cobcopy",
+      ".fd",
+      ".sel",
+      ".scb",
+      ".spb",
+      ".scbl",
+      ".cob",
+      ".dds",
+      ".def",
+      ".src",
+      ".ss",
+      ".wks",
+      ".bib",
+      ".pco",
+      ".eco",
+      ".COBOL",
+      ".CBL",
+      ".CBLSRCE",
+      ".CBLCPY",
+      ".PDV",
+      ".CPY",
+      ".COPYBOOK",
+      ".COBCOPY",
+      ".FD",
+      ".SEL",
+      ".SCB",
+      ".SPB",
+      ".SCBL",
+      ".COB",
+      ".DDS",
+      ".DEF",
+      ".SRC",
+      ".SS",
+      ".WKS",
+      ".BIB",
+      ".PCO",
+      ".ECO"
+    ],
+    "filenames": [
+      "SQLCA"
+    ],
+    "filenamePatterns": [],
+    "firstLine": ".*(\\$[sS][eE][tT]|[pP][rR][oO][gG][rR][aA][mM]\\-[iI][dD]|[iI][dD][eE][nN][tT][iI][fF][iI][cC][aA][tT][iI][oO][nN]|\\*.[mM][iI][cC][rR][oO]).*",
+    "aliases": [
+      "COBOL"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/spgennard/vscode_cobol/7020540cc77e04fb2edc8503f906d51fa840bbe5/package.json"
+    ]
+  },
+  "codeowners": {
+    "extensions": [],
+    "filenames": [
+      "CODEOWNERS"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "CODEOWNERS",
+      "codeowners"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/jasonnutter/vscode-codeowners/219dee0ab25c1bfad0b9de84180117e71221a653/package.json"
+    ]
+  },
+  "codeql": {
+    "extensions": [
+      ".ql",
+      ".qll"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "CodeQL",
+      "ql"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "coffee": {
+    "extensions": [
+      ".coffee",
+      ".cson"
+    ],
+    "filenames": [
+      "Cakefile"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "CoffeeScript",
+      "coffee",
+      "coffee-script",
+      "coffeescript"
+    ],
+    "interpreters": [
+      "coffee"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/ff58f5083f57b50e6a100ab60454dfb72fe21e80/extensions/coffeescript/package.json"
+    ]
+  },
+  "common-lisp": {
+    "extensions": [
+      ".lisp",
+      ".lsp",
+      ".l",
+      ".cl",
+      ".asd",
+      ".asdf"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Common Lisp",
+      "lisp",
+      "common lisp",
+      "commonlisp"
+    ],
+    "interpreters": [
+      "lisp",
+      "sbcl",
+      "ccl",
+      "clisp",
+      "ecl"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/qingpeng9802/vscode-common-lisp/79d04dc9ca80d98e65c4f28b3d67a24a7829b18f/package.json"
+    ]
+  },
+  "coq": {
+    "extensions": [
+      ".v"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Rocq Prover",
+      "coq",
+      "rocq",
+      "Rocq",
+      "Gallina",
+      "gallina"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/rocq-prover/vsrocq/76f6daf4589f6617019e7500d5c2acb327578b44/client/package.json"
+    ]
+  },
+  "cpp": {
+    "extensions": [
+      ".cpp",
+      ".cppm",
+      ".cc",
+      ".ccm",
+      ".cxx",
+      ".cxxm",
+      ".c++",
+      ".c++m",
+      ".hpp",
+      ".hh",
+      ".hxx",
+      ".h++",
+      ".h",
+      ".ii",
+      ".ino",
+      ".inl",
+      ".ipp",
+      ".ixx",
+      ".tpp",
+      ".txx",
+      ".hpp.in",
+      ".h.in"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "C++",
+      "cpp",
+      "Cpp"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/8623a79836fba2e7e058e3493345ee068d28ce4f/extensions/cpp/package.json"
+    ]
+  },
+  "crystal": {
+    "extensions": [
+      ".cr"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Crystal",
+      "crystal"
+    ],
+    "interpreters": [
+      "crystal"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/crystal-lang-tools/vscode-crystal-lang/c920b0931ec5f05b78447dbff31b172c64f1d734/package.json"
+    ]
+  },
+  "csharp": {
+    "extensions": [
+      ".cs",
+      ".csx",
+      ".cake"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "C#",
+      "csharp",
+      "cake",
+      "cakescript"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/af600487b1e94374d9f48f57cbf2cad24656b07f/extensions/csharp/package.json"
+    ]
+  },
+  "css": {
+    "extensions": [
+      ".css"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "CSS",
+      "css"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/af600487b1e94374d9f48f57cbf2cad24656b07f/extensions/css/package.json"
+    ]
+  },
+  "csv": {
+    "extensions": [
+      ".csv"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "CSV",
+      "csv"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/mechatroner/vscode_rainbow_csv/3bdafafa12940a75166089b64bdd80b1d3b071db/package.json"
+    ]
+  },
+  "cue": {
+    "extensions": [
+      ".cue"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "CUE",
+      "cue"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/cue-lang/vscode-cue/a9ee96a7e61fb8acd39f7403144d0b6f45652987/extension/package.json"
+    ]
+  },
+  "cypher": {
+    "extensions": [
+      ".cypher",
+      ".cql",
+      ".cy",
+      ".cyp"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Cypher",
+      "Cypher Query Language",
+      "cypher"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/adam-cowley/neo4j-vscode/ad90d275ac76c740018e78f78722343f730270e0/package.json"
+    ]
+  },
+  "d": {
+    "extensions": [
+      ".d",
+      ".di"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": "^#!.*(dub|rdmd)",
+    "aliases": [
+      "D",
+      "Dlang"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/Pure-D/code-d/71992a1a52a3025f3333e4025eee0f255a8cda03/package.json"
+    ]
+  },
+  "dart": {
+    "extensions": [
+      ".dart"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Dart"
+    ],
+    "interpreters": [
+      "dart"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/af600487b1e94374d9f48f57cbf2cad24656b07f/extensions/dart/package.json"
+    ]
+  },
+  "dax": {
+    "extensions": [
+      ".dax"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "DAX",
+      "dax-language"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/huyza/dax-language/7fd39aa84552617daa258189b2550dcdbd14149a/package.json"
+    ]
+  },
+  "desktop": {
+    "extensions": [
+      ".desktop",
+      ".theme"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": "^\\[Desktop Entry\\]",
+    "aliases": [
+      "desktop",
+      "Desktop"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/nico-castell/desktop-file-support/63720f5f05313de22b68ecbd0ca3d3ed8ba57e7e/package.json"
+    ]
+  },
+  "diff": {
+    "extensions": [
+      ".diff",
+      ".patch",
+      ".rej"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Diff",
+      "udiff",
+      "diff"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/4549bd26c7b799284e0ebd8dc1e0310e6a8707a1/extensions/diff/package.json"
+    ]
+  },
+  "docker": {
+    "extensions": [
+      ".dockerfile",
+      ".containerfile"
+    ],
+    "filenames": [
+      "Containerfile",
+      "Dockerfile"
+    ],
+    "filenamePatterns": [
+      "Dockerfile.*",
+      "Containerfile.*"
+    ],
+    "firstLine": null,
+    "aliases": [
+      "Dockerfile",
+      "Containerfile",
+      "Docker"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/8270a86019db7551da42b71d15c6080a414d8c81/extensions/docker/package.json"
+    ]
+  },
+  "dotenv": {
+    "extensions": [
+      ".env",
+      ".flaskenv"
+    ],
+    "filenames": [
+      ".env",
+      ".env.ci",
+      ".env.dev",
+      ".env.development",
+      ".env.development.local",
+      ".env.example",
+      ".env.local",
+      ".env.prod",
+      ".env.production",
+      ".env.sample",
+      ".env.staging",
+      ".env.template",
+      ".env.test",
+      ".env.testing"
+    ],
+    "filenamePatterns": [
+      ".env*"
+    ],
+    "firstLine": null,
+    "aliases": [
+      "Dotenv",
+      ".env",
+      "env",
+      "environment variables"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/dotenv-org/dotenv-vscode/3b4caf3398b3958b5fef8ef723c332eb1f30dfbb/package.json"
+    ]
+  },
+  "dream-maker": {
+    "extensions": [
+      ".dm",
+      ".dme",
+      ".dmm"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "DM",
+      "byond",
+      "DM (BYOND Code)",
+      "dm"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/gbasood/vscode-atomic-dreams/22d2bf0325f65697ea542856280f66e9e098f4a2/package.json"
+    ]
+  },
+  "edge": {
+    "extensions": [
+      ".edge"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Edge",
+      "edge"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/edge-js/edge-vscode/04352c41981ca664598674556afa63bd393a10f3/package.json"
+    ]
+  },
+  "elixir": {
+    "extensions": [
+      ".ex",
+      ".exs"
+    ],
+    "filenames": [
+      "mix.lock"
+    ],
+    "filenamePatterns": [],
+    "aliases": [
+      "Elixir"
+    ],
+    "interpreters": [
+      "elixir"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "elm": {
+    "extensions": [
+      ".elm"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Elm",
+      "elm"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/elm-tooling/elm-language-client-vscode/c70351314682c2e0fae8a402ebb301da79821c37/package.json"
+    ]
+  },
+  "emacs-lisp": {
+    "extensions": [
+      ".el",
+      ".eld",
+      ".emacs",
+      ".emacs.desktop"
+    ],
+    "filenames": [
+      ".abbrev_defs",
+      ".emacs",
+      ".emacs.desktop",
+      ".gnus",
+      ".spacemacs",
+      ".viper",
+      "Cask",
+      "Eask",
+      "Project.ede",
+      "_emacs",
+      "abbrev_defs"
+    ],
+    "filenamePatterns": [],
+    "aliases": [
+      "Emacs Lisp",
+      "cask",
+      "eask",
+      "elisp",
+      "emacs",
+      "lisp data"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "erb": {
+    "extensions": [
+      ".erb",
+      ".erb.deface",
+      ".rhtml"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "HTML+ERB",
+      "erb",
+      "rhtml",
+      "html+ruby"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "erlang": {
+    "extensions": [
+      ".erl",
+      ".escript",
+      ".es",
+      ".hrl",
+      ".xrl",
+      ".yrl"
+    ],
+    "filenames": [
+      "Emakefile",
+      "rebar.config",
+      "rebar.config.lock",
+      "rebar.lock"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Erlang"
+    ],
+    "interpreters": [
+      "escript"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/erlang-ls/grammar/fe898becd3004bcb4947ab50d6b6b830fbfb9228/package.json"
+    ]
+  },
+  "fennel": {
+    "extensions": [
+      ".fnl"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Fennel",
+      "fennel"
+    ],
+    "interpreters": [
+      "fennel"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/kongeor/vsc-fennel/664148923d7bd72531120d0cba712c6dba6f698d/package.json"
+    ]
+  },
+  "fish": {
+    "extensions": [
+      ".fish"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": "^#!\\s*/.*\\bfish\\b",
+    "aliases": [
+      "fish",
+      "Fish"
+    ],
+    "interpreters": [
+      "fish"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/bmalehorn/vscode-fish/8288b88c46ebe1ef2876fd4275450fc80c5a176a/package.json"
+    ]
+  },
+  "fluent": {
+    "extensions": [
+      ".ftl"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Fluent"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/macabeus/vscode-fluent/8544ea296a7769a359f43ddff4dc4b6c61f5cf59/package.json"
+    ]
+  },
+  "fortran-fixed-form": {
+    "extensions": [
+      ".f",
+      ".F",
+      ".f77",
+      ".F77",
+      ".for",
+      ".FOR"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Fortran77"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/fortran-lang/vscode-fortran-support/002eaa90668fd7d63cd073e8ca21b1388357ed62/package.json"
+    ]
+  },
+  "fortran-free-form": {
+    "extensions": [
+      ".f90",
+      ".F90",
+      ".f95",
+      ".F95",
+      ".f03",
+      ".F03",
+      ".f08",
+      ".F08",
+      ".f18",
+      ".F18",
+      ".fpp",
+      ".FPP",
+      ".pf",
+      ".PF",
+      ".fypp",
+      ".FYPP"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Fortran Free Form",
+      "Fortran",
+      "Fortran90"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/fortran-lang/vscode-fortran-support/f5fbf935d709e165922b307885a6106e32624018/package.json"
+    ]
+  },
+  "fsharp": {
+    "extensions": [
+      ".fs",
+      ".fsi",
+      ".fsx",
+      ".fsscript"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "F#",
+      "fsharp",
+      "FSharp"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/e6cffb21362b6d7addb977ff7db14f0681228780/extensions/fsharp/package.json"
+    ]
+  },
+  "gdresource": {
+    "extensions": [
+      "godot",
+      "tres",
+      "import",
+      "gdns",
+      "gdnlib"
+    ],
+    "filenames": [
+      "project.godot"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Godot Resource",
+      "GDResource",
+      "gdresource"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/godotengine/godot-vscode-plugin/e7e2d0439dea0fb3a568378554c81e0a17348a84/package.json"
+    ]
+  },
+  "gdscript": {
+    "extensions": [
+      ".gd"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "GDScript",
+      "gdscript"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/godotengine/godot-vscode-plugin/3f2860fd76c591a6010f0d35220490933e41d01d/package.json"
+    ]
+  },
+  "gdshader": {
+    "extensions": [
+      ".gdshader",
+      ".gdshaderinc"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "GDShader",
+      "gdshader"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/godotengine/godot-vscode-plugin/e7e2d0439dea0fb3a568378554c81e0a17348a84/package.json"
+    ]
+  },
+  "genie": {
+    "extensions": [
+      ".gs"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Genie",
+      "genie"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/vala-lang/vala-vscode/8f825e95648326df2572d0522632251cdff4a43b/package.json"
+    ]
+  },
+  "gherkin": {
+    "extensions": [
+      ".feature",
+      ".testcase"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Gherkin",
+      "cucumber",
+      "feature",
+      "gherkin"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/alexkrechik/VSCucumberAutoComplete/fbb554addf81e8961b58b1577924af10fecf9694/package.json"
+    ]
+  },
+  "git-commit": {
+    "extensions": [],
+    "filenames": [
+      ".gitmessage",
+      "COMMIT_EDITMSG",
+      "MERGE_MSG"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Git Commit",
+      "commit",
+      "Git Commit Message",
+      "git-commit"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/f8c3f89468fea14103d8790d59ea8594d6e644eb/extensions/git-base/package.json"
+    ]
+  },
+  "git-rebase": {
+    "extensions": [],
+    "filenames": [
+      "git-rebase-todo"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Git Rebase Message",
+      "git-rebase"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/microsoft/vscode/e95c74c4c7af876e79ec58df262464467c06df28/extensions/git-base/package.json"
+    ]
+  },
+  "gleam": {
+    "extensions": [
+      ".gleam"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Gleam",
+      "gleam"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/gleam-lang/vscode-gleam/aa487ed82aeaec8dbac62e796689daf55abf1aa9/package.json"
+    ]
+  },
+  "glimmer-js": {
+    "extensions": [
+      ".gjs"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Glimmer JS",
+      "gjs"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/lifeart/vsc-ember-syntax/76fce7b360ce09a78789e7d5217b8955d1a5d95f/package.json"
+    ]
+  },
+  "glimmer-ts": {
+    "extensions": [
+      ".gts"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Glimmer TS",
+      "gts"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/lifeart/vsc-ember-syntax/76fce7b360ce09a78789e7d5217b8955d1a5d95f/package.json"
+    ]
+  },
+  "glsl": {
+    "extensions": [
+      ".glsl",
+      ".fp",
+      ".frag",
+      ".frg",
+      ".fs",
+      ".fsh",
+      ".fshader",
+      ".geo",
+      ".geom",
+      ".glslf",
+      ".glslv",
+      ".gs",
+      ".gshader",
+      ".rchit",
+      ".rmiss",
+      ".shader",
+      ".tesc",
+      ".tese",
+      ".vert",
+      ".vrx",
+      ".vs",
+      ".vsh",
+      ".vshader"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "GLSL"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "gn": {
+    "extensions": [
+      ".gni",
+      ".gn"
+    ],
+    "filenames": [
+      ".gn"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "GN",
+      "gn"
+    ],
+    "interpreters": [
+      "gn"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/google/gn-language-server/a77b96900dd5ad6395294e34c2c5833cc89d5af0/vscode-gn/package.json"
+    ]
+  },
+  "gnuplot": {
+    "extensions": [
+      ".gp",
+      ".plt",
+      ".plot",
+      ".gnuplot"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": "^#!/.*\\bgnuplot\\b",
+    "aliases": [
+      "Gnuplot",
+      "gnuplot"
+    ],
+    "interpreters": [
+      "gnuplot"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/MarioSchwalbe/vscode-gnuplot/c62c1a61c9b6b4658b43d76c397dc2ad43523b6a/package.json"
+    ]
+  },
+  "go": {
+    "extensions": [
+      ".go"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Go",
+      "golang"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/091ef378baaa141c8bc4bbe9775d4cb3bd655a80/extensions/go/package.json"
+    ]
+  },
+  "graphql": {
+    "extensions": [
+      ".gql",
+      ".graphql",
+      ".graphqls"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "GraphQL",
+      "graphql"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/prisma-labs/vscode-graphql/4569aef2364b42b6acd8188e4a6ca9b0ba3c6a1d/package.json"
+    ]
+  },
+  "groovy": {
+    "extensions": [
+      ".groovy",
+      ".gvy",
+      ".gradle"
+    ],
+    "filenames": [
+      "Jenkinsfile"
+    ],
+    "filenamePatterns": [],
+    "firstLine": "^#!.*\\bgroovy\\b",
+    "aliases": [
+      "Groovy",
+      "groovy"
+    ],
+    "interpreters": [
+      "groovy"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/8fdf170a0850c1cc027382f31650aaf300d3ae2a/extensions/groovy/package.json"
+    ]
+  },
+  "hack": {
+    "extensions": [
+      ".php",
+      ".hh",
+      ".hack"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": "^<\\?hh\\b.*|#!.*hhvm.*$",
+    "aliases": [
+      "Hack",
+      "hacklang"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/slackhq/vscode-hack/f92d6a49ce03a4ed16d342e6bd9e8be65af0b623/package.json"
+    ]
+  },
+  "haml": {
+    "extensions": [
+      ".haml"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Haml",
+      "Ruby Haml",
+      "haml"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/karuna/haml-vscode/aa45415aefd691af0a501ea4f98e434490623e0d/package.json"
+    ]
+  },
+  "handlebars": {
+    "extensions": [
+      ".handlebars",
+      ".hbs",
+      ".hjs"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Handlebars",
+      "hbs",
+      "htmlbars",
+      "handlebars"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/af600487b1e94374d9f48f57cbf2cad24656b07f/extensions/handlebars/package.json"
+    ]
+  },
+  "haskell": {
+    "extensions": [
+      ".hsig",
+      "hs-boot",
+      ".hs"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Haskell",
+      "haskell"
+    ],
+    "interpreters": [
+      "runghc",
+      "runhaskell",
+      "runhugs"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/octref/language-haskell/ae87982aac2bf5cf6334c067e49c5ec8fc08b871/package.json"
+    ]
+  },
+  "haxe": {
+    "extensions": [
+      ".hx",
+      ".hxsl"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "Haxe"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "hcl": {
+    "extensions": [
+      ".hcl"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "HCL",
+      "HashiCorp Configuration Language",
+      "opentofu",
+      "terraform"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/hashicorp/syntax/2ec7cd10c9d6134e836bf85eb0f5aa010512bff4/package.json"
+    ]
+  },
+  "hlsl": {
+    "extensions": [
+      ".hlsl",
+      ".hlsli",
+      ".fx",
+      ".fxh",
+      ".vsh",
+      ".psh",
+      ".cginc",
+      ".compute"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "HLSL",
+      "hlsl"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/efa12b2f49ec6ee84ed1e7bbd948808efec452f6/extensions/hlsl/package.json"
+    ]
+  },
+  "html": {
+    "extensions": [
+      ".html",
+      ".htm",
+      ".shtml",
+      ".xhtml",
+      ".xht",
+      ".mdoc",
+      ".jsp",
+      ".asp",
+      ".aspx",
+      ".jshtm",
+      ".volt",
+      ".ejs",
+      ".rhtml"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "HTML",
+      "xhtml",
+      "htm",
+      "html"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/45324363153075dab0482312ae24d8c068d81e4f/extensions/html/package.json"
+    ]
+  },
+  "html-derivative": {
+    "extensions": [
+      ".html",
+      ".htm",
+      ".shtml",
+      ".xhtml",
+      ".xht",
+      ".mdoc",
+      ".jsp",
+      ".asp",
+      ".aspx",
+      ".jshtm",
+      ".volt",
+      ".ejs",
+      ".rhtml"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "HTML",
+      "htm",
+      "html",
+      "xhtml"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/microsoft/vscode/4064f172528461afc6944383d07521f6a30da89c/extensions/html/package.json"
+    ]
+  },
+  "http": {
+    "extensions": [
+      ".http",
+      ".rest"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": "^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|CONNECT|TRACE|LOCK|UNLOCK|PROPFIND|PROPPATCH|COPY|MOVE|MKCOL|MKCALENDAR|ACL|SEARCH)\\s+(.*?)HTTP/[0-9\\.]+$",
+    "aliases": [
+      "HTTP",
+      "Http",
+      "http"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/Huachao/vscode-restclient/6649589e4d3f97d9c0d68a4f7ffe03fa2919c4df/package.json"
+    ]
+  },
+  "hurl": {
+    "extensions": [
+      ".hurl"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Hurl",
+      "hurl"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/nikeee/language-hurl/dec5d90bea8a13d21fd8365d5a0d2d35453653c1/package.json"
+    ]
+  },
+  "hxml": {
+    "extensions": [
+      ".hxml"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "HXML"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "hy": {
+    "extensions": [
+      ".hy"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Hy",
+      "hylang",
+      "hy"
+    ],
+    "interpreters": [
+      "hy"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/hylang/vscode-hy/8f99630793b7483cf4cac10a655da6fed08a4f9f/package.json"
+    ]
+  },
+  "imba": {
+    "extensions": [
+      ".imba",
+      ".imba2"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": "^#!/.*\\bimba[2-9.-]*\\b",
+    "aliases": [
+      "Imba",
+      "imba"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/imba/imba/183643518e567f0e125046b47b6d81f1aa7bdbb1/packages/vscode-imba/package.json"
+    ]
+  },
+  "ini": {
+    "extensions": [
+      ".ini"
+    ],
+    "filenames": [
+      ".buckconfig",
+      ".codespellrc",
+      ".coveragerc",
+      ".flake8",
+      ".gitreview",
+      ".pylintrc",
+      "HOSTS",
+      "buildozer.spec",
+      "hosts",
+      "pylintrc",
+      "vlcrc"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "INI",
+      "conf",
+      "dosini",
+      "Ini",
+      "ini"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/8fdf170a0850c1cc027382f31650aaf300d3ae2a/extensions/ini/package.json"
+    ]
+  },
+  "java": {
+    "extensions": [
+      ".java",
+      ".jav"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Java",
+      "java"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/3c86ede5f554f6e196c832394e126b291a1de606/extensions/java/package.json"
+    ]
+  },
+  "javascript": {
+    "extensions": [
+      ".js",
+      ".es6",
+      ".mjs",
+      ".cjs",
+      ".pac"
+    ],
+    "filenames": [
+      "Jakefile",
+      "jakefile"
+    ],
+    "filenamePatterns": [],
+    "firstLine": "^#!.*\\bnode",
+    "aliases": [
+      "JavaScript",
+      "js",
+      "node",
+      "javascript"
+    ],
+    "interpreters": [
+      "bun",
+      "chakra",
+      "d8",
+      "deno",
+      "gjs",
+      "js",
+      "node",
+      "nodejs",
+      "qjs",
+      "rhino",
+      "v8",
+      "v8-shell"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/210541906e5a96ab39f9c753f921b1bd35f4138b/extensions/javascript/package.json"
+    ]
+  },
+  "jinja": {
+    "extensions": [
+      ".jinja",
+      ".j2",
+      ".jinja2"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Jinja",
+      "django",
+      "html+django",
+      "html+jinja",
+      "htmldjango",
+      "Jinja Raw",
+      "jinja-raw"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/samuelcolvin/jinjahtml-vscode/be729c88f723602e7b5df2e9dc5e8c016c31c38f/package.json"
+    ]
+  },
+  "jison": {
+    "extensions": [
+      ".jison"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "Jison"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "json": {
+    "extensions": [
+      ".json",
+      ".bowerrc",
+      ".jscsrc",
+      ".webmanifest",
+      ".js.map",
+      ".css.map",
+      ".ts.map",
+      ".har",
+      ".jslintrc",
+      ".jsonld"
+    ],
+    "filenames": [
+      ".all-contributorsrc",
+      ".arcconfig",
+      ".auto-changelog",
+      ".autorc",
+      ".c8rc",
+      ".htmlhintrc",
+      ".imgbotconfig",
+      ".nycrc",
+      ".releaserc",
+      ".secrets.baseline",
+      ".tern-config",
+      ".tern-project",
+      ".watchmanconfig",
+      "MODULE.bazel.lock",
+      "Package.resolved",
+      "Pipfile.lock",
+      "bun.lock",
+      "composer.lock",
+      "deno.lock",
+      "flake.lock",
+      "mcmod.info",
+      ".ember-cli"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "JSON",
+      "geojson",
+      "jsonl",
+      "sarif",
+      "topojson",
+      "json"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/d6af4893ed9a3545163a4cb748fa5548bd1e51a5/extensions/json/package.json"
+    ]
+  },
+  "json5": {
+    "extensions": [
+      ".json5"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "JSON5",
+      "json5"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/mrmlnc/vscode-json5/e884b89929103ff009322c393080ff45a4544e88/package.json"
+    ]
+  },
+  "jsonc": {
+    "extensions": [
+      ".jsonc",
+      ".eslintrc",
+      ".eslintrc.json",
+      ".jsfmtrc",
+      ".jshintrc",
+      ".swcrc",
+      ".hintrc",
+      ".babelrc"
+    ],
+    "filenames": [
+      ".babelrc",
+      ".devcontainer.json",
+      ".eslintrc",
+      ".eslintrc.json",
+      ".jscsrc",
+      ".jshintrc",
+      ".jslintrc",
+      ".oxlintrc.json",
+      ".swcrc",
+      "api-extractor.json",
+      "devcontainer.json",
+      "jsconfig.json",
+      "language-configuration.json",
+      "tsconfig.json",
+      "tslint.json",
+      "babel.config.json",
+      ".babelrc.json",
+      ".ember-cli",
+      "typedoc.json"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "JSON with Comments",
+      "jsonc"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/0adddd82816db666c52038e8277312dc55da2756/extensions/json/package.json"
+    ]
+  },
+  "jsonl": {
+    "extensions": [
+      ".jsonl"
+    ],
+    "filenames": [
+      ".all-contributorsrc",
+      ".arcconfig",
+      ".auto-changelog",
+      ".autorc",
+      ".c8rc",
+      ".htmlhintrc",
+      ".imgbotconfig",
+      ".nycrc",
+      ".releaserc",
+      ".secrets.baseline",
+      ".tern-config",
+      ".tern-project",
+      ".watchmanconfig",
+      "MODULE.bazel.lock",
+      "Package.resolved",
+      "Pipfile.lock",
+      "bun.lock",
+      "composer.lock",
+      "deno.lock",
+      "flake.lock",
+      "mcmod.info"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "JSON",
+      "geojson",
+      "jsonl",
+      "sarif",
+      "topojson",
+      "JSON Lines"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/0adddd82816db666c52038e8277312dc55da2756/extensions/json/package.json"
+    ]
+  },
+  "jsonnet": {
+    "extensions": [
+      ".jsonnet",
+      ".libsonnet"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Jsonnet",
+      "jsonnet"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/heptio/vscode-jsonnet/39088f9cde9f483c8e0efeb67a3fd561cd873aad/package.json"
+    ]
+  },
+  "jsx": {
+    "extensions": [
+      ".jsx"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "JavaScript JSX",
+      "JavaScript React",
+      "jsx"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/microsoft/vscode/210541906e5a96ab39f9c753f921b1bd35f4138b/extensions/javascript/package.json"
+    ]
+  },
+  "julia": {
+    "extensions": [
+      ".jl"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": "^#!\\s*/.*\\bjulia[0-9.-]*\\b",
+    "aliases": [
+      "Julia",
+      "julia"
+    ],
+    "interpreters": [
+      "julia"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/af600487b1e94374d9f48f57cbf2cad24656b07f/extensions/julia/package.json"
+    ]
+  },
+  "just": {
+    "extensions": [
+      ".just",
+      ".justfile",
+      "justfile",
+      "Justfile"
+    ],
+    "filenames": [
+      ".JUSTFILE",
+      ".Justfile",
+      ".justfile",
+      "JUSTFILE",
+      "Justfile",
+      "justfile"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Just",
+      "Justfile",
+      "vscode-just"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/nefrob/vscode-just/2253973135a5cdc34e44df876fecd30aff605150/package.json"
+    ]
+  },
+  "kdl": {
+    "extensions": [
+      ".kdl"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "KDL",
+      "kdl"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/kdl-org/vscode-kdl/b986286d526d3dba7f5121956a52ce300c3418f0/package.json"
+    ]
+  },
+  "kotlin": {
+    "extensions": [
+      ".kt",
+      ".kts"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Kotlin"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/fwcd/vscode-kotlin/626e20d5c51a4379c4c0ee293aa89e58b5232aec/package.json"
+    ]
+  },
+  "kusto": {
+    "extensions": [
+      ".csl",
+      ".kusto",
+      ".kql"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Kusto",
+      "kusto"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/rosshamish/kuskus/2a5d25aa9e1680b90e77b2477d710d11af8fcd88/kusto-syntax-highlighting/package.json"
+    ]
+  },
+  "latex": {
+    "extensions": [
+      ".tex",
+      ".ltx",
+      ".ctx"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "TeX",
+      "latex",
+      "LaTeX"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/af600487b1e94374d9f48f57cbf2cad24656b07f/extensions/latex/package.json"
+    ]
+  },
+  "lean": {
+    "extensions": [
+      ".lean"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Lean 4",
+      "lean4"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/leanprover/vscode-lean4/2ca585c47d447682452bd72f528feffd03ef4971/vscode-lean4/package.json"
+    ]
+  },
+  "less": {
+    "extensions": [
+      ".less"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Less",
+      "less-css",
+      "less"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/03dc55030b3b2b5c4779d4ac1e2e46cd1f5a6b7c/extensions/less/package.json"
+    ]
+  },
+  "liquid": {
+    "extensions": [
+      ".liquid"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "Liquid"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "llvm": {
+    "extensions": [
+      ".ll"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "LLVM",
+      "LLVM IR",
+      "llvm"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/llvm/llvm-project/c07bc2962c5f76ebcbd040c4e97fe5d129530087/llvm/utils/vscode/llvm/package.json"
+    ]
+  },
+  "log": {
+    "extensions": [
+      ".log"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Log File",
+      "log"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/emilast/vscode-logfile-highlighter/396c8552ff99d0e07142fdd940d75dae212dd28c/package.json"
+    ]
+  },
+  "lua": {
+    "extensions": [
+      ".lua"
+    ],
+    "filenames": [
+      ".luacheckrc"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Lua",
+      "lua"
+    ],
+    "interpreters": [
+      "lua",
+      "luajit"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/c8fdd1650c06321d687ddfd1eff06aae4b616256/extensions/lua/package.json"
+    ]
+  },
+  "luau": {
+    "extensions": [
+      ".luau"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "Luau"
+    ],
+    "interpreters": [
+      "luau"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "make": {
+    "extensions": [
+      ".mak",
+      ".mk"
+    ],
+    "filenames": [
+      "BSDmakefile",
+      "GNUmakefile",
+      "Kbuild",
+      "Makefile",
+      "Makefile.am",
+      "Makefile.boot",
+      "Makefile.frag",
+      "Makefile.in",
+      "Makefile.inc",
+      "Makefile.pc",
+      "Makefile.wat",
+      "makefile",
+      "makefile.sco",
+      "mkfile",
+      "OCamlMakefile"
+    ],
+    "filenamePatterns": [],
+    "firstLine": "^#!\\s*/usr/bin/make",
+    "aliases": [
+      "Makefile",
+      "bsdmake",
+      "make",
+      "mf",
+      "makefile"
+    ],
+    "interpreters": [
+      "make"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/91db8ea85fee30ebb3c7a5e7939aa2a8d79811c5/extensions/make/package.json"
+    ]
+  },
+  "markdown": {
+    "extensions": [
+      ".md",
+      ".mkd",
+      ".mdwn",
+      ".mdown",
+      ".markdown",
+      ".markdn",
+      ".mdtxt",
+      ".mdtext",
+      ".workbook"
+    ],
+    "filenames": [
+      "contents.lr"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Markdown",
+      "md",
+      "pandoc",
+      "markdown"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/6d8ab9737d58fc5eaf07e2ae6553b38183a5de47/extensions/markdown-basics/package.json"
+    ]
+  },
+  "marko": {
+    "extensions": [
+      ".marko"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Marko",
+      "markojs",
+      "marko"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/marko-js/language-server/9b627df21b63f9aeecd04780b9336ac3b734fa17/packages/vscode/package.json"
+    ]
+  },
+  "matlab": {
+    "extensions": [
+      ".matlab",
+      ".m"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "MATLAB",
+      "octave"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "mdc": {
+    "extensions": [
+      ".mdc"
+    ],
+    "filenames": [],
+    "filenamePatterns": [
+      "*.md",
+      "*.mdc"
+    ],
+    "firstLine": null,
+    "aliases": [
+      "Markdown Components",
+      "MDC",
+      "mdc",
+      "Nuxt Content",
+      "Nuxt MDC",
+      "Nuxt Markdown Components",
+      "Comark"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/nuxt-content/vscode-mdc/97c4924c847eea22e50188a5127d893262a66019/package.json"
+    ]
+  },
+  "mdx": {
+    "extensions": [
+      ".mdx"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "MDX"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "mermaid": {
+    "extensions": [
+      ".mmd"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Mermaid",
+      "mermaid example"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/bpruitt-goddard/vscode-mermaid-syntax-highlight/8b62f487cb7a89afcd152febfbf47f5d4787657f/package.json"
+    ]
+  },
+  "mojo": {
+    "extensions": [
+      ".mojo",
+      ".🔥"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Mojo",
+      "mojo"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/modular/vscode-mojo/7661e4e6157718ab1ecc700441138738f4fcbc9b/package.json"
+    ]
+  },
+  "moonbit": {
+    "extensions": [
+      ".mbt"
+    ],
+    "filenames": [
+      "moon.mod",
+      "moon.pkg"
+    ],
+    "filenamePatterns": [],
+    "aliases": [
+      "MoonBit"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "move": {
+    "extensions": [
+      ".move"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Move"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/damirka/move-syntax/01aeb9284635195a4861cfa7d46759320bb6609c/package.json"
+    ]
+  },
+  "narrat": {
+    "extensions": [
+      ".nar",
+      ".narrat",
+      ".rat"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Narrat Language",
+      "narrat"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/liana-p/narrat-syntax-highlighting-vscode/00d4b410338fc50ca0ce77a1f7e873c1fb66d376/package.json"
+    ]
+  },
+  "nextflow": {
+    "extensions": [
+      ".nf",
+      ".nf.test"
+    ],
+    "filenames": [
+      "nextflow.config"
+    ],
+    "filenamePatterns": [],
+    "firstLine": "^#!.*\\bnextflow\\b",
+    "aliases": [
+      "Nextflow",
+      "nextflow"
+    ],
+    "interpreters": [
+      "nextflow"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/nextflow-io/vscode-language-nextflow/928fc02dd8d082d489a5cec0c019268894719339/package.json"
+    ]
+  },
+  "nginx": {
+    "extensions": [
+      ".conf",
+      ".conf.default",
+      ".conf.template",
+      "mime.types",
+      "fastcgi_params",
+      "scgi_params",
+      "uwsgi_params"
+    ],
+    "filenames": [
+      "nginx.conf"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Nginx",
+      "nginx configuration file",
+      "NGINX",
+      "nginx"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/hangxingliu/vscode-nginx-conf-hint/49159c02fd09dce264ded7802c9499a0f09646f5/package.json"
+    ]
+  },
+  "nim": {
+    "extensions": [
+      ".nim",
+      ".nims",
+      "nim.cfg",
+      ".nim.cfg"
+    ],
+    "filenames": [
+      "nim.cfg"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Nim",
+      "nim"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/pragmagic/vscode-nim/0272a0544ddf147fde98f8a8f2b624b7dcb19eb3/package.json"
+    ]
+  },
+  "nix": {
+    "extensions": [
+      ".nix"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Nix",
+      "nixos",
+      "nix"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/nix-community/vscode-nix-ide/effbf3494a43250a537834805b305793994b9ca8/package.json"
+    ]
+  },
+  "nsis": {
+    "extensions": [
+      ".nsi",
+      ".nsh",
+      ".bnsi",
+      ".bnsh"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": "^#!/.*\\bmakensis\\b",
+    "aliases": [
+      "NSIS",
+      "nsis"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/idleberg/vscode-nsis/9adaf15a501157c1d3b73730c08a7bcbb057f812/package.json"
+    ]
+  },
+  "nushell": {
+    "extensions": [
+      ".nu"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": "^#!\\s*/?.*\\bnu\\b",
+    "aliases": [
+      "Nushell",
+      "nu-script",
+      "nushell-script",
+      "nushell",
+      "nu"
+    ],
+    "interpreters": [
+      "nu"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/nushell/vscode-nushell-lang/dd6145171b0e51963f1e3b0f92ade7e9ddfd1628/package.json"
+    ]
+  },
+  "objective-c": {
+    "extensions": [
+      ".m"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Objective-C",
+      "obj-c",
+      "objc",
+      "objectivec"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/bd1abe08c38bb5deccf65610f8f3c03d2338d20d/extensions/objective-c/package.json"
+    ]
+  },
+  "objective-cpp": {
+    "extensions": [
+      ".mm"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Objective-C++",
+      "obj-c++",
+      "objc++",
+      "objectivec++"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/bd1abe08c38bb5deccf65610f8f3c03d2338d20d/extensions/objective-c/package.json"
+    ]
+  },
+  "ocaml": {
+    "extensions": [
+      ".ml",
+      ".mli"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "OCaml"
+    ],
+    "interpreters": [
+      "ocaml",
+      "ocamlrun",
+      "ocamlscript"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/reasonml-editor/vscode-reasonml/14af625ec50ed9968b957b4d6336c5338d81af45/package.json"
+    ]
+  },
+  "odin": {
+    "extensions": [
+      ".odin"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Odin",
+      "odinlang",
+      "odin-lang",
+      "odin"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/DanielGavin/ols/d26a19b38c581e28f67609cbb2d5ac933a9373d1/editors/vscode/package.json"
+    ]
+  },
+  "openscad": {
+    "extensions": [
+      ".scad"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "OpenSCAD"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "org": {
+    "extensions": [
+      ".org"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Org",
+      "Org Markup",
+      "Org Mode"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/vscode-org-mode/vscode-org-mode/98f123a97eca8d0cc1d9e3f313dc2a8be8f25d46/package.json"
+    ]
+  },
+  "pascal": {
+    "extensions": [
+      ".pas",
+      ".p",
+      ".dfm",
+      ".fmx",
+      ".dpr",
+      ".dpk",
+      ".lfm",
+      ".dpr",
+      ".lpr",
+      ".ppr"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Pascal",
+      "delphi",
+      "objectpascal",
+      "pascal"
+    ],
+    "interpreters": [
+      "instantfpc"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/alefragnani/vscode-language-pascal/f2d6345bd9fe83932f4d04fcacf98ce7d74b8034/package.json"
+    ]
+  },
+  "perl": {
+    "extensions": [
+      ".pl",
+      ".pm",
+      ".pod",
+      ".t",
+      ".PL",
+      ".psgi"
+    ],
+    "filenames": [
+      ".latexmkrc",
+      "Makefile.PL",
+      "Rexfile",
+      "ack",
+      "cpanfile",
+      "latexmkrc"
+    ],
+    "filenamePatterns": [],
+    "firstLine": "^#!.*\\bperl\\b",
+    "aliases": [
+      "Perl",
+      "cperl",
+      "perl"
+    ],
+    "interpreters": [
+      "cperl",
+      "perl"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/e637ff1bf7f481134849625e982ec80df9b35bc8/extensions/perl/package.json"
+    ]
+  },
+  "php": {
+    "extensions": [
+      ".php",
+      ".php4",
+      ".php5",
+      ".phtml",
+      ".ctp"
+    ],
+    "filenames": [
+      ".php",
+      ".php_cs",
+      ".php_cs.dist",
+      "Phakefile"
+    ],
+    "filenamePatterns": [],
+    "firstLine": "^#!\\s*/.*\\bphp\\b",
+    "aliases": [
+      "PHP",
+      "inc",
+      "php"
+    ],
+    "interpreters": [
+      "php"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/af600487b1e94374d9f48f57cbf2cad24656b07f/extensions/php/package.json"
+    ]
+  },
+  "pkl": {
+    "extensions": [
+      ".pkl"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "Pkl"
+    ],
+    "interpreters": [
+      "pkl"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "plsql": {
+    "extensions": [
+      ".sql",
+      ".ddl",
+      ".dml",
+      ".pkh",
+      ".pks",
+      ".pkb",
+      ".pck",
+      ".pls",
+      ".plb",
+      ".bdy",
+      ".fnc",
+      ".idx",
+      ".mv",
+      ".prc",
+      ".prg",
+      ".sch",
+      ".seq",
+      ".spc",
+      ".syn",
+      ".tab",
+      ".tbl",
+      ".tbp",
+      ".tps",
+      ".trg",
+      ".typ",
+      ".vw"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "PLSQL",
+      "PL/SQL",
+      "plsql"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/zabel-xyz/plsql-language/256a6b8f04f2bdc5e60ce921646a5068957078d7/package.json"
+    ]
+  },
+  "po": {
+    "extensions": [
+      ".po",
+      ".pot"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "Gettext Catalog",
+      "pot"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "polar": {
+    "extensions": [
+      ".polar"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "Polar"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "postcss": {
+    "extensions": [
+      ".pcss",
+      ".postcss"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "PostCSS",
+      "Vue-PostCSS",
+      "Vue-POSTCSS",
+      "vue-postcss"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/vuejs/vetur/8ccae3ba50b65837d4cd4acc71a3b84cd3bee27c/package.json"
+    ]
+  },
+  "powerquery": {
+    "extensions": [
+      ".pq"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "Power Query",
+      "powerquery",
+      "m language",
+      "m formula language"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "powershell": {
+    "extensions": [
+      ".ps1",
+      ".psm1",
+      ".psd1",
+      ".pssc",
+      ".psrc"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": "^#!\\s*/.*\\bpwsh\\b",
+    "aliases": [
+      "PowerShell",
+      "posh",
+      "pwsh",
+      "powershell",
+      "ps",
+      "ps1"
+    ],
+    "interpreters": [
+      "pwsh"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/af600487b1e94374d9f48f57cbf2cad24656b07f/extensions/powershell/package.json"
+    ]
+  },
+  "prisma": {
+    "extensions": [
+      ".prisma"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Prisma",
+      "prisma"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/prisma/language-tools/eca96bfdfa03bde79465e831e502481d386934be/packages/vscode/package.json"
+    ]
+  },
+  "prolog": {
+    "extensions": [
+      ".pl",
+      ".pro",
+      ".prolog",
+      ".plt",
+      ".ecl"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Prolog",
+      "swipl"
+    ],
+    "interpreters": [
+      "swipl",
+      "yap"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/arthwang/vsc-prolog/5e15f731d5ef8e0f3974589b84ddefe6a2bf78c7/package.json"
+    ]
+  },
+  "proto": {
+    "extensions": [
+      ".proto"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Protocol Buffer",
+      "proto",
+      "protobuf",
+      "Protocol Buffers"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/zxh0/vscode-proto3/274be763ecae7055505354b44f4892a2669e1da8/package.json"
+    ]
+  },
+  "pug": {
+    "extensions": [
+      ".pug",
+      ".jade"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Pug",
+      "Jade",
+      "jade"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/6ac83c7c7dda9f27ca1fe9d98675253e010b75d1/extensions/pug/package.json"
+    ]
+  },
+  "puppet": {
+    "extensions": [
+      ".pp",
+      ".epp"
+    ],
+    "filenames": [
+      "Modulefile"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Puppet",
+      "puppet"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/octref/puppet-vscode/42e02ef6c02aefb0dcf03f8367fdc106d7213a6c/package.json"
+    ]
+  },
+  "purescript": {
+    "extensions": [
+      ".purs"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "PureScript",
+      "purescript"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/nwolverson/vscode-language-purescript/b7641936190d6d8eb346660284dab3a5d1cc636f/package.json"
+    ]
+  },
+  "python": {
+    "extensions": [
+      ".py",
+      ".rpy",
+      ".pyw",
+      ".cpy",
+      ".gyp",
+      ".gypi",
+      ".pyi",
+      ".ipy",
+      ".pyt"
+    ],
+    "filenames": [
+      ".gclient",
+      "DEPS",
+      "SConscript",
+      "SConstruct",
+      "wscript"
+    ],
+    "filenamePatterns": [],
+    "firstLine": "^#!\\s*/?.*\\bpython[0-9.-]*\\b",
+    "aliases": [
+      "Python",
+      "py",
+      "py3",
+      "python3",
+      "rusthon"
+    ],
+    "interpreters": [
+      "python",
+      "python2",
+      "python3",
+      "py",
+      "pypy",
+      "pypy3",
+      "uv"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/cf4c9e469d521fa5f33353737e8157eb0789ad02/extensions/python/package.json"
+    ]
+  },
+  "qml": {
+    "extensions": [
+      ".qml"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "QML",
+      "qml"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/seanwu1105/vscode-qt-for-python/51408001e908800c00ce9f68f66e511545ea29fe/package.json"
+    ]
+  },
+  "qmldir": {
+    "extensions": [],
+    "filenames": [
+      "qmldir"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "QML Directory",
+      "qmldir"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/seanwu1105/vscode-qt-for-python/b301e7b18493ba59c4f52e49c3f73b6cd23d4c4b/package.json"
+    ]
+  },
+  "qss": {
+    "extensions": [
+      ".qss"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "QSS",
+      "qss"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/seanwu1105/vscode-qt-for-python/f0a56a97d10f58ab7b4b6e2ab6ce34ca4c9d521d/package.json"
+    ]
+  },
+  "r": {
+    "extensions": [
+      ".R",
+      ".r",
+      ".Rprofile",
+      ".rprofile"
+    ],
+    "filenames": [
+      ".Rapp.history",
+      ".Rhistory",
+      ".Rprofile",
+      "expr-dist",
+      "NAMESPACE"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "R",
+      "Rscript",
+      "splus",
+      "r"
+    ],
+    "interpreters": [
+      "Rscript"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/posit-dev/positron/c4d6bab60dd914427a2d47a4b64e75e025d94059/extensions/positron-r/package.json"
+    ]
+  },
+  "racket": {
+    "extensions": [
+      ".rkt"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Racket",
+      "racket"
+    ],
+    "interpreters": [
+      "racket"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/Eugleo/magic-racket/1b850db7f6e7c3ba8a1b47fe2781800a21f669a8/package.json"
+    ]
+  },
+  "raku": {
+    "extensions": [
+      ".p6",
+      ".pl6",
+      ".pm6",
+      ".nqp"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": "(^#!.*\\bperl6\\b)|use\\s+v6",
+    "aliases": [
+      "Raku",
+      "perl6",
+      "perl-6",
+      "Perl 6"
+    ],
+    "interpreters": [
+      "perl6",
+      "raku",
+      "rakudo"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/8fdf170a0850c1cc027382f31650aaf300d3ae2a/extensions/perl/package.json"
+    ]
+  },
+  "razor": {
+    "extensions": [
+      ".cshtml",
+      ".razor"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "HTML+Razor",
+      "razor"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "rbs": {
+    "extensions": [
+      ".rbs"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "RBS",
+      "rbs",
+      "ruby-signature"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/soutaro/vscode-rbs-syntax/d945dc76ec7eee172c51eb8bea1f206aa2e52925/package.json"
+    ]
+  },
+  "reg": {
+    "extensions": [
+      ".reg",
+      ".REG"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Windows Registry Entries",
+      "REG",
+      "reg"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/mihai-vlc/reg-vscode/896096fc6756329d82c71a913663a1c0ac678f74/package.json"
+    ]
+  },
+  "regexp": {
+    "extensions": [
+      ".regexp",
+      ".regex"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "Regular Expression",
+      "regexp",
+      "regex"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "rel": {
+    "extensions": [
+      ".rel",
+      ".delve"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Rel",
+      "rel"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/relationalai-oss/rel_vscode/63dda4dee48c67b037357f47b562185484555ea9/package.json"
+    ]
+  },
+  "riscv": {
+    "extensions": [
+      ".S",
+      ".s",
+      ".riscv",
+      ".asm"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "RISC-V Assembly",
+      "riscv"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/zhuanhao-wu/vscode-riscv-support/2736b60e45ff2ef738d784055e136cf38d6290cd/package.json"
+    ]
+  },
+  "ron": {
+    "extensions": [
+      ".ron"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "RON",
+      "Rusty Object Notation (RON)",
+      "ron"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/a5huynh/vscode-ron/3acb0d97348c972b3b6f04b4e92901a541b22022/package.json"
+    ]
+  },
+  "rosmsg": {
+    "extensions": [
+      ".msg",
+      ".action",
+      ".srv"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "ROS Interface",
+      "rosmsg"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "rst": {
+    "extensions": [
+      ".rst"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "reStructuredText",
+      "rst"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/48e93f756b764991ede33ad09781a863aca6907a/extensions/restructuredtext/package.json"
+    ]
+  },
+  "ruby": {
+    "extensions": [
+      ".rb",
+      ".rbx",
+      ".rjs",
+      ".gemspec",
+      ".rake",
+      ".ru",
+      ".erb",
+      ".podspec",
+      ".rbi"
+    ],
+    "filenames": [
+      ".irbrc",
+      ".pryrc",
+      ".simplecov",
+      "Appraisals",
+      "Berksfile",
+      "Brewfile",
+      "Buildfile",
+      "Capfile",
+      "Dangerfile",
+      "Deliverfile",
+      "Fastfile",
+      "Gemfile",
+      "Guardfile",
+      "Jarfile",
+      "Mavenfile",
+      "Podfile",
+      "Puppetfile",
+      "Rakefile",
+      "Snapfile",
+      "Steepfile",
+      "Thorfile",
+      "Vagrantfile",
+      "buildfile",
+      "rakefile",
+      "gemfile",
+      "guardfile",
+      "podfile",
+      "capfile",
+      "cheffile",
+      "hobofile",
+      "vagrantfile",
+      "appraisals",
+      "rantfile",
+      "berksfile",
+      "berksfile.lock",
+      "thorfile",
+      "puppetfile",
+      "dangerfile",
+      "brewfile",
+      "fastfile",
+      "appfile",
+      "deliverfile",
+      "matchfile",
+      "scanfile",
+      "snapfile",
+      "gymfile"
+    ],
+    "filenamePatterns": [],
+    "firstLine": "^#!\\s*/.*\\bruby\\b",
+    "aliases": [
+      "Ruby",
+      "jruby",
+      "macruby",
+      "rake",
+      "rb",
+      "rbx"
+    ],
+    "interpreters": [
+      "ruby",
+      "macruby",
+      "rake",
+      "jruby",
+      "rbx"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/af600487b1e94374d9f48f57cbf2cad24656b07f/extensions/ruby/package.json"
+    ]
+  },
+  "rust": {
+    "extensions": [
+      ".rs"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Rust",
+      "rs",
+      "rust"
+    ],
+    "interpreters": [
+      "rust-script"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/af600487b1e94374d9f48f57cbf2cad24656b07f/extensions/rust/package.json"
+    ]
+  },
+  "sas": {
+    "extensions": [
+      ".sas"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "SAS"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "sass": {
+    "extensions": [
+      ".sass",
+      ".sass.erb"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Sass",
+      "sass-indented"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/TheRealSyler/vscode-sass-indented/f0e50cfaca4b64a1d49f8d938f188d6fd0bcfb6f/package.json"
+    ]
+  },
+  "scala": {
+    "extensions": [
+      ".scala",
+      ".sbt",
+      ".sc",
+      ".mill"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Scala",
+      "scala"
+    ],
+    "interpreters": [
+      "scala"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/scala/vscode-scala-syntax/672fa16c64e12b2cc8b98da011411463968de727/package.json"
+    ]
+  },
+  "scheme": {
+    "extensions": [
+      ".scm",
+      ".ss",
+      ".sch",
+      ".rkt"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Scheme",
+      "scheme"
+    ],
+    "interpreters": [
+      "scheme",
+      "guile",
+      "bigloo",
+      "chicken",
+      "csi",
+      "gosh",
+      "r6rs"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/sjhuangx/vscode-scheme/4e21683666e1e2edfa21d040ecd427f628e7b5ff/package.json"
+    ]
+  },
+  "scss": {
+    "extensions": [
+      ".scss"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "SCSS",
+      "scss"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/cf8d61ebd2f022f4ce8280171f0360d1fe0a206d/extensions/scss/package.json"
+    ]
+  },
+  "sdbl": {
+    "extensions": [
+      ".sdbl",
+      ".query"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "1C (Query)",
+      "SDBL"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/1c-syntax/vsc-language-1c-bsl/c60d42089e5139942ff5b1db3a0a3ca8dd094ce6/package.json"
+    ]
+  },
+  "shaderlab": {
+    "extensions": [
+      ".shader"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "ShaderLab",
+      "shaderlab"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/8fdf170a0850c1cc027382f31650aaf300d3ae2a/extensions/shaderlab/package.json"
+    ]
+  },
+  "shellscript": {
+    "extensions": [
+      ".sh",
+      ".bash",
+      ".bashrc",
+      ".bash_aliases",
+      ".bash_profile",
+      ".bash_login",
+      ".ebuild",
+      ".eclass",
+      ".profile",
+      ".bash_logout",
+      ".xprofile",
+      ".xsession",
+      ".xsessionrc",
+      ".Xsession",
+      ".zsh",
+      ".zshrc",
+      ".zprofile",
+      ".zlogin",
+      ".zlogout",
+      ".zshenv",
+      ".zsh-theme",
+      ".fish",
+      ".ksh",
+      ".csh",
+      ".cshrc",
+      ".tcshrc",
+      ".yashrc",
+      ".yash_profile"
+    ],
+    "filenames": [
+      ".bash_aliases",
+      ".bash_functions",
+      ".bash_history",
+      ".bash_logout",
+      ".bash_profile",
+      ".bashrc",
+      ".cshrc",
+      ".envrc",
+      ".flaskenv",
+      ".kshrc",
+      ".login",
+      ".profile",
+      ".tmux.conf",
+      ".xinitrc",
+      ".xsession",
+      ".zlogin",
+      ".zlogout",
+      ".zprofile",
+      ".zshenv",
+      ".zshrc",
+      "9fs",
+      "PKGBUILD",
+      "bash_aliases",
+      "bash_logout",
+      "bash_profile",
+      "bashrc",
+      "cshrc",
+      "gradlew",
+      "kshrc",
+      "login",
+      "man",
+      "mvnw",
+      "profile",
+      "tmux.conf",
+      "xinitrc",
+      "xsession",
+      "zlogin",
+      "zlogout",
+      "zprofile",
+      "zshenv",
+      "zshrc",
+      "APKBUILD",
+      ".hushlogin",
+      "bashrc_Apple_Terminal",
+      "zshrc_Apple_Terminal"
+    ],
+    "filenamePatterns": [
+      ".env.*"
+    ],
+    "firstLine": "^#!.*\\b(bash|fish|zsh|sh|ksh|dtksh|pdksh|mksh|ash|dash|yash|sh|csh|jcsh|tcsh|itcsh).*|^#\\s*-\\*-[^*]*mode:\\s*shell-script[^*]*-\\*-",
+    "aliases": [
+      "Shell",
+      "sh",
+      "shell-script",
+      "bash",
+      "zsh",
+      "envrc",
+      "Shell Script",
+      "shellscript",
+      "fish",
+      "ksh",
+      "csh"
+    ],
+    "interpreters": [
+      "ash",
+      "bash",
+      "dash",
+      "ksh",
+      "mksh",
+      "pdksh",
+      "rc",
+      "sh",
+      "zsh"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/9473445f7d3dcb5c579f42ece8b6c18c43c63ed3/extensions/shellscript/package.json"
+    ]
+  },
+  "shellsession": {
+    "extensions": [
+      ".sh-session"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "ShellSession",
+      "bash session",
+      "console"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "smalltalk": {
+    "extensions": [
+      ".st",
+      ".gst"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Smalltalk",
+      "squeak",
+      "SmallTalk",
+      "smalltalk",
+      "GNU Smalltalk"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/leocamello/vscode-smalltalk/241ae15a15643a7728ddf6c5c1771e340e731041/package.json"
+    ]
+  },
+  "smithy": {
+    "extensions": [
+      ".smithy"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Smithy",
+      "smithy"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/smithy-lang/smithy-vscode/207935eefd01821565e86f115b928fa44992830f/package.json"
+    ]
+  },
+  "solidity": {
+    "extensions": [
+      ".sol",
+      ".s.sol",
+      ".t.sol"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Solidity",
+      "solidity"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/juanfranblanco/vscode-solidity/54ae302551a095e3f34371bb15f654f574e10fac/package.json"
+    ]
+  },
+  "soy": {
+    "extensions": [
+      ".soy"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "Closure Templates",
+      "soy"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "sparql": {
+    "extensions": [
+      ".rq",
+      ".sparql",
+      ".sq"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "SPARQL",
+      "sparql"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/stardog-union/stardog-vsc/a1963c610cde0eab23c44fc01ab36652565524de/stardog-rdf-grammars/package.json"
+    ]
+  },
+  "splunk": {
+    "extensions": [
+      ".spl",
+      ".splunk"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "spl",
+      "SPL",
+      "splunk",
+      "splunk_search"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/arcsector/vscode-splunk-search-syntax/b1f68ff035950e6a98e0db4af1a338cb1c3c1858/package.json"
+    ]
+  },
+  "sql": {
+    "extensions": [
+      ".sql",
+      ".dsql"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "SQL",
+      "MS SQL",
+      "T-SQL"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/af600487b1e94374d9f48f57cbf2cad24656b07f/extensions/sql/package.json"
+    ]
+  },
+  "ssh-config": {
+    "extensions": [],
+    "filenames": [
+      "ssh-config",
+      "ssh_config",
+      "sshconfig",
+      "sshconfig.snip",
+      "sshd-config",
+      "sshd_config"
+    ],
+    "filenamePatterns": [],
+    "aliases": [
+      "SSH Config",
+      "sshconfig",
+      "sshdconfig",
+      "ssh_config",
+      "sshd_config"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "stata": {
+    "extensions": [
+      ".do",
+      ".ado",
+      ".mata"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Stata",
+      "Stata Enhanced",
+      "stata"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/kylebarron/language-stata/dd98de502bc1bf2a205f3f023afb98c7aa5b42ee/package.json"
+    ]
+  },
+  "stylus": {
+    "extensions": [
+      ".styl",
+      ".stylus"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Stylus",
+      "stylus"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/d4rkr00t/language-stylus/198a851f385aee857332f3ce5dd981ff67720ead/package.json"
+    ]
+  },
+  "surrealql": {
+    "extensions": [
+      ".surql",
+      ".surrealql"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "SurrealQL",
+      "surql",
+      "surrealql"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/surrealdb/surrealql-grammar/d7594cbe432daaa51d30723a63fb63888d5073a0/package.json"
+    ]
+  },
+  "svelte": {
+    "extensions": [
+      ".svelte"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Svelte",
+      "svelte"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/sveltejs/language-tools/2cfcc15b4c44dfc1128432e20ca663fe20bdd12e/packages/svelte-vscode/package.json"
+    ]
+  },
+  "swift": {
+    "extensions": [
+      ".swift"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "Swift"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "system-verilog": {
+    "extensions": [
+      ".sv",
+      ".svh",
+      ".SV"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "SystemVerilog",
+      "System Verilog",
+      "systemverilog"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/mshr-h/vscode-verilog-hdl-support/e6a5a2b76055dd7acbdc7420060e0314cb86e8dd/package.json"
+    ]
+  },
+  "systemd": {
+    "extensions": [
+      ".container",
+      ".volume",
+      ".kube",
+      ".image",
+      ".pod",
+      ".build",
+      ".link",
+      ".dnssd",
+      ".netdev",
+      ".network",
+      ".nspawn",
+      ".service",
+      ".service.in",
+      ".socket",
+      ".device",
+      ".mount",
+      ".automount",
+      ".swap",
+      ".target",
+      ".path",
+      ".timer",
+      ".snapshot",
+      ".slice",
+      ".scope"
+    ],
+    "filenames": [],
+    "filenamePatterns": [
+      "**/systemd/*.conf",
+      "**/systemd/*.conf.d/*.conf",
+      "**/*.{service,slice,scope}.d/*.conf",
+      "**/{repart,sysupdate}.d/*.conf",
+      "**/sysupdate.d/*.feature"
+    ],
+    "firstLine": "^\\[(Unit|Install)\\]",
+    "aliases": [
+      "Systemd Configuration",
+      "systemd-conf",
+      "systemd-unit-file"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/hangxingliu/vscode-systemd/62ace1156b5afa0ec9932e3a55cfc00c0123c457/package.json"
+    ]
+  },
+  "talonscript": {
+    "extensions": [
+      ".talon"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Talon",
+      "TalonScript",
+      "talon"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/mrob95/vscode-TalonScript/91f3a6faaf926c02582f36ee155f2c4a02b9cc48/package.json"
+    ]
+  },
+  "tasl": {
+    "extensions": [
+      ".tasl"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "tasl"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/underlay/vscode-tasl/dde4b7c0b762c2e667584095362dd49ebfacece7/package.json"
+    ]
+  },
+  "tcl": {
+    "extensions": [
+      ".tcl"
+    ],
+    "filenames": [
+      "owh",
+      "starfield"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Tcl",
+      "sdc",
+      "xdc",
+      "tcl"
+    ],
+    "interpreters": [
+      "tclsh",
+      "wish"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/sleutho/tcl/f18820ad14678bc033f0a35524820c90fe50f18b/package.json"
+    ]
+  },
+  "templ": {
+    "extensions": [
+      ".templ"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "templ"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/templ-go/templ-vscode/d0af70c97ed384e93892c46b93d622ffaba5d93c/package.json"
+    ]
+  },
+  "terraform": {
+    "extensions": [
+      ".tf",
+      ".tfvars"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "HCL",
+      "HashiCorp Configuration Language",
+      "opentofu",
+      "terraform"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/hashicorp/syntax/cc2b4d4fe389f14b8a13937f4e0d7b2811b57588/package.json"
+    ]
+  },
+  "tex": {
+    "extensions": [
+      ".sty",
+      ".cls",
+      ".bbx",
+      ".cbx"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "TeX",
+      "latex",
+      "tex"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/609f17a76734f092792a33c891af40bbcaea0c64/extensions/latex/package.json"
+    ]
+  },
+  "toml": {
+    "extensions": [
+      ".toml",
+      ".toml.example"
+    ],
+    "filenames": [
+      "Cargo.lock",
+      "Cargo.toml.orig",
+      "Gopkg.lock",
+      "Pipfile",
+      "mise.local.lock",
+      "mise.lock",
+      "pdm.lock",
+      "poetry.lock",
+      "uv.lock"
+    ],
+    "filenamePatterns": [],
+    "aliases": [
+      "TOML"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "tsv": {
+    "extensions": [
+      ".tsv",
+      ".tab"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "TSV",
+      "tab-seperated values",
+      "tsv"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/mechatroner/vscode_rainbow_csv/00d4c947f1bbe6a4a73599bd97fb31bdfbe262f3/package.json"
+    ]
+  },
+  "tsx": {
+    "extensions": [
+      ".tsx"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "TSX",
+      "typescriptreact",
+      "TypeScript JSX",
+      "TypeScript React",
+      "tsx"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/210541906e5a96ab39f9c753f921b1bd35f4138b/extensions/typescript-basics/package.json"
+    ]
+  },
+  "turtle": {
+    "extensions": [
+      ".ttl",
+      ".turtle",
+      ".acl"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Turtle",
+      "TURTLE",
+      "turtle"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/stardog-union/stardog-vsc/3f1364b08bdbf4b4d77f123682db7d2b708b2f6e/stardog-rdf-grammars/package.json"
+    ]
+  },
+  "twig": {
+    "extensions": [
+      ".twig",
+      ".html.twig"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Twig",
+      "HTML (Twig)",
+      "twig"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/mblode/vscode-twig-language-2/73f4e2729ce5f490e294dd158c82c22a35cf96de/package.json"
+    ]
+  },
+  "typescript": {
+    "extensions": [
+      ".ts",
+      ".cts",
+      ".mts"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "TypeScript",
+      "ts",
+      "typescript"
+    ],
+    "interpreters": [
+      "bun",
+      "deno",
+      "ts-node",
+      "tsx",
+      "node"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/210541906e5a96ab39f9c753f921b1bd35f4138b/extensions/typescript-basics/package.json"
+    ]
+  },
+  "typespec": {
+    "extensions": [
+      ".tsp"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "TypeSpec",
+      "tsp"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "typst": {
+    "extensions": [
+      ".typ"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": "^#!/.*\\b(typst)[0-9.-]*\\b",
+    "aliases": [
+      "Typst",
+      "typ",
+      "typst"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/Myriad-Dreamin/tinymist/b4e837d01ddb66d676637a1af80b6754ff874395/editors/vscode/package.json"
+    ]
+  },
+  "v": {
+    "extensions": [
+      ".v",
+      ".vsh"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "V",
+      "vlang",
+      "v"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/vlang/vscode-vlang/cc6dee79af1fc1332084a263b952489aaed7e884/package.json"
+    ]
+  },
+  "vala": {
+    "extensions": [
+      ".vala",
+      ".vapi"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Vala",
+      "vala"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/vala-lang/vala-vscode/8f825e95648326df2572d0522632251cdff4a43b/package.json"
+    ]
+  },
+  "vb": {
+    "extensions": [
+      ".vb",
+      ".brs",
+      ".vbs",
+      ".bas",
+      ".vba"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Visual Basic .NET",
+      "visual basic",
+      "vbnet",
+      "vb .net",
+      "vb.net",
+      "Visual Basic",
+      "vb"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/35d97bc7e439fce0f50f42074041ab2d8571b20a/extensions/vb/package.json"
+    ]
+  },
+  "verilog": {
+    "extensions": [
+      ".v",
+      ".vh",
+      ".vl"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Verilog",
+      "verilog"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/mshr-h/vscode-verilog-hdl-support/67065883604b1b68a97ca33db22b1eb0c05553de/package.json"
+    ]
+  },
+  "vhdl": {
+    "extensions": [
+      ".vhd",
+      ".vhdl",
+      ".vho",
+      ".vht"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "VHDL",
+      "vhdl"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/jonasjj/awesome-vhdl/b787559a47d64c7baf2a9ac0f4cac8e2e721cddc/package.json"
+    ]
+  },
+  "viml": {
+    "extensions": [
+      ".vim",
+      ".vimrc",
+      ".gvim",
+      ".ideavim"
+    ],
+    "filenames": [
+      ".exrc",
+      ".gvimrc",
+      ".nvimrc",
+      ".vimrc",
+      "_vimrc",
+      "gvimrc",
+      "nvimrc",
+      "vimrc"
+    ],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Vim script",
+      "vim",
+      "viml",
+      "nvim",
+      "vimscript",
+      "VimL"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/dunstontc/viml/8762570fc7d6f1009a3c93efd2a337330d88b88e/package.json"
+    ]
+  },
+  "vue": {
+    "extensions": [
+      ".vue"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Vue"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/vuejs/language-tools/cd7a6e53d58111640f116d1e19f1c1cf06c7157d/extensions/vscode/package.json"
+    ]
+  },
+  "vue-html": {
+    "extensions": [],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Vue-html"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/vuejs/vetur/53ee52746b1f26f44391c3764bc7bd06d4ddaa46/package.json"
+    ]
+  },
+  "vyper": {
+    "extensions": [
+      ".vy",
+      ".vyi"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Vyper",
+      "vyper",
+      "vy"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/tintinweb/vscode-vyper/3df08ea46fc7df1a5e7f35365e615624849d1c1b/package.json"
+    ]
+  },
+  "wasm": {
+    "extensions": [
+      ".wasm"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "WebAssembly",
+      "wast",
+      "wasm",
+      "WebAssembly Binary"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/wasmerio/vscode-wasm/9d0ace1ff113f4a3e95797675039cd94ec257078/package.json"
+    ]
+  },
+  "wgsl": {
+    "extensions": [
+      ".wgsl"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "WGSL",
+      "wgsl"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/PolyMeilex/vscode-wgsl/04222c48533ca541d6dc97043ea096471517e079/package.json"
+    ]
+  },
+  "wikitext": {
+    "extensions": [
+      ".wikitext",
+      ".wt",
+      ".mediawiki",
+      ".mw",
+      ".wiki"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Wikitext",
+      "mediawiki",
+      "wiki",
+      "WikiText"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/Frederisk/Wikitext-VSCode-Extension/40e726bfe904a1e3b9a3141b4920f5061ce60e52/package.json"
+    ]
+  },
+  "wit": {
+    "extensions": [
+      ".wit"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "WebAssembly Interface Type",
+      "wit"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/wasmerio/vscode-wasm/5a67ac3f5ade246b44308768b034204612f3a0c9/package.json"
+    ]
+  },
+  "wolfram": {
+    "extensions": [
+      ".wl",
+      ".m",
+      ".wls",
+      ".wlt",
+      ".mt"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Wolfram Language",
+      "mathematica",
+      "mma",
+      "wolfram",
+      "wolfram lang",
+      "wl",
+      "Wolfram"
+    ],
+    "interpreters": [
+      "wolfram",
+      "WolframKernel",
+      "wolframscript",
+      "math",
+      "MathKernel",
+      "MathematicaScript",
+      "WolframNB",
+      "Mathematica"
+    ],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/WolframResearch/vscode-wolfram/8b55fb1724d971a303120b3f5b981d654c308c59/package.json"
+    ]
+  },
+  "xml": {
+    "extensions": [
+      ".xml",
+      ".xsd",
+      ".ascx",
+      ".atom",
+      ".axml",
+      ".bpmn",
+      ".config",
+      ".cpt",
+      ".csl",
+      ".csproj",
+      ".csproj.user",
+      ".dita",
+      ".ditamap",
+      ".dtd",
+      ".dtml",
+      ".fsproj",
+      ".fxml",
+      ".iml",
+      ".isml",
+      ".jmx",
+      ".launch",
+      ".menu",
+      ".mxml",
+      ".nuspec",
+      ".opml",
+      ".owl",
+      ".proj",
+      ".props",
+      ".pt",
+      ".publishsettings",
+      ".pubxml",
+      ".pubxml.user",
+      ".rdf",
+      ".rng",
+      ".rss",
+      ".shproj",
+      ".storyboard",
+      ".svg",
+      ".targets",
+      ".tld",
+      ".tmx",
+      ".vbproj",
+      ".vbproj.user",
+      ".vcxproj",
+      ".vcxproj.filters",
+      ".wsdl",
+      ".wxi",
+      ".wxl",
+      ".wxs",
+      ".xaml",
+      ".xbl",
+      ".xib",
+      ".xlf",
+      ".xliff",
+      ".xpdl",
+      ".xul",
+      ".xoml"
+    ],
+    "filenames": [
+      ".classpath",
+      ".cproject",
+      ".project",
+      "App.config",
+      "NuGet.config",
+      "Settings.StyleCop",
+      "Web.Debug.config",
+      "Web.Release.config",
+      "Web.config",
+      "packages.config"
+    ],
+    "filenamePatterns": [],
+    "firstLine": "(\\<\\?xml.*)|(\\<svg)|(\\<\\!doctype\\s+svg)",
+    "aliases": [
+      "XML",
+      "rss",
+      "xsd",
+      "wsdl",
+      "xml"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/10a1d2a50a2882f5ae85bdb51eb04d3064fb9de9/extensions/xml/package.json"
+    ]
+  },
+  "xsl": {
+    "extensions": [
+      ".xsl",
+      ".xslt"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "XSLT",
+      "xsl",
+      "XSL"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/microsoft/vscode/8fdf170a0850c1cc027382f31650aaf300d3ae2a/extensions/xml/package.json"
+    ]
+  },
+  "yaml": {
+    "extensions": [
+      ".yml",
+      ".mir",
+      ".reek",
+      ".rviz",
+      ".sublime-syntax",
+      ".syntax",
+      ".yaml",
+      ".yaml-tmlanguage",
+      ".yaml.sed",
+      ".yml.mysql"
+    ],
+    "filenames": [
+      ".clang-format",
+      ".clang-tidy",
+      ".clangd",
+      ".eslintrc",
+      ".gemrc",
+      ".releaserc",
+      "CITATION.cff",
+      "glide.lock",
+      "pixi.lock",
+      "yarn.lock"
+    ],
+    "filenamePatterns": [],
+    "aliases": [
+      "YAML",
+      "yml"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "zenscript": {
+    "extensions": [
+      ".zs"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "aliases": [
+      "ZenScript"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml"
+    ]
+  },
+  "zig": {
+    "extensions": [
+      ".zig",
+      ".zon"
+    ],
+    "filenames": [],
+    "filenamePatterns": [],
+    "firstLine": null,
+    "aliases": [
+      "Zig"
+    ],
+    "interpreters": [],
+    "sources": [
+      "https://raw.githubusercontent.com/github-linguist/linguist/14ac04abe3e3722e42c52489b377d9d4118fc8b6/lib/linguist/languages.yml",
+      "https://raw.githubusercontent.com/ziglang/vscode-zig/9c7bb7631f3af99331475b633aaf5b70345c6713/package.json"
+    ]
+  }
+}

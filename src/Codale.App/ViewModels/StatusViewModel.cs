@@ -116,7 +116,23 @@ public sealed partial class StatusViewModel : ObservableObject
         SetFallbackMaxUsage(0);
     }
 
-    public bool HasFallbackUsage => !HasUsage;
+    public bool HasFallbackUsage => !HasUsage && !ExpectsSubscriptionUsage;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasFallbackUsage))]
+    [NotifyPropertyChangedFor(nameof(ShowSubscriptionUsageStatus))]
+    public partial bool ExpectsSubscriptionUsage { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowSubscriptionUsageStatus))]
+    [NotifyPropertyChangedFor(nameof(SubscriptionUsageStatus))]
+    public partial bool IsAccountSignedOut { get; set; }
+
+    public bool ShowSubscriptionUsageStatus => ExpectsSubscriptionUsage && (!HasUsage || IsAccountSignedOut);
+
+    public string SubscriptionUsageStatus => IsAccountSignedOut
+        ? "Sign in required to view subscription usage."
+        : "Subscription usage unavailable.";
     public double FallbackUsagePercent => Math.Clamp((double)(FallbackCostUsd / 10m * 100m), 0, 100);
     public double FallbackMaxUsagePercent => Math.Clamp((double)(FallbackMaxCostUsd / 100m * 100m), 0, 100);
     public string FallbackUsageSummary => $"${FallbackCostUsd:0.00} \u00b7 {FallbackUsagePercent:0}%";
@@ -130,6 +146,7 @@ public sealed partial class StatusViewModel : ObservableObject
     private void NotifyFallbackUsage()
     {
         OnPropertyChanged(nameof(HasFallbackUsage));
+        OnPropertyChanged(nameof(ShowSubscriptionUsageStatus));
         OnPropertyChanged(nameof(UsageCostUsd));
         OnPropertyChanged(nameof(FallbackCostUsd));
         OnPropertyChanged(nameof(FallbackMaxCostUsd));

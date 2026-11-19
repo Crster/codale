@@ -2,8 +2,8 @@ namespace Codale.Core.Syntax;
 
 /// <summary>
 /// Turns a TextMate scope stack (<c>source.cs</c>, <c>string.quoted.double.cs</c>, ...) into one of
-/// the editor's token kinds. Colours stay with the app's own palette rather than a TextMate theme,
-/// so a grammar only has to name things by the standard scopes to get coloured sensibly.
+/// the editor's semantic token kinds for completions and the default palette. Theme rendering
+/// uses the full scope stack independently, so categorization never discards theme information.
 /// </summary>
 public static class ScopeMapper
 {
@@ -69,6 +69,7 @@ public static class ScopeMapper
         if (s.StartsWith("variable.other.constant", StringComparison.Ordinal)
             || s.StartsWith("variable.other.enummember", StringComparison.Ordinal)) return CodeTokenKind.Constant;
         if (s.StartsWith("variable.other.property", StringComparison.Ordinal)
+            || s.StartsWith("variable.key", StringComparison.Ordinal)
             || s.StartsWith("variable.other.object.property", StringComparison.Ordinal)
             || s.StartsWith("variable.other.member", StringComparison.Ordinal)) return CodeTokenKind.Property;
         if (s.StartsWith("markup.heading", StringComparison.Ordinal)) return CodeTokenKind.Heading;

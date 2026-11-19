@@ -1146,7 +1146,19 @@ public sealed partial class CodexAgentSession(CodexSessionOptions options) : IAg
                 return;
 
             case "error":
-                var errorText = parameters.Str("message") ?? parameters.GetRawText();
+                var errorText = ReadErrorText(parameters.Prop("error") ?? parameters);
+
+                // Recoverable app-server errors belong to the same pinned, transient
+                // composer notice as Claude's API retries, not the error transcript.
+                if (parameters.Prop("willRetry") is { ValueKind: JsonValueKind.True })
+                {
+                    await _events.Writer.WriteAsync(new CliInformation(
+                        string.IsNullOrWhiteSpace(errorText) ? "The Codex request failed: retrying." : errorText)
+                    { IsWarning = true, IsRetry = true }).ConfigureAwait(false);
+                    return;
+                }
+
+                errorText ??= parameters.GetRawText();
                 await _events.Writer.WriteAsync(new AgentError(errorText)).ConfigureAwait(false);
                 return;
 
@@ -1447,6 +1459,15 @@ public sealed partial class CodexAgentSession(CodexSessionOptions options) : IAg
         }
     }
 
+    private static string? ReadErrorText(JsonElement error)
+    {
+        var text = error.ValueKind == JsonValueKind.String ? error.GetString() : error.Str("message");
+        var details = error.Str("additionalDetails");
+        return !string.IsNullOrWhiteSpace(details) && details != text
+            ? string.IsNullOrWhiteSpace(text) ? details : $"{text}\n{details}"
+            : text;
+    }
+
     private async Task HandleTurnCompletedAsync(JsonElement parameters)
     {
         var turn = parameters.Prop("turn") ?? parameters;
@@ -1462,7 +1483,13 @@ public sealed partial class CodexAgentSession(CodexSessionOptions options) : IAg
 
         UsageSnapshot? usage = turn.Prop("usage") is { } rawUsage ? ReadUsage(rawUsage) : null;
         _currentTurnId = null;
-        var completion = new TurnCompleted { Subtype = subtype, Usage = usage };
+        var errorText = turn.Prop("error") is { } error ? ReadErrorText(error) : null;
+        var completion = new TurnCompleted
+        {
+            Subtype = subtype,
+            Usage = usage,
+            Errors = status == "failed" && !string.IsNullOrWhiteSpace(errorText) ? [errorText] : [],
+        };
         var proposal = _proposedPlan;
         _proposedPlan = null;
         if (status == "completed" && proposal is { } plan)

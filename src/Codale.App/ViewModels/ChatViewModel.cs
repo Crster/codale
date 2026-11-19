@@ -1847,6 +1847,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             (IsCodexSession && (text.Contains("401 Unauthorized", StringComparison.OrdinalIgnoreCase) ||
                                 text.Contains("Missing bearer or basic authentication", StringComparison.OrdinalIgnoreCase))))
         {
+            if (Status.ExpectsSubscriptionUsage)
+            {
+                Status.IsAccountSignedOut = true;
+                Status.FiveHourUtilization = null;
+                Status.SevenDayUtilization = null;
+            }
             LoginRequired?.Invoke(this, IsCodexSession ? "Codex" : ProviderName);
         }
     }
@@ -2000,16 +2006,22 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         catch (InvalidOperationException ex)
         {
             // The provider cannot serve this CLI (e.g. OpenAI-only for Claude): say so rather than fall back to a login.
-            Add(new NoticeItem { Text = $"Could not start {ProviderName}: {ex.Message}", Severity = NoticeSeverity.Error });
+            ShowCliNotice(new NoticeItem { Text = $"Could not start {ProviderName}: {ex.Message}", Severity = NoticeSeverity.Error });
             return;
         }
 
         // Codale's own account must be signed in before the CLI is started; a provider or an
         // ANTHROPIC_* override brings its own credentials and needs no login.
         var cliId = IsCodexSession ? "codex" : "claude";
-        if (ConnectPreflight.NeedsAccountCheck(endpointEnv is not null, IsCodexSession, EnvironmentOverridesEndpoint()) &&
+        var needsAccount = ConnectPreflight.NeedsAccountCheck(endpointEnv is not null, IsCodexSession, EnvironmentOverridesEndpoint());
+        // Missing quota data does not turn an account login into a dollar-billed endpoint.
+        // Set this before preflight, which may return early for a signed-out account.
+        Status.ExpectsSubscriptionUsage = needsAccount;
+        Status.IsAccountSignedOut = false;
+        if (needsAccount &&
             !await CodaleAccountCli.IsSignedInAsync(cliId, accountId: _smart.Settings.FindByok(EndpointName)?.AccountId))
         {
+            Status.IsAccountSignedOut = true;
             // Use whatever else is available before bothering the user.
             if (await TrySwitchToAvailableProfileAsync())
             {
@@ -2185,7 +2197,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             if (!resumeLost)
             {
-                Add(new NoticeItem { Text = $"Could not start {ProviderName}: {ex.Message}", Severity = NoticeSeverity.Error });
+                ShowCliNotice(new NoticeItem { Text = $"Could not start {ProviderName}: {ex.Message}", Severity = NoticeSeverity.Error });
                 CheckLoginRequired(ex.Message);
             }
 
@@ -2227,17 +2239,26 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // The CLI runs under the selected profile's folder; the default folder may hold no login at all.
         var accountId = _smart.Settings.FindByok(EndpointName)?.AccountId;
         var home = CodaleAccount.ProfileHome("claude", accountId);
-        if (await ClaudeUsageClient.FetchAsync(home).ConfigureAwait(false) is { } limits)
+        var limits = await ClaudeUsageClient.FetchAsync(home).ConfigureAwait(false);
+        var signedOut = limits is null && !await CodaleAccountCli.IsSignedInAsync("claude", accountId: accountId).ConfigureAwait(false);
+        _dispatcher.TryEnqueue(() =>
         {
-            _dispatcher.TryEnqueue(() =>
+            // A response for a previous account/provider must not update the current chat.
+            if (!IsCodexSession && Status.ExpectsSubscriptionUsage &&
+                (_smart.Settings.FindByok(EndpointName)?.AccountId ?? "") == (accountId ?? ""))
             {
-                // The user switched accounts while the call ran: these windows are the old one's.
-                if ((_smart.Settings.FindByok(EndpointName)?.AccountId ?? "") == (accountId ?? ""))
+                Status.IsAccountSignedOut = signedOut;
+                if (limits is { } reading)
                 {
-                    Status.Apply(limits);
+                    Status.Apply(reading);
                 }
-            });
-        }
+                else if (signedOut)
+                {
+                    Status.FiveHourUtilization = null;
+                    Status.SevenDayUtilization = null;
+                }
+            }
+        });
     }
 
     /// <summary>Starts long-lived work off the UI thread; a failure is logged, never left unobserved.</summary>
@@ -2366,6 +2387,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>The "retry 1 of 10" notice on show, if any: cleared once the retry has worked.</summary>
     private NoticeItem? _retryNotice;
+
+    /// <summary>CLI diagnostics stay above the composer, outside conversation history.</summary>
+    private void ShowCliNotice(NoticeItem notice)
+    {
+        ComposerNotice = notice;
+        _retryNotice = null;
+    }
 
     /// <summary>
     /// The model answering (text, thinking, a tool call) or the turn completing means the
@@ -2609,7 +2637,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             case AgentError error:
                 CheckLoginRequired(error.Message);
-                Add(new NoticeItem { Text = error.Message, Severity = NoticeSeverity.Error });
+                ShowCliNotice(new NoticeItem { Text = error.Message, Severity = NoticeSeverity.Error });
                 break;
 
             case PermissionDenied denied:
@@ -2715,11 +2743,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                         break;
 
                     case TurnNotice.Paused:
-                        // Auto mode's safety service is down, not the work: nothing it was asked about
-                        // ran, and the same conversation picks up where it stopped. The CLI's own
-                        // line about it is in the transcript now, so the composer's copy goes.
-                        ComposerNotice = null;
-                        Add(new NoticeItem
+                        ShowCliNotice(new NoticeItem
                         {
                             Text = turnEnd.NoticeText,
                             Severity = NoticeSeverity.Warning,
@@ -2730,7 +2754,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                         break;
 
                     case TurnNotice.Failed:
-                        Add(new NoticeItem { Text = turnEnd.NoticeText, Severity = NoticeSeverity.Error });
+                        // The CLI may send the detailed error before a bare failed turn.
+                        // Keep that explanation instead of replacing it with "Turn ended: error".
+                        if (turn.Errors.Count > 0 || ComposerNotice?.Severity != NoticeSeverity.Error)
+                        {
+                            ShowCliNotice(new NoticeItem { Text = turnEnd.NoticeText, Severity = NoticeSeverity.Error });
+                        }
                         break;
                 }
 
@@ -2771,7 +2800,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 // stop and the line has to settle anyway, or it runs forever.
                 EndTurn(TurnOutcome.Stopped);
                 SessionStateChanged?.Invoke(this, EventArgs.Empty);
-                Add(new NoticeItem
+                ShowCliNotice(new NoticeItem
                 {
                     Text = ended.Error is { Length: > 0 } err
                         ? $"Session ended ({ended.ExitCode}): {err}"
@@ -4458,7 +4487,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             RestoreAfterPlanTurn();
             EndTurn(TurnOutcome.NotSent);
             if (compact) DropCompactItem();
-            Add(new NoticeItem { Text = $"Send failed: {ex.Message}", Severity = NoticeSeverity.Error });
+            ShowCliNotice(new NoticeItem { Text = $"Send failed: {ex.Message}", Severity = NoticeSeverity.Error });
         }
     }
 
@@ -4515,7 +4544,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         catch (Exception ex)
         {
             if (ReferenceEquals(session, _session))
-                Add(new NoticeItem { Text = $"Send failed: {ex.Message}", Severity = NoticeSeverity.Error });
+                ShowCliNotice(new NoticeItem { Text = $"Send failed: {ex.Message}", Severity = NoticeSeverity.Error });
         }
     }
 

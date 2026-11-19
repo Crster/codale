@@ -376,6 +376,26 @@
                             </StackPanel>
                         </Border>
 
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="Syntax themes" />
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Style="{StaticResource RowTitle}" Text="Dark editor theme" />
+                                        <TextBlock Style="{StaticResource RowDesc}" Text="TextMate scope colors, font styles, and editor surfaces." />
+                                    </StackPanel>
+                                    <ComboBox x:Name="DarkSyntaxThemeBox" Grid.Column="1" Width="190" SelectionChanged="OnSyntaxThemeChanged" />
+                                </Grid>
+                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                    <TextBlock Style="{StaticResource RowTitle}" Text="Light editor theme" VerticalAlignment="Center" />
+                                    <ComboBox x:Name="LightSyntaxThemeBox" Grid.Column="1" Width="190" SelectionChanged="OnSyntaxThemeChanged" />
+                                </Grid>
+                                <Grid ColumnDefinitions="*,Auto" Style="{StaticResource SettingRow}">
+                                    <TextBlock Style="{StaticResource RowDesc}" Text="Download themes from the Shiki TextMate catalog." />
+                                    <Button Grid.Column="1" Content="Browse themes…" Click="OnSyntaxThemesDownloadClick" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
                         <TextBlock Style="{StaticResource SectionTitle}" Text="Language grammars" />
                         <Border Style="{StaticResource Card}">
                             <StackPanel>

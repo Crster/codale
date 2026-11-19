@@ -90,18 +90,18 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     /// <summary>The shortest reported quota window, or the $10 fallback budget.</summary>
     public double UsagePercent => Session?.Status is not { } s ? 0 :
         s.HasFiveHour ? s.FiveHourPercent :
-        s.HasLongWindowOnly ? s.SevenDayPercent : s.FallbackUsagePercent;
+        s.HasLongWindowOnly ? s.SevenDayPercent : s.HasFallbackUsage ? s.FallbackUsagePercent : 0;
 
     private string QuotaSummary => Session?.Status is not { } s ? "" :
         s.HasFiveHour ? s.FiveHourSummary : s.HasLongWindowOnly ? s.SevenDaySummary :
-        s.FallbackUsageSummary;
+        s.ShowSubscriptionUsageStatus ? s.SubscriptionUsageStatus : s.FallbackUsageSummary;
 
     public string UsageSummary => Session?.Status is not { } s ? "" :
         string.Join("\n", new[] { $"Context {s.ContextSummary}", QuotaSummary }.Where(t => t.Length > 0));
 
     public bool ShowCompactIcon => CanCompact && Session?.Status.ContextPercent >= 80;
 
-    public string UsagePercentText => $"{UsagePercent:0}%";
+    public string UsagePercentText => Session?.Status.ShowSubscriptionUsageStatus == true ? "—" : $"{UsagePercent:0}%";
 
     /// <summary>What the current prompt cost of the 5-hour window: the measure of how expensive a call was.</summary>
     public string CurrentPromptText => Session?.Status is { HasFiveHour: true, CurrentPromptPercent: >= 0.05 } s
@@ -308,6 +308,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void OnElapsedTick(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args)
     {
+        DeterminateRingSync.Refresh(QuotaRing);
         foreach (var task in Session?.RunningTasks.Where(t => t.IsRunning).ToList() ?? [])
         {
             task.RefreshElapsed();

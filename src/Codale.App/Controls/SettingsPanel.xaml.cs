@@ -1062,6 +1062,7 @@ public sealed partial class SettingsPanel : UserControl
     private void RefreshSyntaxSection()
     {
         _syntax.Start();
+        RefreshSyntaxThemes();
         if (!_syntaxSubscribed)
         {
             // A grammar installed from the status bar (or by a download finishing) shows up here too.
@@ -1141,6 +1142,45 @@ public sealed partial class SettingsPanel : UserControl
     }
 
     private void OnSyntaxDownloadClick(object sender, RoutedEventArgs e) => _ = SyntaxDialogs.ShowCatalogAsync(XamlRoot);
+
+    private bool _loadingSyntaxThemes;
+    private void RefreshSyntaxThemes()
+    {
+        _loadingSyntaxThemes = true;
+        try
+        {
+            foreach (var (box, type, selected) in new[] {
+                (DarkSyntaxThemeBox, "dark", _settings.EditorDarkSyntaxTheme),
+                (LightSyntaxThemeBox, "light", _settings.EditorLightSyntaxTheme) })
+            {
+                var available = SyntaxThemeCatalog.Entries.Where(t => t.Type == type)
+                    .Where(t => File.Exists(SyntaxThemeCatalog.PathFor(_syntax.Store, t.Id))).OrderBy(t => t.Name).ToArray();
+                // Theme changes also invalidate syntax. Keep live combo items stable while a popup closes.
+                if (!box.Items.OfType<ComboBoxItem>().Select(i => (string)i.Tag).SequenceEqual(new[] { "" }.Concat(available.Select(t => t.Id))))
+                {
+                    box.Items.Clear();
+                    box.Items.Add(new ComboBoxItem { Content = "Codale default", Tag = "" });
+                    foreach (var entry in available)
+                        box.Items.Add(new ComboBoxItem { Content = entry.Name, Tag = entry.Id });
+                }
+                box.SelectedItem = box.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == selected) ?? box.Items[0];
+            }
+        }
+        finally { _loadingSyntaxThemes = false; }
+    }
+
+    private void OnSyntaxThemeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || _loadingSyntaxThemes || sender is not ComboBox { SelectedItem: ComboBoxItem item } box) return;
+        if (box == DarkSyntaxThemeBox) _settings.EditorDarkSyntaxTheme = (string)item.Tag;
+        else _settings.EditorLightSyntaxTheme = (string)item.Tag;
+    }
+
+    private async void OnSyntaxThemesDownloadClick(object sender, RoutedEventArgs e)
+    {
+        await SyntaxDialogs.ShowThemesAsync(XamlRoot);
+        RefreshSyntaxThemes();
+    }
 
     private void OnSyntaxImportClick(object sender, RoutedEventArgs e)
     {

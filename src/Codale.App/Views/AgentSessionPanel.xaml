@@ -334,7 +334,7 @@
                         ToolTipService.ToolTip="{x:Bind UsageSummary, Mode=OneWay}"
                         Visibility="{x:Bind HasUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                     <Grid Width="34" Height="34">
-                        <ProgressRing Width="34" Height="34" IsIndeterminate="False" Minimum="0" Maximum="100"
+                        <ProgressRing x:Name="QuotaRing" Width="34" Height="34" IsIndeterminate="False" Minimum="0" Maximum="100"
                                       Value="{x:Bind UsagePercent, Mode=OneWay}"
                                       Foreground="{x:Bind UsagePercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}" />
                         <TextBlock Text="{x:Bind UsagePercentText, Mode=OneWay}" FontSize="9" FontWeight="SemiBold"
@@ -400,6 +400,11 @@
                                     <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                                Text="{x:Bind Session.Status.SevenDayResetText, Mode=OneWay}" />
                                 </StackPanel>
+
+                                <TextBlock Text="{x:Bind Session.Status.SubscriptionUsageStatus, Mode=OneWay}"
+                                           FontSize="12" TextWrapping="Wrap"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           Visibility="{x:Bind Session.Status.ShowSubscriptionUsageStatus, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
 
                                 <StackPanel Spacing="3" Visibility="{x:Bind Session.Status.HasFallbackUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                                     <Grid>

@@ -307,7 +307,7 @@
                     </Button.Flyout>
                 </Button>
 
-                <ItemsControl ItemTemplate="{StaticResource UsageRing}" ItemsSource="{x:Bind Vitals, Mode=OneWay}">
+                <ItemsControl x:Name="VitalsRings" ItemTemplate="{StaticResource UsageRing}" ItemsSource="{x:Bind Vitals, Mode=OneWay}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
                             <StackPanel Spacing="10" />

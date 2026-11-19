@@ -23,6 +23,7 @@ namespace Codale.App.Views;
 /// </remarks>
 public static class KeywordHighlight
 {
+    private static readonly DependencyProperty ApplyingProperty = DependencyProperty.RegisterAttached("Applying", typeof(bool), typeof(KeywordHighlight), new PropertyMetadata(false));
     private static readonly Dictionary<(Color, bool), Brush> TokenBrushes = [];
 
     // TextHighlighter paints yellow unless told otherwise; token colouring must not paint at all.
@@ -81,10 +82,12 @@ public static class KeywordHighlight
         // Text may be bound after the highlight properties; watch it once per TextBlock.
         if (!(bool)text.GetValue(WatchedProperty))
         {
+            void SyntaxChanged() => text.DispatcherQueue.TryEnqueue(() => { if (text.IsLoaded) Apply(text); });
             text.SetValue(WatchedProperty, true);
             text.RegisterPropertyChangedCallback(TextBlock.TextProperty, (s, _) => Apply((TextBlock)s));
             text.Loaded += (_, _) =>
             {
+                SyntaxService.Store.Changed += SyntaxChanged;
                 // The row band spans the card, which can resize while the code itself does not.
                 if (text.Parent is Grid host && host.Children.OfType<Canvas>().FirstOrDefault() is { Tag: null } canvas)
                 {
@@ -94,6 +97,7 @@ public static class KeywordHighlight
 
                 Apply(text);
             };
+            text.Unloaded += (_, _) => SyntaxService.Store.Changed -= SyntaxChanged;
             text.SizeChanged += (_, _) => DrawBackground(text);
             text.ActualThemeChanged += (_, _) => Apply(text);
         }
@@ -103,20 +107,28 @@ public static class KeywordHighlight
 
     private static void Apply(TextBlock text)
     {
-        text.TextHighlighters.Clear();
-
-        var content = text.Text;
-        if (string.IsNullOrEmpty(content))
+        if ((bool)text.GetValue(ApplyingProperty)) return;
+        text.SetValue(ApplyingProperty, true);
+        try
         {
-            DrawBackground(text);
-            return;
-        }
+            text.TextHighlighters.Clear();
 
-        AddSyntax(text, content);
-        DrawBackground(text);
-        // Text changes of the same size may not raise SizeChanged. Re-read glyph
-        // positions after the pending text layout has settled as well.
-        text.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => DrawBackground(text));
+            var content = text.Text;
+            if (string.IsNullOrEmpty(content))
+            {
+                DrawBackground(text);
+                return;
+            }
+
+            text.Inlines.Clear();
+            text.Inlines.Add(new Run { Text = content });
+            AddSyntax(text, content);
+            DrawBackground(text);
+            // Text changes of the same size may not raise SizeChanged. Re-read glyph
+            // positions after the pending text layout has settled as well.
+            text.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => DrawBackground(text));
+        }
+        finally { text.SetValue(ApplyingProperty, false); }
     }
 
     // Background shapes are siblings below the text, so syntax foregrounds stay intact. The
@@ -256,7 +268,7 @@ public static class KeywordHighlight
             gutter.TextHighlighters.Add(highlighter);
     }
 
-    /// <summary>One foreground-only highlighter per token colour, from the same tokenizer the editor uses.</summary>
+    /// <summary>Styled runs and token backgrounds from the same scope-aware tokenizer as the editor.</summary>
     private static void AddSyntax(TextBlock text, string content)
     {
         if (GetSyntax(text) is not { HighlightingEnabled: true } syntax || GetPath(text) is not { Length: > 0 } path)
@@ -271,7 +283,8 @@ public static class KeywordHighlight
         }
 
         var light = text.ActualTheme == ElementTheme.Light;
-        var byKind = new Dictionary<CodeTokenKind, TextHighlighter>();
+        var byStyle = new Dictionary<SyntaxTokenStyle, TextHighlighter>();
+        var runs = new List<Inline>();
         var tokens = new List<CodeToken>();
         var state = new CodeTokenState();
         var start = 0;
@@ -286,31 +299,46 @@ public static class KeywordHighlight
 
             var line = content[start..end].TrimEnd('\r');
             state = CodeTokenizer.TokenizeLine(line, languageId, state, tokens);
+            var at = 0;
             foreach (var token in tokens)
             {
-                if (token.Kind == CodeTokenKind.Plain || token.Length <= 0)
+                if (token.Length <= 0)
                 {
                     continue;
                 }
 
-                if (!byKind.TryGetValue(token.Kind, out var highlighter))
+                if (token.Start > at) runs.Add(new Run { Text = line[at..token.Start] });
+                var style = CodePalette.Style(token, light);
+                runs.Add(CodeText.StyledRun(line.Substring(token.Start, token.Length), style));
+                at = token.Start + token.Length;
+                if (style.Foreground is null && style.Background is null) continue;
+                if (!byStyle.TryGetValue(style, out var highlighter))
                 {
-                    var colour = CodePalette.Get(token.Kind, light);
+                    var colour = style.Foreground is { } foreground ? CodePalette.Color(foreground)
+                        : text.Foreground is SolidColorBrush solid ? solid.Color : Microsoft.UI.Colors.Gray;
                     if (!TokenBrushes.TryGetValue((colour, light), out var brush))
                     {
                         brush = TokenBrushes[(colour, light)] = new SolidColorBrush(colour);
                     }
 
-                    highlighter = byKind[token.Kind] = new TextHighlighter { Foreground = brush, Background = Transparent };
+                    highlighter = byStyle[style] = new TextHighlighter { Foreground = brush,
+                        Background = style.Background is { } background ? new SolidColorBrush(CodePalette.Color(background)) : Transparent };
                 }
 
                 highlighter.Ranges.Add(new TextRange { StartIndex = start + token.Start, Length = token.Length });
             }
 
+            if (at < line.Length) runs.Add(new Run { Text = line[at..] });
+            // Keep the original line endings and offsets used by search highlights.
+            if (end > start && content[end - 1] == '\r') runs.Add(new Run { Text = "\r" });
+            if (end < content.Length) runs.Add(new Run { Text = "\n" });
+
             start = end + 1;
         }
 
-        foreach (var highlighter in byKind.Values)
+        text.Inlines.Clear();
+        foreach (var run in runs) text.Inlines.Add(run);
+        foreach (var highlighter in byStyle.Values)
         {
             text.TextHighlighters.Add(highlighter);
         }

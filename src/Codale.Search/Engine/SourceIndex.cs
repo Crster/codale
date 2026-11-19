@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 
 using Codale.Core.Projects;
+using Codale.Core.Syntax;
 
 namespace Codale.Search.Engine;
 
@@ -62,6 +63,7 @@ public sealed class SourceIndex : IDisposable
 
     private readonly Lock _gate = new();
     private readonly SourceIndexOptions _options;
+    private readonly SyntaxStore _syntaxStore;
 
     /// <summary>Files found binary, by size and write time, so a refresh does not read them again.</summary>
     private readonly ConcurrentDictionary<string, (long Length, DateTime Written)> _binary = new(StringComparer.OrdinalIgnoreCase);
@@ -78,7 +80,11 @@ public sealed class SourceIndex : IDisposable
         Root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         _options = options ?? new SourceIndexOptions();
         Model = new WorkspaceModel(_options.ModelPath);
+        _syntaxStore = SyntaxService.Store;
+        _syntaxStore.Changed += GrammarsChanged;
     }
+
+    private void GrammarsChanged() => Invalidate(reloadAll: true);
 
     /// <summary>
     /// The index for a project root, shared by the title-bar search, the explore tool and
@@ -374,7 +380,7 @@ public sealed class SourceIndex : IDisposable
 
         var pool = Model.Pool;
         var (keys, counts, total) = SourceTokens.Count(text, pool);
-        var symbols = SourceSymbols.Extract(text, pool);
+        var symbols = SourceSymbols.Extract(text, pool, relative);
         var transitions = SourceTokens.Transitions(text, pool);
         var keep = Interlocked.Add(ref retained, text.Length) <= _options.MaxRetainedChars;
         if (!keep)
@@ -476,6 +482,7 @@ public sealed class SourceIndex : IDisposable
         }
 
         _disposed = true;
+        _syntaxStore.Changed -= GrammarsChanged;
         _watcher?.Dispose();
         _watcher = null;
         lock (_gate)

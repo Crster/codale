@@ -546,12 +546,18 @@ public sealed class MarkdownView : StackPanel
 
     private Border CodeFence(MarkdownBlock.CodeBlock code, double size)
     {
+        var light = ActualTheme == ElementTheme.Light;
+        var defaultStyle = Controls.Editing.CodePalette.Theme(light)?.Defaults.FontStyle ?? Core.Syntax.SyntaxFontStyle.None;
         var text = new TextBlock
         {
             FontFamily = CodeFont,
             // Code runs a hair under the prose size, the same relation inline code has.
             FontSize = size - 0.5,
             TextWrapping = TextWrapping.Wrap,
+            FontWeight = defaultStyle.HasFlag(Core.Syntax.SyntaxFontStyle.Bold) ? FontWeights.Bold : FontWeights.Normal,
+            FontStyle = defaultStyle.HasFlag(Core.Syntax.SyntaxFontStyle.Italic) ? Windows.UI.Text.FontStyle.Italic : Windows.UI.Text.FontStyle.Normal,
+            TextDecorations = (defaultStyle.HasFlag(Core.Syntax.SyntaxFontStyle.Underline) ? Windows.UI.Text.TextDecorations.Underline : 0)
+                | (defaultStyle.HasFlag(Core.Syntax.SyntaxFontStyle.Strikethrough) ? Windows.UI.Text.TextDecorations.Strikethrough : 0),
         };
         Selectable(text);
 
@@ -598,9 +604,10 @@ public sealed class MarkdownView : StackPanel
         content.Children.Add(text);
         content.Children.Add(copy);
 
+        text.Foreground = new SolidColorBrush(Controls.Editing.CodePalette.EditorColor("editor.foreground", ((SolidColorBrush)ThemeBrush("MdBodyBrush", 0xD4, 0xD7, 0xDF)).Color, light));
         return new Border
         {
-            Background = ThemeBrush("SubtleFillColorSecondaryBrush", 0x2B, 0x2F, 0x38),
+            Background = new SolidColorBrush(Controls.Editing.CodePalette.EditorColor("editor.background", ((SolidColorBrush)ThemeBrush("SubtleFillColorSecondaryBrush", 0x2B, 0x2F, 0x38)).Color, light)),
             CornerRadius = new CornerRadius(4),
             Padding = new Thickness(8, 6, 8, 6),
             Margin = new Thickness(0, 2, 0, 2),

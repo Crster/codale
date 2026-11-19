@@ -26,10 +26,50 @@ public static class CodePalette
 {
     /// <summary>The app's resolved theme; set by <see cref="ChatPaletteTheme"/>.</summary>
     public static bool Light { get; set; }
+    private static string? _darkId, _lightId;
+    private static SyntaxTheme? _darkTheme, _lightTheme;
+    private static string? _root;
+
+    public static bool ApplyThemes(string darkId, string lightId)
+    {
+        var root = SyntaxService.Store.Root;
+        var changed = _root != root || _darkId != darkId || _lightId != lightId;
+        if (_root != root || _darkId != darkId) { _darkId = darkId; _darkTheme = SyntaxThemeCatalog.Read(SyntaxService.Store, darkId); }
+        if (_root != root || _lightId != lightId) { _lightId = lightId; _lightTheme = SyntaxThemeCatalog.Read(SyntaxService.Store, lightId); }
+        _root = root;
+        return changed;
+    }
+
+    public static SyntaxTheme? Theme(bool light) => (light ? _lightTheme : _darkTheme) is { } theme
+        && theme.Type == (light ? "light" : "dark") ? theme : null;
+
+    public static Windows.UI.Color Color(uint argb) => Windows.UI.Color.FromArgb((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb);
+
+    public static SyntaxTokenStyle Style(CodeToken token, bool light)
+    {
+        if (Theme(light) is { } theme && token.ScopeStack is not null) return theme.Resolve(token.ScopeStack);
+        var color = Get(token.Kind, light);
+        return new(color.A == 0 ? null : (uint)(color.A << 24 | color.R << 16 | color.G << 8 | color.B), null, SyntaxFontStyle.None);
+    }
+
+    public static Windows.UI.Color EditorColor(string key, Windows.UI.Color fallback, bool light) =>
+        Theme(light)?.EditorColors.TryGetValue(key, out var color) == true ? Color(color) : fallback;
+
+    private static bool TryThemeColor(CodeTokenKind kind, bool light, out Windows.UI.Color color)
+    {
+        var theme = light ? _lightTheme : _darkTheme;
+        if (theme?.Type == (light ? "light" : "dark") && theme.Colors.TryGetValue(kind, out var argb))
+        {
+            color = Color(argb);
+            return true;
+        }
+        color = default;
+        return false;
+    }
 
     public static Windows.UI.Color Get(CodeTokenKind kind) => Get(kind, Light);
 
-    public static Windows.UI.Color Get(CodeTokenKind kind, bool light) => light
+    public static Windows.UI.Color Get(CodeTokenKind kind, bool light) => TryThemeColor(kind, light, out var selected) ? selected : light
         ? kind switch
         {
             CodeTokenKind.Keyword => Windows.UI.Color.FromArgb(0xFF, 0x8E, 0x1A, 0xA8),

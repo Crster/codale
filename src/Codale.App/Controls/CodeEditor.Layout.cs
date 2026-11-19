@@ -543,6 +543,8 @@ public sealed partial class CodeEditor
         {
             Options = Microsoft.Graphics.Canvas.Text.CanvasDrawTextOptions.EnableColorFont
         };
+        if (CodePalette.Theme(_light) is { } theme)
+            ApplySyntaxStyle(layout, 0, length, theme.Defaults);
 
         if (visual.Tokens is { Length: > 0 } tokens)
         {
@@ -552,7 +554,7 @@ public sealed partial class CodeEditor
                 var to = Math.Min(token.Start + token.Length, start + length);
                 if (to > from)
                 {
-                    layout.SetColor(from - start, to - from, CodePalette.Get(token.Kind, _light));
+                    ApplySyntaxStyle(layout, from - start, to - from, CodePalette.Style(token, _light));
                 }
             }
         }
@@ -582,6 +584,15 @@ public sealed partial class CodeEditor
 
         visual.Segments[index] = layout;
         return layout;
+    }
+
+    private static void ApplySyntaxStyle(CanvasTextLayout layout, int start, int length, SyntaxTokenStyle style)
+    {
+        if (style.Foreground is { } foreground) layout.SetColor(start, length, CodePalette.Color(foreground));
+        layout.SetFontWeight(start, length, style.FontStyle.HasFlag(SyntaxFontStyle.Bold) ? Microsoft.UI.Text.FontWeights.Bold : Microsoft.UI.Text.FontWeights.Normal);
+        layout.SetFontStyle(start, length, style.FontStyle.HasFlag(SyntaxFontStyle.Italic) ? Windows.UI.Text.FontStyle.Italic : Windows.UI.Text.FontStyle.Normal);
+        layout.SetUnderline(start, length, style.FontStyle.HasFlag(SyntaxFontStyle.Underline));
+        layout.SetStrikethrough(start, length, style.FontStyle.HasFlag(SyntaxFontStyle.Strikethrough));
     }
 
     /// <summary>Releases cached layouts of lines far from the view once there are many.</summary>

@@ -231,26 +231,27 @@ public sealed class SourceIndexTests : IDisposable
     }
 
     [Theory]
-    [InlineData("public sealed partial class SearchViewModel : ObservableObject", "SearchViewModel", SourceSymbolKind.Type)]
-    [InlineData("internal sealed record DiscoveredRange", "DiscoveredRange", SourceSymbolKind.Type)]
-    [InlineData("public readonly record struct LineSpan(int Start, int End);", "LineSpan", SourceSymbolKind.Type)]
-    [InlineData("    public async Task<DiscoveryResult> RunAsync(string query, CancellationToken ct = default)", "RunAsync", SourceSymbolKind.Function)]
-    [InlineData("    public int MaxRounds { get; init; } = 3;", "MaxRounds", SourceSymbolKind.Property)]
-    [InlineData("    private static IReadOnlyList<string> Parse(string s) => [];", "Parse", SourceSymbolKind.Function)]
-    [InlineData("export default function App() {", "App", SourceSymbolKind.Function)]
-    [InlineData("export const handleKeyDown = async (event: KeyboardEvent) => {", "handleKeyDown", SourceSymbolKind.Function)]
-    [InlineData("export interface UserSettings {", "UserSettings", SourceSymbolKind.Type)]
-    [InlineData("def load_config(path):", "load_config", SourceSymbolKind.Function)]
-    [InlineData("class ConfigLoader(Base):", "ConfigLoader", SourceSymbolKind.Type)]
-    [InlineData("func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {", "ServeHTTP", SourceSymbolKind.Function)]
-    [InlineData("pub fn parse_args() -> Args {", "parse_args", SourceSymbolKind.Function)]
-    [InlineData("pub(crate) struct Settings {", "Settings", SourceSymbolKind.Type)]
-    public void Declarations_are_found_across_languages(string line, string name, SourceSymbolKind kind)
+    [InlineData("source.cs", "public sealed partial class SearchViewModel : ObservableObject", "SearchViewModel", SourceSymbolKind.Type)]
+    [InlineData("source.cs", "internal sealed record DiscoveredRange", "DiscoveredRange", SourceSymbolKind.Type)]
+    [InlineData("source.cs", "public readonly record struct LineSpan(int Start, int End);", "LineSpan", SourceSymbolKind.Type)]
+    [InlineData("source.cs", "    public async Task<DiscoveryResult> RunAsync(string query, CancellationToken ct = default)", "RunAsync", SourceSymbolKind.Function)]
+    [InlineData("source.cs", "class Options { public int MaxRounds { get; init; } = 3; }", "MaxRounds", SourceSymbolKind.Property)]
+    [InlineData("source.cs", "    private static IReadOnlyList<string> Parse(string s) => [];", "Parse", SourceSymbolKind.Function)]
+    [InlineData("source.ts", "export default function App() {", "App", SourceSymbolKind.Function)]
+    [InlineData("source.ts", "export const handleKeyDown = async (event: KeyboardEvent) => {", "handleKeyDown", SourceSymbolKind.Function)]
+    [InlineData("source.ts", "export interface UserSettings {", "UserSettings", SourceSymbolKind.Type)]
+    [InlineData("source.py", "def load_config(path):", "load_config", SourceSymbolKind.Function)]
+    [InlineData("source.py", "class ConfigLoader(Base):", "ConfigLoader", SourceSymbolKind.Type)]
+    [InlineData("source.go", "func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {", "ServeHTTP", SourceSymbolKind.Function)]
+    [InlineData("source.rs", "pub fn parse_args() -> Args {", "parse_args", SourceSymbolKind.Function)]
+    [InlineData("source.rs", "pub(crate) struct Settings {", "Settings", SourceSymbolKind.Type)]
+    public void Declarations_are_found_across_languages(string path, string line, string name, SourceSymbolKind kind)
     {
-        var symbol = Assert.Single(SourceSymbols.Extract(line), s => s.Name == name);
+        var symbol = Assert.Single(SourceSymbols.Extract(line, path: path), s => s.Name == name);
         Assert.Equal(kind, symbol.Kind);
         Assert.Equal(1, symbol.Line);
     }
+
 
     [Theory]
     [InlineData("        var policy = new RetryPolicy(3);")]
@@ -283,7 +284,7 @@ public sealed class SourceIndexTests : IDisposable
     [Fact]
     public void A_python_def_runs_over_the_lines_indented_past_it()
     {
-        var symbols = SourceSymbols.Extract("def load(path):\n    text = open(path).read()\n\n    return text\n\nx = load('a')\n");
+        var symbols = SourceSymbols.Extract("def load(path):\n    text = open(path).read()\n\n    return text\n\nx = load('a')\n", path: "source.py");
 
         Assert.Contains(new SourceSymbol("load", SourceSymbolKind.Function, 1, 4), symbols);
     }
@@ -296,7 +297,7 @@ public sealed class SourceIndexTests : IDisposable
         Assert.Contains(new SourceSymbol("retryLimit", SourceSymbolKind.Variable, 3, 3), symbols);
         Assert.Contains(new SourceSymbol("pendingCount", SourceSymbolKind.Variable, 6, 6), symbols);
 
-        var script = SourceSymbols.Extract("$serverName = 'web'\n");
+        var script = SourceSymbols.Extract("$serverName = 'web'\n", path: "script.ps1");
         Assert.Contains(new SourceSymbol("serverName", SourceSymbolKind.Variable, 1, 1), script);
     }
 

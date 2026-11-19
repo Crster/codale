@@ -238,6 +238,7 @@ public sealed partial class CodeEditor : UserControl
     /// <summary>Sets the language the buffer is coloured with.</summary>
     public void SelectSyntaxHighlightingById(string? languageId)
     {
+        RefreshThemeColors();
         _highlighter.LanguageId = languageId;
         DropAllVisuals();
         QueueTokenizing();
@@ -333,6 +334,8 @@ public sealed partial class CodeEditor : UserControl
     /// </summary>
     public void ApplyAppSettings(AppSettingsStore settings)
     {
+        CodePalette.ApplyThemes(settings.EditorDarkSyntaxTheme, settings.EditorLightSyntaxTheme);
+        RefreshThemeColors();
         var tabWidthChanged = _model.TabWidth != settings.EditorTabWidth;
         _model.TabWidth = settings.EditorTabWidth;
 
@@ -376,6 +379,7 @@ public sealed partial class CodeEditor : UserControl
     private Windows.UI.Color _thumbColor = Microsoft.UI.Colors.Gray;
     private Windows.UI.Color _trackColor = Microsoft.UI.Colors.Transparent;
     private Windows.UI.Color _surfaceColor = Microsoft.UI.Colors.White;
+    private Windows.UI.Color _gutterColor = Microsoft.UI.Colors.White;
     private bool _light;
 
     private void RefreshThemeColors()
@@ -462,6 +466,20 @@ public sealed partial class CodeEditor : UserControl
         var surface = FromBrush("ShellCentreBackgroundBrush",
             _light ? Microsoft.UI.Colors.White : Windows.UI.Color.FromArgb(0xFF, 0x1B, 0x1C, 0x20));
         _surfaceColor = Windows.UI.Color.FromArgb(0xFF, surface.R, surface.G, surface.B);
+        var selectedSurface = CodePalette.EditorColor("editor.background", _surfaceColor, _light);
+        // The swap chain needs an opaque clear color; composite an alpha background over the app surface.
+        byte Blend(byte foreground, byte background) => (byte)((foreground * selectedSurface.A + background * (255 - selectedSurface.A)) / 255);
+        _surfaceColor = Windows.UI.Color.FromArgb(255, Blend(selectedSurface.R, _surfaceColor.R), Blend(selectedSurface.G, _surfaceColor.G), Blend(selectedSurface.B, _surfaceColor.B));
+        _gutterColor = CodePalette.EditorColor("editorGutter.background", _surfaceColor, _light);
+        _baseText = CodePalette.EditorColor("editor.foreground", _baseText, _light);
+        _caretColor = CodePalette.EditorColor("editorCursor.foreground", _baseText, _light);
+        _lineNumberText = CodePalette.EditorColor("editorLineNumber.foreground", _lineNumberText, _light);
+        _activeLineNumberText = CodePalette.EditorColor("editorLineNumber.activeForeground", _activeLineNumberText, _light);
+        _selectionColor = CodePalette.EditorColor("editor.selectionBackground", _selectionColor, _light);
+        _inactiveSelectionColor = CodePalette.EditorColor("editor.inactiveSelectionBackground", _inactiveSelectionColor, _light);
+        _activeLineColor = CodePalette.EditorColor("editor.lineHighlightBackground", _activeLineColor, _light);
+        _occurrenceColor = CodePalette.EditorColor("editor.wordHighlightBackground", _occurrenceColor, _light);
+        _wordHighlightColor = CodePalette.EditorColor("editor.findMatchHighlightBackground", _wordHighlightColor, _light);
     }
 
     // ------------------------------------------------------------------ helpers

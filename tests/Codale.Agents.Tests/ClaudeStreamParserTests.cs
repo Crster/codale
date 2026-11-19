@@ -11,6 +11,42 @@ namespace Codale.Agents.Tests;
 public sealed class ClaudeStreamParserTests
 {
     [Theory]
+    [InlineData("authentication_failed", "Please sign in again.")]
+    [InlineData("rate_limit", "Usage limit reached. Try again later.")]
+    [InlineData("billing_error", "Your credit balance is too low.")]
+    public void Assistant_api_errors_become_cli_errors_instead_of_chat_replies(string category, string text)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            type = "assistant",
+            error = category,
+            message = new { id = "error-1", model = "claude", content = new[] { new { type = "text", text } } }
+        });
+
+        var e = Assert.Single(new ClaudeStreamParser().Parse(json));
+        Assert.Equal(text, Assert.IsType<AgentError>(e).Message);
+    }
+
+    [Fact]
+    public void Assistant_api_error_without_text_has_a_readable_cause()
+    {
+        var e = Assert.Single(new ClaudeStreamParser().Parse("""
+            {"type":"assistant","error":"authentication_failed","message":{"content":[]}}
+            """));
+        Assert.Equal("Sign-in failed.", Assert.IsType<AgentError>(e).Message);
+    }
+
+    [Fact]
+    public void Ordinary_assistant_text_mentioning_an_error_stays_a_reply()
+    {
+        var e = Assert.Single(new ClaudeStreamParser().Parse("""
+            {"type":"assistant","message":{"id":"m1","model":"claude",
+              "content":[{"type":"text","text":"I fixed the authentication error."}]}}
+            """));
+        Assert.Equal("I fixed the authentication error.", Assert.IsType<AssistantMessageCompleted>(e).Text);
+    }
+
+    [Theory]
     [InlineData("", false, 0)]
     [InlineData(",\"cache_read_input_tokens\":0", true, 0)]
     [InlineData(",\"cache_read_input_tokens\":800", true, 800)]

@@ -353,6 +353,7 @@ public sealed partial class MainWindow : Window, IWindowOwner
 
     private void ApplyTheme()
     {
+        var syntaxThemeChanged = Codale.App.Controls.Editing.CodePalette.ApplyThemes(_services.Settings.EditorDarkSyntaxTheme, _services.Settings.EditorLightSyntaxTheme);
         RootGrid.RequestedTheme = _services.Settings.Theme switch
         {
             "Light" => ElementTheme.Light,
@@ -361,6 +362,7 @@ public sealed partial class MainWindow : Window, IWindowOwner
         };
         var light = RootGrid.ActualTheme == ElementTheme.Light;
         ChatPaletteTheme.Apply(light);
+        if (syntaxThemeChanged) Codale.Core.Syntax.SyntaxService.Store.NotifyChanged();
 
         // The caption buttons are drawn by the system from the app's theme, not the grid's,
         // so colour them for the resolved theme.

@@ -279,6 +279,17 @@ public sealed class ClaudeStreamParser
             yield break;
         }
 
+        // Claude also wraps API failures as assistant messages. They are CLI
+        // diagnostics, so never turn their text into a conversation reply.
+        if (root.Str("error") is { Length: > 0 } error)
+        {
+            var detail = ContentAsText(message.Prop("content"));
+            yield return new AgentError(string.IsNullOrWhiteSpace(detail)
+                ? RetryCause(null, error) + "."
+                : RepairMojibake(detail));
+            yield break;
+        }
+
         var parentToolUseId = root.Str("parent_tool_use_id");
         var model = message.Str("model") ?? "unknown";
         var messageId = message.Str("id") ?? "";

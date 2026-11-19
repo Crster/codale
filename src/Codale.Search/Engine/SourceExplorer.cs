@@ -952,7 +952,10 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
                     continue;
                 }
 
-                foreach (var location in snapshot.Definitions(key))
+                // Variable scopes include assignment targets and parameters. They remain
+                // searchable, but should not give common prose words a declaration boost.
+                foreach (var location in snapshot.Definitions(key)
+                    .Where(d => d.Symbol.Kind != SourceSymbolKind.Variable))
                 {
                     var id = snapshot.IdOf(location.File);
                     if (id >= 0)
@@ -1363,7 +1366,7 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
             // The nearest declaration whose doc comment or body holds the first match: the
             // slice starts there, not on the tail of whatever came before it.
             var enclosing = symbols
-                .Where(s => s.Line >= start - 12 && s.Line <= firstMatch + 6 && CommentStart(lines, s.Line) <= firstMatch &&
+                .Where(s => s.Kind != SourceSymbolKind.Variable && s.Line >= start - 12 && s.Line <= firstMatch + 6 && CommentStart(lines, s.Line) <= firstMatch &&
                             CommentStart(lines, s.Line) > previousEnd)
                 .OrderByDescending(s => s.Line)
                 .FirstOrDefault();

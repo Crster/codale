@@ -2,7 +2,6 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.RegularExpressions;
 
 namespace Codale.Search;
 
@@ -437,79 +436,14 @@ internal static class SourceTokens
     }
 }
 
-/// <summary>
-/// Declarations by pattern, across the languages a project is likely to mix: C#, Java,
-/// Kotlin, TypeScript/JavaScript, Python, Go, Rust, Swift. Not a parser - it only needs to
-/// say "this name is defined here" often enough to follow a reference to its source.
-/// </summary>
-internal static partial class SourceSymbols
+/// <summary>Declarations supplied by the file's TextMate grammar, with source body ranges.</summary>
+internal static class SourceSymbols
 {
-    /// <summary>A block cannot run longer than this many lines; past it the body is cut short rather than scanned on.</summary>
+    /// <summary>A block cannot run longer than this many lines.</summary>
     private const int MaxBodyLines = 5000;
 
-    public static SourceSymbol[] Extract(string text, StringPool? pool = null)
-    {
-        var symbols = new List<SourceSymbol>();
-        var lineStarts = SourceText.LineStarts(text);
-        var lines = SourceText.SplitLines(text);
-        var seen = new HashSet<(string, int)>();
-
-        void Add(Match match, SourceSymbolKind kind)
-        {
-            var name = match.Groups["name"].Value;
-            if (name.Length < 2 || Reserved.Contains(name))
-            {
-                return;
-            }
-
-            var line = SourceText.LineOf(lineStarts, match.Groups["name"].Index);
-            if (seen.Add((name, line)))
-            {
-                // A variable is one line; a type or function runs to the end of the block it opens.
-                var end = kind == SourceSymbolKind.Variable ? line : BodyEnd(lines, line);
-                symbols.Add(new SourceSymbol(pool?.Intern(name) ?? name, kind, line, end));
-            }
-        }
-
-        foreach (Match match in TypeDeclaration().Matches(text))
-        {
-            Add(match, SourceSymbolKind.Type);
-        }
-
-        foreach (Match match in FunctionDeclaration().Matches(text))
-        {
-            Add(match, SourceSymbolKind.Function);
-        }
-
-        foreach (Match match in MemberDeclaration().Matches(text))
-        {
-            Add(match, match.Groups["prop"].Success ? SourceSymbolKind.Property : SourceSymbolKind.Function);
-        }
-
-        foreach (Match match in BoundFunction().Matches(text))
-        {
-            Add(match, SourceSymbolKind.Function);
-        }
-
-        // Variables come last so a name bound to a function on the same line stays a function.
-        foreach (Match match in VariableDeclaration().Matches(text))
-        {
-            Add(match, SourceSymbolKind.Variable);
-        }
-
-        foreach (Match match in FieldDeclaration().Matches(text))
-        {
-            Add(match, SourceSymbolKind.Variable);
-        }
-
-        foreach (Match match in ScriptVariable().Matches(text))
-        {
-            Add(match, SourceSymbolKind.Variable);
-        }
-
-        symbols.Sort((a, b) => a.Line.CompareTo(b.Line));
-        return [.. symbols];
-    }
+    public static SourceSymbol[] Extract(string text, StringPool? pool = null, string path = "source.cs") =>
+        GrammarSymbols.Extract(path, text, pool).ToArray();
 
     /// <summary>
     /// The last line (1-based) of the body a declaration on <paramref name="line"/> opens. A brace
@@ -624,66 +558,6 @@ internal static partial class SourceSymbols
         return n;
     }
 
-    /// <summary>Locals and constants: <c>var x =</c>, <c>let x</c>, <c>const x</c>, <c>val x</c>, <c>my $x</c>.</summary>
-    [GeneratedRegex(
-        @"^[ \t]*(?:(?:export|public|private|protected|internal|static|readonly|final|const|pub|mut|declare)[ \t]+)*" +
-        @"(?:var|let|const|val|auto|local|my|our)[ \t]+(?<name>[A-Za-z_$][\w$]*)",
-        RegexOptions.Multiline | RegexOptions.CultureInvariant)]
-    private static partial Regex VariableDeclaration();
-
-    /// <summary>A class field: at least one modifier, a type, a name, then <c>=</c> or <c>;</c>.</summary>
-    [GeneratedRegex(
-        @"^[ \t]*(?:(?:public|private|protected|internal|static|readonly|volatile|final|const)[ \t]+)+" +
-        @"[\w.<>\[\],?]+(?:[ \t]*<[^>\n]*>)?[?\[\]]*[ \t]+(?<name>[A-Za-z_]\w*)[ \t]*(?:=[^=]|;)",
-        RegexOptions.Multiline | RegexOptions.CultureInvariant)]
-    private static partial Regex FieldDeclaration();
-
-    /// <summary>PowerShell script variables: <c>$total = ...</c>.</summary>
-    [GeneratedRegex(@"^[ \t]*\$(?<name>[A-Za-z_]\w*)[ \t]*=(?!=)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
-    private static partial Regex ScriptVariable();
-
-    /// <summary>Words a loose pattern may take for a name.</summary>
-    private static readonly HashSet<string> Reserved =
-    [
-        with(StringComparer.Ordinal),
-        "if", "for", "foreach", "while", "switch", "catch", "using", "lock", "return", "new", "await",
-        "get", "set", "init", "add", "remove", "value", "var", "let", "const", "this", "base", "super",
-        "true", "false", "null", "void", "int", "string", "bool", "object", "struct", "class",
-    ];
-
-    [GeneratedRegex(
-        @"^[ \t]*(?:export[ \t]+)?(?:default[ \t]+)?(?:declare[ \t]+)?" +
-        @"(?:(?:public|private|protected|internal|static|abstract|sealed|partial|readonly|ref|final|open|data|inner|enum|annotation|value|pub(?:\([a-z]+\))?|file|unsafe)[ \t]+)*" +
-        @"(?:record[ \t]+(?:struct|class)|class|interface|record|struct|enum|trait|protocol|object|type|typealias)[ \t]+" +
-        @"(?<name>[A-Za-z_$][\w$]*)",
-        RegexOptions.Multiline | RegexOptions.CultureInvariant)]
-    private static partial Regex TypeDeclaration();
-
-    /// <summary>Keyword-led functions: <c>function</c>, <c>def</c>, <c>fn</c>, <c>func</c> (with a Go receiver), <c>fun</c>.</summary>
-    [GeneratedRegex(
-        @"^[ \t]*(?:export[ \t]+)?(?:default[ \t]+)?(?:(?:pub(?:\([a-z]+\))?|async|static|private|public|internal|override|suspend|inline|unsafe|const|extern)[ \t]+)*" +
-        @"(?:function\*?|def|fn|func|fun)[ \t]+(?:\([^)\n]*\)[ \t]*)?(?:<[^>\n]*>[ \t]*)?(?<name>[A-Za-z_$][\w$]*)",
-        RegexOptions.Multiline | RegexOptions.CultureInvariant)]
-    private static partial Regex FunctionDeclaration();
-
-    /// <summary>
-    /// C#/Java-style members: at least one modifier, an optional type, a name, then
-    /// <c>(</c> for a method or <c>{</c> / <c>=&gt;</c> for a property. Requiring a
-    /// modifier is what keeps calls and statements out.
-    /// </summary>
-    [GeneratedRegex(
-        @"^[ \t]*(?:\[[^\]\n]*\][ \t]*)*" +
-        @"(?:(?:public|private|protected|internal|static|async|override|virtual|abstract|sealed|extern|unsafe|partial|final|synchronized|required|readonly|event)[ \t]+)+" +
-        @"(?:[\w.<>\[\],?()]+(?:<[^>\n]*>)?[?\[\]]*[ \t]+)?" +
-        @"(?<name>[A-Za-z_]\w*)[ \t]*(?:<[^>\n]*>)?[ \t]*(?:\(|(?<prop>\{|=>))",
-        RegexOptions.Multiline | RegexOptions.CultureInvariant)]
-    private static partial Regex MemberDeclaration();
-
-    /// <summary>JavaScript/TypeScript functions bound to a name: <c>const run = async (</c>, <c>let f = function</c>.</summary>
-    [GeneratedRegex(
-        @"^[ \t]*(?:export[ \t]+)?(?:const|let|var)[ \t]+(?<name>[A-Za-z_$][\w$]*)[ \t]*(?::[^=\n]+)?=[ \t]*(?:async[ \t]*)?(?:function\b|\([^)\n]*\)[ \t]*(?::[^=\n]+)?=>|[A-Za-z_$][\w$]*[ \t]*=>)",
-        RegexOptions.Multiline | RegexOptions.CultureInvariant)]
-    private static partial Regex BoundFunction();
 }
 
 internal static class StringBuilderExtensions

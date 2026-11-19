@@ -35,7 +35,9 @@ public sealed class SyntaxCatalogClientTests : IDisposable
         Assert.All(SyntaxCatalogClient.Entries, e =>
         {
             Assert.StartsWith("https://raw.githubusercontent.com/", e.Url);
-            Assert.NotEmpty(e.Extensions);
+            Assert.Contains("/shikijs/textmate-grammars-themes/", e.Url);
+            Assert.NotEmpty(e.ScopeName);
+            Assert.All(e.Dependencies, id => Assert.Contains(SyntaxCatalogClient.Entries, d => d.Id == id));
         });
     }
 
@@ -53,6 +55,23 @@ public sealed class SyntaxCatalogClientTests : IDisposable
         Assert.Equal("source.zig", installed.ScopeName);
         Assert.Equal(["zig"], store.Find("zig")!.Extensions);
         Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task New_downloads_persist_catalog_filename_patterns_names_and_first_line_hints()
+    {
+        var store = new SyntaxStore(_root);
+        var client = new SyntaxCatalogClient(new HttpClient(new StubHandler(_ => Ok(Grammar))));
+        var entry = new CatalogEntry("zig", "Zig", ["zig"], "https://raw.githubusercontent.com/x/y/main/zig.json", "x/y")
+        {
+            Filenames = ["Zigfile"], FilenamePatterns = ["*.zig.*"], FirstLine = "^#!.*zig-script", Aliases = ["Zig Script"],
+        };
+        await client.InstallAsync(entry, store);
+        var saved = new SyntaxStore(_root).Find("zig")!;
+        Assert.Contains("Zigfile", saved.Filenames);
+        Assert.Contains("*.zig.*", saved.FilenamePatterns);
+        Assert.Equal("^#!.*zig-script", saved.FirstLine);
+        Assert.Contains("Zig Script", saved.Aliases);
     }
 
     [Fact]
@@ -103,5 +122,51 @@ public sealed class SyntaxCatalogClientTests : IDisposable
         var entry = new CatalogEntry("zig", "Zig", ["zig"], "https://raw.githubusercontent.com/x/y/main/zig.json", "x/y");
 
         await Assert.ThrowsAsync<InvalidDataException>(() => client.InstallAsync(entry, store));
+    }
+
+    [Fact]
+    public async Task Dependencies_are_installed_without_taking_over_file_associations()
+    {
+        var store = new SyntaxStore(_root);
+        var handler = new StubHandler(request =>
+        {
+            var id = Path.GetFileNameWithoutExtension(request.RequestUri!.AbsolutePath);
+            var scope = SyntaxCatalogClient.Entries.First(e => e.Id == id).ScopeName;
+            return Ok($$"""{ "scopeName": "{{scope}}", "patterns": [] }""");
+        });
+        var client = new SyntaxCatalogClient(new HttpClient(handler));
+        var entry = SyntaxCatalogClient.Entries.First(e => e.Id == "vue");
+        var notifications = 0;
+        store.Changed += () => notifications++;
+        await client.InstallAsync(entry, store);
+        Assert.Equal(1, notifications);
+        Assert.False(store.Find("vue")!.IsDependency);
+        Assert.True(store.Find("typescript")!.IsDependency);
+        Assert.Equal(handler.Requests.Count, handler.Requests.Distinct().Count());
+        var catalog = new LanguageCatalog(store, new TextMateSharp.Grammars.RegistryOptions(TextMateSharp.Grammars.ThemeName.DarkPlus));
+        Assert.Equal("vue", catalog.ForFile("component.vue")!.Id);
+        Assert.DoesNotContain(catalog.All, l => l.Id == "vue-directives");
+    }
+
+    [Fact]
+    public async Task A_bad_dependency_leaves_the_existing_store_unchanged()
+    {
+        var store = new SyntaxStore(_root);
+        var client = new SyntaxCatalogClient(new HttpClient(new StubHandler(_ => Ok("{}"))));
+        await Assert.ThrowsAsync<InvalidDataException>(() => client.InstallAsync(SyntaxCatalogClient.Entries.First(e => e.Id == "vue"), store));
+        Assert.Empty(store.Languages);
+    }
+
+    [Fact]
+    public void Begin_only_rules_and_misplaced_capture_metadata_can_be_loaded()
+    {
+        const string json = """
+            { "scopeName": "source.capture-test", "patterns": [
+              { "include": "#array-rule" },
+              { "begin": "<!--", "captures": { "0": { "name": "comment" }, "end": "-->", "name": "comment.block" } },
+              { "begin": "BEGIN", "name": "string" }
+            ], "repository": { "array-rule": [ { "match": "test", "name": "keyword" } ] } }
+            """;
+        Assert.Null(GrammarValidator.Validate(json, out _, "<!-- comment -->\nBEGIN text"));
     }
 }
