@@ -235,9 +235,9 @@ public sealed partial class SearchViewModel : ObservableObject
                 Knowledge = _knowledge,
                 UseSemanticSearch = !keywordOnly,
                 // Short code or a name typed as-is is ranked by keyword likeness in chain order over the
-                // source and semantic indexes; anything else is ranked the way context enrichment ranks a prompt.
+                // source and semantic indexes; anything else fuses their rankings by reciprocal rank.
                 ExactKeywordFirst = true,
-                FuseLikeContext = true,
+                FuseSemanticRanks = true,
                 MaxRankedResults = keywordOnly ? 40 : 12,
                 MaxRelated = naturalLanguage ? 4 : 0,
             };

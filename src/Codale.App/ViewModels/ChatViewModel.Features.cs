@@ -34,10 +34,9 @@ public sealed partial class ChatViewModel
     private readonly string _chatId = Guid.NewGuid().ToString("N");
     private string? _featureRequest;
     private CancellationTokenSource? _briefing;
-    private readonly HashSet<string> _knownContextFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (string Command, string? Cwd)> _pendingShellReads = [];
     private readonly HashSet<string> _turnEditedPaths = [with(StringComparer.OrdinalIgnoreCase)];
-    /// <summary>Files the agent opened with a read tool this turn, first few only: what it needed beyond the enrichment.</summary>
+    /// <summary>Files the agent opened with a read tool this turn.</summary>
     private readonly HashSet<string> _turnReadPaths = [with(StringComparer.OrdinalIgnoreCase)];
     private const int MaxLearnedReads = 6;
     /// <summary>When the current turn's request went out; files changed on disk since then are the turn's work.</summary>
@@ -209,7 +208,6 @@ public sealed partial class ChatViewModel
         _recording = false;
         _attachLogged = false;
         _featureRequest = null;
-        _knownContextFiles.Clear();
         _pendingShellReads.Clear();
         _turnEditedPaths.Clear();
         _turnReadPaths.Clear();
@@ -262,17 +260,6 @@ public sealed partial class ChatViewModel
         PublishFeatureActivity(true);
     }
 
-    /// <summary>A file the agent already has in its conversation; the locator does not hint it again.</summary>
-    private void CaptureReference(string path)
-    {
-        try
-        {
-            var relative = Path.IsPathRooted(path) ? Path.GetRelativePath(ProjectPath, path) : path;
-            _knownContextFiles.Add(relative.Replace('\\', '/'));
-        }
-        catch (ArgumentException) { }
-    }
-
     private void RecordFeatureEvent(AgentEvent e)
     {
         if (Features is not { } features || !_recording) return;
@@ -292,7 +279,6 @@ public sealed partial class ChatViewModel
                     if (property.Name is "file_path" or "path" or "file" && property.Value.ValueKind == System.Text.Json.JsonValueKind.String &&
                         property.Value.GetString() is { Length: > 0 } path)
                     {
-                        CaptureReference(path);
                         if (IsFileReadTool(tool.ToolName) && _turnReadPaths.Count < MaxLearnedReads) _turnReadPaths.Add(path);
                     }
         }
@@ -301,13 +287,12 @@ public sealed partial class ChatViewModel
             if (_pendingShellReads.Remove(done.ToolUseId, out var shell) && !done.IsError)
                 foreach (var path in ShellReadFiles.Find(ProjectPath, shell.Command, shell.Cwd, done.ResultText))
                 {
-                    CaptureReference(path);
                     if (_turnReadPaths.Count < MaxLearnedReads) _turnReadPaths.Add(path);
                 }
             if (!done.IsError)
             {
-                if (done.FileChange is { } change) { CaptureReference(change.FilePath); _turnEditedPaths.Add(change.FilePath); }
-                foreach (var changed in done.FileChanges ?? []) { CaptureReference(changed.FilePath); _turnEditedPaths.Add(changed.FilePath); }
+                if (done.FileChange is { } change) _turnEditedPaths.Add(change.FilePath);
+                foreach (var changed in done.FileChanges ?? []) _turnEditedPaths.Add(changed.FilePath);
             }
         }
         if (e is TurnCompleted completed)

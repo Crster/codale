@@ -1,5 +1,5 @@
 [
-  { "query": "fuse the lexical and index rankings of a prompt by reciprocal rank", "path": "src/Codale.Search/PromptFileLocator.cs", "symbol": "FuseAsync" },
+  { "query": "fuse source and knowledge index rankings by reciprocal rank", "path": "src/Codale.Search/Engine/ProjectSearchFusion.cs", "symbol": "FuseAsync" },
   { "query": "how does the session briefing wrap context for the agent", "path": "src/Codale.Core/Agents/SessionBriefing.cs", "symbol": "ContextBlock" },
   { "query": "strip the briefing back off when a transcript is replayed", "path": "src/Codale.Core/Agents/SessionBriefing.cs", "symbol": "StripContext" },
   { "query": "validate the smart brief so invented citations are dropped", "path": "src/Codale.Smart/SmartBrief.cs", "symbol": "Validate" },
@@ -14,7 +14,7 @@
   { "query": "send a routed prompt as plan ask or act", "path": "src/Codale.App/ViewModels/ChatViewModel.cs", "symbol": "SendRoutedAsync" },
   { "query": "mid-turn message steers the running turn", "path": "src/Codale.App/ViewModels/ChatViewModel.cs", "symbol": "SteerTurnAsync" },
   { "query": "compact an idle chat before the prompt cache expires", "path": "src/Codale.App/ViewModels/ChatViewModel.cs", "symbol": "CompactWhileCacheWarmAsync" },
-  { "query": "lend score to files linked to the leading results in the file graph", "path": "src/Codale.Search/PromptFileLocator.cs", "symbol": "FollowGraph" },
+  { "query": "lend score to files linked to the leading results in the file graph", "path": "src/Codale.Search/Engine/ProjectSearchFusion.cs", "symbol": "FollowGraph" },
   { "query": "same branch check when HEAD moves between refreshes", "path": "src/Codale.Search/ProjectKnowledgeIndex.cs", "symbol": "SameBranch" },
   { "query": "which files are eligible for indexing", "path": "src/Codale.Search/ProjectKnowledgeIndex.cs", "symbol": "Eligible" },
   { "query": "save the smart process log history of a run", "path": "src/Codale.Smart/SmartHistory.cs", "symbol": "Save" },

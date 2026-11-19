@@ -92,7 +92,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
                         var log = _contentChanges.GetOrAdd(worktree, _ => new(StringComparer.OrdinalIgnoreCase));
                         foreach (var path in changed) log[path] = now;
                     }
-                    // The locator lends score along these links.
+                    // Related source files can borrow a portion of this file's search score.
                     RefreshGraph(worktree, snapshot);
                 }
                 finally
@@ -111,7 +111,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
 
     /// <summary>
     /// An agent turn started editing <paramref name="worktree"/>. Each of its writes marks the index stale, and every
-    /// search, ghost-text lookup and prompt enrichment would then re-index mid-turn; the index instead
+    /// search and ghost-text lookup would then re-index mid-turn; the index instead
     /// catches up once, at <see cref="EndAgentTurn"/>.
     /// </summary>
     public void BeginAgentTurn(string worktree) =>
@@ -137,7 +137,7 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
             CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
     }
 
-    /// <summary>Ranked, hash-verified source excerpts for discovery and prompt enrichment; only fresh source is returned.</summary>
+    /// <summary>Ranked, hash-verified source excerpts for discovery; only fresh source is returned.</summary>
     /// <param name="recent">Accepted for callers that pass the conversation; ranking uses the prompt alone.</param>
     public IReadOnlyList<SourceChunk> Search(string worktree, string prompt, string recent = "", int maxFiles = 12, int maxChunksPerFile = 1)
     {

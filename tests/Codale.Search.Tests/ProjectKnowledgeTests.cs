@@ -101,19 +101,6 @@ public sealed class ProjectKnowledgeTests : IDisposable
         Assert.Equal("client/garrison_view.js", Found("garrison panel")[0]);
     }
 
-    [Fact]
-    public async Task A_file_edited_mid_turn_is_still_hinted()
-    {
-        Write("Auth.cs", "class Authentication { void RefreshToken() {} }");
-        await _index.RefreshAsync(Root);
-        // The agent edits the file; a steer about it arrives before the index catches up.
-        _index.BeginAgentTurn(Root);
-        Write("Auth.cs", "class Authentication { void RefreshToken() { RotateCredential(); } }");
-        var result = await PromptFileLocator.RetrieveAsync(Root, "where does RefreshToken rotate the credential", _index);
-        Assert.Contains("Auth.cs", result.Files);
-        _index.EndAgentTurn(Root);
-    }
-
     public void Dispose()
     {
         _index.Dispose();

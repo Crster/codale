@@ -4255,8 +4255,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             default:
-                await SendTurnAsync(text, attachments, planOnly: false, askOnly: false, preparationToken,
-                    autoAct: IsAutomaticMode && intent == RouteIntent.Act);
+                await SendTurnAsync(text, attachments, planOnly: false, askOnly: false, preparationToken);
                 break;
         }
     }
@@ -4279,7 +4278,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private async Task SendTurnAsync(string text, IReadOnlyList<TurnAttachment> attachments, bool planOnly, bool askOnly, CancellationToken preparationToken = default, bool autoAct = false)
+    private async Task SendTurnAsync(string text, IReadOnlyList<TurnAttachment> attachments, bool planOnly, bool askOnly, CancellationToken preparationToken = default)
     {
         _idleCompactTimer.Stop();
         var compact = IsCompactCommand(text);
@@ -4336,8 +4335,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         NextPromptSuggestion = null;
         Attachments.Clear();
         ComposerNotice = null;
-        // Retrieval can take many seconds before BeginTurn runs; without a message the
-        // status capsule would show only its dot. BeginTurn replaces this with a phrase.
         IsBusy = true;
         LastUserPrompt = text;
         var sent = pre?.Item ?? new UserMessageItem { Text = text, Attachments = attachments };
@@ -4351,57 +4348,21 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         if (_activeTurn is null) BeginTurn();
         if (!compact) MarkNewTopic(text, sent);
-        var freshSession = !Items.TakeWhile(i => !ReferenceEquals(i, sent))
-            .OfType<UserMessageItem>().Any(i => !string.IsNullOrWhiteSpace(i.Text));
-        // Only the Auto router's Act branch opts in. Manual modes and routed Ask/Plan
-        // turns never retrieve context, even when they share the same send pipeline.
-        var retrieveContext = autoAct && !compact && !planOnly && !askOnly &&
-            Codale.Search.PromptFileLocator.ShouldRetrieve(text, attachments.Count > 0, freshSession, sent.IsNewTopic);
-        _preparingTask = compact || retrieveContext ? "context" : null;
-        _activeTurn!.LiveStage = compact ? "Compacting" : retrieveContext ? "Gathering context" : "";
-        var contextClock = System.Diagnostics.Stopwatch.StartNew();
-        Codale.Search.FileLocatorContext? locatedContext = null;
-        // A compaction is one row from start to finish: an idle one already added its
-        // entry, and one the reader asked for gets it here. Context gathering is one
-        // quiet row that finishes in place, so the reader never sees it change style mid-turn.
+        _preparingTask = compact ? "context" : null;
+        _activeTurn!.LiveStage = compact ? "Compacting" : "";
         if (compact && _compactItem is null)
         {
             _compactItem = new CompactItem { BeforeTokens = Status.ContextTokens };
             Items.Insert(Items.IndexOf(_activeTurn), _compactItem);
         }
 
-        var contextStatus = retrieveContext ? new ContextEnrichmentItem { Summary = "Gathering context…", IsPending = true } : null;
-        // Activity grows inside the turn's existing row, so preparation must sit
-        // before that row to remain above the work it precedes.
-        ChatItem? preparing = contextStatus;
-        if (preparing is not null) Items.Insert(Items.IndexOf(_activeTurn), preparing);
         Reflow();
 
         if (!compact) RecordUserTurn(text);
 
-        // Only a fresh session or a new topic receives local project references.
         try
         {
             preparationToken.ThrowIfCancellationRequested();
-            if (retrieveContext)
-            {
-                using var retrievalBudget = CancellationTokenSource.CreateLinkedTokenSource(preparationToken);
-                retrievalBudget.CancelAfter(TimeSpan.FromSeconds(4));
-                try
-                {
-                    locatedContext = await Codale.Search.PromptFileLocator.RetrieveAsync(
-                        ProjectPath, text, Features?.Knowledge, retrievalBudget.Token,
-                        new HashSet<string>(_knownContextFiles, StringComparer.OrdinalIgnoreCase),
-                        // The General model suggests the names the code likely uses ("Search keywords" feature).
-                        _smart.Settings.SmartFeatureEnabled("keywords") ? _smart.Instance : null);
-                }
-                catch (OperationCanceledException) when (!preparationToken.IsCancellationRequested) { }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    Debug.WriteLine($"Project file retrieval failed: {ex.Message}");
-                }
-                preparationToken.ThrowIfCancellationRequested();
-            }
         }
         catch (OperationCanceledException)
         {
@@ -4412,7 +4373,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             var abandoned = _activeTurn;
             EndTurn(TurnOutcome.NotSent);
             if (abandoned is not null) Items.Remove(abandoned);
-            if (preparing is not null) Items.Remove(preparing);
             if (compact) DropCompactItem();
             Items.Remove(sent);
             Reflow();
@@ -4427,17 +4387,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        contextClock.Stop();
-        var elapsed = $"{contextClock.Elapsed.TotalSeconds:0.00}s";
-        if (contextStatus is not null)
-        {
-            var found = locatedContext?.Files.Count ?? 0;
-            contextStatus.Summary = found > 0
-                ? $"Context gathered · {found} {(found == 1 ? "file" : "files")} · {elapsed}"
-                : $"No matching files · {elapsed}";
-            contextStatus.IsPending = false;
-        }
-
         // "/compact" is housekeeping, not part of the conversation a resumed history replays.
         _preparingTask = null;
         if (_activeTurn is { } ready) ready.LiveStage = "";
@@ -4450,11 +4399,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            string? context = locatedContext?.Text;
-            if (!compact && _handoffContext is not null)
-            {
-                context = context is null ? TakeHandoffContext() : TakeHandoffContext() + "\n\n" + context;
-            }
+            var context = !compact ? TakeHandoffContext() : null;
 
             Status.BeginCacheTurn();
             if (compact && await session.TryCompactAsync())
@@ -4469,14 +4414,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             else
             {
                 await session.SendAsync(new UserTurn(text) { Attachments = attachments, PlanOnly = planOnly, AskOnly = askOnly, ContextPrefix = context });
-                if (locatedContext is not null) _knownContextFiles.UnionWith(locatedContext.Files);
-                if (locatedContext is { Files.Count: > 0 } && contextStatus is not null)
-                {
-                    // The hints are shown only once they actually went out with the prompt.
-                    contextStatus.Details = locatedContext.Text;
-                    _featureLog?.Append(new ContextEnrichmentRecorded(contextStatus.Summary, locatedContext.Text)
-                        { Timestamp = contextStatus.Timestamp });
-                }
             }
         }
         catch (Exception ex)

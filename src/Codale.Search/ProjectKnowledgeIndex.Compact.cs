@@ -222,7 +222,7 @@ public sealed partial class ProjectKnowledgeIndex
         if (terms.Count > 0)
         {
             var ranked = lexical ?? SourceExplorer.Rank(snapshot,
-                SourceExplorer.Resolve(snapshot, PromptFileLocator.PromptTerms(prompt, snapshot.Contains)), [], setup: false);
+                SourceExplorer.Resolve(snapshot, ProjectSearchFusion.PromptTerms(prompt, snapshot.Contains)), [], setup: false);
             rank = 0;
             foreach (var match in ranked.Take(48))
                 Add(match.File.RelativePath, 24.0 / (3 + rank++));

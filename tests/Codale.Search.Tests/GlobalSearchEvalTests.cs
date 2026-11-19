@@ -67,7 +67,7 @@ public sealed class GlobalSearchEvalTests(ITestOutputHelper output) : IDisposabl
                     ? null : new LoggedModel(models.Experience, root, output);
                 var explorer = new SourceExplorer(index, model)
                 {
-                    Knowledge = knowledge, UseSemanticSearch = true, ExactKeywordFirst = true, FuseLikeContext = true,
+                    Knowledge = knowledge, UseSemanticSearch = true, ExactKeywordFirst = true, FuseSemanticRanks = true,
                     MaxRankedResults = 12, MaxRelated = SearchQueryIntent.IsNaturalLanguage(query) ? 4 : 0,
                 };
                 explorer.Progress += (_, r) => output.WriteLine($"   progress round {r.Round}: {r.Files.Count} files");

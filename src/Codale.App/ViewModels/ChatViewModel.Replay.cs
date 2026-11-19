@@ -39,15 +39,6 @@ public sealed partial class ChatViewModel
                 rows.Add(new UserMessageItem { Text = user.Text, Timestamp = user.Timestamp ?? DateTimeOffset.Now, IsSteer = user.IsSteer });
             }
 
-            // Preparation belongs between the prompt and its activity, even when
-            // the send acknowledgement arrived after the first tool event.
-            foreach (var context in turn.OfType<ContextEnrichmentRecorded>())
-                rows.Add(new ContextEnrichmentItem
-                {
-                    Summary = context.Summary, Details = context.Details,
-                    Timestamp = context.Timestamp ?? DateTimeOffset.Now,
-                });
-
             var tools = turn.OfType<ToolCallStarted>().Where(t => !IsQuietCall(t.ToolName)).ToList();
             var lastTool = tools.Count == 0 ? -1 : turn.IndexOf(tools[^1]);
             if (tools.Count > 0)

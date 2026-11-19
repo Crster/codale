@@ -142,11 +142,6 @@ public sealed class FeatureLog(HistoryStore store, string featureId, string? cha
     {
         switch (e)
         {
-            case ContextEnrichmentRecorded context:
-                Append(new { type = "context", summary = context.Summary, details = context.Details,
-                    at = context.Timestamp ?? DateTimeOffset.Now });
-                break;
-
             case AssistantMessageCompleted { ParentToolUseId: null, Text.Length: > 0 } reply:
                 Append(new { type = "assistant", id = reply.MessageId, model = reply.Model, text = reply.Text, thinking = reply.Thinking, at = DateTimeOffset.Now });
                 break;
@@ -389,7 +384,6 @@ public sealed class FeatureLog(HistoryStore store, string featureId, string? cha
     private static AgentEvent? Translate(JsonElement record) => record.Str("type") switch
     {
         "user" when record.Str("text") is { Length: > 0 } text => new UserMessageRecorded(text) { IsSteer = record.Bool("steer") },
-        "context" when record.Str("summary") is { Length: > 0 } summary => new ContextEnrichmentRecorded(summary, record.Str("details") ?? ""),
         "assistant" => new AssistantMessageCompleted
         {
             MessageId = record.Str("id") ?? "",

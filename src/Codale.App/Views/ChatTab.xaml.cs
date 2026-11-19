@@ -431,24 +431,6 @@ public sealed partial class ChatTab : UserControl
         }
     }
 
-    /// <summary>Folds or opens the files a prompt's context row suggested.</summary>
-    private void OnToggleContextClick(object sender, RoutedEventArgs e)
-    {
-        if (((FrameworkElement)sender).Tag is ContextEnrichmentItem { HasHints: true } context)
-        {
-            context.IsExpanded = !context.IsExpanded;
-        }
-    }
-
-    /// <summary>A file from the context row opens beside the chat at the lines it suggested, like a read step's file.</summary>
-    private void OnContextFileClick(object sender, RoutedEventArgs e)
-    {
-        if (((FrameworkElement)sender).Tag is ContextHint { Path.Length: > 0 } hint)
-        {
-            ToolFileRequested?.Invoke(this, new ToolFileRequestEventArgs(hint.Path, isEdit: false, line: hint.Line, endLine: hint.EndLine));
-        }
-    }
-
     /// <summary>"Open in diff tab" under an inline diff.</summary>
     private void OnOpenToolDiffClick(object sender, RoutedEventArgs e)
     {

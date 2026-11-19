@@ -15,7 +15,7 @@ namespace Codale.Search;
 /// definitions it uses and its callers, not only the files that repeat a keyword.
 /// </summary>
 /// <remarks>
-/// Context-enrichment retrieval streams first, with local ranking as a cold-index
+/// Local ranking streams first, with semantic retrieval as a cold-index
 /// fallback. The background-task model reviews those files directly before trying
 /// keyword exploration (<see cref="CodeDiscovery"/>'s prompts). Ranking is BM25 over identifier
 /// tokens with boosts for file names, declarations and the model's path hints, and it
@@ -73,10 +73,10 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
     public int MaxExactResults { get; init; } = 40;
 
     /// <summary>
-    /// Rank the way context enrichment does - the source and knowledge indexes vote by reciprocal rank and a
-    /// file one of them alone found must cover enough of the query - instead of listing semantic hits first.
+    /// Fuse source and knowledge index rankings by reciprocal rank, requiring a file one index alone found
+    /// to cover enough of the query instead of listing semantic hits first.
     /// </summary>
-    public bool FuseLikeContext { get; init; }
+    public bool FuseSemanticRanks { get; init; }
 
     /// <summary>A fused file is listed while it scores this share of the leader: the expanded terms make the leaders clear, so loose tails are cut.</summary>
     private const double ModelFusedFloor = 0.5;
@@ -187,16 +187,16 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
 
         var question = Resolve(snapshot, questionTerms);
         var instant = Rank(snapshot, question, [], setup);
-        var enriched = false;
+        var hasRetrievedMatches = false;
         var fusedByModel = false;
-        if (Knowledge is not null && UseSemanticSearch && FuseLikeContext)
+        if (Knowledge is not null && UseSemanticSearch && FuseSemanticRanks)
         {
-            // The ranking context enrichment uses: a file leads when both indexes agree on it, or when it
+            // A file leads when both indexes agree on it, or when it
             // holds enough of the query's own words - not because it is merely near in meaning.
             // Semantic search goes first and its nearest snippets are read by the Smart model (or, when it is off, mined
             // for names) to compose the terms the final search uses. Nothing is shown before that and no later pass
             // re-sorts what was shown.
-            var fusion = await PromptFileLocator.FuseAsync(_index.Root, query, snapshot, Knowledge, null, null, null, ct,
+            var fusion = await ProjectSearchFusion.FuseAsync(_index.Root, query, snapshot, Knowledge, ct,
                 (vocabulary, snippets, token) => ExpandKeywordsAsync(query, vocabulary, snippets, token)).ConfigureAwait(false);
             var lexical = instant.DistinctBy(r => r.File).ToDictionary(r => r.File);
             // A file listed must hold the query's own words (at least half of them): meaning alone is not a match.
@@ -216,12 +216,12 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
                 .ToList();
             if (retrieved.Count > 0)
             {
-                enriched = true;
+                hasRetrievedMatches = true;
                 fusedByModel = _model is not null;
-                // The fused list is the result, as it is for enrichment: the plain lexical tail is what
+                // The fused list is the result: the plain lexical tail is what
                 // the gate turned down (tests, docs, files sharing one common word).
                 instant = retrieved;
-                // Mark lines with the joined names enrichment found too ("status bar" is StatusBar).
+                // Mark lines with joined names discovered from code ("status bar" is StatusBar).
                 question = [.. question, .. fusion.LineTerms.Where(t =>
                     !Regex.IsMatch(query, $@"\b{Regex.Escape(t.Term.Text)}\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) &&
                     question.All(q => !string.Equals(q.Term.Text, t.Term.Text, StringComparison.OrdinalIgnoreCase)))];
@@ -229,7 +229,7 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
         }
         else if (Knowledge is not null && UseSemanticSearch)
         {
-            // Search committed, hash-verified chunks just as context enrichment does.
+            // Search committed, hash-verified chunks from the project index.
             // Search warms the index itself; cold model loading and full refreshes must
             // never hold up the first visible results.
             var hybrid = await Knowledge.SearchAsync(_index.Root, query, maxFiles: MaxRankedResults, ct: ct).ConfigureAwait(false);
@@ -241,7 +241,7 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
             }
             if (retrieved.Count > 0)
             {
-                enriched = true;
+                hasRetrievedMatches = true;
                 instant = [.. retrieved, .. instant.Where(c => retrieved.All(r => r.File != c.File))];
             }
         }
@@ -262,7 +262,7 @@ public sealed partial class SourceExplorer(SourceIndex index, ISearchModel? mode
         Report(provisional);
 
         ct.ThrowIfCancellationRequested();
-        if (_model is not null && enriched)
+        if (_model is not null && hasRetrievedMatches)
         {
             // Retrieval chose the related files; the provider reads their source, drops
             // the ones that do not answer, and marks the exact rows and words.

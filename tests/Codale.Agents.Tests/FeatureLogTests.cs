@@ -75,34 +75,16 @@ public sealed class FeatureLogTests : IDisposable
     }
 
     [Fact]
-    public void ContextShortlistSurvivesReopeningAndArchivingWithoutEnteringHandoff()
+    public void Legacy_context_records_are_ignored_when_reading_history()
     {
-        const string details = "Project file search hints (paths | matching keywords; verify as needed):\n- src/Login.cs | login, timeout\n\n";
-        var timestamp = DateTimeOffset.Now.AddSeconds(-2);
-        var writer = new FeatureLog(_directory, "context", "chat");
-        writer.AppendUser("fix login timeout");
-        writer.Append(new ContextEnrichmentRecorded("Context gathered · 1 files · 0.12s", details)
-            { Timestamp = timestamp });
-        writer.Append(new ToolCallStarted { ToolUseId = "read", ToolName = "Read", Input = Json("{\"file_path\":\"src/Login.cs\"}") });
-        writer.Append(new AssistantMessageCompleted { MessageId = "reply", Model = "model", Text = "done" });
-        writer.EndTurn("success");
+        var store = new Codale.Workspace.HistoryStore(_directory);
+        store.Append("legacy", "{\"type\":\"user\",\"text\":\"saved request\"}");
+        store.Append("legacy", "{\"type\":\"context\",\"summary\":\"Context gathered\",\"details\":\"old hint\"}");
 
-        void Verify()
-        {
-            var reader = new FeatureLog(_directory, "context");
-            var events = reader.ReadTail(100, out var hasMore);
-            Assert.False(hasMore);
-            Assert.IsType<UserMessageRecorded>(events[0]);
-            var context = Assert.IsType<ContextEnrichmentRecorded>(events[1]);
-            Assert.Equal("Context gathered · 1 files · 0.12s", context.Summary);
-            Assert.Equal(details, context.Details);
-            Assert.Equal(timestamp, context.Timestamp);
-            Assert.IsType<ToolCallStarted>(events[2]);
-            Assert.DoesNotContain(reader.ReadAllSnapshot().Entries, e => e.Text.Contains("Project file search hints"));
-        }
-        Verify();
-        writer.Archive();
-        Verify();
+        var events = new FeatureLog(store, "legacy").ReadTail(10, out var hasMore);
+
+        Assert.False(hasMore);
+        Assert.Collection(events, item => Assert.Equal("saved request", Assert.IsType<UserMessageRecorded>(item).Text));
     }
 
     private FeatureLog Recorded()

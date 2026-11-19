@@ -87,7 +87,7 @@ public sealed partial class RetrievalEvalTests
             IReadOnlyList<string> resolvedText = [];
             if (terms.Count > 0)
             {
-                var resolved = SourceExplorer.Resolve(snapshot, PromptFileLocator.PromptTerms(query, snapshot.Contains));
+                var resolved = SourceExplorer.Resolve(snapshot, ProjectSearchFusion.PromptTerms(query, snapshot.Contains));
                 resolvedText = [.. resolved.Select(r => $"{r.Term.Text}{(r.Term.Bonus ? "*" : "")}:{r.Weight:F2}:{string.Join('|', r.Keys.Select(k => k.Key))}")];
                 var position = 0;
                 foreach (var ranked in SourceExplorer.Rank(snapshot, resolved, [], setup: false))

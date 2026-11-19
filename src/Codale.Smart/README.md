@@ -31,7 +31,7 @@ Embedding uses an explicit model through an OpenAI-compatible endpoint. When it 
 
 Remote summaries, exploration, embeddings and completion may send source code to the selected provider. Background exploration receives read-only tools and cannot call `run_shell`. CLI generation runs from an isolated temporary working directory: Claude native tools/MCP are disabled, and Codex uses a read-only sandbox. Codale supplies bounded project context for features that request exploration.
 
-Search UI uses `SourceExplorer` for local retrieval and optional refinement. The removed MCP `explore` tool and old search Ask UI are not required by these provider features. Retained summary/context APIs also do not mean every chat turn receives automatic source enrichment.
+Search UI uses `SourceExplorer` for local retrieval and optional refinement. The removed MCP `explore` tool and old search Ask UI are not required by these provider features. Chat turns do not receive automatic project source retrieval.
 
 ## Status and history
 

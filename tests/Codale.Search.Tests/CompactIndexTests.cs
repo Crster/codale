@@ -9,40 +9,6 @@ public sealed class CompactIndexTests : IDisposable
     private readonly string _temp = Directory.CreateTempSubdirectory("codale-compact-").FullName;
 
     [Fact]
-    public async Task Paraphrased_turn_points_to_current_code_without_vectors_and_retains_deleted_provenance()
-    {
-        var root = Directory.CreateDirectory(Path.Combine(_temp, "repo")).FullName;
-        var file = Path.Combine(root, "Writer.cs");
-        await File.WriteAllTextAsync(file, "public class Writer { public void Save() { } }");
-        using var db = new CodaleDb(Path.Combine(_temp, "index"));
-        using var index = new ProjectKnowledgeIndex(db);
-        await index.RefreshAsync(root);
-        const string query = "where is the code for creating password hash";
-        Assert.Empty(index.Search(root, query));
-        index.RecordTurnTopic("session1", "turn1", root, "credential storage", [new("Writer.cs", true)]);
-        index.RecordTurnTopic("session1", "turn1", root, "credential storage", [new("Writer.cs", true)]);
-        Assert.Equal("Writer.cs", Assert.Single(index.Search(root, query, maxChunksPerFile: 1)).Path);
-        var context = await PromptFileLocator.RetrieveAsync(root, query, index);
-        Assert.Contains("Writer.cs", context.Files);
-        Assert.Contains("was edited in Codale history session1, turn turn1", context.Text);
-        Assert.Equal(1, db.Open("turn-topics-v1").Open(ProjectPaths.Normalize(root)).Open("session1").ChildCount());
-        var sibling = Directory.CreateDirectory(Path.Combine(_temp, "sibling")).FullName;
-        await File.WriteAllTextAsync(Path.Combine(sibling, "Writer.cs"), "public class Writer {}");
-        await index.RefreshAsync(sibling);
-        Assert.Empty(index.Search(sibling, query));
-
-        File.Delete(file);
-        Assert.Empty(index.Search(root, query));
-        await Task.Delay(100);
-        await index.RefreshAsync(root);
-        var deleted = await PromptFileLocator.RetrieveAsync(root, query, index);
-        Assert.Empty(deleted.Files);
-        Assert.Contains("no current file location", deleted.Text);
-        index.RemoveTurnTopics("session1");
-        Assert.Empty((await PromptFileLocator.RetrieveAsync(root, query, index)).Text);
-    }
-
-    [Fact]
     public async Task Git_history_is_loaded_on_demand_without_blocking_search()
     {
         var root = Directory.CreateDirectory(Path.Combine(_temp, "repo")).FullName;
@@ -66,17 +32,7 @@ public sealed class CompactIndexTests : IDisposable
         Assert.Equal(0, calls);
         Assert.NotEmpty(await index.SearchAsync(root, "Writer").WaitAsync(TimeSpan.FromSeconds(5)));
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.DoesNotContain("Retain journal entries", (await PromptFileLocator.RetrieveAsync(root, "Writer", index)).Text);
         finish.SetResult([new(new string('b', 40), "Retain journal entries", 1)]);
-
-        var limit = DateTime.UtcNow.AddSeconds(5);
-        while (true)
-        {
-            var result = await PromptFileLocator.RetrieveAsync(root, "Writer", index);
-            if (result.Text.Contains("Retain journal entries", StringComparison.Ordinal)) break;
-            Assert.True(DateTime.UtcNow < limit, "The completed Git lookup was not visible in agent context.");
-            await Task.Delay(20);
-        }
         Assert.Equal(1, calls);
     }
 

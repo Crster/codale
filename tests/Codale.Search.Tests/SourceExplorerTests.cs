@@ -258,7 +258,7 @@ public sealed class SourceExplorerTests : IDisposable
     {
         using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
         using var knowledge = await KnowledgeAsync(store);
-        var result = await new SourceExplorer(_index, null) { Knowledge = knowledge, FuseLikeContext = true, MaxRelated = 0 }
+        var result = await new SourceExplorer(_index, null) { Knowledge = knowledge, FuseSemanticRanks = true, MaxRelated = 0 }
             .RunAsync("where is the retry backoff computed?");
         Assert.Equal(P("src/RetryPolicy.cs"), result.Files[0].RelativePath);
         Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains("Test", StringComparison.OrdinalIgnoreCase));
@@ -509,7 +509,7 @@ public sealed class SourceExplorerTests : IDisposable
     }
 
     [Fact]
-    public async Task Enrichment_results_stream_before_review_and_skip_keyword_generation()
+    public async Task Search_results_stream_before_review_and_skip_keyword_generation()
     {
         using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
         using var knowledge = new ProjectKnowledgeIndex(store);
@@ -584,7 +584,7 @@ public sealed class SourceExplorerTests : IDisposable
     }
 
     [Fact]
-    public async Task Enrichment_survives_an_unavailable_background_provider()
+    public async Task Search_results_survive_an_unavailable_background_provider()
     {
         using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
         using var knowledge = new ProjectKnowledgeIndex(store);
