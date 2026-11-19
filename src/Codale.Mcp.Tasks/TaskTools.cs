@@ -226,12 +226,14 @@ public static class TaskTools
             new McpTool(
                 "memory_save",
                 "Remember something about this workspace for later conversations: a decision and why, a convention, where something lives, " +
-                "how to build or test, a preference the user stated. Keep it short and self-contained. Saving under a title that already exists " +
-                "replaces that note, so correct a stale memory by saving it again. Not for the current task's progress or anything the code already says.",
+                "how to build or test, a preference the user stated. Write it so it stands alone later: the rule or fact first, then why, then when it applies; " +
+                "name exact commands, paths and tools. Call memory_search first: saving under an existing title, or with near-identical text, updates that note " +
+                "instead of adding one, so correct a stale memory by saving it again. Save when the user states or corrects a preference, accepts a decision, " +
+                "or you verify a convention by running it; not for the current task's progress, guesses, or anything the code already says.",
                 McpTool.Schema(
                     [
                         ("title", "string", "A short name that identifies the note, e.g. \"Test command\"."),
-                        ("text", "string", "What to remember, a few sentences at most."),
+                        ("text", "string", "What to remember, a few sentences at most: fact or rule, then \"Why:\" and \"Applies to:\" when known."),
                         ("tags", "string", "Optional comma-separated tags, e.g. \"build, ci\"."),
                         ("category", "string", "Optional preference, decision or project-fact; only user-stated, explicitly accepted or verified knowledge."),
                     ],
@@ -240,7 +242,7 @@ public static class TaskTools
                 (a, _) => Guarded(() =>
                 {
                     var text = a.RequiredString("text");
-                    if (MemoryCapture.ContainsSecret(text)) throw new ArgumentException("Do not save credentials or secrets in project memory.");
+                    if (MemoryCapture.ContainsSecret(text) || MemoryCapture.ContainsSecret(a.RequiredString("title")) || MemoryCapture.ContainsSecret(a.String("tags") ?? "")) throw new ArgumentException("Do not save credentials or secrets in project memory.");
                     var category = a.String("category");
                     if (category is not (null or "preference" or "decision" or "project-fact"))
                         throw new ArgumentException("Memory category must be preference, decision or project-fact.");
@@ -252,8 +254,9 @@ public static class TaskTools
 
             new McpTool(
                 "memory_search",
-                "Look up what was remembered about this workspace (memory_save). Pass a question or keywords. Check it at the start of a task " +
-                "that depends on project conventions, and before asking the user something they may already have told you.",
+                "Look up what was remembered about this workspace (memory_save). Pass a question or a few specific keywords (a topic, a command, a tool name), " +
+                "not a whole sentence of the task. Check it at the start of a task that depends on project conventions, and before asking the user " +
+                "something they may already have told you. If nothing comes back, try one different keyword before concluding nothing is known.",
                 McpTool.Schema(
                     [
                         ("query", "string", "What you want to recall."),

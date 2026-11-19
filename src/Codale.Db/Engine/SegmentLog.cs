@@ -54,7 +54,7 @@ internal sealed class SegmentLog(string directory, long segmentBytes) : IDisposa
         if (ids.Count == 0) ids.Add(1);
 
         foreach (var id in ids)
-            _handles[id] = File.OpenHandle(SegmentPath(id), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+            _handles[id] = OpenSegment(SegmentPath(id));
         Scan(handler);
     }
 
@@ -215,7 +215,7 @@ internal sealed class SegmentLog(string directory, long segmentBytes) : IDisposa
     {
         Sync();
         var id = _active + 1;
-        _handles[id] = File.OpenHandle(SegmentPath(id), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+        _handles[id] = OpenSegment(SegmentPath(id));
         _lengths[id] = 0;
         _active = id;
         _tail = 0;
@@ -271,6 +271,27 @@ internal sealed class SegmentLog(string directory, long segmentBytes) : IDisposa
         _lengths[segment] = offset;
         _active = segment;
         _tail = offset;
+    }
+
+    /// <summary>
+    /// Opens a segment. The directory lock already makes this process the only writer, so a sharing violation here is
+    /// a transient holder (a handle from a just-closed instance, a scanner, an indexer): share generously and retry
+    /// briefly instead of failing the whole database open.
+    /// </summary>
+    private static SafeFileHandle OpenSegment(string path)
+    {
+        const int attempts = 40;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return File.OpenHandle(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+            }
+            catch (IOException) when (attempt < attempts)
+            {
+                Thread.Sleep(Math.Min(10 * attempt, 100));
+            }
+        }
     }
 
     private string SegmentPath(int id) => Path.Combine(_dir, $"seg-{id:D8}.log");

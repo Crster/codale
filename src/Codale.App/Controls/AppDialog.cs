@@ -69,32 +69,79 @@ public static class AppDialog
             dialog.Content = Message(text);
         }
 
-        if (tone == DialogTone.Danger && dialog.PrimaryButtonText is { Length: > 0 })
+        var hasPrimary = dialog.PrimaryButtonText is { Length: > 0 };
+        var danger = tone == DialogTone.Danger && hasPrimary;
+        if (danger)
         {
             dialog.PrimaryButtonStyle = (Style)Application.Current.Resources["DialogDangerButtonStyle"];
+        }
 
-            // With DefaultButton = Primary the template swaps the primary button to AccentButtonStyle,
-            // discarding the style above; retarget the accent brushes so it stays red either way.
-            var light = dialog.RequestedTheme == ElementTheme.Light;
-            static Microsoft.UI.Xaml.Media.Brush Solid(string hex) => new Microsoft.UI.Xaml.Media.SolidColorBrush(
-                Windows.UI.Color.FromArgb(0xFF, Convert.ToByte(hex[..2], 16), Convert.ToByte(hex[2..4], 16), Convert.ToByte(hex[4..], 16)));
-            var normal = Solid("E11D48");
-            var hover = Solid(light ? "BE123C" : "F43F5E");
-            var pressed = Solid(light ? "9F1239" : "BE123C");
-            var white = Solid("FFFFFF");
-            var border = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(light ? (byte)0x1A : (byte)0x33, light ? (byte)0 : (byte)255, light ? (byte)0 : (byte)255, light ? (byte)0 : (byte)255));
-            dialog.Resources["AccentButtonBackground"] = normal;
-            dialog.Resources["AccentButtonBackgroundPointerOver"] = hover;
-            dialog.Resources["AccentButtonBackgroundPressed"] = pressed;
-            dialog.Resources["AccentButtonBorderBrush"] = border;
-            dialog.Resources["AccentButtonBorderBrushPointerOver"] = border;
-            dialog.Resources["AccentButtonBorderBrushPressed"] = border;
-            dialog.Resources["AccentButtonForeground"] = white;
-            dialog.Resources["AccentButtonForegroundPointerOver"] = white;
-            dialog.Resources["AccentButtonForegroundPressed"] = white;
+        // The template gives whichever button is the default AccentButtonStyle, discarding the styles
+        // above, so the accent brushes are retargeted from existing theme brushes only:
+        //  - Close is the default next to an action button: Cancel uses the native default button ("none").
+        //  - Primary is the default: danger red for Danger, amber for Warning, else the native accent.
+        var light = dialog.RequestedTheme == ElementTheme.Light;
+        if (dialog.DefaultButton == ContentDialogButton.Close && hasPrimary)
+        {
+            SetAccent(dialog, light, "ButtonBackground", "ButtonBackgroundPointerOver", "ButtonBackgroundPressed",
+                "ButtonForeground", "ButtonForegroundPointerOver", "ButtonForegroundPressed",
+                "ButtonBorderBrush", "ButtonBorderBrushPointerOver", "ButtonBorderBrushPressed");
+        }
+        else if (dialog.DefaultButton == ContentDialogButton.Primary && danger)
+        {
+            SetAccent(dialog, light, "DialogDangerButtonBackground", "DialogDangerButtonBackgroundPointerOver", "DialogDangerButtonBackgroundPressed",
+                "DialogDangerButtonForeground", "DialogDangerButtonForeground", "DialogDangerButtonForegroundPressed",
+                "DialogDangerButtonBorderBrush", "DialogDangerButtonBorderBrush", "DialogDangerButtonBorderBrush");
+        }
+        else if (dialog.DefaultButton == ContentDialogButton.Primary && tone == DialogTone.Warning && hasPrimary)
+        {
+            SetAccent(dialog, light, "DialogToneWarningBrush", "DialogToneWarningBrush", "DialogToneWarningBrush",
+                light ? "TextOnAccentFillColorPrimaryBrush" : "ContentDialogBackground", light ? "TextOnAccentFillColorPrimaryBrush" : "ContentDialogBackground", light ? "TextOnAccentFillColorPrimaryBrush" : "ContentDialogBackground",
+                "DialogToneWarningBrush", "DialogToneWarningBrush", "DialogToneWarningBrush");
         }
 
         return dialog;
+    }
+
+    /// <summary>Points the dialog's accent-button brushes at existing theme brushes (bg, fg, border; normal/hover/pressed).</summary>
+    private static void SetAccent(ContentDialog dialog, bool light, params string[] keys)
+    {
+        string[] targets =
+        [
+            "AccentButtonBackground", "AccentButtonBackgroundPointerOver", "AccentButtonBackgroundPressed",
+            "AccentButtonForeground", "AccentButtonForegroundPointerOver", "AccentButtonForegroundPressed",
+            "AccentButtonBorderBrush", "AccentButtonBorderBrushPointerOver", "AccentButtonBorderBrushPressed",
+        ];
+        for (var i = 0; i < targets.Length; i++)
+        {
+            if (FindThemeBrush(Application.Current.Resources, light ? "Light" : "Default", keys[i]) is { } brush)
+            {
+                dialog.Resources[targets[i]] = brush;
+            }
+        }
+    }
+
+    private static object? FindThemeBrush(ResourceDictionary dictionary, string theme, string key)
+    {
+        if (dictionary.ThemeDictionaries.TryGetValue(theme, out var themed) && themed is ResourceDictionary t && t.TryGetValue(key, out var found))
+        {
+            return found;
+        }
+
+        if (dictionary.TryGetValue(key, out found))
+        {
+            return found;
+        }
+
+        foreach (var merged in dictionary.MergedDictionaries)
+        {
+            if (FindThemeBrush(merged, theme, key) is { } hit)
+            {
+                return hit;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>Replaces the header, e.g. when an assessment that arrives later changes the dialog's tone.</summary>

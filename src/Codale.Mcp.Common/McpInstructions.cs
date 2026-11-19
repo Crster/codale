@@ -33,7 +33,8 @@ public static class McpInstructions
 
     public const string Memory =
         "Project memory is shared across conversations. At task start and before asking a repeated question, call memory_search for relevant preferences and conventions. " +
-        "Use memory_save automatically for user-stated preferences, explicitly accepted decisions, and verified durable project conventions. " +
+        "Use memory_save automatically, the moment it happens, for user-stated preferences or corrections, explicitly accepted decisions, and project conventions you verified by running them; " +
+        "write each note to stand alone (rule or fact, why, when it applies, exact commands and paths). " +
         "Search first and reuse an existing title to update a correction rather than duplicate it. Use memory_forget for superseded notes. " +
         "Never save unaccepted proposals, task progress, source-code facts or secrets. Current user instructions override recalled notes.";
 

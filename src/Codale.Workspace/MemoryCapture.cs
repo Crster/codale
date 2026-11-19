@@ -15,9 +15,18 @@ public static class MemoryCapture
         if (ContainsSecret(userText)) return [];
         return Regex.Split(userText, @"(?<=[.!?])\s+|[\r\n]+")
             .Select(s => s.Trim()).Where(s => s.Length is > 8 and <= 1000 && Regex.IsMatch(s,
-                @"(?i)^(?:please\s+)?(?:remember (?:that |to )?|i prefer |from now on[,:]? |always use |never use )") &&
+                @"(?i)^(?:please\s+)?(?:remember (?:that |to )?|i prefer |i like (?:it when|to have) |from now on[,:]? |going forward[,:]? |in (?:this|the) (?:repo|project)[,:]? |our (?:convention|rule|standard) is |we (?:always|never|use) |always use |never use |always |never |don'?t (?:ever |ever again )?(?:use|add|commit|run) |do not (?:use|add|commit|run) |make sure (?:you |to )?always )") &&
                 !Regex.IsMatch(s, @"(?i)\b(fix|implement|commit|finish|today|tomorrow|this task|step [0-9])\b"))
-            .Take(3).Select(s => new MemoryCandidate("Preference: " + s[..Math.Min(s.Length, 65)], s, "preference", s)).ToArray();
+            .Take(3).Select(s => new MemoryCandidate(TitleOf(s), s, "preference", s)).ToArray();
+    }
+
+    /// <summary>A readable title from the instruction itself: its first words, without the "remember that" lead-in.</summary>
+    private static string TitleOf(string sentence)
+    {
+        var core = Regex.Replace(sentence, @"(?i)^(?:please\s+)?(?:remember (?:that |to )?|from now on[,:]? |going forward[,:]? )", "").Trim().TrimEnd('.', '!');
+        if (core.Length == 0) core = sentence;
+        var cut = core.Length <= 60 ? core : core[..core.LastIndexOf(' ', 60)];
+        return char.ToUpperInvariant(cut[0]) + cut[1..];
     }
 
     public static bool Eligible(MemoryCandidate candidate, string userText, string? acceptedPlan, string? verifiedEvidence)
