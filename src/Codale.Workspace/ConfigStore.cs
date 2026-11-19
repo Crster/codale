@@ -21,6 +21,20 @@ public sealed class ConfigStore(string directory, WorkspaceDatabasePool? databas
 
     public void Set(string name, string value) => (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("config").Open(name).Write(value));
 
+    /// <summary>Claims a durable operation once, including across multiple views of the same workspace.</summary>
+    public bool TrySetIfAbsent(string name, string value) => (databases ?? WorkspaceDb.Shared).Use(directory, db =>
+    {
+        var claimed = false;
+        db.Batch(() =>
+        {
+            var node = db.Open("config").Open(name);
+            if (node.Read() is not null) return;
+            node.Write(value);
+            claimed = true;
+        });
+        return claimed;
+    });
+
     public bool Remove(string name) => (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("config").Open(name).Remove());
 
     public IReadOnlyList<string> Names() => (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("config").Children());

@@ -21,18 +21,30 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TitleBar x:Name="AppTitleBar" Title="Codale">
+        <!--
+            Title bar: [icon] [panel] [project ▾]  ·····  [ search ]  ·····  [run] [tools] | [settings]
+            The project chip replaces the long title + full-path subtitle (the path lives in its tooltip),
+            so the search field keeps its width and the bar reads as three calm groups.
+        -->
+        <TitleBar x:Name="AppTitleBar" Height="48">
             <TitleBar.LeftHeader>
-                <StackPanel Orientation="Horizontal">
+                <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
                     <Image
                         Width="18"
                         Height="18"
-                        Margin="12,0,6,0"
+                        Margin="12,0,8,0"
                         VerticalAlignment="Center"
                         Source="Assets/AppIcon.ico" />
+                    <TextBlock
+                        x:Name="AppNameText"
+                        Margin="0,0,8,0"
+                        VerticalAlignment="Center"
+                        FontSize="12.5"
+                        FontWeight="SemiBold"
+                        Text="Codale" />
                     <Button
                         x:Name="LeftPanelButton"
-                        Width="32"
+                        Width="30"
                         Height="30"
                         Click="OnTitleBarLeftPanelClick"
                         Style="{StaticResource ShellIconButton}"
@@ -40,121 +52,155 @@
                         Visibility="Collapsed">
                         <FontIcon FontSize="14" Glyph="&#xE8A0;" />
                     </Button>
+                    <!--  The open project: name only; full path on hover; click to switch folders.  -->
+                    <Button
+                        x:Name="ProjectChip"
+                        Height="30"
+                        MaxWidth="460"
+                        Margin="2,0,0,0"
+                        Padding="8,0,8,0"
+                        Click="OnChangeFolderClick"
+                        Style="{StaticResource ShellTextButton}"
+                        Visibility="Collapsed">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <FontIcon
+                                VerticalAlignment="Center"
+                                FontSize="13"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                Glyph="&#xE8B7;" />
+                            <TextBlock
+                                x:Name="ProjectNameText"
+                                MaxWidth="400"
+                                VerticalAlignment="Center"
+                                FontSize="12.5"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                TextTrimming="CharacterEllipsis" />
+                            <FontIcon
+                                VerticalAlignment="Center"
+                                FontSize="9"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Glyph="&#xE70D;" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </TitleBar.LeftHeader>
             <TitleBar.Content>
-                <!--  The global search: looks like a field, opens the floating palette.  -->
-                <Grid x:Name="TitleBarCenter" Visibility="Collapsed">
-                    <Button
-                        x:Name="SearchLauncher"
-                        Width="460"
-                        Height="30"
-                        Padding="10,0,6,0"
-                        HorizontalAlignment="Center"
-                        HorizontalContentAlignment="Stretch"
-                        VerticalAlignment="Center"
-                        Background="{ThemeResource ShellInputBackgroundBrush}"
-                        BorderBrush="{ThemeResource ShellInputStrokeBrush}"
-                        BorderThickness="1"
-                        Click="OnSearchLauncherClick"
-                        CornerRadius="7"
-                        ToolTipService.ToolTip="Search the project">
-                        <Grid ColumnSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <FontIcon
-                                VerticalAlignment="Center"
-                                FontSize="12"
-                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                Glyph="&#xE721;" />
-                            <TextBlock
-                                Grid.Column="1"
-                                VerticalAlignment="Center"
-                                FontSize="12.5"
-                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                Text="Search files, chats and commands"
-                                TextTrimming="CharacterEllipsis" />
-                            <Border Grid.Column="2" Style="{StaticResource ShellKeycap}">
-                                <TextBlock x:Name="SearchShortcutText" Style="{StaticResource ShellKeycapText}" Text="Ctrl+F" />
-                            </Border>
-                        </Grid>
-                    </Button>
+                <!--  Search and the tool buttons travel together as one centred group, apart by a small gap.
+                      The group's width comes from the window (MainWindow.xaml.cs).  -->
+                <Grid x:Name="TitleBarCenter" Padding="12,0" Visibility="Collapsed">
+                    <Grid x:Name="CenterGroup" Width="680" HorizontalAlignment="Center" ColumnSpacing="0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            x:Name="SearchLauncher"
+                            Height="32"
+                            Padding="12,0,6,0"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Stretch"
+                            VerticalAlignment="Center"
+                            Background="{ThemeResource ShellInputBackgroundBrush}"
+                            BorderBrush="{ThemeResource ShellInputStrokeBrush}"
+                            BorderThickness="1"
+                            Click="OnSearchLauncherClick"
+                            CornerRadius="8"
+                            ToolTipService.ToolTip="Search the project">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <FontIcon
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Glyph="&#xE721;" />
+                                <TextBlock
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    FontSize="12.5"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    Text="Search files, chats and commands"
+                                    TextTrimming="CharacterEllipsis" />
+                                <Border Grid.Column="2" Style="{StaticResource ShellKeycap}">
+                                    <TextBlock x:Name="SearchShortcutText" Style="{StaticResource ShellKeycapText}" Text="Ctrl+F" />
+                                </Border>
+                            </Grid>
+                        </Button>
+                        <Border
+                            x:Name="TitleBarExtras"
+                            Grid.Column="2"
+                            Height="32"
+                            Padding="2"
+                            VerticalAlignment="Center"
+                            Background="{ThemeResource ShellInputBackgroundBrush}"
+                            BorderBrush="{ThemeResource ShellInputStrokeBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Visibility="Collapsed">
+                            <StackPanel Orientation="Horizontal" Spacing="0">
+                                <Button
+                                    x:Name="CommandsButton"
+                                    Width="34"
+                                    Height="26"
+                                    Click="OnTitleBarCommandsClick"
+                                    Style="{StaticResource ShellIconButton}"
+                                    ToolTipService.ToolTip="Run a project command">
+                                    <Grid>
+                                        <FontIcon FontSize="14" Glyph="&#xE768;" />
+                                        <!--  The running-command count; hidden when nothing runs.  -->
+                                        <Border
+                                            x:Name="CommandsBadge"
+                                            MinWidth="14"
+                                            Margin="0,-6,-11,0"
+                                            Padding="4,0"
+                                            HorizontalAlignment="Right"
+                                            VerticalAlignment="Top"
+                                            Background="{StaticResource StatusSuccessBrush}"
+                                            CornerRadius="7"
+                                            Visibility="Collapsed">
+                                            <TextBlock
+                                                x:Name="CommandsBadgeText"
+                                                FontSize="9.5"
+                                                FontWeight="SemiBold"
+                                                Foreground="#0B0C0E"
+                                                HorizontalTextAlignment="Center"
+                                                Text="0" />
+                                        </Border>
+                                    </Grid>
+                                </Button>
+                                <Button
+                                    x:Name="BrowserButton"
+                                    Width="34"
+                                    Height="26"
+                                    Click="OnTitleBarBrowserClick"
+                                    Style="{StaticResource ShellIconButton}"
+                                    ToolTipService.ToolTip="Browser, desktop and phone tools for the agent">
+                                    <FontIcon FontSize="14" Glyph="&#xE774;" />
+                                </Button>
+                                <Rectangle
+                                    Width="1"
+                                    Height="14"
+                                    Margin="3,0"
+                                    VerticalAlignment="Center"
+                                    Fill="{ThemeResource ShellHairlineBrush}" />
+                                <Button
+                                    Width="34"
+                                    Height="26"
+                                    Click="OnSettingsClick"
+                                    Style="{StaticResource ShellIconButton}"
+                                    ToolTipService.ToolTip="Settings">
+                                    <FontIcon FontSize="14" Glyph="&#xE713;" />
+                                </Button>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
                 </Grid>
             </TitleBar.Content>
-            <TitleBar.RightHeader>
-                <StackPanel
-                    x:Name="TitleBarExtras"
-                    Margin="0,0,6,0"
-                    VerticalAlignment="Center"
-                    Orientation="Horizontal"
-                    Spacing="2"
-                    Visibility="Collapsed">
-                    <Button
-                        x:Name="CommandsButton"
-                        Width="32"
-                        Height="30"
-                        Click="OnTitleBarCommandsClick"
-                        Style="{StaticResource ShellIconButton}"
-                        ToolTipService.ToolTip="Run a project command">
-                        <Grid>
-                            <FontIcon FontSize="13" Glyph="&#xE768;" />
-                            <!--  The running-command count; hidden when nothing runs.  -->
-                            <Border
-                                x:Name="CommandsBadge"
-                                MinWidth="14"
-                                Margin="0,-7,-10,0"
-                                Padding="4,0"
-                                HorizontalAlignment="Right"
-                                VerticalAlignment="Top"
-                                Background="{StaticResource StatusSuccessBrush}"
-                                CornerRadius="7"
-                                Visibility="Collapsed">
-                                <TextBlock
-                                    x:Name="CommandsBadgeText"
-                                    FontSize="9.5"
-                                    FontWeight="SemiBold"
-                                    Foreground="#0B0C0E"
-                                    HorizontalTextAlignment="Center"
-                                    Text="0" />
-                            </Border>
-                        </Grid>
-                    </Button>
-                    <Button
-                        x:Name="BrowserButton"
-                        Width="32"
-                        Height="30"
-                        Click="OnTitleBarBrowserClick"
-                        Style="{StaticResource ShellIconButton}"
-                        ToolTipService.ToolTip="Browser, desktop and phone tools for the agent">
-                        <FontIcon FontSize="13" Glyph="&#xE774;" />
-                    </Button>
-                    <Rectangle
-                        Width="1"
-                        Height="16"
-                        Margin="4,0"
-                        VerticalAlignment="Center"
-                        Fill="{ThemeResource ShellHairlineBrush}" />
-                    <Button
-                        Width="32"
-                        Height="30"
-                        Click="OnChangeFolderClick"
-                        Style="{StaticResource ShellIconButton}"
-                        ToolTipService.ToolTip="Open another folder">
-                        <FontIcon FontSize="13" Glyph="&#xE8B7;" />
-                    </Button>
-                    <Button
-                        Width="32"
-                        Height="30"
-                        Click="OnSettingsClick"
-                        Style="{StaticResource ShellIconButton}"
-                        ToolTipService.ToolTip="Settings">
-                        <FontIcon FontSize="13" Glyph="&#xE713;" />
-                    </Button>
-                </StackPanel>
-            </TitleBar.RightHeader>
         </TitleBar>
 
         <!--

@@ -233,13 +233,20 @@ public static class TaskTools
                         ("title", "string", "A short name that identifies the note, e.g. \"Test command\"."),
                         ("text", "string", "What to remember, a few sentences at most."),
                         ("tags", "string", "Optional comma-separated tags, e.g. \"build, ci\"."),
+                        ("category", "string", "Optional preference, decision or project-fact; only user-stated, explicitly accepted or verified knowledge."),
                     ],
                     "title",
                     "text"),
                 (a, _) => Guarded(() =>
                 {
-                    var note = memory.Save(a.RequiredString("title"), a.RequiredString("text"),
-                        a.String("tags")?.Split(',') ?? []);
+                    var text = a.RequiredString("text");
+                    if (MemoryCapture.ContainsSecret(text)) throw new ArgumentException("Do not save credentials or secrets in project memory.");
+                    var category = a.String("category");
+                    if (category is not (null or "preference" or "decision" or "project-fact"))
+                        throw new ArgumentException("Memory category must be preference, decision or project-fact.");
+                    var note = memory.Save(a.RequiredString("title"), text,
+                        a.String("tags")?.Split(',') ?? [], category,
+                        new MemorySource(null, "agent-tool", text, DateTimeOffset.UtcNow));
                     return $"Remembered as [{note.Id}].";
                 })),
 

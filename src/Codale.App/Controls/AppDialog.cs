@@ -72,6 +72,26 @@ public static class AppDialog
         if (tone == DialogTone.Danger && dialog.PrimaryButtonText is { Length: > 0 })
         {
             dialog.PrimaryButtonStyle = (Style)Application.Current.Resources["DialogDangerButtonStyle"];
+
+            // With DefaultButton = Primary the template swaps the primary button to AccentButtonStyle,
+            // discarding the style above; retarget the accent brushes so it stays red either way.
+            var light = dialog.RequestedTheme == ElementTheme.Light;
+            static Microsoft.UI.Xaml.Media.Brush Solid(string hex) => new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                Windows.UI.Color.FromArgb(0xFF, Convert.ToByte(hex[..2], 16), Convert.ToByte(hex[2..4], 16), Convert.ToByte(hex[4..], 16)));
+            var normal = Solid("E11D48");
+            var hover = Solid(light ? "BE123C" : "F43F5E");
+            var pressed = Solid(light ? "9F1239" : "BE123C");
+            var white = Solid("FFFFFF");
+            var border = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(light ? (byte)0x1A : (byte)0x33, light ? (byte)0 : (byte)255, light ? (byte)0 : (byte)255, light ? (byte)0 : (byte)255));
+            dialog.Resources["AccentButtonBackground"] = normal;
+            dialog.Resources["AccentButtonBackgroundPointerOver"] = hover;
+            dialog.Resources["AccentButtonBackgroundPressed"] = pressed;
+            dialog.Resources["AccentButtonBorderBrush"] = border;
+            dialog.Resources["AccentButtonBorderBrushPointerOver"] = border;
+            dialog.Resources["AccentButtonBorderBrushPressed"] = border;
+            dialog.Resources["AccentButtonForeground"] = white;
+            dialog.Resources["AccentButtonForegroundPointerOver"] = white;
+            dialog.Resources["AccentButtonForegroundPressed"] = white;
         }
 
         return dialog;

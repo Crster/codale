@@ -974,7 +974,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             IsViewingHistory = false;
             HistoryTitle = null;
             ChatActivationRequested?.Invoke(this, target);
-            await target.SendRedirectedAsync(redirect.Text, redirect.NewName);
+            await target.SendRedirectedAsync(redirect.Text, redirect.NewName, redirect.Attachments);
         }
         catch (Exception)
         {

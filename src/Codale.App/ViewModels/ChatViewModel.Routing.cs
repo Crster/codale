@@ -1,4 +1,4 @@
-﻿using Codale.App.Services;
+using Codale.App.Services;
 using Codale.Core.Agents;
 using Codale.Core.Features;
 using Codale.Core.Helper;
@@ -6,11 +6,13 @@ using Codale.Core.Helper;
 namespace Codale.App.ViewModels;
 
 /// <summary>A prompt Auto mode found belongs elsewhere: an existing session (<see cref="FeatureId"/>) or a new one.</summary>
-public sealed record TopicRedirect(string Text, string? FeatureId, string? FeatureName, string? NewName);
+public sealed record TopicRedirect(string Text, string? FeatureId, string? FeatureName, string? NewName)
+{
+    public IReadOnlyList<TurnAttachment> Attachments { get; init; } = [];
+}
 
 /// <summary>
-/// The auto mode enhancer: on the Decision model (General when Decision is off) it picks Ask, Plan or Act for the turn,
-/// and when the conversation seems to change topic it checks whether the prompt belongs to another session.
+/// Model-first assessment of independent topic, intent, difficulty, planning, clarity and preference dimensions.
 /// </summary>
 public sealed partial class ChatViewModel
 {
@@ -23,117 +25,55 @@ public sealed partial class ChatViewModel
     private string? _keepHere;
 
     /// <summary>
-    /// The turn's mode, and where the prompt belongs when it looks like another topic. The local rules settle most
-    /// prompts; the model is asked only when they are unsure of the mode or see a topic change, and its answer is
-    /// checked against them. Slow answers fall back to the local rules.
+    /// The last assessment shown in the routing notice. Decision, then General, then local fallback, per field.
     /// </summary>
-    private async Task<(RouteDecision Decision, TopicRedirect? Redirect)> RouteSmartAsync(
-        string text, bool hasAttachments, UserMessageItem shown, CancellationToken ct, DateTimeOffset deadline)
-    {
-        var local = MessageRouting.Assess(text);
-        var fallback = MessageRouting.RouteWithoutModel(text);
-        if (!_smart.Settings.SmartFeatureEnabled("routing")) return (fallback, null);
+    private AutoAssessment? _autoAssessment;
 
-        var earlier = Items.OfType<UserMessageItem>().Where(i => !ReferenceEquals(i, shown) && i.Text.Length > 0)
-            .TakeLast(3).Select(i => i.Text).ToList();
+    private async Task<(RouteDecision Decision, TopicRedirect? Redirect)> RouteSmartAsync(
+        string text, UserMessageItem shown, CancellationToken ct)
+    {
         var keep = _keepHere == text;
         _keepHere = null;
-        var canRedirect = !keep && !hasAttachments && FeatureId is not null && Features is not null && earlier.Count > 0;
-
-        // The Decision model answers in about a second, so every prompt with a subject of its own is checked
-        // against the project's sessions; its answer is trusted only when it is sure.
-        if (_decider.IsAvailable)
+        var recent = Features?.List().OrderByDescending(s => s.Id == FeatureId)
+            .ThenByDescending(s => s.UpdatedAt).Take(MaxRoutedSessions).ToList() ?? [];
+        var sessions = recent.Where(s => s.Id == FeatureId).Concat(Features?.Search(text, 10) ?? [])
+            .Concat(recent).DistinctBy(s => s.Id).Take(MaxRoutedSessions).ToList();
+        var earlier = Items.OfType<UserMessageItem>().Where(i => !ReferenceEquals(i, shown))
+            .TakeLast(3).Select(i => i.Text).ToArray();
+        var questions = AutoDecisions.Questions();
+        var canRedirect = !keep && FeatureId is not null && earlier.Length > 0;
+        if (canRedirect) questions["session"] = AutoDecisions.SessionQuestion(sessions, FeatureId!);
+        var memory = RecallMemory(text);
+        var state = new
         {
-            var askSession = canRedirect && SearchText.HasTopic(text) && !MessageRouting.IsFollowUp(text);
-            if (local.Confident && !askSession) return (fallback, null);
-            var decided = await DecideRouteAsync(text, local, fallback, askSession, ct);
-            if (decided is { } answer) return answer;
-            if (local.Confident) return (fallback, null);
-        }
-
-        var shifted = canRedirect && TopicShift.IsNewTopic(text, earlier, LastRoutingReply)
-            && _smart.Settings.SmartRoleEnabled(SmartFeatureSettings.General);
-        if (local.Confident && !shifted) return (fallback, null);
-        if (!_smart.Settings.SmartRoleEnabled(SmartFeatureSettings.General) || _smart.Instance.Status.State != Codale.Smart.SmartState.Ready)
-            return (fallback, null);
-
-        try
+            current_session = sessions.FirstOrDefault(s => s.Id == FeatureId),
+            recent_user_messages = earlier,
+            last_agent_reply = LastRoutingReply,
+            new_message = text,
+            attachments = shown.Attachments.Select(a => new { a.Name, kind = a.Kind.ToString(), a.Path }),
+            memory,
+        };
+        var general = _smart.CreateClient(SmartFeatureSettings.General);
+        var assessment = await AutoRouter.AssessAsync(text, state, questions,
+            (input, qs, token) => _smart.Settings.SmartFeatureEnabled("routing") && _decider.IsAvailable
+                ? _decider.AskAsync(input, qs, token) : Task.FromResult<IReadOnlyDictionary<string, SmartDecision>?>(null),
+            async (system, input, token) => _smart.Settings.SmartFeatureEnabled("routing") && general.IsEnabled
+                ? await general.CompleteAsync("routing", system, input, 800, token) : null, ct);
+        if (canRedirect && !assessment.FieldSources.ContainsKey("session") &&
+            TopicShift.IsNewTopic(text, earlier, LastRoutingReply) && !MessageRouting.IsFollowUp(text))
+            assessment = assessment with { Topic = "new" };
+        // An empty chat is a fresh topic: only then (or on a new topic) can a planner be worth its cost.
+        if (earlier.Length == 0) assessment = assessment with { FreshTopic = true };
+        _autoAssessment = assessment;
+        OnPropertyChanged(nameof(AutoRoutingDetails));
+        TopicRedirect? redirect = assessment.Topic switch
         {
-            using var quick = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            quick.CancelAfter(TimeSpan.FromSeconds(shifted ? 6 : 4));
-            if (!shifted)
-            {
-                var intent = await _smart.Instance.ClassifyAsync(new(ProjectPath, ProjectPath, "routing", _chatId, deadline),
-                    text, LastRoutingReply, quick.Token).WaitAsync(quick.Token);
-                return intent?.Value is { } selected ? (MessageRouting.Reconcile(local, selected switch
-                {
-                    Codale.Smart.SmartIntent.Ask => RouteIntent.Ask,
-                    Codale.Smart.SmartIntent.Plan => RouteIntent.Plan,
-                    _ => RouteIntent.Act,
-                }), null) : (fallback, null);
-            }
-
-            // Recent sessions only: the list is the model's prompt, and a far-off session is rarely the right one.
-            var sessions = Features!.List().OrderByDescending(f => f.Id == FeatureId).ThenByDescending(f => f.UpdatedAt)
-                .Take(MaxRoutedSessions).ToList();
-            var helper = new SmartHelperModel(ProjectPath, "routing", TimeSpan.FromSeconds(6), _smart);
-            var call = await helper.CallToolAsync(FeatureRouting.SystemPrompt,
-                FeatureRouting.BuildConversation(text, sessions, FeatureId, LastRoutingReply), [FeatureRouting.RouteTool(sessions)], quick.Token);
-            if (call is null) return (fallback, null);
-            var routed = FeatureRouting.Interpret(call, text, sessions, FeatureId);
-            var decision = MessageRouting.Reconcile(local, routed.Route.Intent);
-            TopicRedirect? redirect = routed.Action switch
-            {
-                FeatureAction.Switch when sessions.FirstOrDefault(s => s.Id == routed.FeatureId) is { } target =>
-                    new(text, target.Id, target.Name, null),
-                FeatureAction.Create => new(text, null, null, routed.NewNames?.FirstOrDefault()),
-                _ => null,
-            };
-            return (decision, redirect);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return (fallback, null); }
-        catch (HelperModelException) { return (fallback, null); }
-        finally
-        {
-            if (_activeTurn is { } routedTurn) routedTurn.LiveStage = "Routing";
-        }
-    }
-
-    /// <summary>
-    /// One request to the Decision model: the mode (when the local rules are unsure) and the session (when asked).
-    /// Null when the request failed, so the caller falls back to General or the local rules.
-    /// </summary>
-    private async Task<(RouteDecision Decision, TopicRedirect? Redirect)?> DecideRouteAsync(string text, RouteDecision local,
-        RouteDecision fallback, bool askSession, CancellationToken ct)
-    {
-        var sessions = askSession ? Features!.List().OrderByDescending(f => f.Id == FeatureId).ThenByDescending(f => f.UpdatedAt)
-            .Take(MaxRoutedSessions).ToList() : [];
-        var questions = new Dictionary<string, SmartQuestion>();
-        if (!local.Confident) questions["intent"] = SmartDecisions.IntentQuestion();
-        if (askSession) questions["session"] = SmartDecisions.SessionQuestion(sessions, FeatureId!);
-
-        try
-        {
-            using var quick = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            quick.CancelAfter(TimeSpan.FromSeconds(4));
-            var current = sessions.FirstOrDefault(s => s.Id == FeatureId) ?? (FeatureId is { } id ? Features?.Get(id) : null);
-            var answers = await _decider.AskAsync(SmartDecisions.State(text, current, LastRoutingReply), questions, quick.Token);
-            if (answers is null) return null;
-            var decision = answers.TryGetValue("intent", out var intent) ? SmartDecisions.Route(local, intent) : fallback;
-            TopicRedirect? redirect = null;
-            if (askSession && SmartDecisions.Redirect(answers.GetValueOrDefault("session"), sessions, FeatureId!) is { } move)
-            {
-                redirect = move.New
-                    ? new(text, null, null, TitleFromPrompt(text))
-                    : new(text, move.FeatureId, sessions.First(s => s.Id == move.FeatureId).Name, null);
-            }
-            return (decision, redirect);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return null; }
-        finally
-        {
-            if (_activeTurn is { } routedTurn) routedTurn.LiveStage = "Routing";
-        }
+            "new" when canRedirect => new(text, null, null, TitleFromPrompt(text)) { Attachments = shown.Attachments },
+            var id when canRedirect && id != "current" && sessions.FirstOrDefault(s => s.Id == id && s.Id != FeatureId) is { } target =>
+                new(text, target.Id, target.Name, null) { Attachments = shown.Attachments },
+            _ => null,
+        };
+        return (new(text, assessment.Intent, redirect is not null, assessment.Confidence >= AutoDecisions.MinimumConfidence), redirect);
     }
 
     /// <summary>Append a question to the transcript asking where the held-back prompt goes.</summary>
@@ -151,26 +91,30 @@ public sealed partial class ChatViewModel
             case FeatureJumpChoice.Jump:
             case FeatureJumpChoice.New:
                 if (Draft.Replace("\r\n", "\n").Replace('\r', '\n').Trim() == redirect.Text) Draft = "";
+                foreach (var attachment in Attachments.Where(a => redirect.Attachments.Any(sent => sent.Path == a.Path)).ToArray())
+                    Attachments.Remove(attachment);
                 TopicRedirectRequested?.Invoke(this, choice == FeatureJumpChoice.New
                     ? redirect with { FeatureId = null, FeatureName = null }
                     : redirect);
                 break;
             case FeatureJumpChoice.Stay:
                 _keepHere = redirect.Text;
+                AddRedirectedAttachments(redirect.Attachments);
                 await SendAsync();
                 break;
         }
     }
 
     /// <summary>Sends a prompt another session handed over, once this chat is connected; a new session takes <paramref name="name"/>.</summary>
-    public async Task SendRedirectedAsync(string text, string? name)
+    public async Task SendRedirectedAsync(string text, string? name, IReadOnlyList<TurnAttachment>? attachments = null)
     {
         if (!IsConnected && !IsConnecting) await ConnectAsync();
         for (var waited = 0; IsConnecting && waited < 300; waited++) await Task.Delay(100);
-        if (!IsConnected) { Draft = text; return; }
+        if (!IsConnected) { Draft = text; AddRedirectedAttachments(attachments ?? []); return; }
         var isNew = FeatureId is null;
         _keepHere = text;
         Draft = text;
+        AddRedirectedAttachments(attachments ?? []);
         await SendAsync();
         if (isNew && name is { Length: > 0 } && FeatureId is { } id && Features is { } features)
         {

@@ -325,10 +325,10 @@ public sealed partial class StatusViewModel : ObservableObject
         ? $"{Format(ContextTokens)} / {Format(ContextWindow)}"
         : ContextTokens == 0 ? "0 / 1.0M" : Format(ContextTokens);
 
-    /// <summary>"45k / 200k Â\u00b7 22%" for the session panel's context bar; a dash before the session reports anything.</summary>
+    /// <summary>"45k / 200k · 22%" for the session panel's context bar; a dash before the session reports anything.</summary>
     public string ContextSummary => !HasContext
-        ? "0 Â\u00b7 0%"
-        : HasContextWindow ? $"{ContextText} Â\u00b7 {ContextPercentText}" : ContextText;
+        ? "0 · 0%"
+        : HasContextWindow ? $"{ContextText} · {ContextPercentText}" : ContextText;
 
     public bool HasContextWindow => ContextWindow > 0;
 
@@ -399,8 +399,8 @@ public sealed partial class StatusViewModel : ObservableObject
         return "Resets in " + text;
     }
 
-    /// <summary>Status bar label: the percentages alone, e.g. "9% Â\u00b7 67%".</summary>
-    public string UsageSummary => string.Join(" Â\u00b7 ", new[] { FiveHourUtilization, SevenDayUtilization }
+    /// <summary>Status bar label: the percentages alone, e.g. "9% · 67%".</summary>
+    public string UsageSummary => string.Join(" · ", new[] { FiveHourUtilization, SevenDayUtilization }
         .Where(u => u is not null)
         .Select(u => $"{Math.Clamp(u!.Value * 100, 0, 100):0}%"));
 
@@ -501,8 +501,8 @@ public sealed partial class StatusViewModel : ObservableObject
 
     public bool HasChanges => Changes.Count > 0;
 
-    /// <summary>"3 files +42 âˆ’7" for the status bar.</summary>
-    public string ChangeBarText => $"{Changes.Count} {(Changes.Count == 1 ? "file" : "files")}  +{Changes.Sum(c => c.Added)} âˆ’{Changes.Sum(c => c.Removed)}";
+    /// <summary>"3 files +42 −7" for the status bar.</summary>
+    public string ChangeBarText => $"{Changes.Count} {(Changes.Count == 1 ? "file" : "files")}  +{Changes.Sum(c => c.Added)} −{Changes.Sum(c => c.Removed)}";
 
     private void NotifyChangeBar()
     {
@@ -510,10 +510,10 @@ public sealed partial class StatusViewModel : ObservableObject
         OnPropertyChanged(nameof(ChangeBarText));
     }
 
-    /// <summary>"3 files Â\u00b7 +42 âˆ’7" for the section header.</summary>
+    /// <summary>"3 files · +42 −7" for the section header.</summary>
     public string ChangeSummary => Changes.Count == 0
         ? "The agent has not changed any files in this session."
-        : $"{Changes.Count} {(Changes.Count == 1 ? "file" : "files")} Â\u00b7 +{Changes.Sum(c => c.Added)} âˆ’{Changes.Sum(c => c.Removed)}";
+        : $"{Changes.Count} {(Changes.Count == 1 ? "file" : "files")} · +{Changes.Sum(c => c.Added)} −{Changes.Sum(c => c.Removed)}";
 
     /// <summary>Any row still lit from a change moments ago: drives the section badge's pulse.</summary>
     [ObservableProperty]

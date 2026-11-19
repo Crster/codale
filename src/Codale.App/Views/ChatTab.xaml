@@ -107,6 +107,17 @@
             <Setter Property="CornerRadius" Value="6" />
         </Style>
 
+        <!--  A starter card on the chat empty state: the same neutral surface the
+              workspace welcome page uses for its action cards.  -->
+        <Style x:Key="StarterCardButton" TargetType="Button">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="16,14" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+        </Style>
+
         <!--  ===== Shared pieces =====  -->
 
         <!--  A diff, inline: one gutter column, a sign column, tinted rows, wrapped
@@ -917,7 +928,7 @@
             </Grid>
         </DataTemplate>
 
-        <!--  The agent thinking aloud between steps: quieter than the answer.  -->
+        <!--  Agent updates keep the surrounding gap but carry no card fill, so the text still breathes between tool events.  -->
         <DataTemplate x:Key="StepNarrationTemplate" x:DataType="vm:AssistantMessageItem">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -926,37 +937,30 @@
                 </Grid.ColumnDefinitions>
                 <Rectangle
                     Width="1"
-                    Height="8"
+                    Height="21"
                     VerticalAlignment="Top"
                     Fill="{StaticResource TimelineRailBrush}" />
                 <Ellipse
-                    Width="6"
-                    Height="6"
-                    Margin="0,9,0,0"
+                    Width="8"
+                    Height="8"
+                    Margin="0,25,0,0"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Top"
-                    Fill="{ThemeResource TextFillColorTertiaryBrush}" />
+                    Fill="{ThemeResource AccentFillColorDefaultBrush}" />
                 <Rectangle
                     Width="1"
-                    Margin="0,17,0,0"
+                    Margin="0,33,0,0"
                     Fill="{StaticResource TimelineRailBrush}" />
                 <StackPanel
                     Grid.Column="1"
-                    Margin="6,2,0,8"
-                    Spacing="2">
-                    <StackPanel
-                        Orientation="Horizontal"
-                        Spacing="6"
-                        Visibility="{x:Bind HasThinking, Mode=OneWay}">
-                        <FontIcon
-                            FontSize="{x:Bind S12_5, Mode=OneWay}"
-                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Glyph="&#xEA80;" />
-                        <TextBlock
-                            FontSize="{x:Bind S12_5, Mode=OneWay}"
-                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="thought" />
-                    </StackPanel>
+                    Margin="1,10,0,14"
+                    Padding="10,10"
+                    Spacing="3">
+                    <TextBlock
+                        FontSize="{x:Bind S11, Mode=OneWay}"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Text="· thought"
+                        Visibility="{x:Bind HasThinking, Mode=OneWay}" />
                     <views:MarkdownView BaseFontSize="{x:Bind S13_5, Mode=OneWay}" Markdown="{x:Bind Text, Mode=OneWay}" />
                     <Rectangle
                         Width="7"
@@ -1439,6 +1443,75 @@
             </StackPanel>
         </DataTemplate>
 
+        <!-- Answers and plans use the same compact review surface as the original plan approval. -->
+        <DataTemplate x:Key="SpecialistTemplate" x:DataType="vm:SpecialistHistoryItem">
+            <Border Margin="{Binding RowMargin, Mode=OneWay}" Style="{StaticResource HistoryQuestionCard}">
+                <StackPanel Spacing="10">
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="{Binding Specialist.EntryGlyph}" FontSize="15" VerticalAlignment="Center" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                        <StackPanel Grid.Column="1" Spacing="1">
+                            <TextBlock Text="{Binding Specialist.EntryTitle, Mode=OneWay}" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding Specialist.EntrySubtitle, Mode=OneWay}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <Button Grid.Column="2" Content="Open" Command="{Binding Specialist.OpenDetailsCommand}"
+                                Style="{StaticResource LinkButton}" ToolTipService.ToolTip="Show beside the chat" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="MemoryNoticeTemplate" x:DataType="vm:MemoryNoticeItem">
+            <!--  A quiet one-line entry like compaction; View / Forget live in the right-click menu.  -->
+            <StackPanel
+                views:TextBaseline.IsAligned="True"
+                Margin="{x:Bind RowMargin, Mode=OneWay}"
+                Background="Transparent"
+                Orientation="Horizontal"
+                Spacing="8"
+                ToolTipService.ToolTip="Right-click to view or forget this memory">
+                <StackPanel.ContextFlyout>
+                    <MenuFlyout>
+                        <MenuFlyoutItem Command="{x:Bind OpenMemoryCommand}" Text="View memory">
+                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE82D;" /></MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem Command="{x:Bind ForgetMemoryCommand}" IsEnabled="{x:Bind CanForget, Mode=OneWay}" Text="Forget">
+                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74D;" /></MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                    </MenuFlyout>
+                </StackPanel.ContextFlyout>
+                <Grid
+                    Width="20"
+                    Height="20"
+                    Margin="1,3,1,3"
+                    VerticalAlignment="Center">
+                    <Border Background="{StaticResource KindAskTintBrush}" CornerRadius="10" />
+                    <FontIcon
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        FontSize="{x:Bind S10, Mode=OneWay}"
+                        Foreground="{StaticResource KindAskBrush}"
+                        Glyph="&#xE82D;" />
+                </Grid>
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="{x:Bind S12, Mode=OneWay}"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    Text="{x:Bind Label, Mode=OneWay}" />
+                <TextBlock
+                    MaxWidth="420"
+                    VerticalAlignment="Center"
+                    FontSize="{x:Bind S12, Mode=OneWay}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="{x:Bind Text}"
+                    TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+        </DataTemplate>
+
         <DataTemplate x:Key="NoticeTemplate" x:DataType="vm:NoticeItem">
             <Grid
                 Margin="{x:Bind RowMargin, Mode=OneWay}"
@@ -1478,22 +1551,21 @@
             </Grid>
         </DataTemplate>
 
-        <!-- Session routing shares the question surface and folds to the chosen answer. -->
+        <!-- Session routing shares the question surface and folds to the chosen answer. Each choice
+             uses neutral monochrome icons; only the glyphs tell the three apart. -->
         <DataTemplate x:Key="FeatureJumpTemplate" x:DataType="vm:FeatureJumpItem">
             <Border
                 Margin="{x:Bind RowMargin, Mode=OneWay}"
                 Style="{StaticResource HistoryQuestionCard}">
                 <StackPanel Spacing="10">
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                        <FontIcon
-                            FontSize="{x:Bind S13, Mode=OneWay}"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Glyph="&#xE81C;" />
+                        <FontIcon VerticalAlignment="Center" FontSize="{x:Bind S12, Mode=OneWay}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE81C;" />
                         <TextBlock
+                            VerticalAlignment="Center"
                             FontSize="{x:Bind S12, Mode=OneWay}"
                             FontWeight="SemiBold"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="The agent needs your input" />
+                            Text="Which history does this belong to?" />
                     </StackPanel>
                     <TextBlock
                         FontSize="{x:Bind S14, Mode=OneWay}"
@@ -1501,100 +1573,84 @@
                         Text="{x:Bind Question}"
                         TextWrapping="Wrap" />
                     <StackPanel Visibility="{x:Bind IsOpen, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                            <Button
-                                Margin="0,0,0,6"
-                                BorderBrush="{StaticResource DetailStrokeBrush}"
-                                Background="Transparent"
-                                Click="OnFeatureJumpClick"
-                                Style="{StaticResource OptionRow}"
-                                Tag="{x:Bind}"
-                                Visibility="{x:Bind HasJump, Converter={StaticResource BoolToVisibility}}">
-                                <Grid ColumnSpacing="12">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <FontIcon
-                                        Margin="0,2,0,0"
-                                        VerticalAlignment="Top"
-                                        FontSize="{x:Bind S14, Mode=OneWay}"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Glyph="&#xE111;" />
-                                    <StackPanel Grid.Column="1" Spacing="2">
-                                        <TextBlock
-                                            FontWeight="SemiBold"
-                                            Text="{x:Bind JumpText}"
-                                            TextWrapping="Wrap" />
-                                        <TextBlock
-                                            FontSize="{x:Bind S12, Mode=OneWay}"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            Text="Continue this conversation there."
-                                            TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </Grid>
-                            </Button>
-                            <Button
-                                Margin="0,0,0,6"
-                                BorderBrush="{StaticResource DetailStrokeBrush}"
-                                Background="Transparent"
-                                Click="OnFeatureJumpNewClick"
-                                Style="{StaticResource OptionRow}"
-                                Tag="{x:Bind}">
-                                <Grid ColumnSpacing="12">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <FontIcon
-                                        Margin="0,2,0,0"
-                                        VerticalAlignment="Top"
-                                        FontSize="{x:Bind S14, Mode=OneWay}"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Glyph="&#xE710;" />
-                                    <StackPanel Grid.Column="1" Spacing="2">
-                                        <TextBlock
-                                            FontWeight="SemiBold"
-                                            Text="New history"
-                                            TextWrapping="Wrap" />
-                                        <TextBlock
-                                            FontSize="{x:Bind S12, Mode=OneWay}"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            Text="Start a fresh history for this message."
-                                            TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </Grid>
-                            </Button>
-                            <Button
-                                Margin="0,0,0,6"
-                                BorderBrush="{StaticResource DetailStrokeBrush}"
-                                Background="Transparent"
-                                Click="OnFeatureJumpStayClick"
-                                Style="{StaticResource OptionRow}"
-                                Tag="{x:Bind}">
-                                <Grid ColumnSpacing="12">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <FontIcon
-                                        Margin="0,2,0,0"
-                                        VerticalAlignment="Top"
-                                        FontSize="{x:Bind S14, Mode=OneWay}"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Glyph="&#xE73E;" />
-                                    <StackPanel Grid.Column="1" Spacing="2">
-                                        <TextBlock
-                                            FontWeight="SemiBold"
-                                            Text="Stay"
-                                            TextWrapping="Wrap" />
-                                        <TextBlock
-                                            FontSize="{x:Bind S12, Mode=OneWay}"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            Text="Keep going in the current history."
-                                            TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </Grid>
-                            </Button>
+                        <Button
+                            Margin="0,0,0,6"
+                            BorderBrush="{StaticResource DetailStrokeBrush}"
+                            Background="Transparent"
+                            Click="OnFeatureJumpClick"
+                            Style="{StaticResource OptionRow}"
+                            Tag="{x:Bind}"
+                            Visibility="{x:Bind HasJump, Converter={StaticResource BoolToVisibility}}">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <FontIcon Width="22" VerticalAlignment="Center" FontSize="{x:Bind S14, Mode=OneWay}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE8AD;" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                                    <TextBlock FontWeight="SemiBold" Text="{x:Bind JumpText}" TextWrapping="Wrap" />
+                                    <TextBlock FontSize="{x:Bind S12, Mode=OneWay}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="Continue this conversation there." TextWrapping="Wrap" />
+                                </StackPanel>
+                                    <Border Grid.Column="2" Padding="6,1" VerticalAlignment="Center" CornerRadius="4"
+                                            BorderThickness="1" BorderBrush="{StaticResource DetailStrokeBrush}">
+                                        <TextBlock FontSize="{x:Bind S11, Mode=OneWay}"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Suggested" />
+                                    </Border>
+                                <FontIcon Grid.Column="3" VerticalAlignment="Center" FontSize="{x:Bind S10, Mode=OneWay}"
+                                          Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE76C;" />
+                            </Grid>
+                        </Button>
+                        <Button
+                            Margin="0,0,0,6"
+                            BorderBrush="{StaticResource DetailStrokeBrush}"
+                            Background="Transparent"
+                            Click="OnFeatureJumpNewClick"
+                            Style="{StaticResource OptionRow}"
+                            Tag="{x:Bind}">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <FontIcon Width="22" VerticalAlignment="Center" FontSize="{x:Bind S14, Mode=OneWay}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE710;" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                                    <TextBlock FontWeight="SemiBold" Text="New history" TextWrapping="Wrap" />
+                                    <TextBlock FontSize="{x:Bind S12, Mode=OneWay}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="Start a fresh history for this message." TextWrapping="Wrap" />
+                                </StackPanel>
+                                <FontIcon Grid.Column="3" VerticalAlignment="Center" FontSize="{x:Bind S10, Mode=OneWay}"
+                                          Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE76C;" />
+                            </Grid>
+                        </Button>
+                        <Button
+                            Margin="0,0,0,6"
+                            BorderBrush="{StaticResource DetailStrokeBrush}"
+                            Background="Transparent"
+                            Click="OnFeatureJumpStayClick"
+                            Style="{StaticResource OptionRow}"
+                            Tag="{x:Bind}">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <FontIcon Width="22" VerticalAlignment="Center" FontSize="{x:Bind S14, Mode=OneWay}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE73E;" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                                    <TextBlock FontWeight="SemiBold" Text="Stay" TextWrapping="Wrap" />
+                                    <TextBlock FontSize="{x:Bind S12, Mode=OneWay}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="Keep going in the current history." TextWrapping="Wrap" />
+                                </StackPanel>
+                                <FontIcon Grid.Column="3" VerticalAlignment="Center" FontSize="{x:Bind S10, Mode=OneWay}"
+                                          Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE76C;" />
+                            </Grid>
+                        </Button>
                     </StackPanel>
                     <StackPanel
                         Orientation="Horizontal"
@@ -1880,6 +1936,8 @@
 
         <views:ChatItemTemplateSelector
             x:Key="ChatTemplateSelector"
+            SpecialistTemplate="{StaticResource SpecialistTemplate}"
+            MemoryNoticeTemplate="{StaticResource MemoryNoticeTemplate}"
             ActivityTemplate="{StaticResource ActivityTemplate}"
             AssistantTemplate="{StaticResource AssistantTemplate}"
             BriefingTemplate="{StaticResource BriefingTemplate}"
@@ -2051,7 +2109,8 @@
                 ItemsSource="{x:Bind ViewModel.Items}" />
         </ScrollViewer>
 
-        <!--  Shown until the first message arrives: Vibrant Welcome & Quick Starters  -->
+        <!--  Shown until the first message arrives: a quiet welcome with quick
+              starters, in the same neutral language as the workspace welcome page.  -->
         <ScrollViewer
             HorizontalAlignment="Center"
             VerticalAlignment="Center"
@@ -2062,36 +2121,25 @@
                 MaxWidth="620"
                 Margin="24,16"
                 Spacing="20">
-                <!-- Glowing Emblem & Header -->
-                <StackPanel HorizontalAlignment="Center" Spacing="10">
-                    <Border
-                        Width="56"
-                        Height="56"
-                        HorizontalAlignment="Center"
-                        Background="{StaticResource KindAskTintBrush}"
-                        BorderBrush="{StaticResource AskStrokeBrush}"
-                        BorderThickness="1.5"
-                        CornerRadius="16">
-                        <FontIcon
-                            FontSize="26"
-                            Foreground="{StaticResource KindAskBrush}"
-                            Glyph="&#xEA80;" />
-                    </Border>
+                <!-- Header -->
+                <StackPanel HorizontalAlignment="Center" Spacing="8">
                     <TextBlock
                         HorizontalAlignment="Center"
                         FontSize="20"
                         FontWeight="Bold"
                         Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                        Text="What are we building today?" />
+                        Text="What are we building today?"
+                        TextWrapping="Wrap" />
                     <TextBlock
                         HorizontalAlignment="Center"
                         FontSize="13"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="Explore the codebase, edit files, run commands, or plan new features." />
+                        Text="Explore the codebase, edit files, run commands, or plan new features."
+                        TextWrapping="Wrap" />
                 </StackPanel>
 
                 <!-- 2x2 Grid of Quick Starters -->
-                <Grid ColumnSpacing="12" RowSpacing="12">
+                <Grid ColumnSpacing="10" RowSpacing="10">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
@@ -2105,31 +2153,23 @@
                     <Button
                         Grid.Row="0"
                         Grid.Column="0"
-                        Padding="14,12"
-                        HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Stretch"
-                        Background="{StaticResource StarterCardBrush}"
-                        BorderBrush="{StaticResource StarterCardStrokeBrush}"
-                        BorderThickness="1"
                         Click="OnStarterPromptClick"
-                        CornerRadius="10"
-                        Tag="Compile the project with dotnet build and run unit tests to check for failures.">
-                        <Grid ColumnSpacing="10">
+                        Tag="Compile the project with dotnet build and run unit tests to check for failures."
+                        Style="{StaticResource StarterCardButton}"
+                        AutomationProperties.Name="Build &amp; Test Project">
+                        <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <Border
-                                Width="32"
-                                Height="32"
+                            <FontIcon
                                 VerticalAlignment="Center"
-                                Background="{StaticResource KindWriteTintBrush}"
-                                CornerRadius="8">
-                                <FontIcon FontSize="15" Foreground="{StaticResource KindWriteBrush}" Glyph="&#xE768;" />
-                            </Border>
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                <TextBlock FontSize="12.5" FontWeight="SemiBold" Text="Build &amp; Test Project" />
-                                <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="Compile solution and verify tests" TextTrimming="CharacterEllipsis" />
+                                FontSize="18"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Glyph="&#xE768;" />
+                            <StackPanel Grid.Column="1" Spacing="3">
+                                <TextBlock FontSize="13" FontWeight="SemiBold" Text="Build &amp; Test Project" TextWrapping="Wrap" />
+                                <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Compile solution and verify tests" TextWrapping="Wrap" />
                             </StackPanel>
                         </Grid>
                     </Button>
@@ -2138,31 +2178,23 @@
                     <Button
                         Grid.Row="0"
                         Grid.Column="1"
-                        Padding="14,12"
-                        HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Stretch"
-                        Background="{StaticResource StarterCardBrush}"
-                        BorderBrush="{StaticResource StarterCardStrokeBrush}"
-                        BorderThickness="1"
                         Click="OnStarterPromptClick"
-                        CornerRadius="10"
-                        Tag="Check git status and summarize pending changes and modified files.">
-                        <Grid ColumnSpacing="10">
+                        Tag="Check git status and summarize pending changes and modified files."
+                        Style="{StaticResource StarterCardButton}"
+                        AutomationProperties.Name="Review Git Changes">
+                        <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <Border
-                                Width="32"
-                                Height="32"
+                            <FontIcon
                                 VerticalAlignment="Center"
-                                Background="{StaticResource KindEditTintBrush}"
-                                CornerRadius="8">
-                                <FontIcon FontSize="15" Foreground="{StaticResource KindEditBrush}" Glyph="&#xE70F;" />
-                            </Border>
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                <TextBlock FontSize="12.5" FontWeight="SemiBold" Text="Review Git Changes" />
-                                <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="Inspect pending diffs and status" TextTrimming="CharacterEllipsis" />
+                                FontSize="18"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Glyph="&#xE70F;" />
+                            <StackPanel Grid.Column="1" Spacing="3">
+                                <TextBlock FontSize="13" FontWeight="SemiBold" Text="Review Git Changes" TextWrapping="Wrap" />
+                                <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Inspect pending diffs and status" TextWrapping="Wrap" />
                             </StackPanel>
                         </Grid>
                     </Button>
@@ -2171,31 +2203,23 @@
                     <Button
                         Grid.Row="1"
                         Grid.Column="0"
-                        Padding="14,12"
-                        HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Stretch"
-                        Background="{StaticResource StarterCardBrush}"
-                        BorderBrush="{StaticResource StarterCardStrokeBrush}"
-                        BorderThickness="1"
                         Click="OnStarterPromptClick"
-                        CornerRadius="10"
-                        Tag="Explain the high-level architecture of this codebase, key projects and how they relate.">
-                        <Grid ColumnSpacing="10">
+                        Tag="Explain the high-level architecture of this codebase, key projects and how they relate."
+                        Style="{StaticResource StarterCardButton}"
+                        AutomationProperties.Name="Explain Architecture">
+                        <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <Border
-                                Width="32"
-                                Height="32"
+                            <FontIcon
                                 VerticalAlignment="Center"
-                                Background="{StaticResource KindReadTintBrush}"
-                                CornerRadius="8">
-                                <FontIcon FontSize="15" Foreground="{StaticResource KindReadBrush}" Glyph="&#xE8B7;" />
-                            </Border>
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                <TextBlock FontSize="12.5" FontWeight="SemiBold" Text="Explain Architecture" />
-                                <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="Walk through structure and design" TextTrimming="CharacterEllipsis" />
+                                FontSize="18"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Glyph="&#xE8B7;" />
+                            <StackPanel Grid.Column="1" Spacing="3">
+                                <TextBlock FontSize="13" FontWeight="SemiBold" Text="Explain Architecture" TextWrapping="Wrap" />
+                                <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Walk through structure and design" TextWrapping="Wrap" />
                             </StackPanel>
                         </Grid>
                     </Button>
@@ -2204,31 +2228,23 @@
                     <Button
                         Grid.Row="1"
                         Grid.Column="1"
-                        Padding="14,12"
-                        HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Stretch"
-                        Background="{StaticResource StarterCardBrush}"
-                        BorderBrush="{StaticResource StarterCardStrokeBrush}"
-                        BorderThickness="1"
                         Click="OnStarterPromptClick"
-                        CornerRadius="10"
-                        Tag="Help me plan a new feature. Interview me about requirements and propose a design.">
-                        <Grid ColumnSpacing="10">
+                        Tag="Help me plan a new feature. Interview me about requirements and propose a design."
+                        Style="{StaticResource StarterCardButton}"
+                        AutomationProperties.Name="Plan New Feature">
+                        <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <Border
-                                Width="32"
-                                Height="32"
+                            <FontIcon
                                 VerticalAlignment="Center"
-                                Background="{StaticResource KindPlanTintBrush}"
-                                CornerRadius="8">
-                                <FontIcon FontSize="15" Foreground="{StaticResource KindPlanBrush}" Glyph="&#xE8FD;" />
-                            </Border>
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                <TextBlock FontSize="12.5" FontWeight="SemiBold" Text="Plan New Feature" />
-                                <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="Interactive planning and design" TextTrimming="CharacterEllipsis" />
+                                FontSize="18"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Glyph="&#xE8FD;" />
+                            <StackPanel Grid.Column="1" Spacing="3">
+                                <TextBlock FontSize="13" FontWeight="SemiBold" Text="Plan New Feature" TextWrapping="Wrap" />
+                                <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Interactive planning and design" TextWrapping="Wrap" />
                             </StackPanel>
                         </Grid>
                     </Button>

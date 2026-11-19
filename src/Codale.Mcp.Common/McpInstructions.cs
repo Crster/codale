@@ -32,7 +32,10 @@ public static class McpInstructions
         "for when the user says a command they ran failed.";
 
     public const string Memory =
-        "memory_save, memory_search, memory_list and memory_forget keep notes about this workspace across conversations: decisions, conventions, how to build or test.";
+        "Project memory is shared across conversations. At task start and before asking a repeated question, call memory_search for relevant preferences and conventions. " +
+        "Use memory_save automatically for user-stated preferences, explicitly accepted decisions, and verified durable project conventions. " +
+        "Search first and reuse an existing title to update a correction rather than duplicate it. Use memory_forget for superseded notes. " +
+        "Never save unaccepted proposals, task progress, source-code facts or secrets. Current user instructions override recalled notes.";
 
     public const string Secret =
         "env_list, env_get and env_set reach the secrets stored for this workspace. Use a value only where it is needed; never write it into files, code, commits or messages.";

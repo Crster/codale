@@ -367,12 +367,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public partial string WorkingElapsed { get; set; } = "";
 
     /// <summary>The turn is blocked on the reader: a question or a permission is open.</summary>
-    public bool IsWaitingForYou => _approvals.Count > 0;
+    public bool IsWaitingForYou => _approvals.Count > 0 || _specialists.Any(s => s.HasQuestions || s.CanApprove);
 
     public bool IsWorkingOnItsOwn => !IsWaitingForYou;
 
     // Separate runs keep the two status colors while sharing the timer/detail baseline.
-    public string WorkingStatusMessage => IsWorkingOnItsOwn ? WorkingMessage : "";
+    public string WorkingStatusMessage => IsWorkingOnItsOwn ? HasRunningSpecialist ? "Thinking…" : WorkingMessage : "";
 
     public string WaitingStatusMessage => IsWaitingForYou ? "Action required" : "";
 
@@ -613,7 +613,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public string ActiveSubagentText => ActiveSubagentCount == 1 ? "1 agent" : $"{ActiveSubagentCount} agents";
 
     /// <summary>True while the turn runs or a subagent is still going: the composer shows Stop.</summary>
-    public bool ShowStop => IsBusy || HasActiveSubagents;
+    public bool ShowStop => IsBusy || HasActiveSubagents || HasRunningSpecialist;
 
     private void WatchTask(RunningTaskItem task) =>
         task.PropertyChanged += (_, e) =>
@@ -1425,10 +1425,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public bool CanPickModel => CanChangeMode;
 
     /// <summary>Running a turn without waiting on anyone: the tab's blue dot. Waiting shows amber instead.</summary>
-    public bool IsBusyWorking => IsBusy && !IsWaitingForYou;
+    public bool IsBusyWorking => (IsBusy || HasRunningSpecialist) && !IsWaitingForYou;
 
     /// <summary>The status line above the composer: while a turn runs or waits on the reader.</summary>
-    public bool ShowStatusLine => IsBusy || IsWaitingForYou;
+    public bool ShowStatusLine => IsBusy || HasRunningSpecialist || IsWaitingForYou;
 
     [ObservableProperty]
     public partial bool IsConnected { get; set; }
@@ -2062,11 +2062,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             OnPropertyChanged(nameof(HasModelCatalog));
             OnPropertyChanged(nameof(CanPickModel));
         }
-        // Legacy tier-only settings are resolved once a catalogue is available.
-        if (!_smart.Settings.ModelPreferenceFor(CliId).HasValue)
+        // Tier picks made before the CLI catalogue arrived may have persisted a null
+        // model. Resolve them again now that the fast/pro catalogue choices are known;
+        // otherwise Claude starts on its own default (often Opus) while the UI says Lite.
+        var hasSavedModelPreference = _smart.Settings.ModelPreferenceFor(CliId).HasValue;
+        var selectedTierNeedsModel = _selectedTier != "cli" && string.IsNullOrWhiteSpace(RequestedModel);
+        if (!hasSavedModelPreference || selectedTierNeedsModel)
         {
             (RequestedModel, RequestedEffort) = TierConfig(_selectedTier);
-            if (RequestedModel is not null || _selectedTier == "cli")
+            if (RequestedModel is not null || RequestedEffort is not null || _selectedTier == "cli")
                 _smart.Settings.SetModelPreference(CliId, RequestedModel, RequestedEffort);
         }
         var model = LaunchValue(RequestedModel);
@@ -2139,7 +2143,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             environment[IsCodexSession ? CodaleAccount.CodexVariable : CodaleAccount.ClaudeVariable] =
                 CodaleAccount.ProfileHome(CliId, _smart.Settings.FindByok(EndpointName)?.AccountId);
 
-            IAgentSession session = starting = _agentSessions.Create(new AgentSessionRequest
+            var connectedRequest = new AgentSessionRequest
             {
                 CliId = IsCodexSession ? "codex" : "claude",
                 WorkingDirectory = workingDirectory,
@@ -2163,13 +2167,16 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 Environment = environment.Count == 0 ? null : environment,
                 CodexProvider = IsCodexSession ? _endpointSettings?.CodexProvider(EndpointName) : null,
                 PromptSuggestions = _smart.Settings.SuggestNextPrompt,
-            });
+            };
 
+            _connectedRequest = connectedRequest;
+            IAgentSession session = starting = _agentSessions.Create(connectedRequest);
             _session = session;
 
             await session.StartAsync();
 
             IsConnected = true;
+            RestoreSpecialists();
             if (_loginNotice is not null) { Items.Remove(_loginNotice); _loginNotice = null; }
 
             SessionStateChanged?.Invoke(this, EventArgs.Empty);
@@ -2579,6 +2586,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     // cap it. Flattening newlines turned a directory table into one
                     // unwrapped-in-any-language line of text.
                     call.Output = CapOutput(completed.ResultText);
+                    if (!completed.IsError && ToolCallItem.IsShellName(call.ToolName) && completed.ResultText is { Length: > 0 } verified && _memoryVerifiedEvidence.Length < 6000)
+                        _memoryVerifiedEvidence += "\nVerified command output:\n" + verified[..Math.Min(verified.Length, 2000)];
 
                     // A question's raw result is one long "q"="a" line; the step shows each
                     // question with its answer instead, for when the reader reopens it.
@@ -2765,6 +2774,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
                 _interruptPending = false;
                 _autoModeUnavailable = false;
+                if (outcome == TurnOutcome.Completed)
+                    _ = CaptureMemoryAsync(_memoryTurnUser, Items.OfType<AssistantMessageItem>().LastOrDefault()?.Text, verifiedEvidence: _memoryVerifiedEvidence);
                 EndTurn(outcome);
 
                 // The reader asked for nothing, so an idle compaction finishing is no reason to call them back.
@@ -4134,6 +4145,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        if (HasRunningSpecialist)
+        {
+            var activeSpecialist = _specialists.LastOrDefault(s => s.Session.IsRunning);
+            if (activeSpecialist is not null) SpecialistDetailsRequested?.Invoke(this, activeSpecialist);
+            ComposerNotice = new NoticeItem { Text = "Continue this answer or planning session in the pane on the right, or stop it before sending another request.", Severity = NoticeSeverity.Info };
+            return;
+        }
+
         // A mid-turn message belongs to the running prompt; only a fresh one starts a new segment.
         if (!IsBusy)
         {
@@ -4146,7 +4165,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         if (IsAutomaticMode && !IsBusy && !planOnly && !text.StartsWith('/'))
         {
-            var preparationDeadline = DateTimeOffset.UtcNow.AddSeconds(120);
             using var preparation = new CancellationTokenSource();
             using var stopped = new CancellationTokenSource();
             using var routing = CancellationTokenSource.CreateLinkedTokenSource(preparation.Token, stopped.Token);
@@ -4197,14 +4215,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 TopicRedirect? redirect = null;
                 try
                 {
-                    (decision, redirect) = await RouteSmartAsync(text, attachments.Count > 0, shown, routing.Token, preparationDeadline);
+                    (decision, redirect) = await RouteSmartAsync(text, shown, routing.Token);
                 }
                 catch (OperationCanceledException) { if (stopped.IsCancellationRequested) return; }
                 finally
                 {
                     routingClock.Stop();
                     CompletePreparationNotice(routingStatus,
-                        $"Auto Mode · {routingClock.Elapsed.TotalSeconds:0.00}s · {(stopped.IsCancellationRequested ? "Stopped" : redirect is not null ? "Suggested another session" : decision.Intent.ToString())}");
+                        $"Auto Mode · {routingClock.Elapsed.TotalSeconds:0.00}s · {(stopped.IsCancellationRequested ? "Stopped" : redirect is not null ? "Suggested another session" : decision.Intent.ToString())} · {_autoAssessment?.Source ?? "Local"}");
+                    if (!stopped.IsCancellationRequested && redirect is null) Items.Remove(routingStatus);
                     _briefing = null;
                 }
                 if (stopped.IsCancellationRequested) return;
@@ -4215,7 +4234,17 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     await SendTurnAsync(text, attachments, planOnly: PermissionMode == "plan", askOnly: IsAskMode, preparation.Token);
                     return;
                 }
-                await SendRoutedAsync(text, attachments, decision.Intent, preparation.Token);
+                if (await TryApplyAutoConfigurationAsync(text, attachments)) return;
+                if (_autoAssessment?.Topic == "current" && _specialists.LastOrDefault() is { } pendingPlanner &&
+                    pendingPlanner.Session.Snapshot.Planner && !pendingPlanner.Session.Snapshot.HandedOff &&
+                    !pendingPlanner.Status.StartsWith("Stopped")) decision = decision with { Intent = RouteIntent.Plan };
+                if (decision.Intent is RouteIntent.Ask or RouteIntent.Plan)
+                    await StartSpecialistAsync(text, attachments, decision.Intent, preparation.Token);
+                else
+                {
+                    _answerSpecialist = null;
+                    await SendRoutedAsync(text, attachments, decision.Intent, preparation.Token);
+                }
             }
         }
         await SendTurnAsync(text, attachments, planOnly, askOnly: IsAskMode && !planOnly);
@@ -4278,8 +4307,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private async Task SendTurnAsync(string text, IReadOnlyList<TurnAttachment> attachments, bool planOnly, bool askOnly, CancellationToken preparationToken = default)
+    private async Task SendTurnAsync(string text, IReadOnlyList<TurnAttachment> attachments, bool planOnly, bool askOnly, CancellationToken preparationToken = default, string? displayText = null)
     {
+        var previousReply = LastRoutingReply;
         _idleCompactTimer.Stop();
         var compact = IsCompactCommand(text);
         if (!compact)
@@ -4337,7 +4367,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         ComposerNotice = null;
         IsBusy = true;
         LastUserPrompt = text;
-        var sent = pre?.Item ?? new UserMessageItem { Text = text, Attachments = attachments };
+        // displayText: what the chat and its history show when the prompt is long machine text (an approved plan).
+        var sent = pre?.Item ?? new UserMessageItem { Text = displayText ?? text, Attachments = attachments };
         sent.SentAsPlan = planOnly;
         var silent = compact && _idleCompacting;
         if (!silent && pre is null)
@@ -4358,7 +4389,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         Reflow();
 
-        if (!compact) RecordUserTurn(text);
+        if (!compact)
+        {
+            RecordUserTurn(displayText ?? text);
+            _memoryTurnUser = text;
+            _memoryVerifiedEvidence = "";
+            _ = CaptureMemoryAsync(text, previousReply);
+        }
 
         try
         {
@@ -4400,6 +4437,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         try
         {
             var context = !compact ? TakeHandoffContext() : null;
+            if (!compact)
+            {
+                var recalled = RecallMemory(text);
+                var children = SpecialistContext();
+                if (recalled.Length > 0 || children.Length > 0)
+                    context = SessionBriefing.ConversationBlock(SessionBriefing.StripContext(context ?? "") + "\n" + recalled + "\n" + children);
+            }
 
             Status.BeginCacheTurn();
             if (compact && await session.TryCompactAsync())
@@ -4938,6 +4982,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     private async Task InterruptAsync()
     {
+        if (HasRunningSpecialist) { await StopSpecialistsAsync(); return; }
         if (_session is null || !ShowStop)
         {
             return;
@@ -5337,6 +5382,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
+        _memoryLifetime.Cancel();
         foreach (var task in RunningTasks.Where(t => t.IsWorkspaceTerminal && t.IsRunning).ToList())
             task.Cancel?.Invoke();
         _taskCaptureTimer?.Stop();
@@ -5360,6 +5406,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeSessionAsync()
     {
+        await StopSpecialistsAsync();
         _briefing?.Cancel();
         _smart.Instance.CancelOwner(ProjectPath, _chatId);
         // A tab closed mid-turn would otherwise leave the 500ms timer ticking forever,

@@ -3,7 +3,13 @@ using System.Text;
 namespace Codale.Workspace;
 
 /// <summary>A note the agent saved about the workspace.</summary>
-public sealed record MemoryNote(string Id, string Title, string Text, IReadOnlyList<string> Tags, DateTimeOffset SavedAt);
+public sealed record MemoryNote(string Id, string Title, string Text, IReadOnlyList<string> Tags, DateTimeOffset SavedAt)
+{
+    public string? Category { get; init; }
+    public MemorySource? Source { get; init; }
+}
+
+public sealed record MemorySource(string? SessionId, string Kind, string Evidence, DateTimeOffset CapturedAt);
 
 /// <summary>
 /// What the agent keeps between conversations: short notes about the workspace (decisions, conventions, where
@@ -15,7 +21,7 @@ public sealed class MemoryStore(string directory, WorkspaceDatabasePool? databas
 {
     private const int MaxText = 8000;
     /// <exception cref="ArgumentException">There is no text, or no title to name it by.</exception>
-    public MemoryNote Save(string title, string text, IEnumerable<string>? tags = null)
+    public MemoryNote Save(string title, string text, IEnumerable<string>? tags = null, string? category = null, MemorySource? source = null)
     {
         title = title.Trim();
         text = text.Trim();
@@ -31,15 +37,36 @@ public sealed class MemoryStore(string directory, WorkspaceDatabasePool? databas
 
         var note = new MemoryNote(IdOf(title), title, text,
             [.. (tags ?? []).Select(t => t.Trim()).Where(t => t.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)],
-            DateTimeOffset.Now);
+            DateTimeOffset.Now) { Category = category, Source = source };
         (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Batch(() =>
         {
+            var duplicate = Everything(db).FirstOrDefault(n => Normalize(n.Text) == Normalize(text));
+            if (duplicate is not null && duplicate.Id != note.Id)
+            {
+                note = duplicate;
+                return;
+            }
             var node = db.Open("memory").Open(note.Id);
+            if (node.ReadJson<MemoryNote>() is { } previous)
+                note = note with { Category = note.Category ?? previous.Category, Source = note.Source ?? previous.Source };
             node.WriteJson(note);
             node.Embed(Searchable(note));
         }));
         return note;
     }
+
+    /// <summary>Reconciles host and CLI writes. A model may replace only an existing id it was shown.</summary>
+    public MemoryNote? Remember(string title, string text, string category, MemorySource source, string? replacesId = null)
+    {
+        if (MemoryCapture.ContainsSecret(text) || MemoryCapture.ContainsSecret(source.Evidence)) return null;
+        var existing = List();
+        var duplicate = existing.FirstOrDefault(n => Normalize(n.Text) == Normalize(text));
+        if (duplicate is not null) return null;
+        var replaced = replacesId is not null ? existing.FirstOrDefault(n => n.Id == replacesId) : null;
+        return Save(replaced?.Title ?? title, text, [category], category, source);
+    }
+
+    private static string Normalize(string text) => string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToLowerInvariant().TrimEnd('.', '!');
 
     public MemoryNote? Get(string id) =>
         (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("memory").Open(IdOf(id)).ReadJson<MemoryNote>());

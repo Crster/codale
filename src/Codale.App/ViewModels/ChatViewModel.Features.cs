@@ -201,6 +201,9 @@ public sealed partial class ChatViewModel
     private void ClearFeature()
     {
         _handoffContext = null;
+        _specialists.Clear();
+        _answerSpecialist = null;
+        _restoredSpecialistsFor = null;
         Features?.ClearChatActivity(_chatId);
         FeatureId = null;
         FeatureName = "";
@@ -345,8 +348,13 @@ public sealed partial class ChatViewModel
 
     // Final answers are lifted out of the activity timeline for both Claude and Codex.
     // Ignore streaming narration and answers from older turns.
-    internal string? LastRoutingReply => Items.Reverse().TakeWhile(i => i is not UserMessageItem)
-        .OfType<AssistantMessageItem>().FirstOrDefault(i => !i.IsStreaming)?.Text;
+    internal string? LastRoutingReply => Items.Where(i => !ReferenceEquals(i, _preShown?.Item)).Reverse()
+        .TakeWhile(i => i is not UserMessageItem).Select(i => i switch
+        {
+            AssistantMessageItem { IsStreaming: false } answer => answer.Text,
+            SpecialistHistoryItem child => child.Specialist.Session.Snapshot.Messages.LastOrDefault(m => m.Role == "assistant")?.Text,
+            _ => null,
+        }).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t));
 
     /// <summary>
     /// Topic detection on local hashed vectors.

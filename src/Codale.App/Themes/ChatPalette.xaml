@@ -70,8 +70,6 @@
     <SolidColorBrush x:Key="UserBubbleStrokeBrush" Color="#12FFFFFF" />
     <SolidColorBrush x:Key="AssistantCardBrush" Color="#06FFFFFF" />
     <SolidColorBrush x:Key="AssistantCardStrokeBrush" Color="#12FFFFFF" />
-    <SolidColorBrush x:Key="StarterCardBrush" Color="#0DFFFFFF" />
-    <SolidColorBrush x:Key="StarterCardStrokeBrush" Color="#1AFFFFFF" />
     <SolidColorBrush x:Key="PillBackgroundBrush" Color="#14FFFFFF" />
     <SolidColorBrush x:Key="TodoTextBrush" Color="#F1F5F9" />
     <SolidColorBrush x:Key="TodoDoneTextBrush" Color="#64748B" />

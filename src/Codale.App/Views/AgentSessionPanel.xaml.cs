@@ -187,6 +187,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         ArtifactsFlyout.Hide();
     }
 
+
     public CliUpdateViewModel CliUpdate { get; } = new();
 
     private CliDescriptor PanelCli => Session?.TerminalCli ?? Session?.SessionCli ?? CliLocator.ActiveCli;

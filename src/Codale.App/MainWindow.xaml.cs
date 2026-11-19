@@ -48,6 +48,9 @@ public sealed partial class MainWindow : Window, IWindowOwner
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
         AppWindow.SetIcon("Assets/AppIcon.ico");
+        // The TitleBar's content slot sizes to its child, so the search + buttons group takes its width from the window:
+        // about three tenths of it, never cramped and never wider than reads well.
+        RootGrid.SizeChanged += (_, e) => CenterGroup.Width = Math.Clamp(e.NewSize.Width * 0.3, 280, 560);
 
         ApplyTheme();
         RootGrid.ActualThemeChanged += (_, _) => ChatPaletteTheme.Apply(RootGrid.ActualTheme == ElementTheme.Light);
@@ -78,7 +81,6 @@ public sealed partial class MainWindow : Window, IWindowOwner
         else
         {
             Title = "Codale";
-            AppTitleBar.Title = "Codale";
             RootFrame.Navigate(typeof(ProjectPickerPage), new ProjectPickerNavigation(_services.RecentProjects, this));
         }
     }
@@ -120,6 +122,8 @@ public sealed partial class MainWindow : Window, IWindowOwner
         LeftPanelButton.Visibility = Visibility.Visible;
         TitleBarExtras.Visibility = Visibility.Visible;
         TitleBarCenter.Visibility = Visibility.Visible;
+        ProjectChip.Visibility = Visibility.Visible;
+        AppNameText.Visibility = Visibility.Collapsed;
 
         // Window.Title alone is not enough when the TitleBar control owns the caption:
         // the taskbar / alt-tab caption follows AppWindow.Title, which Window.Title does
@@ -127,8 +131,9 @@ public sealed partial class MainWindow : Window, IWindowOwner
         var title = $"{_workspace.DisplayName} — Codale";
         Title = title;
         AppWindow.Title = title;
-        AppTitleBar.Title = _workspace.DisplayName;
-        AppTitleBar.Subtitle = _workspace.ProjectPath;
+        // The bar shows a project chip instead of a title + full-path subtitle; the path is its tooltip.
+        ProjectNameText.Text = _workspace.DisplayName;
+        ToolTipService.SetToolTip(ProjectChip, $"{_workspace.ProjectPath}\nClick to open another folder");
 
         RootFrame.Navigate(typeof(WorkspacePage), new WorkspaceNavigation(_workspace, this));
     }
@@ -423,8 +428,8 @@ public sealed partial class MainWindow : Window, IWindowOwner
             }
 
             Title = "Codale";
-            AppTitleBar.Title = "Codale";
-            AppTitleBar.Subtitle = null;
+            ProjectChip.Visibility = Visibility.Collapsed;
+            AppNameText.Visibility = Visibility.Visible;
             LeftPanelButton.Visibility = Visibility.Collapsed;
             TitleBarExtras.Visibility = Visibility.Collapsed;
             TitleBarCenter.Visibility = Visibility.Collapsed;

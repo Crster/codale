@@ -1639,6 +1639,7 @@
                             <Button
                                 Grid.Column="2"
                                 Click="OnSidePreviewOpenInTabClick"
+                                  x:Name="SidePreviewOpenInTabButton"
                                 Style="{StaticResource ShellTextButton}"
                                 ToolTipService.ToolTip="Open in its own tab">
                                 <StackPanel Orientation="Horizontal" Spacing="6">

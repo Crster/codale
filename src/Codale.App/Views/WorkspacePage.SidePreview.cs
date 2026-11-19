@@ -25,6 +25,15 @@ public sealed partial class WorkspacePage
     /// <summary>The plan or other artifact shown in the side preview.</summary>
     private ArtifactTab? _sideArtifact;
 
+    private void OnChatSpecialistOpenRequested(object? sender, SpecialistItem specialist)
+    {
+        if (!ReferenceEquals(sender, ViewModel.Chat)) return;
+        SetSidePreviewContent(new SpecialistPane(specialist));
+        SetSidePreviewHeader(specialist.EntryGlyph, specialist.Session.Snapshot.Planner ? "Plan" : "Answer", specialist.ModelLabel);
+        _sidePreviewOpenInTab = null;
+        ShowSidePreview();
+    }
+
     /// <summary>What "Open in tab" does for the current occupant.</summary>
     private Action? _sidePreviewOpenInTab;
 
@@ -151,6 +160,7 @@ public sealed partial class WorkspacePage
 
     private void SetSidePreviewContent(UIElement content)
     {
+        SidePreviewOpenInTabButton.Visibility = content is SpecialistPane ? Visibility.Collapsed : Visibility.Visible;
         if (!ReferenceEquals(SidePreviewHost.Child, content))
         {
             ReleaseSideEditorIfHidden(content);

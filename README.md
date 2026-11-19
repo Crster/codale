@@ -12,7 +12,9 @@ Codale is a WinUI 3 desktop application targeting .NET 10 and Windows 11. It com
 
 - Claude and Codex sessions stream answers, reasoning, tool calls, approvals, plans, and usage into the chat view.
 - Select an account or compatible endpoint profile, model, effort, and permission mode. Account profiles keep CLI credential homes separate; endpoint support depends on the selected agent and provider format.
-- Auto mode routes prompts to Ask, Plan, or Act using local rules and configured Smart providers. Session routing can offer to move a prompt to another conversation or start a new one.
+- Auto mode assesses topic, question/action intent, difficulty, planning, clarity, and configuration/preferences through Decision, General, then local fallback. Topic changes offer another session, a new session, or retaining the message here.
+- Questions use a Lite answer session; hard or unclear actions use a temporary Plus planner with a full requirements interview. Compact history entries open the answer or plan in the existing right-hand preview pane, where questions and follow-ups stay. Approving a plan sends it to the parent at its selected tier. Child history and pending plan reviews survive reopening.
+- Project memory recalls relevant notes and captures user preferences, accepted decisions, and verified durable conventions. Claude, Codex, and terminal CLI integrations share the memory tools. Saved notes can be viewed or forgotten from chat.
 - Open CLI transcript history, resume conversations, and hand off context between sessions. Responses show their model alongside their timestamp and copy action.
 - Next-prompt suggestions use the active agent. Codex can fall back to an ephemeral read-only conversation when its prediction endpoint is unavailable. Suggestions can consume an additional model request.
 
@@ -157,6 +159,8 @@ dotnet test tests/Codale.Agents.Tests --filter "FullyQualifiedName~Live"
 ```
 
 Routing corpus tests have their own opt-in switch, `CODALE_ROUTING_LIVE_TESTS=1`. Native inference smoke/evaluation commands are documented separately in the native harness notes.
+
+`CODALE_SPECIALIST_LIVE_TESTS=1` enables `SpecialistSessionLiveTests`: real Claude/Codex answer and planner sessions against disposable fixtures. These checks spend tokens and require signed-in CLI accounts.
 
 ## Source layout and ownership
 

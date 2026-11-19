@@ -182,7 +182,9 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
         "that keeps running, call mcp__codale-terminal__run_in_terminal: it opens a terminal tab the user watches (read_terminal follows its output, " +
         "stop_terminal ends it); quick commands run normally. Saved project commands: mcp__codale-command__list_commands, add_command (saves only), " +
         "run_command (runs one by name in a terminal tab). The user's own terminals: list_terminals then read_terminal (read-only). " +
-        "Workspace notes: codale-memory; stored secrets: codale-secret. " +
+        "Project memory: use codale-memory memory_search before work or repeated questions; automatically memory_save user-stated preferences, " +
+        "accepted decisions and verified durable conventions. Search first, update the same title for corrections, memory_forget stale notes. " +
+        "Never remember unaccepted suggestions, progress, source-code facts or secrets. Current user instructions override memories. Stored secrets: codale-secret. " +
         "MANDATORY when a request needs tools: your FIRST action is mcp__codale-panel__todos_set with the whole list (2-6 short steps, one in_progress), " +
         "called again as each step starts and when the last finishes. TodoWrite, TaskCreate and TaskUpdate are off; do not look for them. " +
         "Deliverables that are not project source (report, document, image, data) go to mcp__codale-panel__artifact_add (a path or markdown). " +
@@ -194,7 +196,9 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
         "that keeps running, call the codale-terminal run_in_terminal tool: it opens a terminal tab the user watches (read_terminal follows its output, " +
         "stop_terminal ends it); quick commands run normally. Saved project commands: the codale-command list_commands, add_command (saves only) and " +
         "run_command (runs one by name in a terminal tab) tools. The user's own terminals: list_terminals then read_terminal (read-only). " +
-        "Workspace notes: codale-memory; stored secrets: codale-secret. " +
+        "Project memory: use codale-memory memory_search before work or repeated questions; automatically memory_save user-stated preferences, " +
+        "accepted decisions and verified durable conventions. Search first, update the same title for corrections, memory_forget stale notes. " +
+        "Never remember unaccepted suggestions, progress, source-code facts or secrets. Current user instructions override memories. Stored secrets: codale-secret. " +
         "When a request needs tools, report the step list with the codale-panel todos_set tool (2-6 short steps, one in_progress) as each step starts and when the last finishes. " +
         "If todos_set is not available, skip it and do the work anyway: never stop or refuse because a checklist tool is missing. " +
         "Deliverables that are not project source go to the codale-panel artifact_add tool when available.";

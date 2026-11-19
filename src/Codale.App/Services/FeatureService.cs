@@ -18,6 +18,7 @@ public sealed partial class FeatureService : IDisposable
 {
     private readonly string _projectPath;
     private readonly IWorkspaceData _data;
+    internal IWorkspaceData Data => _data;
     private readonly CodaleDb _db;
 
     public ProjectKnowledgeIndex Knowledge { get; }

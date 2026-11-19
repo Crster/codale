@@ -85,6 +85,25 @@ public sealed class TaskToolsTests
     }
 
     [Fact]
+    public async Task Memory_tools_share_deduplicated_notes_and_refuse_secrets()
+    {
+        var root = Directory.CreateTempSubdirectory("codale-memory-tools-").FullName;
+        try
+        {
+            var server = Server(new FakeTasks(), root);
+            Assert.Contains("Remembered", Text(await Call(server, "memory_save", """{"title":"Spacing","text":"Use compact spacing","category":"preference"}""")));
+            Assert.Contains("Remembered", Text(await Call(server, "memory_save", """{"title":"Layout","text":"Use compact spacing."}""")));
+            var list = Text(await Call(server, "memory_list", "{}"));
+            Assert.Contains("Spacing", list);
+            Assert.DoesNotContain("Layout", list);
+            var secret = await Call(server, "memory_save", """{"title":"Credential","text":"My password is test-only"}""");
+            Assert.True(secret.GetProperty("isError").GetBoolean());
+            Assert.DoesNotContain("Credential", Text(await Call(server, "memory_list", "{}")));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task Run_in_terminal_passes_the_command_and_reports_output()
     {
         var fake = new FakeTasks();
