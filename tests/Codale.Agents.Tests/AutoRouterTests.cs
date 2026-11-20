@@ -47,7 +47,8 @@ public sealed class AutoRouterTests
                 Assert.False(pending.TryGetProperty("session", out _));
                 return Task.FromResult<string?>("{\"hard\":{\"choice\":\"yes\",\"confidence\":0.9},\"unclear\":{\"choice\":\"invalid\",\"confidence\":1}}");
             }, default);
-        Assert.Equal(RouteIntent.Ask, assessment.Intent);
+        // "make it better" is not a question: the model's "question" is overruled.
+        Assert.Equal(RouteIntent.Act, assessment.Intent);
         Assert.True(assessment.Hard);
         Assert.True(assessment.Unclear);
         Assert.Equal("Decision", assessment.FieldSources["session"]);
@@ -85,6 +86,24 @@ public sealed class AutoRouterTests
             (_, _, _) => never.Task, (_, _, _) => Task.FromResult<string?>(null), default);
         Assert.Equal("Local", assessment.Source);
         Assert.InRange(watch.Elapsed.TotalSeconds, 3.5, 7);
+    }
+
+    [Theory]
+    [InlineData("can we implement login page", RouteIntent.Act)]
+    [InlineData("can you add a logout button to the header?", RouteIntent.Act)]
+    [InlineData("could we fix the login redirect", RouteIntent.Act)]
+    [InlineData("Handoff: the settings page is half done.\nNext steps:\n- wire the Save button\n- add validation\nAny questions?", RouteIntent.Act)]
+    [InlineData("why does the login page redirect twice?", RouteIntent.Ask)]
+    [InlineData("how does the session store work?", RouteIntent.Ask)]
+    public async Task A_model_question_must_read_as_a_pure_question(string text, RouteIntent expected)
+    {
+        var assessment = await AutoRouter.AssessAsync(text, new { }, AutoDecisions.Questions(),
+            (_, _, _) => Task.FromResult<IReadOnlyDictionary<string, SmartDecision>?>(new Dictionary<string, SmartDecision>
+            {
+                ["kind"] = Choice("question"), ["hard"] = Choice("no"), ["plan"] = Choice("no"),
+                ["unclear"] = Choice("no"), ["configuration"] = Choice("none"),
+            }), (_, _, _) => Task.FromResult<string?>(null), default);
+        Assert.Equal(expected, assessment.Intent);
     }
 
     [Theory]

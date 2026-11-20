@@ -37,6 +37,10 @@ public static class AutoRouter
             ct.ThrowIfCancellationRequested();
         }
         if (pending.Count > 0) sources.Add("Local");
+        // An ask turn refuses every edit, so a model's "question" has to be earned: the message must read as a question
+        // and request no change. "can we implement a login page", a pasted handoff, or a statement acts.
+        if (result.Kind == "question" && MessageRouting.Assess(text).Intent != RouteIntent.Ask)
+            result = result with { Kind = "action" };
         return result with { Source = string.Join(" + ", sources) };
     }
 

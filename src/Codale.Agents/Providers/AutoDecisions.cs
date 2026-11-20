@@ -9,8 +9,9 @@ public static class AutoDecisions
     public const double MinimumConfidence = 0.6;
     public static Dictionary<string, SmartQuestion> Questions() => new()
     {
-        ["kind"] = SmartQuestion.Choice("Classify the user's intent in context. A request phrased 'can you fix' is an action.", new Dictionary<string, string>
-        { ["question"] = "Explanation, investigation or advice only; no requested changes", ["action"] = "Requests a change or execution", ["mixed"] = "Both explanation and requested changes" }),
+        ["kind"] = SmartQuestion.Choice("Classify the user's intent in context. A request phrased as a question ('can you fix X', 'can we implement a login page', " +
+            "'could you add Y') is an action, and so is a pasted handoff or task description. When unsure, choose action.", new Dictionary<string, string>
+        { ["question"] = "Deliberately asks only for an explanation, investigation or advice, and explicitly wants nothing changed", ["action"] = "Requests a change or execution", ["mixed"] = "Both explanation and requested changes" }),
         ["hard"] = Binary("Is this a large, risky change: a new subsystem, a rewrite or migration, or many interacting changes across several files? " +
             "Bug fixes, tweaks, follow-ups and changes to a known area are not hard, even when they need some investigation."),
         ["plan"] = Binary("Would implementing without an agreed plan first be risky or wasteful? Answer yes only for broad or open-ended work " +
