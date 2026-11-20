@@ -20,7 +20,6 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     /// <summary>The project window that owns this view's pickers and attention feedback.</summary>
     public IWindowOwner? Owner { get; set; }
 
-    private int _todoCountSeen;
 
     public AgentSessionPanel()
     {
@@ -49,12 +48,10 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             }
 
             field = value;
-            _todoCountSeen = 0;
 
             if (field is not null)
             {
                 Attach(field);
-                OpenTodosOnFirstGoals();
             }
 
             NotifySessionProperties();
@@ -204,7 +201,9 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     public string WorkingDirectory => Workspace?.ProjectPath ?? "";
 
     // Events raised to parent container
-    public event EventHandler<string>? FileDiffRequested;
+
+    /// <summary>A prompt's group of changed files was picked; the workspace shows them in the side preview.</summary>
+    public event EventHandler<PromptChangeGroup>? PromptChangesRequested;
     public event EventHandler<SessionArtifact>? ArtifactRequested;
     public event EventHandler<string>? UpdateCliRequested;
 
@@ -533,12 +532,12 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         }
     }
 
-    private void OnSessionChangeClick(object sender, ItemClickEventArgs e)
+    private void OnPromptGroupClick(object sender, ItemClickEventArgs e)
     {
         HideDetails();
-        if (e.ClickedItem is SessionFileChange change)
+        if (e.ClickedItem is PromptChangeGroup group)
         {
-            FileDiffRequested?.Invoke(this, change.Path);
+            PromptChangesRequested?.Invoke(this, group);
         }
     }
 
@@ -601,22 +600,10 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     private void OnSessionCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
-            OpenTodosOnFirstGoals();
-
             // Refresh nested collection bindings when the session details change.
             NotifySessionProperties();
 
         });
-
-    private void OpenTodosOnFirstGoals()
-    {
-        var count = Session?.Todos.Count ?? 0;
-        if (_todoCountSeen == 0 && count > 0)
-        {
-            TodosSection.IsChecked = true;
-        }
-        _todoCountSeen = count;
-    }
 
     #endregion
 

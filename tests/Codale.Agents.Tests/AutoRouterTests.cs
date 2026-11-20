@@ -117,6 +117,20 @@ public sealed class AutoRouterTests
     public void Only_a_fresh_topic_that_needs_a_plan_and_is_hard_or_unclear_plans(string kind, bool fresh, bool plan, bool hard, bool unclear, RouteIntent expected) =>
         Assert.Equal(expected, new AutoAssessment { Kind = kind, FreshTopic = fresh, Hard = hard, NeedsPlan = plan, Unclear = unclear }.Intent);
 
+    [Theory]
+    [InlineData("create an snake game")]
+    [InlineData("create a snake game")]
+    public async Task A_broad_new_build_is_planned_even_when_the_model_says_not_hard(string text)
+    {
+        var assessment = await AutoRouter.AssessAsync(text, new { }, AutoDecisions.Questions(),
+            (_, _, _) => Task.FromResult<IReadOnlyDictionary<string, SmartDecision>?>(new Dictionary<string, SmartDecision>
+            {
+                ["kind"] = Choice("action"), ["hard"] = Choice("no"), ["plan"] = Choice("no"),
+                ["unclear"] = Choice("no"), ["configuration"] = Choice("none"),
+            }), (_, _, _) => Task.FromResult<string?>(null), default);
+        Assert.Equal(RouteIntent.Plan, (assessment with { FreshTopic = true }).Intent);
+    }
+
     [Fact]
     public void A_new_topic_counts_as_fresh() =>
         Assert.Equal(RouteIntent.Plan, new AutoAssessment { Topic = "new", NeedsPlan = true, Hard = true }.Intent);

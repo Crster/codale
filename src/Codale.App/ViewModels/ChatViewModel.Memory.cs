@@ -34,6 +34,9 @@ public sealed partial class ChatViewModel
         var sessionId = FeatureId;
         if (data is null) return;
         var token = _memoryLifetime.Token;
+        // Capture is slow; by the time a note is saved the chat has moved on. Anchor to what was
+        // last when the capture began so the note stacks right there, not at the end.
+        var anchor = Items.LastOrDefault();
         try
         {
             await _memoryCaptureGate.WaitAsync(token);
@@ -86,7 +89,7 @@ public sealed partial class ChatViewModel
                         candidate.Evidence, DateTimeOffset.UtcNow);
                     var saved = data.Memory.Remember(candidate.Title, candidate.Text, candidate.Category, source, candidate.ReplacesId);
                     if (saved is null) continue;
-                    Add(new MemoryNoticeItem
+                    var notice = new MemoryNoticeItem
                     {
                         Text = saved.Title,
                         Open = () => MemoryViewRequested?.Invoke(this, EventArgs.Empty),
@@ -96,7 +99,18 @@ public sealed partial class ChatViewModel
                             catch (Exception e) { ComposerNotice = new NoticeItem { Text = "Could not forget project memory: " + e.Message, Severity = NoticeSeverity.Warning }; }
                             return Task.FromResult(false);
                         },
-                    });
+                    };
+                    var at = anchor is null ? -1 : Items.IndexOf(anchor);
+                    if (at < 0) Add(notice);
+                    else
+                    {
+                        // Stack after the anchor and any notes already placed there, in save order.
+                        at++;
+                        while (at < Items.Count && Items[at] is MemoryNoticeItem) at++;
+                        Items.Insert(at, notice);
+                        anchor = notice;
+                        Reflow();
+                    }
                 }
             }
             finally { _memoryCaptureGate.Release(); }

@@ -34,7 +34,6 @@ public sealed partial class CliTerminalTab : UserControl, ITerminalHost
         Terminal.LinkActivated += (_, link) => LinkActivated?.Invoke(this, link);
         Terminal.TitleChanged += (_, title) => SessionPanel.ObserveTerminalTitle(title);
 
-        SessionPanel.FileDiffRequested += (_, path) => FileDiffRequested?.Invoke(this, path);
         SessionPanel.ArtifactRequested += (_, artifact) => ArtifactRequested?.Invoke(this, artifact);
         SessionPanel.TaskPeekRequested += (_, task) => TaskPeekRequested?.Invoke(this, task);
         SessionPanel.UpdateCliRequested += (_, command) => UpdateCliRequested?.Invoke(this, command);
@@ -48,7 +47,6 @@ public sealed partial class CliTerminalTab : UserControl, ITerminalHost
     public event EventHandler<LinkMatch>? LinkActivated;
 
     /// <summary>A file change was clicked in the session panel: show its diff.</summary>
-    public event EventHandler<string>? FileDiffRequested;
 
     /// <summary>An artifact was clicked in the session panel.</summary>
     public event EventHandler<SessionArtifact>? ArtifactRequested;

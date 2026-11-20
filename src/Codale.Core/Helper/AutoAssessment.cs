@@ -19,7 +19,13 @@ public sealed record AutoAssessment
     /// unclear or hard goes to it. Everything else acts in the main chat, which has the conversation.
     /// </summary>
     public RouteIntent Intent => Kind == "question" ? RouteIntent.Ask
-        : (FreshTopic || Topic == "new") && NeedsPlan && (Unclear || Hard) ? RouteIntent.Plan : RouteIntent.Act;
+        : (FreshTopic || Topic == "new") && (LocalPlan || NeedsPlan && (Unclear || Hard)) ? RouteIntent.Plan : RouteIntent.Act;
+
+    /// <summary>
+    /// The local rules are sure the request is big or new ("create a snake game", a rewrite): a model that
+    /// answers "not hard" cannot talk a fresh topic out of its plan.
+    /// </summary>
+    public bool LocalPlan { get; init; }
 
     public static AutoAssessment Local(string text)
     {
@@ -32,6 +38,7 @@ public sealed record AutoAssessment
         {
             Kind = route.Intent == RouteIntent.Ask ? "question" : "action",
             NeedsPlan = route.Intent == RouteIntent.Plan,
+            LocalPlan = route is { Intent: RouteIntent.Plan, Confident: true },
             Hard = route.Intent == RouteIntent.Plan && text.Length > 120,
             Unclear = text.Trim().ToLowerInvariant() is "make it better" or "fix it" or "do it" or "make the app better",
             Configuration = preference && configuration ? "both" : preference ? "preference" : configuration ? "configuration" : "none",

@@ -125,6 +125,15 @@ public sealed partial class SessionFileChange : ObservableObject
         }
     }
 
+    private bool _frozen;
+
+    /// <summary>The prompt this row belongs to has ended: settle its totals against its own last content.</summary>
+    public void Freeze()
+    {
+        _frozen = true;
+        RefreshCounts();
+    }
+
     /// <summary>Recomputes the totals if a burst coalesced them away; called at turn end.</summary>
     public void RefreshCountsIfDirty()
     {
@@ -157,6 +166,12 @@ public sealed partial class SessionFileChange : ObservableObject
     /// <summary>What the file holds now: the disk wins (it has every later edit), the last report is the fallback.</summary>
     private (bool Exists, string? Content) CurrentContent()
     {
+        // A row of a finished prompt shows what that prompt left, not later prompts' edits.
+        if (_frozen && _latest is not null && Kind != FileChangeKind.Delete)
+        {
+            return (true, _latest);
+        }
+
         try
         {
             var info = new FileInfo(Path);

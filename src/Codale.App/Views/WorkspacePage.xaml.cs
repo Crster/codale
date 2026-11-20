@@ -655,6 +655,7 @@ public sealed partial class WorkspacePage : Page
         {
             var tab = new ChatTab(ViewModel.Smart.Settings, ViewModel.Shortcuts) { ViewModel = chat, Workspace = ViewModel, Owner = _window };
             tab.ToolFileRequested += OnChatToolFileRequested;
+            tab.PromptChangesRequested += (_, group) => ShowPromptChangesBeside(group);
             tab.PlanOpenRequested += OnChatPlanOpenRequested;
             tab.TaskPeekRequested += OnChatTaskPeekRequested;
             tab.ArtifactRequested += (_, artifact) => ShowArtifactFromChat(artifact);
@@ -843,7 +844,6 @@ public sealed partial class WorkspacePage : Page
         {
             // An agent CLI: its TUI in a rounded card beside the session panel.
             var cli = new CliTerminalTab(ViewModel.Smart.Settings) { ViewModel = terminal, Workspace = ViewModel };
-            cli.FileDiffRequested += (_, path) => OnChatToolFileRequested(cli, new ToolFileRequestEventArgs(path, isEdit: true));
             cli.ArtifactRequested += (_, artifact) => ShowArtifactFromChat(artifact);
             cli.UpdateCliRequested += (_, cmd) => _ = UpdateCliAsync(cmd);
             cli.TaskPeekRequested += (_, task) => SetPeek(ReferenceEquals(PeekPane.Task, task) && PeekPane.Visibility == Visibility.Visible ? null : task);

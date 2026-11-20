@@ -467,6 +467,12 @@ public sealed partial class StatusViewModel : ObservableObject
         row.Record(change, diff);
         MarkFresh(row);
 
+        // The same change again under the prompt that caused it, measured from that prompt's start.
+        var group = _currentGroup ??= StartGroup("Session changes");
+        group.Row(change.FilePath, out _).Record(change, diff);
+        group.IsFresh = true;
+        group.Recompute();
+
         OnPropertyChanged(nameof(ChangeCount));
         OnPropertyChanged(nameof(ChangeSummary));
         NotifyChangeBar();
@@ -476,6 +482,8 @@ public sealed partial class StatusViewModel : ObservableObject
     public void ClearSessionChanges()
     {
         Changes.Clear();
+        PromptGroups.Clear();
+        _currentGroup = null;
         OnPropertyChanged(nameof(ChangeCount));
         OnPropertyChanged(nameof(ChangeSummary));
         NotifyChangeBar();
@@ -493,8 +501,40 @@ public sealed partial class StatusViewModel : ObservableObject
             row.RefreshCountsIfDirty();
         }
 
+        foreach (var group in PromptGroups)
+        {
+            group.Settle();
+            group.IsFresh = false;
+        }
+
         OnPropertyChanged(nameof(ChangeSummary));
         NotifyChangeBar();
+    }
+
+    /// <summary>Changes grouped by the prompt that caused them, newest prompt first; prompts that changed nothing are absent.</summary>
+    public ObservableCollection<PromptChangeGroup> PromptGroups { get; } = [];
+
+    private PromptChangeGroup? _currentGroup;
+
+    private string _pendingPrompt = "";
+
+    /// <summary>
+    /// A new prompt was sent: the group of the one before it is settled, and the next
+    /// file change opens a group under this prompt's text (no group appears until then).
+    /// </summary>
+    public void BeginPrompt(string text)
+    {
+        _currentGroup?.Freeze();
+        _currentGroup = null;
+        _pendingPrompt = text;
+    }
+
+    private PromptChangeGroup StartGroup(string fallbackTitle)
+    {
+        var title = _pendingPrompt.Trim();
+        var group = new PromptChangeGroup { Title = title.Length > 0 ? title : fallbackTitle };
+        PromptGroups.Insert(0, group);
+        return group;
     }
 
     public int ChangeCount => Changes.Count;

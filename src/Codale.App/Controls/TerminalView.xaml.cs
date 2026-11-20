@@ -685,6 +685,7 @@ public sealed partial class TerminalView : UserControl
 
     private void OnCreateResources(CanvasControl sender, CanvasCreateResourcesEventArgs args)
     {
+        if (_closed) return;
         try
         {
             // A device rebuild invalidates every cached brush and format; they are rebuilt lazily.
@@ -706,6 +707,7 @@ public sealed partial class TerminalView : UserControl
 
     private void OnCaretCreateResources(CanvasControl sender, CanvasCreateResourcesEventArgs args)
     {
+        if (_closed) return;
         _caretBrush?.Dispose();
         _caretGlyphBrush?.Dispose();
         _caretBrush = new CanvasSolidColorBrush(sender, CursorColor);
@@ -714,6 +716,7 @@ public sealed partial class TerminalView : UserControl
 
     private void OnCaretCanvasDraw(CanvasControl sender, CanvasDrawEventArgs args)
     {
+        if (_closed) return;
         if (Canvas.ActualWidth <= 0 || Canvas.ActualHeight <= 0)
         {
             return;
@@ -736,6 +739,7 @@ public sealed partial class TerminalView : UserControl
 
     private void OnCanvasDraw(CanvasControl sender, CanvasDrawEventArgs args)
     {
+        if (_closed) return;
         try
         {
             DrawFrame(args);

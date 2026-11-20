@@ -141,6 +141,32 @@ public sealed partial class WorkspacePage
         }
     }
 
+    /// <summary>One prompt's changes beside the chat: every file it touched, listed and diffed as that prompt left them.</summary>
+    private void ShowPromptChangesBeside(PromptChangeGroup group)
+    {
+        if (_sideDiff is null)
+        {
+            _sideDiffViewModel = ViewModel.CreateDiffViewer();
+            _sideDiff = new DiffTab().WithViewModel(_sideDiffViewModel);
+            _sideDiff.FileOpenRequested += (_, relativePath) => OpenRepositoryFile(relativePath, beside: true);
+        }
+
+        var diffs = new List<Codale.Git.FileDiff>();
+        foreach (var file in group.Files)
+        {
+            var absolute = ResolveWorkspacePath(file.Path);
+            var diff = file.CumulativeDiff();
+            diffs.Add(diff with { Path = ToRepoRelative(absolute) ?? absolute });
+        }
+
+        var title = group.Title.ReplaceLineEndings(" ");
+        SetSidePreviewContent(_sideDiff);
+        SetSidePreviewHeader("", title.Length > 60 ? title[..60] + "…" : title, group.SummaryText);
+        _sidePreviewOpenInTab = null;
+        ShowSidePreview();
+        _sideDiffViewModel!.LoadDiffs(title, group.SummaryText, diffs, canOpenFile: true);
+    }
+
     /// <summary>A plan (or other artifact) beside the chat; revisions still go back to the conversation.</summary>
     private void ShowArtifactBeside(SessionArtifact artifact)
     {

@@ -78,6 +78,8 @@ public sealed partial class ChatTab : UserControl
 
     public event EventHandler<ToolFileRequestEventArgs>? ToolFileRequested;
 
+    public event EventHandler<PromptChangeGroup>? PromptChangesRequested;
+
     /// <summary>
     /// Live-applies the chat font settings: the family on the tab root (inherited by
     /// every row), and the scale through each open row's <c>RaiseTextScale</c>, which
@@ -145,7 +147,7 @@ public sealed partial class ChatTab : UserControl
         _draftBox.SelectionChanged += OnDraftSelectionChanged;
         _draftBox.PillInvoked += OnComposerPillInvoked;
 
-        SessionPanel.FileDiffRequested += (_, path) => ToolFileRequested?.Invoke(this, new ToolFileRequestEventArgs(path, isEdit: true));
+        SessionPanel.PromptChangesRequested += (_, group) => PromptChangesRequested?.Invoke(this, group);
         SessionPanel.ArtifactRequested += (_, artifact) => ArtifactRequested?.Invoke(this, artifact);
         SessionPanel.TaskPeekRequested += (_, task) => RunningTaskPeekRequested?.Invoke(this, task);
         SessionPanel.UpdateCliRequested += (_, cmd) => UpdateCliRequested?.Invoke(this, cmd);

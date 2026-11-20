@@ -199,6 +199,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // to model/effort), or the CLI's own default when nothing has been chosen yet.
         RestoreModelPreference();
 
+        // Editing the Flash/Pro model in Settings re-resolves the chosen tier and, when a
+        // session is running, switches it (or restarts the CLI) to the new model.
+        _smart.Settings.Changed += OnSettingsModelChanged;
+
         // The session panel shows its live sections (tasks, changes, subagents) only once
         // there is a conversation; a chat opened empty from history gains one later.
         Items.CollectionChanged += (_, e) =>
@@ -1649,7 +1653,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return (pick ?? models.FirstOrDefault())?.Id;
         }
 
-        var account = _smart.Settings.FindByok(EndpointName) ?? _smart.Settings.ByokProviders.FirstOrDefault(p => p.IsAccount && p.CliId == CliId && p.AccountId.Length == 0);
+        // The CLI's own login is an account entry; signed-in accounts carry an AccountId, so prefer
+        // the id-less one but accept any account of this CLI rather than dropping the Flash/Pro pick.
+        var account = _smart.Settings.FindByok(EndpointName)
+            ?? _smart.Settings.ByokProviders.FirstOrDefault(p => p.IsAccount && p.CliId == CliId && p.AccountId.Length == 0)
+            ?? _smart.Settings.ByokProviders.FirstOrDefault(p => p.IsAccount && p.CliId == CliId);
         var configured = account is { IsAccount: true } ? account.ModelForTier(tier) : null;
         if (!string.IsNullOrWhiteSpace(configured))
         {
@@ -1712,14 +1720,41 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        var liveModel = AvailableModels.Count > 0 && model is not null &&
-            !AvailableModels.Any(m => string.Equals(m.Id, model, StringComparison.OrdinalIgnoreCase)) ? null : model;
-        if (await TryApplyModelEffortLiveAsync(liveModel, effort))
+        // Tier models come from settings (real names/aliases), so they are sent as-is: filtering
+        // them by the catalogue would turn a valid pick into "keep the current model".
+        if (await TryApplyModelEffortLiveAsync(model, effort))
         {
             return;
         }
 
         await RestartWithCurrentConfigAsync();
+    }
+
+    private bool _tierRefreshQueued;
+
+    private void OnSettingsModelChanged(object? sender, EventArgs e)
+    {
+        if (_tierRefreshQueued) return;
+        _tierRefreshQueued = true;
+        _dispatcher.TryEnqueue(async () =>
+        {
+            try
+            {
+                // Wait out a running turn or connect; give up after a minute.
+                for (var i = 0; i < 60 && (IsBusy || IsConnecting); i++) await Task.Delay(1000);
+                _tierRefreshQueued = false;
+                if (_selectedTier == "cli" || IsBusy || IsConnecting) return;
+                await ApplyTierAsync(_selectedTier);
+            }
+            catch (Exception)
+            {
+                // A failed refresh keeps the current session; the next launch re-resolves anyway.
+            }
+            finally
+            {
+                _tierRefreshQueued = false;
+            }
+        });
     }
 
     /// <summary>Everything the chips show that depends on the catalogue or the model/effort pick.</summary>
@@ -2065,14 +2100,17 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // Tier picks made before the CLI catalogue arrived may have persisted a null
         // model. Resolve them again now that the fast/pro catalogue choices are known;
         // otherwise Claude starts on its own default (often Opus) while the UI says Lite.
+        // The tier is the source of truth: settings hold the real model names, so a chosen tier
+        // is re-resolved from them at every launch instead of trusting a stale saved model.
         var hasSavedModelPreference = _smart.Settings.ModelPreferenceFor(CliId).HasValue;
-        var selectedTierNeedsModel = _selectedTier != "cli" && string.IsNullOrWhiteSpace(RequestedModel);
-        if (!hasSavedModelPreference || selectedTierNeedsModel)
+        var tierDriven = _selectedTier != "cli";
+        if (!hasSavedModelPreference || tierDriven)
         {
             (RequestedModel, RequestedEffort) = TierConfig(_selectedTier);
             if (RequestedModel is not null || RequestedEffort is not null || _selectedTier == "cli")
                 _smart.Settings.SetModelPreference(CliId, RequestedModel, RequestedEffort);
         }
+        var configuredTierModel = tierDriven ? RequestedModel : null;
         var model = LaunchValue(RequestedModel);
         if (endpointEnv is not null)
         {
@@ -2083,7 +2121,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 return;
             }
         }
-        else if (model is not null && catalogue.Count > 0 &&
+        else if (model is not null && catalogue.Count > 0 && configuredTierModel is null &&
             !catalogue.Any(m => string.Equals(m.Id, model, StringComparison.OrdinalIgnoreCase)))
         {
             model = null;
@@ -4367,6 +4405,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         ComposerNotice = null;
         IsBusy = true;
         LastUserPrompt = text;
+        if (!compact) Status.BeginPrompt(displayText ?? text);
         // displayText: what the chat and its history show when the prompt is long machine text (an approved plan).
         var sent = pre?.Item ?? new UserMessageItem { Text = displayText ?? text, Attachments = attachments };
         sent.SentAsPlan = planOnly;
@@ -5389,6 +5428,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         StopTaskHost();
 
         // The session goes first, so a turn cut off by the close is marked as ended before the summary reads the log.
+        _smart.Settings.Changed -= OnSettingsModelChanged;
         await DisposeSessionAsync();
         if (_watchingFeatures && Features is not null)
         {
