@@ -758,7 +758,8 @@ public sealed partial class ChatTab : UserControl
                         var text = b.Content as string;
                         if (text is not null &&
                             (string.Equals(text, "Allow", StringComparison.OrdinalIgnoreCase) ||
-                             text.StartsWith("Accept", StringComparison.OrdinalIgnoreCase) ||
+                             // The plan card's safe default, not the first "Accept · …" (it sits last now).
+                             text.StartsWith("Accept · review", StringComparison.OrdinalIgnoreCase) ||
                              string.Equals(text, "Submit", StringComparison.OrdinalIgnoreCase) ||
                              string.Equals(text, "Next", StringComparison.OrdinalIgnoreCase)))
                         {

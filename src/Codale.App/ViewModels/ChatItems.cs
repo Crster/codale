@@ -1899,6 +1899,11 @@ public sealed partial class FeatureJumpItem : ChatItem
         ? "This message looks like a new topic."
         : $"This message looks like it belongs to \"{TargetName}\".";
 
+    /// <summary>The line under the question that names the choices.</summary>
+    public string Detail => TargetName is null
+        ? "Start a new history for it, or stay in this one?"
+        : "Continue there, start a new history, or stay in this one?";
+
     public bool HasJump => TargetName is not null;
 
     public string JumpText => $"Jump to {TargetName}";
