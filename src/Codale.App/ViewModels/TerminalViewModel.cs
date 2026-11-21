@@ -450,6 +450,7 @@ public sealed partial class TerminalViewModel : ObservableObject, IDisposable
         _session = null;
         session?.Dispose();
         DisposeBlocks();
+        Activity = TerminalActivity.Terminated;
     }
 
     private void DisposeBlocks()
