@@ -187,15 +187,11 @@ public sealed partial class ChatViewModel
             else
             {
                 var input = item.Input.Trim();
+                // Whatever is typed here belongs to this pane's conversation - follow-ups and extra
+                // instructions alike. The reader chose this composer over the main one; guessing
+                // "this sounds like an action" and sending it to the main chat acted on words meant
+                // as context. The answer specialist is read-only and says so when asked to act.
                 if (input.Length == 0) return;
-                if (!item.Session.Snapshot.Planner && MessageRouting.RouteWithoutModel(input).Intent != RouteIntent.Ask && !MessageRouting.IsFollowUp(input))
-                {
-                    // Requests to act return to the main conversation; answer follow-ups stay in this pane.
-                    item.Input = "";
-                    Draft = input;
-                    await SendCoreAsync(false);
-                    return;
-                }
                 if (item.IsRevising && item.Session.Snapshot.Plan is not null) input = "Revise the plan: " + input;
                 await item.Session.SendAsync(input);
             }

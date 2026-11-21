@@ -192,7 +192,7 @@ public sealed class KeyboardShortcuts(AppSettingsStore settings) : IDisposable
         new(ToggleCommands, "Toggle command menu", "The project commands menu.", "Ctrl+P"),
         new(Search, "Search", "Opens the quick search over files, history and commands; scoped to the file while an editor is in front.", "Ctrl+F"),
         new(OpenBrowser, "Open browser", "The browser the agent's browser tools attach to.", "Ctrl+Shift+B"),
-        new(CycleMode, "Cycle chat mode", "Auto, Ask, Planning, Manual, Accept edits, Full.", "Ctrl+."),
+        new(CycleMode, "Cycle chat mode", "Auto, Interactive, Plan, Full.", "Ctrl+."),
         new(ShowGit, "Show git panel", "Opens the left panel on its Git tab.", "Ctrl+G"),
         new(StopChat, "Stop chat", "Cancels the running turn. Press Esc twice in the chat, or record another chord.", DoubleEscape),
     ];

@@ -127,9 +127,19 @@ public sealed partial class SessionFileChange : ObservableObject
 
     private bool _frozen;
 
+    /// <summary>What the file held when its prompt ended; later prompts' edits must not change this row.</summary>
+    private string? _frozenContent;
+
     /// <summary>The prompt this row belongs to has ended: settle its totals against its own last content.</summary>
     public void Freeze()
     {
+        if (_frozen)
+        {
+            return;
+        }
+
+        // An Edit reports no full content, so the disk as it stands now is what this prompt left.
+        _frozenContent = _latest ?? (Kind != FileChangeKind.Delete && CurrentContent() is (true, var onDisk) ? onDisk : null);
         _frozen = true;
         RefreshCounts();
     }
@@ -167,9 +177,9 @@ public sealed partial class SessionFileChange : ObservableObject
     private (bool Exists, string? Content) CurrentContent()
     {
         // A row of a finished prompt shows what that prompt left, not later prompts' edits.
-        if (_frozen && _latest is not null && Kind != FileChangeKind.Delete)
+        if (_frozen && _frozenContent is not null && Kind != FileChangeKind.Delete)
         {
-            return (true, _latest);
+            return (true, _frozenContent);
         }
 
         try

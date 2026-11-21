@@ -9,6 +9,12 @@ public static class AgentModePolicy
     public static bool IsHostMode(string mode) => mode is Ask or Automatic;
     public static bool IsFullMode(string mode) => mode is "auto" or "dontAsk" or "bypassPermissions";
 
+    /// <summary>
+    /// Codale offers Auto, Interactive, Plan and Full (plus Ask for explain-only turns). The CLI's
+    /// "acceptEdits" and "default" are not modes of ours: both land on Interactive ("manual").
+    /// </summary>
+    public static string ToSupported(string mode) => mode is "acceptEdits" or "default" ? "manual" : mode;
+
     public static string ToCli(string mode) => AgentPermissionMode.Normalize(mode switch
     {
         Ask or Automatic => "manual",

@@ -119,8 +119,13 @@ public sealed partial class CommandBlockViewModel : ObservableObject, IDisposabl
     public event EventHandler? Exited;
 
     /// <summary>Starts the command. Called once, on the UI thread.</summary>
+    /// <summary>The short name of the shell the block ran under ("pwsh", "powershell", "cmd"); empty until it runs.</summary>
+    [ObservableProperty]
+    public partial string ShellName { get; private set; } = "";
+
     public void Run(string shell, bool loadProfile)
     {
+        ShellName = Path.GetFileNameWithoutExtension(shell);
         StartedAt = DateTimeOffset.Now;
         _clock.Start();
 

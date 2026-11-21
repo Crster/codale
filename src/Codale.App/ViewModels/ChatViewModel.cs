@@ -1371,6 +1371,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public event EventHandler? TurnFinished;
 
     /// <summary>
+    /// Raised when a prompt is sent, before the agent can act on it: the workspace notes the
+    /// working tree, so edits the agent makes through the shell (which report no FileChange)
+    /// are still listed under this prompt at turn end.
+    /// </summary>
+    public event EventHandler? PromptStarted;
+
+    /// <summary>
     /// Raised mid-turn whenever a tool reports a file change, so the file tree can
     /// pick up creations while the turn is still running - turn end would be too
     /// late to feel responsive.
@@ -1543,6 +1550,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     partial void OnPermissionModeChanged(string value)
     {
+        // A mode Codale does not offer (the CLI's acceptEdits, from an old default or a CLI
+        // suggestion) would show a chip the menu has no entry for: it becomes Interactive.
+        if (AgentModePolicy.ToSupported(value) is var supported && supported != value)
+        {
+            PermissionMode = supported;
+            return;
+        }
+
         // Leaving ask in any direction ends Auto's hold on it.
         if (value != AskMode)
         {
@@ -1563,7 +1578,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async Task SetPermissionModeAsync(string mode)
     {
-        mode = IsHostMode(mode) ? mode : AgentPermissionMode.Normalize(mode);
+        mode = IsHostMode(mode) ? mode : AgentModePolicy.ToSupported(AgentPermissionMode.Normalize(mode));
 
         // Any pick is the user's own: picking Ask while Auto had borrowed it makes it stick.
         _modeRestore.AskTurnFromAuto = false;
@@ -3143,7 +3158,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         try
         {
-            return Path.IsPathRooted(path) ? path : Path.GetFullPath(Path.Combine(ProjectPath, path));
+            // Normalized either way (Codex reports "X:/a/b.cs"): the change lists match rows by path.
+            return Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(ProjectPath, path));
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
@@ -3804,9 +3820,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             Risk = shellAssessment.Risk,
             RiskNote = mcpRisk is { } noted ? noted.Effect : ToolCallItem.IsShellName(approval.ToolName) ? shellAssessment.FormatRiskNote() : "",
             Questions = ApprovalRequestItem.ParseQuestions(approval.Input),
+            // No shortcut into a mode Codale does not offer ("Allow all edits this session" = acceptEdits).
             Suggestions = [.. approval.Suggestions
                 .Where(s => !string.Equals(s.Type, "addRules", StringComparison.OrdinalIgnoreCase) &&
-                            !string.Equals(s.Type, "addRule", StringComparison.OrdinalIgnoreCase))
+                            !string.Equals(s.Type, "addRule", StringComparison.OrdinalIgnoreCase) &&
+                            !(s.Type == "setMode" && s.Mode is { } suggested && AgentModePolicy.ToSupported(suggested) != suggested))
                 .Select(s => new SuggestionOption { RequestId = approval.RequestId, Suggestion = s })],
         };
         pending.Approval = approvalItem;
@@ -3982,7 +4000,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             RespondToApproval(
                 approval.RequestId,
-                new ApprovalDecision { Behavior = ApprovalBehavior.Allow, SwitchToMode = "acceptEdits" });
+                new ApprovalDecision { Behavior = ApprovalBehavior.Allow, SwitchToMode = "manual" });
             return true;
         }
 
@@ -4405,7 +4423,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         ComposerNotice = null;
         IsBusy = true;
         LastUserPrompt = text;
-        if (!compact) Status.BeginPrompt(displayText ?? text);
+        if (!compact)
+        {
+            Status.BeginPrompt(displayText ?? text);
+            PromptStarted?.Invoke(this, EventArgs.Empty);
+        }
         // displayText: what the chat and its history show when the prompt is long machine text (an approved plan).
         var sent = pre?.Item ?? new UserMessageItem { Text = displayText ?? text, Attachments = attachments };
         sent.SentAsPlan = planOnly;

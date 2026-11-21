@@ -38,6 +38,7 @@ public sealed partial class SpecialistPane : UserControl
         var text = (sender as FrameworkElement)?.Tag switch
         {
             UserMessageItem user => user.Text,
+            SpecialistAnswersItem answers => string.Join("\n\n", answers.Pairs.Select(p => $"{p.Question}\n→ {p.Answer}")),
             AssistantMessageItem assistant => assistant.Text,
             _ => "",
         };

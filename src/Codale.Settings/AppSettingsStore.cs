@@ -336,15 +336,18 @@ public sealed class AppSettingsStore(string folder) : IDisposable
     private bool ReadFlag(string name, bool fallback) => Read(name, fallback ? "1" : "0") == "1";
 
     private bool IsChatMode(string? mode) =>
-        mode is "automatic" or "ask" or "plan" or "manual" or "acceptEdits" or "auto";
+        mode is "automatic" or "ask" or "plan" or "manual" or "auto";
 
-    /// <summary>The permission mode a fresh chat starts in: "automatic" (Auto), "ask", "plan", "manual", "acceptEdits" or "auto" (Full). Unset is Auto: a CLI left in its own default asks about every edit.</summary>
+    /// <summary>A default saved before "acceptEdits" was retired reads back as Interactive.</summary>
+    private static string? Retired(string? mode) => mode == "acceptEdits" ? "manual" : mode;
+
+    /// <summary>The permission mode a fresh chat starts in: "automatic" (Auto), "ask", "plan", "manual" (Interactive) or "auto" (Full). Unset is Auto: a CLI left in its own default asks about every edit.</summary>
     public string DefaultChatMode
     {
         get
         {
             EnsureFullModeMigration();
-            return Get("chat.defaultMode", () => Read("chat.defaultMode", "") is var raw && IsChatMode(raw) ? raw : "auto");
+            return Get("chat.defaultMode", () => Retired(Read("chat.defaultMode", "")) is { } raw && IsChatMode(raw) ? raw : "auto");
         }
         set => Set("chat.defaultMode", IsChatMode(value) ? value : "auto", FormatText);
     }
@@ -467,7 +470,7 @@ public sealed class AppSettingsStore(string folder) : IDisposable
     public string DefaultModeFor(string cli)
     {
         EnsureFullModeMigration();
-        return ReadDefault(cli, "mode") is { } saved && IsChatMode(saved) ? saved : DefaultChatMode;
+        return Retired(ReadDefault(cli, "mode")) is { } saved && IsChatMode(saved) ? saved : DefaultChatMode;
     }
 
     public void SetDefaultMode(string cli, string? value) => WriteDefault(cli, "mode", IsChatMode(value) ? value : "");

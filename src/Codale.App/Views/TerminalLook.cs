@@ -16,6 +16,9 @@ namespace Codale.App.Views;
 internal static class TerminalLook
 {
     public static readonly Color Background = Color.FromArgb(0xFF, 0x0C, 0x0C, 0x0C);
+
+    /// <summary>The zebra stripe: every other block, a shade above the background.</summary>
+    public static readonly Color Stripe = Color.FromArgb(0xFF, 0x16, 0x16, 0x1B);
     public static readonly Color Command = Color.FromArgb(0xFF, 0xE8, 0xE8, 0xE8);
     public static readonly Color Muted = Color.FromArgb(0xFF, 0x80, 0x80, 0x88);
     public static readonly Color Faint = Color.FromArgb(0xFF, 0x50, 0x50, 0x58);

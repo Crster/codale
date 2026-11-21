@@ -32,14 +32,16 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
     private readonly Grid _statusHost = new() { Width = 14, Height = 14, VerticalAlignment = VerticalAlignment.Center };
     private readonly FontIcon _statusGlyph = new() { FontSize = 10, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
     private readonly ProgressRing _statusRing = new() { IsActive = false, Width = 10, Height = 10, MinWidth = 0, MinHeight = 0, Foreground = TerminalLook.Brush(TerminalLook.Accent) };
-    private readonly TextBlock _where = new() { FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 280 };
+    private readonly TextBlock _where = new() { FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly TextBlock _timing = new() { FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _result = new() { FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _command = new();
     private readonly TextBlock _right = new() { FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center };
     private readonly StackPanel _actions = new() { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 6, 0) };
     private readonly Border _body = new() { MinHeight = 0 };
+    private readonly TextBlock _shell = new() { FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center };
     private readonly Button _stopButton;
+    private readonly Button _rerunButton;
     private readonly DispatcherQueueTimer _clock;
     private double _lastBodyHeight;
     private bool _pointerOver;
@@ -58,25 +60,49 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
         _root.Background = TerminalLook.Brush(TerminalLook.Background);
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        _root.Padding = new Thickness(0, 0, 0, docked ? 0 : 6);
+        _root.Padding = new Thickness(0, 2, 0, docked ? 0 : 8);
 
-        // ---- the prompt line
-        _header.Padding = new Thickness(8, 3, 0, 3);
+        // ---- the prompt line, two rows like the input it came from:
+        //   status  X:\full\path  1.2s  exit 1                            12:04:31
+        //           pwsh > command                                      [run again] [more]
+        _header.Padding = new Thickness(8, 4, 0, 2);
         _header.ColumnSpacing = 8;
+        _header.RowSpacing = 1;
         _header.CornerRadius = new CornerRadius(4);
-        _header.Background = TerminalLook.Brush(TerminalLook.Background);
         _header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         _header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        _header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _header.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _header.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         _statusHost.Children.Add(_statusGlyph);
         _statusHost.Children.Add(_statusRing);
-        _where.Text = ShortPath(block.Cwd);
+
+        // Row 0: where it ran, how long, how it ended. Left-aligned, so the path trims before the rest.
+        _where.Text = block.Cwd;
         _where.Foreground = TerminalLook.Brush(TerminalLook.Muted);
         ToolTipService.SetToolTip(_where, block.Cwd);
         _timing.Foreground = TerminalLook.Brush(TerminalLook.Faint);
         _result.Foreground = TerminalLook.Brush(TerminalLook.Failure);
+        var meta = new Grid { ColumnSpacing = 8, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
+        meta.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        meta.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        meta.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(_timing, 1);
+        Grid.SetColumn(_result, 2);
+        meta.Children.Add(_where);
+        meta.Children.Add(_timing);
+        meta.Children.Add(_result);
+        Grid.SetColumn(meta, 1);
+
+        _right.Foreground = TerminalLook.Brush(TerminalLook.Faint);
+        _right.Margin = new Thickness(0, 0, 10, 0);
+        _right.HorizontalAlignment = HorizontalAlignment.Right;
+        Grid.SetColumn(_right, 2);
+
+        // Row 1: the shell, the prompt and the command.
+        _shell.Foreground = TerminalLook.Brush(TerminalLook.Faint);
+        _shell.Text = Block.ShellName.Length > 0 ? Block.ShellName : TerminalLook.ShellLabel(Block.Settings);
         var prompt = new TextBlock
         {
             Text = "❯",
@@ -85,12 +111,6 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
             Foreground = TerminalLook.Brush(TerminalLook.Accent),
             VerticalAlignment = VerticalAlignment.Center,
         };
-        var left = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7, VerticalAlignment = VerticalAlignment.Center };
-        left.Children.Add(_statusHost);
-        left.Children.Add(_where);
-        left.Children.Add(_timing);
-        left.Children.Add(_result);
-        left.Children.Add(prompt);
 
         _command.FontFamily = TerminalLook.MonoFont(Block.Settings);
         _command.FontSize = TerminalLook.MonoSize(Block.Settings);
@@ -103,33 +123,36 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
         var firstLine = block.Command.Split('\n')[0].TrimEnd('\r');
         _command.Text = firstLine.Length < block.Command.Length ? firstLine + " …" : firstLine;
         ToolTipService.SetToolTip(_command, block.Command);
-        Grid.SetColumn(_command, 1);
 
-        _actions.Children.Add(IconButton("", "Copy command", (_, _) => _ = ClipboardWriter.SetTextAsync(Block.Command)));
-        _actions.Children.Add(IconButton("", "Copy output", (_, _) => _ = ClipboardWriter.SetTextAsync(Block.OutputText)));
-        _actions.Children.Add(IconButton("", "Run again", (_, _) => RerunRequested?.Invoke(this, Block)));
-        _stopButton = IconButton("", "Stop (Ctrl+C)", (_, _) => _ = Block.StopAsync());
+        var line = new Grid { ColumnSpacing = 7, MinHeight = 22 };
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(prompt, 1);
+        Grid.SetColumn(_command, 2);
+        line.Children.Add(_shell);
+        line.Children.Add(prompt);
+        line.Children.Add(_command);
+        Grid.SetRow(line, 1);
+        Grid.SetColumn(line, 1);
+
+        // Two controls: the one that fits the moment (Stop while it runs, Run again after) and a
+        // menu with the rest - the same menu a right-click on the prompt line opens.
+        _rerunButton = IconButton("\uE72C", "Run again", (_, _) => RerunRequested?.Invoke(this, Block));
+        _stopButton = IconButton("\uE71A", "Stop (Ctrl+C)", (_, _) => _ = Block.StopAsync());
+        var more = IconButton("\uE712", "More", (sender, _) => BuildMenu().ShowAt((FrameworkElement)sender));
+        _actions.Children.Add(_rerunButton);
         _actions.Children.Add(_stopButton);
-        if (docked)
-        {
-            _actions.Children.Add(IconButton("", "Back to its terminal", (_, _) => UndockRequested?.Invoke(this, Block)));
-        }
-
-        var dock = IconButton("", "Dock to the right - or drag this line to the right edge", (_, _) => { });
-        dock.Flyout = BuildDockMenu();
-        _actions.Children.Add(dock);
-        _actions.Children.Add(IconButton("", "Maximize in a new tab", (_, _) => PopOutRequested?.Invoke(this, Block)));
-        _actions.Children.Add(IconButton("", "Remove from history (stops it if running)", (_, _) => RemoveRequested?.Invoke(this, Block)));
+        _actions.Children.Add(more);
+        _actions.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetRow(_actions, 1);
         Grid.SetColumn(_actions, 2);
 
-        _right.Foreground = TerminalLook.Brush(TerminalLook.Faint);
-        _right.Margin = new Thickness(0, 0, 10, 0);
-        Grid.SetColumn(_right, 3);
-
-        _header.Children.Add(left);
-        _header.Children.Add(_command);
-        _header.Children.Add(_actions);
+        _header.Children.Add(_statusHost);
+        _header.Children.Add(meta);
         _header.Children.Add(_right);
+        _header.Children.Add(line);
+        _header.Children.Add(_actions);
 
         // A tap, not a press: pressing the line may be the start of a drag to the dock. Presses on
         // the line's own buttons are theirs, not a selection.
@@ -226,6 +249,24 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
             }
         } }
 
+    /// <summary>Every other block of the notebook is drawn a shade lighter, so each one reads as a unit.</summary>
+    public bool IsStriped { get; set
+        {
+            if (field != value)
+            {
+                field = value;
+                ApplySurface();
+            }
+        } }
+
+    private Windows.UI.Color SurfaceColor => IsStriped && !IsDocked && !IsBare ? TerminalLook.Stripe : TerminalLook.Background;
+
+    private void ApplySurface()
+    {
+        _root.Background = TerminalLook.Brush(SurfaceColor);
+        Terminal?.SurfaceColor = SurfaceColor;
+    }
+
     /// <summary>The live output view, while the block is realized.</summary>
     public TerminalView? Terminal { get; private set; }
 
@@ -251,6 +292,7 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
         _body.ClearValue(HeightProperty);
         var terminal = new TerminalView();
         terminal.ApplyAppSettings(Block.Settings);
+        terminal.SurfaceColor = SurfaceColor;
         terminal.Response += OnTerminalInput;
         terminal.Resized += OnTerminalResized;
         terminal.LinkActivated += OnTerminalLink;
@@ -371,23 +413,6 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
         LayoutChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private MenuFlyout BuildDockMenu()
-    {
-        var menu = new MenuFlyout();
-        AddDockItems(menu);
-        return menu;
-    }
-
-    private void AddDockItems(MenuFlyout menu)
-    {
-        foreach (var (text, dock) in new[] { ("Dock right", BlockDock.Right), ("Dock top right", BlockDock.TopRight), ("Dock bottom right", BlockDock.BottomRight) })
-        {
-            var item = new MenuFlyoutItem { Text = text };
-            item.Click += (_, _) => DockRequested?.Invoke(this, (Block, dock));
-            menu.Items.Add(item);
-        }
-    }
-
     private void OnTerminalHeightChanged(object? sender, EventArgs e) => LayoutChanged?.Invoke(this, EventArgs.Empty);
 
     private void OnBlockPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -409,6 +434,7 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
                 }
 
                 break;
+            case nameof(CommandBlockViewModel.ShellName):
             case nameof(CommandBlockViewModel.Status):
                 UpdateStatus();
                 Terminal?.ShowCursor = Block.IsRunning;
@@ -436,26 +462,43 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
     private void OnHeaderContextRequested(UIElement sender, ContextRequestedEventArgs args)
     {
         args.Handled = true;
+        BuildMenu().ShowAt(_header, new FlyoutShowOptions { Position = args.TryGetPosition(_header, out var p) ? p : null });
+    }
+
+    /// <summary>Everything a block can do, for the "More" button and the right-click on its prompt line.</summary>
+    private MenuFlyout BuildMenu()
+    {
         var menu = new MenuFlyout();
-        Add("Copy command", "", () => _ = ClipboardWriter.SetTextAsync(Block.Command));
-        Add("Copy output", "", () => _ = ClipboardWriter.SetTextAsync(Block.OutputText));
-        Add("Run again", "", () => RerunRequested?.Invoke(this, Block));
         if (Block.IsRunning)
         {
-            Add("Stop", "", () => _ = Block.StopAsync());
+            Add("Stop", "\uE71A", () => _ = Block.StopAsync());
+        }
+        else
+        {
+            Add("Run again", "\uE72C", () => RerunRequested?.Invoke(this, Block));
         }
 
+        Add("Copy command", "\uE8C8", () => _ = ClipboardWriter.SetTextAsync(Block.Command));
+        Add("Copy output", "\uE8C8", () => _ = ClipboardWriter.SetTextAsync(Block.OutputText));
         menu.Items.Add(new MenuFlyoutSeparator());
-        AddDockItems(menu);
+        var dock = new MenuFlyoutSubItem { Text = "Dock", Icon = new FontIcon { Glyph = "\uE90C" } };
+        foreach (var (text, side) in new[] { ("Right", BlockDock.Right), ("Top right", BlockDock.TopRight), ("Bottom right", BlockDock.BottomRight) })
+        {
+            var item = new MenuFlyoutItem { Text = text };
+            item.Click += (_, _) => DockRequested?.Invoke(this, (Block, side));
+            dock.Items.Add(item);
+        }
+
+        menu.Items.Add(dock);
         if (IsDocked)
         {
-            Add("Back to its terminal", "", () => UndockRequested?.Invoke(this, Block));
+            Add("Back to its terminal", "\uE72B", () => UndockRequested?.Invoke(this, Block));
         }
 
-        Add("Maximize in new tab", "", () => PopOutRequested?.Invoke(this, Block));
+        Add("Maximize in new tab", "\uE740", () => PopOutRequested?.Invoke(this, Block));
         menu.Items.Add(new MenuFlyoutSeparator());
-        Add("Remove from history", "", () => RemoveRequested?.Invoke(this, Block));
-        menu.ShowAt(_header, new FlyoutShowOptions { Position = args.TryGetPosition(_header, out var p) ? p : null });
+        Add("Remove from history", "\uE74D", () => RemoveRequested?.Invoke(this, Block));
+        return menu;
 
         void Add(string text, string glyph, Action action)
         {
@@ -474,13 +517,14 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
         _actions.IsHitTestVisible = showActions;
         _header.Background = TerminalLook.Brush(IsSelected ? TerminalLook.Selected
             : _pointerOver ? TerminalLook.Hover
-            : TerminalLook.Background);
+            : Microsoft.UI.Colors.Transparent);
     }
 
     /// <summary>The result mark: a spinner while running, then a tick, a cross with the exit code, or "stopped".</summary>
     private void UpdateStatus()
     {
         _stopButton.Visibility = Block.IsRunning ? Visibility.Visible : Visibility.Collapsed;
+        _rerunButton.Visibility = Block.IsRunning ? Visibility.Collapsed : Visibility.Visible;
         // A collapsed ring that is still active keeps its animation ticking on the compositor,
         // so every finished block in the scrollback would redraw the window each frame.
         _statusRing.IsActive = Block.IsRunning;
@@ -504,7 +548,8 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
         _result.Visibility = _result.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
         var started = Block.StartedAt == default ? DateTimeOffset.Now : Block.StartedAt;
-        _right.Text = $"{TerminalLook.ShellLabel(Block.Settings)}  {started.ToLocalTime():HH:mm:ss}";
+        _right.Text = $"{started.ToLocalTime():HH:mm:ss}";
+        _shell.Text = Block.ShellName.Length > 0 ? Block.ShellName : TerminalLook.ShellLabel(Block.Settings);
 
         if (Block.IsRunning)
         {
@@ -525,14 +570,6 @@ public sealed partial class CommandBlockView : UserControl, INotebookCell
         : elapsed.TotalMinutes < 1 ? $"{elapsed.TotalSeconds:0.0}s"
         : elapsed.TotalHours < 1 ? $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds}s"
         : $"{(int)elapsed.TotalHours}h {elapsed.Minutes}m";
-
-    /// <summary>The last two folders of a path: enough to tell where a command ran without crowding the line.</summary>
-    internal static string ShortPath(string path)
-    {
-        var trimmed = path.TrimEnd('\\', '/');
-        var parts = trimmed.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries);
-        return parts.Length <= 2 ? trimmed : "…\\" + string.Join('\\', parts[^2..]);
-    }
 
     private static Button IconButton(string glyph, string tip, RoutedEventHandler click)
     {

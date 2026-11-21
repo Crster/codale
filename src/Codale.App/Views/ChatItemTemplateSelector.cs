@@ -15,6 +15,7 @@ public sealed partial class ChatItemTemplateSelector : DataTemplateSelector
     public DataTemplate? SpecialistTemplate { get; set; }
     public DataTemplate? MemoryNoticeTemplate { get; set; }
     public DataTemplate? UserTemplate { get; set; }
+    public DataTemplate? AnswersTemplate { get; set; }
     public DataTemplate? AssistantTemplate { get; set; }
     public DataTemplate? ToolTemplate { get; set; }
     public DataTemplate? ActivityTemplate { get; set; }
@@ -34,6 +35,7 @@ public sealed partial class ChatItemTemplateSelector : DataTemplateSelector
         CompactItem => CompactTemplate,
         FeatureBriefingItem => BriefingTemplate,
         HandoffBriefItem => HandoffBriefTemplate,
+        SpecialistAnswersItem => AnswersTemplate ?? base.SelectTemplateCore(item),
         UserMessageItem => UserTemplate,
         AssistantMessageItem => AssistantTemplate,
         ToolCallItem => ToolTemplate,

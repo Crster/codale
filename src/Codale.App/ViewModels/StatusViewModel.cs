@@ -527,7 +527,15 @@ public sealed partial class StatusViewModel : ObservableObject
         _currentGroup?.Freeze();
         _currentGroup = null;
         _pendingPrompt = text;
+        PromptIndex++;
     }
+
+    /// <summary>Counts prompts sent; a turn-end reconcile that started under an earlier prompt checks it before recording.</summary>
+    public int PromptIndex { get; private set; }
+
+    /// <summary>Whether the current prompt already listed this file (from the agent's own edit events).</summary>
+    public bool CurrentPromptTouched(string path) =>
+        _currentGroup is { } group && group.Files.Any(f => string.Equals(f.Path, path, StringComparison.OrdinalIgnoreCase));
 
     private PromptChangeGroup StartGroup(string fallbackTitle)
     {

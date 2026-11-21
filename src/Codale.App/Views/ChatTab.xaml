@@ -718,8 +718,8 @@
                                     ToolTipService.ToolTip="Build it without asking" />
                                 <Button
                                     Click="OnApprovalPlanAccept"
-                                    CommandParameter="acceptEdits"
-                                    Content="Accept · review edits"
+                                    CommandParameter="manual"
+                                    Content="Accept · interactive"
                                     Style="{StaticResource CardAccentButton}"
                                     Tag="{x:Bind Approval, Mode=OneWay}"
                                     ToolTipService.ToolTip="Build it, asking before each file change (Enter)" />

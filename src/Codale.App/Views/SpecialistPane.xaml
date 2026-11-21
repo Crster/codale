@@ -2,6 +2,7 @@
     x:Class="Codale.App.Views.SpecialistPane"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:agents="using:Codale.Agents"
     xmlns:views="using:Codale.App.Views"
     xmlns:vm="using:Codale.App.ViewModels">
     <UserControl.Resources>
@@ -31,7 +32,42 @@
                 </StackPanel>
             </StackPanel>
         </DataTemplate>
-        <views:ChatItemTemplateSelector x:Key="MessageTemplates" UserTemplate="{StaticResource PromptTemplate}" AssistantTemplate="{StaticResource ReplyTemplate}" />
+        <!--  Answers to planner questions: each question as a small muted label, the answer beneath it on an indigo rule.  -->
+        <DataTemplate x:Key="AnswersTemplate" x:DataType="vm:SpecialistAnswersItem">
+            <StackPanel Margin="32,14,0,4" HorizontalAlignment="Right" MaxWidth="640" Spacing="3">
+                <Border Padding="14,10,14,12" CornerRadius="12" Background="{StaticResource AskSurfaceBrush}"
+                        BorderBrush="{StaticResource AskStrokeBrush}" BorderThickness="1">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="YOUR ANSWERS" Style="{StaticResource ShellSectionLabel}" HorizontalAlignment="Left" />
+                        <ItemsControl ItemsSource="{x:Bind Pairs}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Spacing="12" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="agents:SpecialistAnswer">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{x:Bind Question}" FontSize="12" TextWrapping="Wrap"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <Border Padding="10,1,0,1" BorderBrush="{StaticResource AskStrokeBrush}" BorderThickness="2,0,0,0">
+                                            <TextBlock Text="{x:Bind Answer}" FontSize="13.5" FontWeight="SemiBold" TextWrapping="Wrap"
+                                                       IsTextSelectionEnabled="True" />
+                                        </Border>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+                <Button HorizontalAlignment="Right" Width="20" Height="20" Padding="0" Background="Transparent" BorderThickness="0"
+                        Click="OnCopyMessageClick" Tag="{x:Bind}" ToolTipService.ToolTip="Copy answers">
+                    <FontIcon FontSize="10" Glyph="&#xE8C8;" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                </Button>
+            </StackPanel>
+        </DataTemplate>
+        <views:ChatItemTemplateSelector x:Key="MessageTemplates" UserTemplate="{StaticResource PromptTemplate}"
+                                        AnswersTemplate="{StaticResource AnswersTemplate}" AssistantTemplate="{StaticResource ReplyTemplate}" />
     </UserControl.Resources>
     <Grid>
         <Grid.RowDefinitions>
@@ -69,7 +105,7 @@
                 <ItemsControl ItemsSource="{Binding Messages}" ItemTemplateSelector="{StaticResource MessageTemplates}" />
 
                 <!--  Planner questions: flat blocks divided by hairlines; options are click-to-pick rows.  -->
-                <ItemsControl ItemsSource="{Binding Questions}">
+                <ItemsControl ItemsSource="{Binding Questions}" IsEnabled="{Binding IsIdle, Mode=OneWay}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:SpecialistQuestionItem">
                             <StackPanel Margin="0,4,0,8" Padding="0,12,0,0" Spacing="8"
@@ -112,8 +148,7 @@
 
         <StackPanel Grid.Row="2" Margin="12,0,12,16" Spacing="8">
             <!--  Planner actions: Skip · Revise · Accept for a plan, Skip · Continue for questions.  -->
-            <Grid Padding="4,10,0,0" ColumnSpacing="8" BorderBrush="{ThemeResource ShellHairlineBrush}" BorderThickness="0,1,0,0"
-                  Visibility="{Binding ShowActionBar, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+            <Grid Padding="4,10,0,0" ColumnSpacing="8" BorderBrush="{ThemeResource ShellHairlineBrush}" BorderThickness="0,1,0,0"                  Visibility="{Binding ShowActionBar, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
@@ -123,13 +158,16 @@
                 <TextBlock Text="{Binding ActionHint, Mode=OneWay}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap"
                            Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                 <Button Grid.Column="1" Content="Skip" MinWidth="64" Command="{Binding SkipPlanningCommand}"
+                        IsEnabled="{Binding IsIdle, Mode=OneWay}"
                         Style="{StaticResource ShellTextButton}" Height="32"
                         ToolTipService.ToolTip="Stop planning; nothing is sent to the main chat"
                         Visibility="{Binding CanSkip, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                 <Button Grid.Column="2" Content="{Binding ReviseLabel, Mode=OneWay}" MinWidth="72" Command="{Binding BeginReviseCommand}"
+                        IsEnabled="{Binding IsIdle, Mode=OneWay}"
                         ToolTipService.ToolTip="Ask the planner for changes"
                         Visibility="{Binding CanRevise, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                 <Button Grid.Column="3" Content="{Binding PrimaryLabel, Mode=OneWay}" MinWidth="80" Command="{Binding ContinuePlanningCommand}"
+                        IsEnabled="{Binding IsIdle, Mode=OneWay}"
                         Style="{StaticResource AccentButtonStyle}"
                         ToolTipService.ToolTip="Submit the answers, or implement the plan in the main chat"
                         Visibility="{Binding CanContinue, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
@@ -149,6 +187,7 @@
                          MaxHeight="140" VerticalAlignment="Bottom"
                          IsEnabled="{Binding CanSend, Mode=OneWay}" PreviewKeyDown="OnInputKeyDown" />
                 <Button Grid.Column="1" Content="Back" MinWidth="64" VerticalAlignment="Bottom" Command="{Binding CancelReviseCommand}"
+                        IsEnabled="{Binding IsIdle, Mode=OneWay}"
                         ToolTipService.ToolTip="Back to the plan actions (Esc)"
                         Visibility="{Binding IsRevising, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                 <Button Grid.Column="2" Content="Send" MinWidth="72" VerticalAlignment="Bottom"

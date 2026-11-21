@@ -6,7 +6,9 @@ using Codale.Core.Shell;
 
 namespace Codale.Agents;
 
-public sealed record SpecialistMessage(string Role, string Text);
+/// <summary>One turn of a specialist conversation; <paramref name="Answers"/> is set when the user turn answers the planner's questions.</summary>
+public sealed record SpecialistMessage(string Role, string Text, IReadOnlyList<SpecialistAnswer>? Answers = null);
+public sealed record SpecialistAnswer(string Question, string Answer);
 public sealed record SpecialistQuestion(string Id, string Text, string[] Options, bool MultiSelect = false);
 
 /// <summary>Persisted separately from the provider transcript, including review state across application restarts.</summary>
@@ -58,16 +60,20 @@ public sealed class SpecialistSession(IAgentSessionFactory factory, AgentSession
         "and request review. Codale handles approval and sends the plan to the parent. You must never implement it yourself.";
 
     public const string AnswerInstruction = "You are the parent's Lite answer specialist. Answer questions only; inspect files and search as needed. " +
-        "Never change application files, execute changes, or launch other agents. If the user requests an action, return it to the parent.";
+        "Never change application files, execute changes, or launch other agents. Treat further instructions from the user as guidance for your answer " +
+        "(what to cover, focus on, or explain). If the user asks you to make a change, explain what it would involve and say it can be sent from the main chat.";
 
-    public async Task SendAsync(string text, IReadOnlyList<TurnAttachment>? attachments = null, CancellationToken ct = default)
+    public Task SendAsync(string text, IReadOnlyList<TurnAttachment>? attachments = null, CancellationToken ct = default) =>
+        SendAsync(text, attachments, null, ct);
+
+    private async Task SendAsync(string text, IReadOnlyList<TurnAttachment>? attachments, IReadOnlyList<SpecialistAnswer>? answers, CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_running) throw new InvalidOperationException("The specialist is still answering.");
         if (Snapshot.HandedOff) throw new InvalidOperationException("This plan has already been handed to its parent.");
         Snapshot = Snapshot with { Plan = null, Questions = [], Status = "Starting",
             Attachments = Snapshot.Attachments.Concat(attachments ?? []).DistinctBy(a => a.Path).ToArray() };
-        Snapshot.Messages.Add(new("user", text));
+        Snapshot.Messages.Add(new("user", text, answers));
         _running = true;
         Changed?.Invoke();
         try
@@ -193,6 +199,7 @@ public sealed class SpecialistSession(IAgentSessionFactory factory, AgentSession
     public async Task AnswerAsync(IReadOnlyDictionary<string, string> answers, CancellationToken ct = default)
     {
         var text = string.Join("\n", Snapshot.Questions.Select(q => $"{q.Text}: {answers.GetValueOrDefault(q.Id)}"));
+        var pairs = Snapshot.Questions.Select(q => new SpecialistAnswer(q.Text, answers.GetValueOrDefault(q.Id) ?? "")).ToArray();
         if (Snapshot.Questions.Any(q => string.IsNullOrWhiteSpace(answers.GetValueOrDefault(q.Id))))
             throw new ArgumentException("Answer every question before submitting.");
         if (_question is { } pending && _session is { } session)
@@ -206,12 +213,12 @@ public sealed class SpecialistSession(IAgentSessionFactory factory, AgentSession
                 Behavior = ApprovalBehavior.Allow,
                 UpdatedInput = JsonSerializer.SerializeToElement(updated),
             }, ct);
-            Snapshot.Messages.Add(new("user", text));
+            Snapshot.Messages.Add(new("user", text, pairs));
             Snapshot = Snapshot with { Questions = [], Status = "Working", InterviewAnswered = true };
             _question = null;
             Changed?.Invoke();
         }
-        else await SendAsync("Answers to your interview questions:\n" + text, ct: ct);
+        else await SendAsync("Answers to your interview questions:\n" + text, null, pairs, ct);
     }
 
     private void SetPlan(string plan)
@@ -249,6 +256,30 @@ public sealed class SpecialistSession(IAgentSessionFactory factory, AgentSession
         var match = Regex.Match(text, @"<proposed_plan>\s*(.*?)\s*</proposed_plan>", RegexOptions.Singleline);
         return match.Success && match.Groups[1].Value.Trim().Length > 0 ? match.Groups[1].Value.Trim() : null;
     }
+
+    /// <summary>
+    /// The reply a proposed plan replaces on screen: the planner usually writes the plan (or a
+    /// summary of it) as a message, then proposes the fuller text through ExitPlanMode. Showing
+    /// both reads as the same plan twice. Only the latest reply since the user last spoke can be
+    /// that draft, and only when it carried tags or shares most of its words with the plan. -1 when none.
+    /// </summary>
+    public static int DraftIndexOf(IReadOnlyList<SpecialistMessage> messages, string plan)
+    {
+        if (messages.Any(m => m.Role == "assistant" && (m.Text == plan || ExtractPlan(m.Text) == plan))) return -1;
+        for (var i = messages.Count - 1; i >= 0 && messages[i].Role != "user"; i--)
+        {
+            if (messages[i].Role != "assistant") continue;
+            if (ExtractPlan(messages[i].Text) is not null) return i;
+            var words = Words(messages[i].Text);
+            if (words.Count == 0) return -1;
+            var planWords = Words(plan);
+            return words.Count(planWords.Contains) * 5 >= words.Count * 2 ? i : -1;
+        }
+        return -1;
+    }
+
+    private static HashSet<string> Words(string text) =>
+        [.. Regex.Matches(text.ToLowerInvariant(), @"[\p{L}\p{N}_]{4,}").Select(m => m.Value)];
 
     public static bool AllowsInspection(ApprovalRequested approval, bool planner, string cwd, IReadOnlyList<string> roots)
     {

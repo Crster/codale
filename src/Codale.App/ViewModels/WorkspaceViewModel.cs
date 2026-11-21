@@ -249,6 +249,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         chat.PermissionMode = Smart.Settings.DefaultModeFor(chat.CliId);
 
         chat.TurnFinished += OnTurnFinished;
+        chat.PromptStarted += OnChatPromptStarted;
         chat.FilesChanged += OnChatFilesChanged;
         chat.SessionStateChanged += OnSessionStateChanged;
         chat.TodosChanged += OnTodosChanged;
@@ -281,11 +282,13 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     {
 
         chat.TurnFinished -= OnTurnFinished;
+        chat.PromptStarted -= OnChatPromptStarted;
         chat.FilesChanged -= OnChatFilesChanged;
         chat.SessionStateChanged -= OnSessionStateChanged;
         chat.TodosChanged -= OnTodosChanged;
         chat.PropertyChanged -= OnChatPropertyChanged;
         chat.TopicRedirectRequested -= OnTopicRedirectRequested;
+        _promptBaselines.Remove(chat);
         Chats.Remove(chat);
 
         // The panel always needs a chat to show; with the last one gone, a blank one
@@ -667,8 +670,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             await Git.RefreshAsync();
             await Diff.RefreshAsync();
 
-            if (sender is ChatViewModel chat)
+            // Edits made through the shell report no FileChange; git shows them, so they are
+            // listed under the prompt now, against the working tree as it stood when it was sent.
+            if (sender is ChatViewModel chat && await ReconcilePromptChangesAsync(chat))
             {
+                chat.Status.RefreshSessionChanges();
             }
         }
         catch (OperationCanceledException)
@@ -726,6 +732,141 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     }
 
     private long _lastLiveRefresh = -10_000;
+
+    /// <summary>The working tree as it stood when a chat's latest prompt was sent: full path → git totals and content.</summary>
+    private sealed record PromptBaseline(int PromptIndex, Dictionary<string, (int Added, int Removed, bool Deleted, string? Content)> Files);
+
+    private readonly Dictionary<ChatViewModel, Task<PromptBaseline?>> _promptBaselines = [];
+
+    /// <summary>Files read per baseline, and the largest one read: a huge dirty tree falls back to git totals.</summary>
+    private const int MaxBaselineFiles = 300;
+    private const long MaxBaselineBytes = 2 * 1024 * 1024;
+
+    private void OnChatPromptStarted(object? sender, EventArgs e)
+    {
+        if (sender is ChatViewModel chat && !TerminalSessions.Contains(chat))
+        {
+            _promptBaselines[chat] = CapturePromptBaselineAsync(chat.Status.PromptIndex);
+        }
+    }
+
+    private async Task<PromptBaseline?> CapturePromptBaselineAsync(int promptIndex)
+    {
+        try
+        {
+            await Diff.RefreshAsync();
+            var files = new Dictionary<string, (int, int, bool, string?)>(StringComparer.OrdinalIgnoreCase);
+            foreach (var file in Diff.Files.ToList())
+            {
+                var path = WorkspaceFullPath(file.Path);
+                files[path] = (file.Added, file.Removed, file.IsDeleted,
+                    file.IsDeleted || files.Count >= MaxBaselineFiles ? null : ReadSmallFile(path));
+            }
+
+            return new PromptBaseline(promptIndex, files);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Lists, under the chat's latest prompt, every file git shows changed since that prompt
+    /// was sent that the agent's own events did not already report - Codex and Claude both
+    /// edit through the shell at times, which no FileChange describes. True when any was added.
+    /// </summary>
+    private async Task<bool> ReconcilePromptChangesAsync(ChatViewModel chat)
+    {
+        if (!_promptBaselines.TryGetValue(chat, out var pending) || await pending is not { } baseline ||
+            baseline.PromptIndex != chat.Status.PromptIndex)
+        {
+            return false;
+        }
+
+        // Another chat still working may be the one that wrote a file; it lists its own.
+        bool OwnedElsewhere(string path) => Chats.Any(other => !ReferenceEquals(other, chat) && other.IsBusy && other.Status.CurrentPromptTouched(path));
+
+        var recorded = false;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in Diff.Files.ToList())
+        {
+            var path = WorkspaceFullPath(file.Path);
+            seen.Add(path);
+            if (chat.Status.CurrentPromptTouched(path) || OwnedElsewhere(path))
+            {
+                continue;
+            }
+
+            var now = file.IsDeleted ? null : ReadSmallFile(path);
+            if (baseline.Files.TryGetValue(path, out var before))
+            {
+                var unchanged = before.Deleted == file.IsDeleted && before.Added == file.Added && before.Removed == file.Removed &&
+                    (before.Content is null || string.Equals(before.Content, now, StringComparison.Ordinal));
+                if (unchanged)
+                {
+                    continue;
+                }
+
+                if (before.Content is not null)
+                {
+                    // Already dirty when the prompt was sent: this prompt's change is measured from that content.
+                    var kind = file.IsDeleted ? FileChangeKind.Delete : FileChangeKind.Update;
+                    chat.Status.RecordFileChange(
+                        new FileChange { Kind = kind, FilePath = path, OriginalContent = before.Content, NewContent = now },
+                        TextDiff.Compute(path, before.Content, now));
+                    recorded = true;
+                    continue;
+                }
+            }
+
+            var newKind = file.IsNew ? FileChangeKind.Create : file.IsDeleted ? FileChangeKind.Delete : FileChangeKind.Update;
+            chat.Status.RecordFileChange(new FileChange { Kind = newKind, FilePath = path, NewContent = now }, file);
+            recorded = true;
+        }
+
+        // Dirty when the prompt was sent, clean now: the prompt put it back to what git has.
+        foreach (var (path, before) in baseline.Files)
+        {
+            if (seen.Contains(path) || before.Content is null || chat.Status.CurrentPromptTouched(path) || OwnedElsewhere(path) ||
+                ReadSmallFile(path) is not { } restored || restored == before.Content)
+            {
+                continue;
+            }
+
+            chat.Status.RecordFileChange(
+                new FileChange { Kind = FileChangeKind.Update, FilePath = path, OriginalContent = before.Content, NewContent = restored },
+                TextDiff.Compute(path, before.Content, restored));
+            recorded = true;
+        }
+
+        return recorded;
+    }
+
+    private string WorkspaceFullPath(string relative)
+    {
+        try
+        {
+            return System.IO.Path.GetFullPath(System.IO.Path.Combine(ProjectPath, relative));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or System.IO.PathTooLongException)
+        {
+            return relative;
+        }
+    }
+
+    private static string? ReadSmallFile(string path)
+    {
+        try
+        {
+            var info = new System.IO.FileInfo(path);
+            return info.Exists && info.Length <= MaxBaselineBytes ? System.IO.File.ReadAllText(path) : null;
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>The session's opening message is named, never answered: it often is a task the model would happily start on.</summary>
     /// The General model names it when configured; the local heuristic answers otherwise, or when the model is slow.
@@ -996,6 +1137,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         foreach (var chat in Chats)
         {
             chat.TurnFinished -= OnTurnFinished;
+            chat.PromptStarted -= OnChatPromptStarted;
             chat.FilesChanged -= OnChatFilesChanged;
             chat.SessionStateChanged -= OnSessionStateChanged;
             chat.TodosChanged -= OnTodosChanged;

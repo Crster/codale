@@ -677,7 +677,7 @@ public sealed partial class ChatTab : UserControl
             case VirtualKey.Enter:
                 ViewModel.RespondToApproval(
                     approval.RequestId,
-                    new ApprovalDecision { Behavior = ApprovalBehavior.Allow, SwitchToMode = "acceptEdits" });
+                    new ApprovalDecision { Behavior = ApprovalBehavior.Allow, SwitchToMode = "manual" });
                 DispatcherQueue.TryEnqueue(FocusDraft);
                 e.Handled = true;
                 break;
@@ -805,7 +805,7 @@ public sealed partial class ChatTab : UserControl
     /// <summary>
     /// Plan flow: "Accept (edit mode)" / "Accept (auto)" approve the plan and put the
     /// session straight into the chosen work mode, so the follow-up turn runs under it.
-    /// The parameter is a host mode id ("acceptEdits", <see cref="ChatViewModel.AutomaticMode"/>);
+    /// The parameter is a host mode id ("manual", <see cref="ChatViewModel.AutomaticMode"/>, "auto");
     /// the CLI half is translated at the switch, not stored raw.
     /// </summary>
     private void OnApprovalPlanAccept(object sender, RoutedEventArgs e)
@@ -1449,14 +1449,124 @@ public sealed partial class ChatTab : UserControl
             ? "→ " + prediction.Replacement
             : prediction.Replacement[prediction.Length..];
 
-        var range = DraftEditor.Document.Selection;
-        range.GetRect(Microsoft.UI.Text.PointOptions.ClientCoordinates, out var rect, out _);
+        PlacePrediction();
+    }
+
+    /// <summary>The box's own scroller: when it scrolls, the caret moves under the ghost.</summary>
+    private ScrollViewer? _draftScroll;
+
+    /// <summary>
+    /// Puts the ghost at the caret. It runs again whenever the box grows, shrinks or scrolls:
+    /// a prediction placed while the text was still wrapping onto a new line, before the box
+    /// had grown to show it, stayed where the caret had been.
+    /// </summary>
+    private void PlacePrediction()
+    {
+        if (_prediction is not { } prediction)
+        {
+            return;
+        }
+
+        HookDraftLayout();
+        DraftEditor.Document.Selection.GetRect(Microsoft.UI.Text.PointOptions.ClientCoordinates, out var rect, out _);
+        rect.Y = DrawnY(rect.Y);
         var padding = DraftEditor.Padding;
-        var left = rect.X + padding.Left + (prediction.IsCorrection ? 6 : 1);
-        PredictionText.MaxWidth = Math.Max(40, DraftEditor.ActualWidth - left - 48);
-        Canvas.SetLeft(PredictionPanel, left);
-        Canvas.SetTop(PredictionPanel, rect.Y + padding.Top);
+        var textWidth = DraftEditor.ActualWidth - padding.Left - padding.Right;
+        var viewport = DraftEditor.ActualHeight - padding.Top - padding.Bottom;
+
+        // Scrolled out of view: nothing to sit next to.
+        if (rect.Y < -1 || rect.Y > viewport)
+        {
+            PredictionPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        PredictionText.MaxWidth = double.PositiveInfinity;
+        PredictionPanel.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        var panelWidth = PredictionPanel.DesiredSize.Width;
+
+        // After the caret, or - when the ghost can't fit before the right edge - at the start
+        // of the next line, where the text itself would wrap to.
+        var x = rect.X + (prediction.IsCorrection ? 6 : 1);
+        var y = rect.Y;
+        if (x + panelWidth > textWidth && x > textWidth / 2 && rect.Height > 0)
+        {
+            x = 0;
+            y += rect.Height;
+        }
+
+        PredictionText.MaxWidth = Math.Max(40, textWidth - x - 48);
+        Canvas.SetLeft(PredictionPanel, padding.Left + x);
+        Canvas.SetTop(PredictionPanel, padding.Top + y);
         PredictionPanel.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>
+    /// The document's reported line tops run a little ahead of the lines it draws - about a
+    /// pixel a line - so a ghost right on line one sat visibly low by line four. The text's
+    /// drawn height (the scroller's extent) over its reported height gives the true pitch;
+    /// when they agree this changes nothing.
+    /// </summary>
+    private double DrawnY(double reportedY)
+    {
+        if (_draftScroll is not { ExtentHeight: > 0 } scroll)
+        {
+            return reportedY;
+        }
+
+        var document = DraftEditor.Document;
+        document.GetRange(0, 0).GetRect(Microsoft.UI.Text.PointOptions.ClientCoordinates, out var first, out _);
+        var end = document.GetRange(0, 0);
+        end.EndOf(Microsoft.UI.Text.TextRangeUnit.Story, false);
+        end.GetRect(Microsoft.UI.Text.PointOptions.ClientCoordinates, out var last, out _);
+
+        var reported = last.Y + last.Height - first.Y;
+        var ratio = reported > 0 ? scroll.ExtentHeight / reported : 1;
+
+        // One line, or a reading far from a small rounding drift: trust the document.
+        if (last.Y - first.Y < 1 || ratio is < 0.85 or > 1.15)
+        {
+            return reportedY;
+        }
+
+        // Measured from the first line's drawn top, which sits a scroll offset above the view.
+        return -scroll.VerticalOffset + (reportedY - first.Y) * ratio;
+    }
+
+    private void HookDraftLayout()
+    {
+        if (_draftScroll is not null)
+        {
+            return;
+        }
+
+        _draftScroll = FindDescendant<ScrollViewer>(DraftEditor);
+        if (_draftScroll is null)
+        {
+            return;
+        }
+
+        _draftScroll.ViewChanged += (_, _) => PlacePrediction();
+        DraftEditor.SizeChanged += (_, _) => PlacePrediction();
+    }
+
+    private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (var i = 0; i < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, i);
+            if (child is T found)
+            {
+                return found;
+            }
+
+            if (FindDescendant<T>(child) is { } deeper)
+            {
+                return deeper;
+            }
+        }
+
+        return null;
     }
 
     private void HidePrediction()

@@ -25,74 +25,130 @@
         VerticalScrollMode="Enabled">
         <views:NotebookPanel x:Name="Notebook">
 
-            <!--  The prompt line: always the last child, right after the newest command.  -->
-            <Grid x:Name="InputCell" Padding="8,3,0,3" RowSpacing="2">
+            <!--
+              The prompt: always the last child, right after the newest command. Two rows, like every
+              block above it - the full folder on top, then the shell and the command.
+            -->
+            <Grid
+                x:Name="InputCell"
+                Margin="0,6,0,0"
+                Padding="8,6,0,4"
+                BorderBrush="#26262C"
+                BorderThickness="0,1,0,0"
+                RowSpacing="2">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
+                <!--  Row 0: where the command will run, and which running command a line goes to while one is targeted.  -->
                 <Grid ColumnSpacing="8">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <!--  Where the command will run, and which running command a line goes to while one is targeted.  -->
-                    <StackPanel VerticalAlignment="Top" Orientation="Horizontal" Spacing="7" Margin="0,1,0,0">
-                        <!--  The folder: click to move to a subfolder, the parent, or any folder.  -->
-                        <Button
-                            x:Name="CwdButton"
-                            Height="22"
-                            Padding="4,0,6,0"
-                            VerticalAlignment="Center"
-                            AutomationProperties.Name="Change folder"
-                            Click="OnCwdClick"
-                            Style="{StaticResource ShellTextButton}">
-                            <StackPanel Orientation="Horizontal" Spacing="7">
-                                <FontIcon
-                                    Width="14"
-                                    VerticalAlignment="Center"
-                                    FontSize="10"
-                                    Foreground="#505058"
-                                    Glyph="&#xE8B7;" />
-                                <TextBlock
-                                    x:Name="CwdText"
-                                    MaxWidth="320"
-                                    VerticalAlignment="Center"
-                                    FontSize="11.5"
-                                    Foreground="#E8E8E8"
-                                    TextTrimming="CharacterEllipsis" />
-                                <FontIcon
-                                    VerticalAlignment="Center"
-                                    FontSize="7"
-                                    Foreground="#505058"
-                                    Glyph="&#xE70D;" />
-                            </StackPanel>
-                        </Button>
-                        <Button
-                            x:Name="TargetChip"
-                            Height="20"
-                            Padding="6,0"
-                            VerticalAlignment="Center"
-                            Click="OnTargetChipClick"
-                            Style="{StaticResource ShellTextButton}"
-                            ToolTipService.ToolTip="Lines you send go to this running command. Click or press Esc to run new commands again."
-                            Visibility="Collapsed">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <TextBlock x:Name="TargetText" FontSize="11.5" Foreground="#A78BFA" />
-                                <FontIcon FontSize="8" Foreground="#808088" Glyph="&#xE711;" />
-                            </StackPanel>
-                        </Button>
-                        <TextBlock
-                            x:Name="PromptGlyph"
-                            VerticalAlignment="Center"
-                            Foreground="#A78BFA"
-                            Text="❯" />
-                    </StackPanel>
+                    <!--  The folder: click to move to a subfolder, the parent, or any folder.  -->
+                    <Button
+                        x:Name="CwdButton"
+                        Height="22"
+                        Margin="-4,0,0,0"
+                        Padding="4,0,6,0"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        AutomationProperties.Name="Change folder"
+                        Click="OnCwdClick"
+                        Style="{StaticResource ShellTextButton}">
+                        <Grid ColumnSpacing="7">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon
+                                VerticalAlignment="Center"
+                                FontSize="10"
+                                Foreground="#505058"
+                                Glyph="&#xE8B7;" />
+                            <TextBlock
+                                x:Name="CwdText"
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                FontSize="11.5"
+                                Foreground="#B8B8C0"
+                                TextTrimming="CharacterEllipsis" />
+                            <FontIcon
+                                Grid.Column="2"
+                                VerticalAlignment="Center"
+                                FontSize="7"
+                                Foreground="#505058"
+                                Glyph="&#xE70D;" />
+                        </Grid>
+                    </Button>
 
-                    <Grid Grid.Column="1" VerticalAlignment="Center">
+                    <Button
+                        x:Name="TargetChip"
+                        Grid.Column="1"
+                        Height="20"
+                        Margin="0,0,6,0"
+                        Padding="6,0"
+                        VerticalAlignment="Center"
+                        Click="OnTargetChipClick"
+                        Style="{StaticResource ShellTextButton}"
+                        ToolTipService.ToolTip="Lines you send go to this running command. Click or press Esc to run new commands again."
+                        Visibility="Collapsed">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock x:Name="TargetText" FontSize="11.5" Foreground="#A78BFA" />
+                            <FontIcon FontSize="8" Foreground="#808088" Glyph="&#xE711;" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+                <!--  Row 1: the shell new commands run under (click to switch it for this tab), the prompt, the command.  -->
+                <Grid Grid.Row="1" ColumnSpacing="7">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Button
+                        x:Name="ShellButton"
+                        Height="22"
+                        Margin="-6,0,-4,0"
+                        Padding="6,0"
+                        VerticalAlignment="Top"
+                        AutomationProperties.Name="Change shell"
+                        Click="OnShellClick"
+                        Style="{StaticResource ShellTextButton}"
+                        ToolTipService.ToolTip="The shell new commands run under. Click to switch.">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <TextBlock
+                                x:Name="ShellText"
+                                VerticalAlignment="Center"
+                                FontSize="11.5"
+                                Foreground="#808088" />
+                            <FontIcon
+                                VerticalAlignment="Center"
+                                FontSize="7"
+                                Foreground="#505058"
+                                Glyph="&#xE70D;" />
+                        </StackPanel>
+                    </Button>
+
+                    <TextBlock
+                        x:Name="PromptGlyph"
+                        Grid.Column="1"
+                        Margin="0,2,0,0"
+                        VerticalAlignment="Top"
+                        Foreground="#A78BFA"
+                        Text="❯" />
+
+                    <Grid Grid.Column="2" Margin="0,0,10,0" VerticalAlignment="Center">
                     <!--
                       The ghost suggestion under the typed text: what is typed again, invisible, so the
                       rest lands right after the caret in faint grey. From PowerShell (its history and tab
@@ -145,40 +201,15 @@
                     </TextBox>
                     </Grid>
 
-                    <!--  The shell new commands run under: click to switch it for this tab.  -->
-                    <Button
-                        x:Name="ShellButton"
+                    <!--  Commands from this project's history that start like what is typed; Tab takes the highlighted one.  -->
+                    <StackPanel
+                        x:Name="SuggestionList"
+                        Grid.Row="1"
                         Grid.Column="2"
-                        Height="22"
-                        Margin="0,1,6,0"
-                        Padding="6,0"
-                        VerticalAlignment="Top"
-                        AutomationProperties.Name="Change shell"
-                        Click="OnShellClick"
-                        Style="{StaticResource ShellTextButton}"
-                        ToolTipService.ToolTip="The shell new commands run under. Click to switch.">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock
-                                x:Name="ShellText"
-                                VerticalAlignment="Center"
-                                FontSize="11.5"
-                                Foreground="#808088" />
-                            <FontIcon
-                                VerticalAlignment="Center"
-                                FontSize="7"
-                                Foreground="#505058"
-                                Glyph="&#xE70D;" />
-                        </StackPanel>
-                    </Button>
+                        Margin="0,0,0,2"
+                        Spacing="0"
+                        Visibility="Collapsed" />
                 </Grid>
-
-                <!--  Commands from this project's history that start like what is typed; Tab takes the highlighted one.  -->
-                <StackPanel
-                    x:Name="SuggestionList"
-                    Grid.Row="1"
-                    Margin="21,0,0,2"
-                    Spacing="0"
-                    Visibility="Collapsed" />
             </Grid>
         </views:NotebookPanel>
     </ScrollViewer>

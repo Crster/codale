@@ -287,6 +287,23 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
 
         // The input cell stays the last child.
         Notebook.Children.Insert(index, view);
+        Restripe();
+    }
+
+    /// <summary>Zebra stripes: every other visible block a shade lighter. Docked blocks leave the flow, so they do not count.</summary>
+    private void Restripe()
+    {
+        var odd = false;
+        foreach (var view in _views)
+        {
+            if (view.Visibility == Visibility.Collapsed)
+            {
+                continue;
+            }
+
+            view.IsStriped = odd;
+            odd = !odd;
+        }
     }
 
     private void RemoveView(CommandBlockViewModel block)
@@ -299,6 +316,7 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
         _views.Remove(view);
         Notebook.Children.Remove(view);
         CloseView(view);
+        Restripe();
         if (ReferenceEquals(_target, block))
         {
             SetTarget(null);
@@ -370,6 +388,7 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
 
     private void OnBlockLayoutChanged(object? sender, EventArgs e)
     {
+        Restripe();
         Notebook.InvalidateMeasure();
         DispatcherQueue.TryEnqueue(UpdateRealization);
     }
@@ -399,7 +418,7 @@ public sealed partial class TerminalTab : UserControl, ITerminalHost
             return;
         }
 
-        CwdText.Text = CommandBlockView.ShortPath(viewModel.State.Cwd);
+        CwdText.Text = viewModel.State.Cwd;
         ToolTipService.SetToolTip(CwdButton, $"{viewModel.State.Cwd}\nClick to change folder.");
         ShellText.Text = viewModel.ShellName;
     }

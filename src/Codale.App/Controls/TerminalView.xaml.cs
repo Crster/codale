@@ -403,6 +403,25 @@ public sealed partial class TerminalView : UserControl
         BlockHeightChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>
+    /// The colour behind the grid. Cells on the default background show it, so a notebook block can
+    /// tint its whole output (the zebra stripe) without changing what programs draw.
+    /// </summary>
+    public Windows.UI.Color SurfaceColor
+    {
+        get;
+        set
+        {
+            if (field == value)
+            {
+                return;
+            }
+
+            field = value;
+            InvalidateAll();
+        }
+    } = BackgroundColor;
+
     /// <summary>Invalidates both layers: the grid lives on Canvas, the cursor alone on CaretCanvas.</summary>
     private void InvalidateAll()
     {
@@ -765,7 +784,7 @@ public sealed partial class TerminalView : UserControl
             return;
         }
 
-        session.FillRectangle(0, 0, (float)Canvas.ActualWidth, (float)viewportHeight, Brush(session, BackgroundColor));
+        session.FillRectangle(0, 0, (float)Canvas.ActualWidth, (float)viewportHeight, Brush(session, SurfaceColor));
 
         // Exactly one screen's worth of rows from the top line: the grid was sized to
         // fit the viewport, so pinned, the live screen's last row is the last one drawn.
