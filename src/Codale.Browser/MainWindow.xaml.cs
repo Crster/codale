@@ -107,6 +107,9 @@ public sealed partial class MainWindow : Window
         Root.Loaded += (_, _) =>
         {
             UpdateCaptionInset();
+            // TabView's built-in "+" button carries a "(Ctrl+T)" tooltip; replace it.
+            if (FindByName(Tabs, "AddButton") is { } addButton)
+                ToolTipService.SetToolTip(addButton, "New tab");
             if (!_started)
             {
                 _started = true;
@@ -390,6 +393,17 @@ public sealed partial class MainWindow : Window
     private void Tabs_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
     {
         if (args.Tab.Tag is BrowserTab tab) CloseTab(tab);
+    }
+
+    private static FrameworkElement? FindByName(DependencyObject parent, string name)
+    {
+        for (var i = 0; i < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, i);
+            if (child is FrameworkElement fe && fe.Name == name) return fe;
+            if (FindByName(child, name) is { } found) return found;
+        }
+        return null;
     }
 
     private void Tabs_AddTabButtonClick(TabView sender, object args) => RunSafe(() => OpenUserTabAsync(null, focusAddress: true));

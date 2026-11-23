@@ -233,7 +233,7 @@ public sealed partial class MainWindow
     {
         // The More button sits at the window's right edge, so the menu opens leftward from it.
         var menu = new MenuFlyout { Placement = FlyoutPlacementMode.BottomEdgeAlignedRight };
-        menu.Items.Add(MenuItem("New tab  (Ctrl+T)", () => RunSafe(() => OpenUserTabAsync(null, focusAddress: true))));
+        menu.Items.Add(MenuItem("New tab", () => RunSafe(() => OpenUserTabAsync(null, focusAddress: true))));
         menu.Items.Add(MenuItem("Find in page  (Ctrl+F)", ShowFind));
         menu.Items.Add(MenuItem("Bookmark this page  (Ctrl+D)", ToggleBookmark));
         menu.Items.Add(MenuItem("Sidebar  (Ctrl+B)", () => ToggleSidebar(null)));
