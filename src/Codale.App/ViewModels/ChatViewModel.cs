@@ -1710,9 +1710,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>The (model, effort) a tier hands the CLI. Null model keeps the CLI's own pick.</summary>
     public (string? Model, string? Effort) TierConfig(string tier) => tier switch
     {
-        "lite" => (FlashModel, "low"),
-        "flash" => (FlashModel, "medium"),
-        "pro" => (ProModel, "medium"),
+        "lite" => (FlashModel, "medium"),
+        "flash" => (FlashModel, "high"),
+        "pro" => (ProModel, "low"),
         "plus" => (ProModel, "high"),
         _ => (null, null),
     };

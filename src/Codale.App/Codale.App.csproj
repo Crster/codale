@@ -54,7 +54,7 @@
   <Target Name="IncludeBundledServers" BeforeTargets="AssignTargetPaths" Condition="'$(DesignTimeBuild)' != 'true'">
     <MSBuild Condition="'$(NoBuild)' != 'true'" Projects="@(BundledMcpProject)" Targets="Build" BuildInParallel="true" Properties="Configuration=$(Configuration)" RemoveProperties="RuntimeIdentifier;Platform;TargetFramework;SelfContained;PublishReadyToRun;GenerateAppxPackageOnBuild" />
     <ItemGroup>
-      <_BrowserPayload Include="..\Codale.Browser\bin\$(Configuration)\net10.0-windows\**\*.*" Condition="Exists('..\Codale.Browser\bin\$(Configuration)\net10.0-windows\Codale.Browser.exe')" />
+      <_BrowserPayload Include="..\Codale.Browser\bin\$(Configuration)\net10.0-windows10.0.26100.0\**\*.*" Condition="Exists('..\Codale.Browser\bin\$(Configuration)\net10.0-windows10.0.26100.0\Codale.Browser.exe')" />
       <_BrowserPayload Update="@(_BrowserPayload)">
         <Link>Codale.Browser\%(_BrowserPayload.RecursiveDir)%(_BrowserPayload.Filename)%(_BrowserPayload.Extension)</Link>
         <TargetPath>Codale.Browser\%(_BrowserPayload.RecursiveDir)%(_BrowserPayload.Filename)%(_BrowserPayload.Extension)</TargetPath>

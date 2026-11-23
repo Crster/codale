@@ -65,7 +65,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         Health = new WorkspaceHealthViewModel(ProjectPath, Features.Knowledge);
         SmartActivity = new SmartActivityViewModel(ProjectPath, smart.Instance);
         SmartActivity.ObserveIndex(Features.Knowledge);
-        McpTools = new McpToolsViewModel(_mcp, FolderServers, ProjectPath);
+        McpTools = new McpToolsViewModel(_mcp, smart.Settings, FolderServers, ProjectPath);
         CliEndpoint = new CliEndpointViewModel(smart.Settings);
         CliEndpoint.PropertyChanged += (_, e) =>
         {

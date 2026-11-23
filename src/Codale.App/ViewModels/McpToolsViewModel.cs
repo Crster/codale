@@ -6,6 +6,7 @@ using Codale.App.Services;
 using Codale.Core.Agents;
 using Codale.Core.Serving;
 using Codale.Core.Tasks;
+using Codale.Settings;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -23,15 +24,17 @@ namespace Codale.App.ViewModels;
 public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
 {
     private readonly McpServerSettings _settings;
+    private readonly AppSettingsStore _appSettings;
     private readonly FolderServerHost _servers;
     private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
 
     /// <summary>Set while values load from the store, so the round-trip does not rewrite them.</summary>
     private bool _loading;
 
-    public McpToolsViewModel(McpServerSettings settings, FolderServerHost servers, string projectPath)
+    public McpToolsViewModel(McpServerSettings settings, AppSettingsStore appSettings, FolderServerHost servers, string projectPath)
     {
         _settings = settings;
+        _appSettings = appSettings;
         _servers = servers;
         ProjectPath = projectPath;
         _servers.Changed += OnServersChanged;
@@ -182,7 +185,10 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
         var exe = Path.Combine(AppContext.BaseDirectory, "Codale.Browser", "Codale.Browser.exe");
         try
         {
-            Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true })?.Dispose();
+            var theme = _appSettings.Theme;
+            var startInfo = new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe) };
+            startInfo.Environment["CODALE_APP_THEME"] = theme;
+            Process.Start(startInfo)?.Dispose();
             OpenBrowserError = null;
         }
         catch (Win32Exception ex)

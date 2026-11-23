@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 
 using Codale.Core.Projects;
+using Codale.Settings;
 
 namespace Codale.Mcp.Browser;
 
@@ -196,11 +197,28 @@ public sealed class BrowserSession : IAsyncDisposable
             ?? throw new McpToolException("Codale Browser is not installed with this build. Open it from Codale (Open browser) and try again.");
         try
         {
-            Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe) })?.Dispose();
+            var startInfo = new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe) };
+            startInfo.Environment["CODALE_APP_THEME"] = ReadAppTheme();
+            Process.Start(startInfo)?.Dispose();
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or FileNotFoundException)
         {
             throw new McpToolException($"Could not start Codale Browser ({exe}): {ex.Message}");
+        }
+    }
+
+    private static string ReadAppTheme()
+    {
+        try
+        {
+            var folder = CodalePaths.DataRoot;
+            using var database = new ApplicationDatabase(folder);
+            var value = database.GetSetting("app.theme");
+            return value is "Light" or "System" ? value : "Dark";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return "System";
         }
     }
 

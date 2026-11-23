@@ -1,17 +1,47 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Codale Browser: a WinUI 3 window over WebView2, shipped unpackaged. It runs on the Windows App
+    Runtime that Codale itself depends on (no MSIX, no install step); Program.cs bootstraps it.
+  -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
-    <UseWindowsForms>true</UseWindowsForms>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.22621.0</TargetPlatformMinVersion>
+    <RootNamespace>Codale.Browser</RootNamespace>
+    <AssemblyName>Codale.Browser</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\BrowserIcon.ico</ApplicationIcon>
+    <Platforms>x64;ARM64</Platforms>
+    <Platform Condition="'$(Platform)' == '' Or '$(Platform)' == 'AnyCPU'">$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</Platform>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WinUISDKReferences>false</WinUISDKReferences>
+    <!-- Unpackaged: framework-dependent on the Windows App Runtime, so the window starts without a self-contained copy of it. -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- Microsoft.Web.WebView2 ships a net5.0 WPF assembly that references WindowsBase 5.0; this
-         WinForms app never loads it, so the MSB3277 version conflict is benign. Newer WebView2 releases
-         (1.0.4370.26) do not clear it. -->
-    <NoWarn>$(NoWarn);MSB3277</NoWarn>
+    <!-- CsWinRT1032 flags collection expressions for trimming/AOT; neither is used here. -->
+    <NoWarn>$(NoWarn);CsWinRT1032</NoWarn>
+    <!-- Custom Main: the single-instance check and the runtime bootstrap have to run before the XAML application starts. -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <!-- Fast start: ReadyToRun precompiles the release build; no trimming, which WinUI and WebView2 interop do not support. -->
+    <PublishReadyToRun Condition="'$(PublishReadyToRun)' == '' And '$(Configuration)' == 'Release'">true</PublishReadyToRun>
+    <PublishTrimmed>false</PublishTrimmed>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TieredPGO>true</TieredPGO>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
+
   <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
     <PackageReference Include="Microsoft.Web.WebView2" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Manifest Include="app.manifest" />
   </ItemGroup>
 </Project>

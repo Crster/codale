@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Codale.Mcp.Common\Codale.Mcp.Common.csproj" />
     <ProjectReference Include="..\Codale.Core\Codale.Core.csproj" />
+    <ProjectReference Include="..\Codale.Settings\Codale.Settings.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
