@@ -41,6 +41,7 @@
                      IsAddTabButtonVisible="True"
                      CanReorderTabs="False"
                      CanDragTabs="False"
+                     KeyboardAcceleratorPlacementMode="Hidden"
                      CloseButtonOverlayMode="OnPointerOver"
                      Background="Transparent"
                      TabCloseRequested="Tabs_TabCloseRequested"

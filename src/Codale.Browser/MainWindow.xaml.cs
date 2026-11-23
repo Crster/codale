@@ -108,8 +108,14 @@ public sealed partial class MainWindow : Window
         {
             UpdateCaptionInset();
             // TabView's built-in "+" button carries a "(Ctrl+T)" tooltip; replace it.
-            if (FindByName(Tabs, "AddButton") is { } addButton)
+            if (FindByName(Tabs, "AddButton") is Microsoft.UI.Xaml.UIElement addButton)
+            {
                 ToolTipService.SetToolTip(addButton, "New tab");
+                // The button's built-in Ctrl+T accelerator pops a key tip each time it regains focus.
+                addButton.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
+                foreach (var accel in addButton.KeyboardAccelerators) accel.IsEnabled = false;
+            }
+            Tabs.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
             if (!_started)
             {
                 _started = true;
