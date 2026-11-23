@@ -79,6 +79,7 @@ public static class Program
             return 1;
         }
 
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => Log("unhandled", e.ExceptionObject);
         try
         {
             WinRT.ComWrappersSupport.InitializeComWrappers();
@@ -94,6 +95,18 @@ public static class Program
         }
 
         return 0;
+    }
+
+    /// <summary>Appends a line to the browser's trace log next to its data (never throws).</summary>
+    internal static void Log(string kind, object? ex)
+    {
+        try
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, "browser-trace.log"), $"{DateTime.Now:HH:mm:ss.fff} [{kind}] {ex}{Environment.NewLine}");
+        }
+        catch (Exception) { }
     }
 
     /// <summary>Brings the window another launch already opened to the front (restoring it when minimized).</summary>

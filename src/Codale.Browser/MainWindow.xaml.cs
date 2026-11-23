@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Collections.ObjectModel;
 using System.Text.Json;
 using Microsoft.UI;
 using Microsoft.UI.Input;
@@ -8,13 +7,11 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
 using Microsoft.Web.WebView2.Core;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Graphics;
 using Windows.System;
 using Windows.UI;
-using Windows.UI.Core;
 using WinRT.Interop;
 
 namespace Codale.Browser;
@@ -22,8 +19,8 @@ namespace Codale.Browser;
 /// <summary>
 /// Codale Browser: tabs over one shared WebView2 profile. Each agent session gets a tab of its own,
 /// marked with the session's colour (see <see cref="ControlPipe"/>); tabs the user opens are plain.
-/// The toolbar - address, breakpoint, passwords and passkeys, notifications, console, requests, element
-/// picker - acts on the selected tab.
+/// The toolbar - address, back, forward, reload, element picker, breakpoint, console, requests - acts on the
+/// selected tab. Everything else (logins, permissions, downloads) is left to WebView2.
 /// </summary>
 public sealed partial class MainWindow : Window
 {
@@ -40,27 +37,16 @@ public sealed partial class MainWindow : Window
     private readonly Dictionary<string, Color> _agentColors = [];
     private readonly List<(Breakpoint? Choice, ToggleMenuFlyoutItem Item)> _breakpointItems = [];
     private readonly MenuFlyout _breakpointMenu = new();
-    private readonly NotificationCenter _notifications = new();
-    private readonly CredentialStore _credentials;
-    private readonly PasskeySites _passkeys;
-    private readonly SitePermissions _permissions;
-    private readonly BookmarkStore _bookmarks;
-    private readonly HistoryStore _history;
-    private readonly ObservableCollection<DownloadRow> _downloads = [];
-    private readonly HashSet<string> _declinedSaves = [];
-    private readonly HashSet<string> _savePending = [];
     private readonly ControlPipe _pipe;
     private readonly IntPtr _hwnd;
-    private CredentialsWindow? _credentialsWindow;
     private Task<CoreWebView2Environment>? _environment;
     private BrowserTab? _active;
     private string? _diagnosticsMode;
     private bool _picking;
     private bool _addressEdited;
     private bool _settingAddress;
-    private bool _dark;
-    private bool _windowActive = true;
     private bool _started;
+    private bool _fullScreen;
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr window);
@@ -82,45 +68,22 @@ public sealed partial class MainWindow : Window
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(DragRegion);
 
-        _credentials = new CredentialStore(BrowserPaths.Folder);
-        _passkeys = new PasskeySites(BrowserPaths.Folder);
-        _permissions = new SitePermissions(BrowserPaths.Folder);
-        _bookmarks = new BookmarkStore(BrowserPaths.Folder);
-        _history = new HistoryStore(BrowserPaths.Folder);
-        AttachSidebar();
-        MoreButton.Flyout = BuildMoreMenu();
-
         BuildBreakpointMenu();
-        NotificationList.ItemsSource = _notifications.Items;
-        _notifications.Items.CollectionChanged += (_, _) => NoNotifications.Visibility = _notifications.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         Diagnostics.CloseRequested += () =>
         {
             _diagnosticsMode = null;
             Diagnostics.Show(null);
         };
 
-        ApplyTheme(InitialDarkTheme());
         _pipe = new ControlPipe(HandleControlAsync);
 
-        Activated += (_, e) => _windowActive = e.WindowActivationState != WindowActivationState.Deactivated;
         Root.SizeChanged += (_, _) => UpdateCaptionInset();
         Root.Loaded += (_, _) =>
         {
             UpdateCaptionInset();
-            // TabView's built-in "+" button carries a "(Ctrl+T)" tooltip; replace it.
-            if (FindByName(Tabs, "AddButton") is Microsoft.UI.Xaml.UIElement addButton)
-            {
-                ToolTipService.SetToolTip(addButton, "New tab");
-                // The button's built-in Ctrl+T accelerator pops a key tip each time it regains focus.
-                addButton.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
-                foreach (var accel in addButton.KeyboardAccelerators) accel.IsEnabled = false;
-            }
-            Tabs.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
-            if (!_started)
-            {
-                _started = true;
-                RunSafe(StartAsync);
-            }
+            if (_started) return; // Loaded can fire again when the tree is re-attached; set up once
+            _started = true;
+            RunSafe(StartAsync);
         };
         Closed += (_, _) => Shutdown();
     }
@@ -134,16 +97,20 @@ public sealed partial class MainWindow : Window
         _tabs.Clear();
     }
 
-    /// <summary>Runs work started from an event, so a failure shows in the bell instead of crashing the window.</summary>
+    /// <summary>Runs work started from an event; a failure is logged rather than crashing the window (and every agent's tab).</summary>
     private async void RunSafe(Func<Task> work)
     {
         try
         {
             await work();
         }
+        catch (OperationCanceledException)
+        {
+            // The tab it belonged to was closed.
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _notifications.Post("Something went wrong", ex.Message);
+            Program.Log("error", ex);
         }
     }
 
@@ -171,61 +138,10 @@ public sealed partial class MainWindow : Window
         if (inset > 0) CaptionInset.Width = new GridLength(inset);
     }
 
-    private static string? AppTheme() =>
-        Environment.GetEnvironmentVariable("CODALE_APP_THEME") is { Length: > 0 } env ? env : LaunchHandoff.Get("theme");
-
-    private static bool InitialDarkTheme() => AppTheme() switch
-    {
-        "Light" => false,
-        "Dark" => true,
-        _ => !IsSystemLightTheme(),
-    };
-
-    private static bool IsSystemLightTheme()
-    {
-        try
-        {
-            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-            return key?.GetValue("AppsUseLightTheme") is int value && value != 0;
-        }
-        catch (System.Security.SecurityException)
-        {
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Light or dark for the window and every page: the pages' prefers-color-scheme follows the toggle
-    /// instead of the OS setting, so a site's two styles can be checked from here.
-    /// </summary>
-    private void ApplyTheme(bool dark)
-    {
-        _dark = dark;
-        Root.RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light;
-        Stage.Background = new SolidColorBrush(dark ? Hex(0x14151A) : Hex(0xE9EBEE));
-
-        var titleBar = AppWindow.TitleBar;
-        titleBar.ButtonBackgroundColor = Colors.Transparent;
-        titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
-        titleBar.ButtonHoverBackgroundColor = dark ? Hex(0x3A3F48) : Hex(0xE5E7EB);
-        titleBar.ButtonPressedBackgroundColor = dark ? Hex(0x454B55) : Hex(0xD1D5DB);
-        titleBar.ButtonForegroundColor = dark ? Hex(0xF3F4F6) : Hex(0x1F2328);
-        titleBar.ButtonHoverForegroundColor = dark ? Hex(0xFFFFFF) : Hex(0x111827);
-        titleBar.ButtonPressedForegroundColor = dark ? Hex(0xFFFFFF) : Hex(0x111827);
-        titleBar.ButtonInactiveForegroundColor = dark ? Hex(0x6B7280) : Hex(0x9CA3AF);
-
-        ThemeButton.Content = dark ? "" : "";
-        ToolTipService.SetToolTip(ThemeButton, dark ? "Switch to light mode" : "Switch to dark mode");
-        foreach (var tab in _tabs)
-        {
-            if (tab.View.CoreWebView2 is { } core) core.Profile.PreferredColorScheme = dark ? CoreWebView2PreferredColorScheme.Dark : CoreWebView2PreferredColorScheme.Light;
-        }
-    }
-
-    private void Theme_Click(object sender, RoutedEventArgs e) => ApplyTheme(!_dark);
-
     private void SetFullScreen(bool on)
     {
+        if (on == _fullScreen) return;
+        _fullScreen = on;
         AppWindow.SetPresenter(on ? AppWindowPresenterKind.FullScreen : AppWindowPresenterKind.Overlapped);
         TitleRow.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
         Toolbar.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
@@ -261,28 +177,31 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            await tab.View.EnsureCoreWebView2Async(await EnvironmentAsync());
+            // A WebView2 that never initialises must not hang the caller (or leave a dead tab) forever.
+            await tab.View.EnsureCoreWebView2Async(await EnvironmentAsync()).AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+            if (tab.IsClosed || tab.View.CoreWebView2 is not { } core) throw new OperationCanceledException("The tab was closed.");
+
+            WireCore(tab, core);
+            await core.CallDevToolsProtocolMethodAsync("Runtime.enable", "{}");
+            await core.CallDevToolsProtocolMethodAsync("Network.enable", "{}");
+            if (tab.Breakpoint is not null) await ApplyBreakpointAsync(tab, reload: false);
+            using (var info = JsonDocument.Parse(await core.CallDevToolsProtocolMethodAsync("Target.getTargetInfo", "{}")))
+            {
+                tab.TargetId = info.RootElement.GetProperty("targetInfo").GetProperty("targetId").GetString();
+            }
+
+            if (tab.IsClosed) throw new OperationCanceledException("The tab was closed.");
+            tab.RefreshHeader();
+            if (url is not null) core.Navigate(url);
+            tab.Ready.TrySetResult();
         }
-        catch
+        catch (Exception ex)
         {
-            RemoveTab(tab);
+            tab.Ready.TrySetException(ex);
+            if (_tabs.Contains(tab)) CloseTab(tab);
             throw;
         }
 
-        var core = tab.View.CoreWebView2;
-        core.Profile.PreferredColorScheme = _dark ? CoreWebView2PreferredColorScheme.Dark : CoreWebView2PreferredColorScheme.Light;
-        WireCore(tab, core);
-        await core.AddScriptToExecuteOnDocumentCreatedAsync(PageScripts.Init);
-        await core.CallDevToolsProtocolMethodAsync("Runtime.enable", "{}");
-        await core.CallDevToolsProtocolMethodAsync("Network.enable", "{}");
-        if (tab.Breakpoint is not null) await ApplyBreakpointAsync(tab, reload: false);
-        using (var info = JsonDocument.Parse(await core.CallDevToolsProtocolMethodAsync("Target.getTargetInfo", "{}")))
-        {
-            tab.TargetId = info.RootElement.GetProperty("targetInfo").GetProperty("targetId").GetString();
-        }
-
-        tab.RefreshHeader();
-        if (url is not null) core.Navigate(url);
         if (focusAddress && ReferenceEquals(tab, _active))
         {
             Address.Focus(FocusState.Programmatic);
@@ -313,6 +232,7 @@ public sealed partial class MainWindow : Window
 
     private void WireCore(BrowserTab tab, CoreWebView2 core)
     {
+        core.ProcessFailed += (_, e) => OnProcessFailed(tab, e);
         core.SourceChanged += (_, _) =>
         {
             tab.RefreshHeader();
@@ -333,18 +253,42 @@ public sealed partial class MainWindow : Window
                 UpdateTitle();
             }
         };
-        core.NavigationCompleted += (_, e) =>
-        {
-            if (!e.IsSuccess) return;
-            RememberVisit(core);
-            RunSafe(() => AutofillAsync(tab));
-        };
         core.WebMessageReceived += (_, e) => OnPageMessage(tab, e);
         core.NewWindowRequested += (_, e) => OnNewWindow(tab, e);
-        core.PermissionRequested += (_, e) => OnPermissionRequested(e);
-        core.DownloadStarting += (_, e) => OnDownloadStarting(e);
-        core.ContainsFullScreenElementChanged += (_, _) => SetFullScreen(core.ContainsFullScreenElement);
+        core.ContainsFullScreenElementChanged += (_, _) => { if (ReferenceEquals(tab, _active)) SetFullScreen(core.ContainsFullScreenElement); };
         tab.Diagnostics.Attach(core);
+    }
+
+    /// <summary>
+    /// WebView2 processes die (crash, out of memory, killed). A dead page process is reloaded; a dead browser
+    /// process takes every tab with it, so the shared environment is dropped and the window starts over -
+    /// agents get fresh tabs the next time they ask.
+    /// </summary>
+    private void OnProcessFailed(BrowserTab tab, CoreWebView2ProcessFailedEventArgs e)
+    {
+        if (tab.IsClosed) return;
+        switch (e.ProcessFailedKind)
+        {
+            case CoreWebView2ProcessFailedKind.BrowserProcessExited:
+                _environment = null;
+                foreach (var dead in _tabs.ToList()) RemoveTab(dead);
+                _active = null;
+                RunSafe(() => OpenUserTabAsync(null, focusAddress: false));
+                break;
+
+            case CoreWebView2ProcessFailedKind.RenderProcessExited:
+            case CoreWebView2ProcessFailedKind.RenderProcessUnresponsive:
+                try
+                {
+                    tab.View.CoreWebView2?.Reload();
+                }
+                catch (Exception ex) when (ex is COMException or InvalidOperationException)
+                {
+                    Debug.WriteLine(ex);
+                }
+
+                break;
+        }
     }
 
     private void SelectTab(BrowserTab tab)
@@ -352,6 +296,8 @@ public sealed partial class MainWindow : Window
         if (!_tabs.Contains(tab)) return;
         _active = tab;
         _picking = false;
+        // Fullscreen belongs to the page that asked for it; switching away (or closing it) must not strand the window in it.
+        SetFullScreen(tab.View.CoreWebView2?.ContainsFullScreenElement == true);
         if (!ReferenceEquals(Tabs.SelectedItem, tab.Item)) Tabs.SelectedItem = tab.Item;
         Diagnostics.Bind(tab.Diagnostics);
         Diagnostics.Show(_diagnosticsMode);
@@ -384,13 +330,6 @@ public sealed partial class MainWindow : Window
         tab.Dispose();
     }
 
-    private void Cycle(int step)
-    {
-        if (_tabs.Count < 2 || _active is null) return;
-        var index = (_tabs.IndexOf(_active) + step + _tabs.Count) % _tabs.Count;
-        SelectTab(_tabs[index]);
-    }
-
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (Tabs.SelectedItem is TabViewItem { Tag: BrowserTab tab } && !ReferenceEquals(tab, _active)) SelectTab(tab);
@@ -399,17 +338,6 @@ public sealed partial class MainWindow : Window
     private void Tabs_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
     {
         if (args.Tab.Tag is BrowserTab tab) CloseTab(tab);
-    }
-
-    private static FrameworkElement? FindByName(DependencyObject parent, string name)
-    {
-        for (var i = 0; i < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent); i++)
-        {
-            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, i);
-            if (child is FrameworkElement fe && fe.Name == name) return fe;
-            if (FindByName(child, name) is { } found) return found;
-        }
-        return null;
     }
 
     private void Tabs_AddTabButtonClick(TabView sender, object args) => RunSafe(() => OpenUserTabAsync(null, focusAddress: true));
@@ -446,12 +374,17 @@ public sealed partial class MainWindow : Window
                         var userIsBusy = _active is { IsAgent: false } current && current.Url != "about:blank";
                         var blank = _active is { IsAgent: false } spare && spare.Url == "about:blank" && _tabs.Count == 1 ? spare : null;
                         tab = await CreateTabAsync(session, label ?? "Agent", activate: !userIsBusy);
-                        if (blank is not null) CloseTab(blank);
+                        if (blank is not null && blank.Url == "about:blank") CloseTab(blank);
                     }
-                    else if (label is not null)
+                    else
                     {
-                        tab.AgentLabel = label;
-                        tab.RefreshHeader();
+                        // A second request for a tab that is still starting waits for it rather than failing.
+                        await tab.Ready.Task.WaitAsync(TimeSpan.FromSeconds(30));
+                        if (label is not null)
+                        {
+                            tab.AgentLabel = label;
+                            tab.RefreshHeader();
+                        }
                     }
 
                     done.TrySetResult(tab.TargetId is null
@@ -478,7 +411,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    // ---- Toolbar and keyboard -------------------------------------------------------------
+    // ---- Toolbar: navigation and address ---------------------------------------------------
 
     private void Back_Click(object sender, RoutedEventArgs e)
     {
@@ -490,7 +423,13 @@ public sealed partial class MainWindow : Window
         if (_active?.View.CoreWebView2 is { CanGoForward: true } core) core.GoForward();
     }
 
-    private void Reload_Click(object sender, RoutedEventArgs e) => _active?.View.CoreWebView2?.Reload();
+    private void Reload_Click(object sender, RoutedEventArgs e)
+    {
+        // Shift+click is a hard reload.
+        var shift = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+        if (shift) RunSafe(HardReloadAsync);
+        else _active?.View.CoreWebView2?.Reload();
+    }
 
     private void UpdateNavigationButtons()
     {
@@ -499,14 +438,13 @@ public sealed partial class MainWindow : Window
         ForwardButton.IsEnabled = core?.CanGoForward == true;
     }
 
-    /// <summary>Shows the selected tab's address, its connection state and whether it is bookmarked.</summary>
+    /// <summary>Shows the selected tab's address and its connection state.</summary>
     private void SyncAddress()
     {
         if (_active is null) return;
-        UpdateBookmarkStar();
         var url = _active.Url;
         var secure = url.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
-        SecurityIcon.Glyph = url == "about:blank" ? "" : secure ? "" : "";
+        SecurityIcon.Glyph = url == "about:blank" ? "" : secure ? "" : "";
         ToolTipService.SetToolTip(SecurityIcon, url == "about:blank" ? "New tab" : secure ? "Connection is secure (https)" : "Connection is not secure (http)");
         // While the user is typing in the address, keep their text; otherwise follow the page.
         if (Address.FocusState != FocusState.Unfocused && _addressEdited) return;
@@ -514,6 +452,12 @@ public sealed partial class MainWindow : Window
         Address.Text = url == "about:blank" ? "" : url;
         _settingAddress = false;
         _addressEdited = false;
+    }
+
+    /// <summary>The address field stopped being edited by the user (Enter or Escape): it follows the page again.</summary>
+    private void Address_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!_settingAddress && Address.FocusState != FocusState.Unfocused) _addressEdited = true;
     }
 
     private void Address_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -534,7 +478,7 @@ public sealed partial class MainWindow : Window
         if (text.Length == 0) return;
         if (text.Contains("://", StringComparison.Ordinal) && OriginOf(text) is null)
         {
-            _notifications.Post("Can't open that address", "Enter an http or https address.");
+            Program.Log("info", $"Not navigating to {text}: only http and https addresses open.");
             return;
         }
 
@@ -554,55 +498,15 @@ public sealed partial class MainWindow : Window
         return "https://duckduckgo.com/?q=" + Uri.EscapeDataString(text);
     }
 
-    private void NewTab_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
-    {
-        args.Handled = true;
-        RunSafe(() => OpenUserTabAsync(null, focusAddress: true));
-    }
-
-    private void CloseTab_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
-    {
-        args.Handled = true;
-        if (_active is not null) CloseTab(_active);
-    }
-
-    private void Address_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
-    {
-        args.Handled = true;
-        Address.Focus(FocusState.Keyboard);
-        Address.SelectAll();
-    }
-
-    private void NextTab_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
-    {
-        args.Handled = true;
-        Cycle(1);
-    }
-
-    private void PreviousTab_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
-    {
-        args.Handled = true;
-        Cycle(-1);
-    }
-
-    private void HardReload_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
-    {
-        args.Handled = true;
-        RunSafe(HardReloadAsync);
-    }
-
-    private void Credentials_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
-    {
-        args.Handled = true;
-        OpenCredentials(passkeys: false);
-    }
-
     /// <summary>Reloads the page and everything it loads straight from the server, skipping the HTTP cache.</summary>
     private async Task HardReloadAsync()
     {
         if (_active?.View.CoreWebView2 is not { } core) return;
         try
         {
+            // ignoreCache only skips the HTTP cache; a service worker or Cache Storage can still serve a stale UI.
+            await core.Profile.ClearBrowsingDataAsync(
+                CoreWebView2BrowsingDataKinds.DiskCache | CoreWebView2BrowsingDataKinds.CacheStorage | CoreWebView2BrowsingDataKinds.ServiceWorkers);
             await core.CallDevToolsProtocolMethodAsync("Page.reload", "{\"ignoreCache\":true}");
         }
         catch (Exception ex) when (ex is COMException or InvalidOperationException)
@@ -610,6 +514,8 @@ public sealed partial class MainWindow : Window
             core.Reload();
         }
     }
+
+    // ---- Diagnostics: console and requests ----------------------------------------------------
 
     private void Console_Click(object sender, RoutedEventArgs e) => ToggleDiagnostics("console");
 
@@ -620,8 +526,6 @@ public sealed partial class MainWindow : Window
         _diagnosticsMode = _diagnosticsMode == mode ? null : mode;
         Diagnostics.Show(_diagnosticsMode);
     }
-
-    private void ClearNotifications_Click(object sender, RoutedEventArgs e) => _notifications.Clear();
 
     // ---- Breakpoints and layout --------------------------------------------------------------
 
@@ -710,6 +614,37 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private async Task ApplyBreakpointAsync(BrowserTab tab, bool reload)
     {
+        // One pass at a time per tab: overlapping DevTools calls (a window being dragged) can finish out of order
+        // and leave a stale scale. A request during a pass just asks for one more pass afterwards.
+        if (tab.EmulationBusy)
+        {
+            tab.EmulationDirty = true;
+            tab.EmulationReload |= reload;
+            return;
+        }
+
+        tab.EmulationBusy = true;
+        try
+        {
+            do
+            {
+                reload |= tab.EmulationReload;
+                tab.EmulationReload = false;
+                tab.EmulationDirty = false;
+                await ApplyBreakpointOnceAsync(tab, reload);
+                reload = false;
+            }
+            while (tab.EmulationDirty && !tab.IsClosed);
+        }
+        finally
+        {
+            tab.EmulationBusy = false;
+        }
+    }
+
+    private async Task ApplyBreakpointOnceAsync(BrowserTab tab, bool reload)
+    {
+        if (tab.IsClosed) return;
         var fit = LayoutTab(tab);
         if (tab.View.CoreWebView2 is not { } core) return;
         var applied = tab.Breakpoint is null ? 1 : fit;
@@ -738,7 +673,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    // ---- Page messages: element picker, logins, passkeys ---------------------------------------
+    // ---- Element picker -----------------------------------------------------------------------
 
     private void Pick_Click(object sender, RoutedEventArgs e) => RunSafe(PickAsync);
 
@@ -766,29 +701,6 @@ public sealed partial class MainWindow : Window
                     _picking = false;
                     UpdateTitle();
                     break;
-
-                case "codale-credentials":
-                    // Only a page's own top document may offer to save its logins: the origin it reports must be the one it is on.
-                    var origin = root.GetProperty("origin").GetString();
-                    if (origin is not null && OriginOf(tab.Url) == origin)
-                    {
-                        var username = root.GetProperty("username").GetString() ?? "";
-                        var password = root.GetProperty("password").GetString() ?? "";
-                        RunSafe(() => OfferSaveAsync(origin, username, password));
-                    }
-
-                    break;
-
-                case "codale-passkey":
-                    var site = root.GetProperty("origin").GetString();
-                    var operation = root.GetProperty("op").GetString() ?? "get";
-                    if (site is not null && OriginOf(tab.Url) == site)
-                    {
-                        _passkeys.Record(site, operation);
-                        _notifications.Post(operation == "create" ? "Passkey created" : "Passkey sign-in", Prompts.Site(site));
-                    }
-
-                    break;
             }
         }
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
@@ -797,6 +709,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>Copies the picked element's path to the clipboard (the title bar stops saying "Select an element").</summary>
     private void FinishPick(JsonElement root)
     {
         _picking = false;
@@ -806,13 +719,11 @@ public sealed partial class MainWindow : Window
             var selectors = root.GetProperty("selectors").EnumerateArray().Select(x => x.GetString()).Where(x => !string.IsNullOrEmpty(x)).ToArray();
             var hosts = root.GetProperty("shadowHosts").EnumerateArray().Select(x => x.GetString() ?? "").ToArray();
             var selector = selectors.FirstOrDefault() ?? throw new InvalidOperationException("Could not find a unique path for this element.");
-            var path = string.Join(" >> ", hosts.Append(selector));
-            CopyText(path);
-            _notifications.Post("Element path copied", path);
+            CopyText(string.Join(" >> ", hosts.Append(selector)));
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
         {
-            _notifications.Post("Could not capture element", ex.Message);
+            Program.Log("error", ex);
         }
     }
 
@@ -823,110 +734,10 @@ public sealed partial class MainWindow : Window
         Clipboard.SetContent(package);
     }
 
-    /// <summary>Offers to save a login the user submitted, unless it is already saved, the site is excluded, or the user declined it in this session.</summary>
-    private async Task OfferSaveAsync(string origin, string username, string password)
-    {
-        if (_credentials.IsNever(origin)) return;
-        var existing = _credentials.Find(origin, username);
-        if (existing is not null && _credentials.Password(existing) == password) return;
-        var key = origin + "\n" + username;
-        if (existing is null && _declinedSaves.Contains(key)) return;
-        if (!_savePending.Add(key)) return;
-        try
-        {
-            switch (await Prompts.SavePasswordAsync(Root.XamlRoot, origin, username, existing is not null))
-            {
-                case SaveChoice.Save:
-                    var saved = _credentials.Upsert(origin, username, password);
-                    _notifications.Post(saved ? "Password saved" : "Password not saved",
-                        $"{username} on {Prompts.Site(origin)}" + (saved ? "" : ". The password store could not be written."));
-                    break;
-
-                case SaveChoice.Never:
-                    _credentials.SetNever(origin, true);
-                    _notifications.Post("Won't offer to save here", Prompts.Site(origin));
-                    break;
-
-                default:
-                    _declinedSaves.Add(key);
-                    break;
-            }
-        }
-        finally
-        {
-            _savePending.Remove(key);
-        }
-    }
-
-    /// <summary>Fills the page with the only saved login for its site, shortly after it loads. Several logins: the key button asks which.</summary>
-    private async Task AutofillAsync(BrowserTab tab)
-    {
-        if (tab.View.CoreWebView2 is not { } core) return;
-        var origin = OriginOf(core.Source);
-        if (origin is null) return;
-        var logins = _credentials.ForOrigin(origin);
-        if (logins.Count != 1) return;
-        await Task.Delay(150);
-        if (OriginOf(core.Source) == origin) PostFill(core, logins[0]);
-    }
-
-    private void PostFill(CoreWebView2 core, CredentialEntry entry)
-    {
-        var secret = _credentials.Password(entry);
-        if (secret is null)
-        {
-            _notifications.Post("Could not read a saved password", entry.Site);
-            return;
-        }
-
-        core.PostWebMessageAsJson(JsonSerializer.Serialize(new { type = "codale-fill", username = entry.Username, password = secret }));
-    }
-
-    private void Fill_Click(object sender, RoutedEventArgs e) => RunSafe(async () =>
-    {
-        if (_active?.View.CoreWebView2 is not { } core) return;
-        var origin = OriginOf(core.Source);
-        var logins = origin is null ? new List<CredentialEntry>() : _credentials.ForOrigin(origin).ToList();
-        if (logins.Count == 0)
-        {
-            _notifications.Post("No saved login", $"Nothing is saved for {Prompts.Site(origin ?? core.Source)}.");
-            return;
-        }
-
-        var choice = logins.Count == 1 ? logins[0] : await Prompts.ChooseAccountAsync(Root.XamlRoot, logins);
-        if (choice is not null) PostFill(core, choice);
-    });
-
-    private Task FillFromManagerAsync(CredentialEntry entry)
-    {
-        if (_active?.View.CoreWebView2 is not { } core) return Task.CompletedTask;
-        if (OriginOf(core.Source) != entry.Origin)
-        {
-            _notifications.Post("Open the site to fill it", $"{entry.Username} is saved for {entry.Site}; this tab is on another site.");
-            return Task.CompletedTask;
-        }
-
-        PostFill(core, entry);
-        return Task.CompletedTask;
-    }
-
-    private void Credentials_Click(object sender, RoutedEventArgs e) => OpenCredentials(passkeys: false);
-
-    private void OpenCredentials(bool passkeys)
-    {
-        if (_credentialsWindow is null)
-        {
-            _credentialsWindow = new CredentialsWindow(_credentials, _passkeys, FillFromManagerAsync, passkeys);
-            _credentialsWindow.Closed += (_, _) => _credentialsWindow = null;
-        }
-
-        _credentialsWindow.Activate();
-    }
-
     private static string? OriginOf(string? url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var uri) && (uri.Scheme is "http" or "https") ? uri.GetLeftPart(UriPartial.Authority) : null;
 
-    // ---- Permissions, downloads, new windows ----------------------------------------------
+    // ---- New windows and full screen ------------------------------------------------------------
 
     private void OnNewWindow(BrowserTab tab, CoreWebView2NewWindowRequestedEventArgs e)
     {
@@ -936,44 +747,5 @@ public sealed partial class MainWindow : Window
         // An agent's pop-up stays in its tab, so the agent keeps driving it; the user's opens a new tab.
         if (tab.IsAgent) tab.View.CoreWebView2?.Navigate(e.Uri);
         else RunSafe(() => OpenUserTabAsync(e.Uri, focusAddress: false));
-    }
-
-    /// <summary>
-    /// A site asks for a permission. Kinds the browser cares about are answered from the saved choice or by
-    /// asking the user in a native dialog; the rest keep WebView2's own handling.
-    /// </summary>
-    private void OnPermissionRequested(CoreWebView2PermissionRequestedEventArgs e)
-    {
-        var what = SitePermissions.Describe(e.PermissionKind);
-        if (what is null) return;
-        var origin = OriginOf(e.Uri);
-        if (origin is null)
-        {
-            e.State = CoreWebView2PermissionState.Deny;
-            return;
-        }
-
-        if (_permissions.Get(origin, e.PermissionKind) is { } remembered)
-        {
-            e.State = remembered ? CoreWebView2PermissionState.Allow : CoreWebView2PermissionState.Deny;
-            return;
-        }
-
-        var kind = e.PermissionKind;
-        var deferral = e.GetDeferral();
-        RunSafe(async () =>
-        {
-            try
-            {
-                var answer = await Prompts.PermissionAsync(Root.XamlRoot, origin, what);
-                if (answer.Remember) _permissions.Set(origin, kind, answer.Allow);
-                e.State = answer.Allow ? CoreWebView2PermissionState.Allow : CoreWebView2PermissionState.Deny;
-                _notifications.Post(answer.Allow ? "Allowed" : "Blocked", $"{Prompts.Site(origin)} · {what}");
-            }
-            finally
-            {
-                deferral.Complete();
-            }
-        });
     }
 }

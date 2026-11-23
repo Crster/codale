@@ -39,7 +39,7 @@ internal sealed class ControlPipe : IDisposable
                 _ = Task.Run(() => ServeAsync(connected));
             }
             catch (OperationCanceledException) { pipe?.Dispose(); return; }
-            catch (IOException) { pipe?.Dispose(); await Task.Delay(200).ConfigureAwait(false); }
+            catch (Exception) { pipe?.Dispose(); await Task.Delay(200).ConfigureAwait(false); } // never let the accept loop die
         }
     }
 
@@ -59,7 +59,7 @@ internal sealed class ControlPipe : IDisposable
                         using var request = JsonDocument.Parse(line);
                         answer = await _handle(request.RootElement.Clone()).ConfigureAwait(false);
                     }
-                    catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException or ObjectDisposedException)
+                    catch (Exception ex) when (ex is not OperationCanceledException || !_stop.IsCancellationRequested)
                     {
                         answer = new { error = ex.Message };
                     }
@@ -67,7 +67,7 @@ internal sealed class ControlPipe : IDisposable
                     await writer.WriteLineAsync(JsonSerializer.Serialize(answer)).ConfigureAwait(false);
                 }
             }
-            catch (Exception ex) when (ex is IOException or OperationCanceledException or ObjectDisposedException)
+            catch (Exception)
             {
                 // The agent hung up.
             }
@@ -77,6 +77,5 @@ internal sealed class ControlPipe : IDisposable
     public void Dispose()
     {
         _stop.Cancel();
-        _stop.Dispose();
     }
 }

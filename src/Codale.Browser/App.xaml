@@ -10,7 +10,7 @@
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
             </ResourceDictionary.MergedDictionaries>
 
-            <!-- Shared by the toolbar buttons in MainWindow.xaml and CredentialsWindow.xaml. -->
+            <!-- Shared by the toolbar buttons in MainWindow.xaml. -->
             <Style x:Key="ToolButton" TargetType="Button">
                 <Setter Property="Width" Value="40" />
                 <Setter Property="Height" Value="36" />

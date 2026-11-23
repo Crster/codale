@@ -15,6 +15,10 @@ public sealed class Feed<T>(Func<T, string> searchText) where T : DiagnosticsRow
     public const int Limit = 500;
 
     private readonly List<T> _all = [];
+    private readonly List<T> _pending = [];
+    private readonly List<T> _evicted = [];
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _timer;
+    private bool _dirty;
     private string _filter = "";
     private Func<T, bool>? _predicate;
 
@@ -28,53 +32,102 @@ public sealed class Feed<T>(Func<T, string> searchText) where T : DiagnosticsRow
 
     public int Total => _all.Count;
 
-    /// <summary>Adds a row and returns the oldest row it pushed out, if the limit was reached.</summary>
+    /// <summary>
+    /// Adds a row and returns the oldest row it pushed out, if the limit was reached. The list the UI binds to
+    /// is updated in batches (see <see cref="Flush"/>): a page logging or fetching hundreds of times a second
+    /// would otherwise flood the UI thread with collection changes.
+    /// </summary>
     public T? Add(T row)
     {
         _all.Add(row);
-        if (Matches(row)) Visible.Add(row);
+        _pending.Add(row);
         T? evicted = null;
         if (_all.Count > Limit)
         {
             evicted = _all[0];
             _all.RemoveAt(0);
-            Visible.Remove(evicted);
+            _evicted.Add(evicted);
         }
 
-        Changed?.Invoke();
+        Schedule();
         return evicted;
     }
 
-    /// <summary>Call after a row's values change: a row that now matches the filter (or stopped matching) is added or removed.</summary>
+    /// <summary>Call after a row's values change: with a filter on, the row may now match (or stop matching).</summary>
     public void Refresh(T row)
     {
-        if (Matches(row) != Visible.Contains(row)) Rebuild();
+        if (_predicate is null && _filter.Length == 0) return;
+        _dirty = true;
+        Schedule();
     }
 
     public void SetFilter(string filter)
     {
         _filter = filter;
-        Rebuild();
+        _dirty = true;
+        Flush();
     }
 
     /// <summary>A category filter (the chips above the list); null shows every category.</summary>
     public void SetPredicate(Func<T, bool>? predicate)
     {
         _predicate = predicate;
-        Rebuild();
+        _dirty = true;
+        Flush();
     }
 
     public void Clear()
     {
         _all.Clear();
+        _pending.Clear();
+        _evicted.Clear();
+        _dirty = false;
         Visible.Clear();
         Changed?.Invoke();
     }
 
-    private void Rebuild()
+    private void Schedule()
     {
-        Visible.Clear();
-        foreach (var row in _all) if (Matches(row)) Visible.Add(row);
+        _timer ??= CreateTimer();
+        if (_timer is { IsRunning: false } timer) timer.Start();
+        else if (_timer is null) Flush();
+    }
+
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? CreateTimer()
+    {
+        var queue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        if (queue is null) return null;
+        var timer = queue.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(150);
+        timer.IsRepeating = false;
+        timer.Tick += (_, _) => Flush();
+        return timer;
+    }
+
+    /// <summary>Brings <see cref="Visible"/> up to date with the rows added, evicted or re-filtered since the last flush.</summary>
+    private void Flush()
+    {
+        if (_dirty)
+        {
+            _dirty = false;
+            _pending.Clear();
+            _evicted.Clear();
+            Visible.Clear();
+            foreach (var row in _all) if (Matches(row)) Visible.Add(row);
+            Changed?.Invoke();
+            return;
+        }
+
+        if (_pending.Count == 0 && _evicted.Count == 0) return;
+        foreach (var row in _pending) if (Matches(row)) Visible.Add(row);
+        foreach (var gone in _evicted)
+        {
+            if (Visible.Count > 0 && ReferenceEquals(Visible[0], gone)) Visible.RemoveAt(0);
+            else Visible.Remove(gone);
+        }
+
+        _pending.Clear();
+        _evicted.Clear();
         Changed?.Invoke();
     }
 

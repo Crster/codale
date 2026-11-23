@@ -63,6 +63,17 @@ public sealed class BrowserTab
     /// <summary>The page's DevTools target id, which the agent looks up on the debugging port.</summary>
     public string? TargetId { get; set; }
 
+    /// <summary>Completes when the tab's WebView2 is initialised (or fails/is closed), so a second agent request can wait for it.</summary>
+    public TaskCompletionSource Ready { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>True once the tab was closed; async work that resumes afterwards must stop touching it.</summary>
+    public bool IsClosed { get; private set; }
+
+    /// <summary>Breakpoint emulation runs one pass at a time per tab; a request during a pass asks for another.</summary>
+    public bool EmulationBusy { get; set; }
+    public bool EmulationDirty { get; set; }
+    public bool EmulationReload { get; set; }
+
     public string Url => View.CoreWebView2?.Source ?? "about:blank";
 
     public string Title => View.CoreWebView2?.DocumentTitle is { Length: > 0 } title ? title
@@ -78,13 +89,15 @@ public sealed class BrowserTab
 
     public void Dispose()
     {
+        IsClosed = true;
+        Ready.TrySetException(new OperationCanceledException("The tab was closed."));
         try
         {
             View.Close();
         }
-        catch (InvalidOperationException)
+        catch (Exception)
         {
-            // Already closed.
+            // Already closed, or the browser process is gone.
         }
     }
 }

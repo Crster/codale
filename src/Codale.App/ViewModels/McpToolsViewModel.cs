@@ -122,7 +122,7 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
 
     /// <summary>The Browser Use dropdown's index; its items are in <see cref="AgentToolMode"/> order (Block, CLI Default, Allow).</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Summary), nameof(BrowserNote), nameof(CanOpenBrowser))]
+    [NotifyPropertyChangedFor(nameof(Summary), nameof(BrowserNote))]
     public partial int BrowserMode { get; set; }
 
     [ObservableProperty]
@@ -139,9 +139,6 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
 
     public bool ComputerAvailable => _settings.ComputerAvailable;
 
-    /// <summary>"Open browser" opens the window Codale's browser server attaches to, so it only matters on Allow.</summary>
-    public bool CanOpenBrowser => BrowserAvailable && (AgentToolMode)BrowserMode == AgentToolMode.Allow;
-
     /// <summary>The status bar button's text: what the agents can reach.</summary>
     public string Summary => string.Join(" + ", new[]
     {
@@ -152,11 +149,11 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
 
     public string BrowserNote => Note(BrowserMode, BrowserAvailable,
         "On for agents",
-        "The CLI's own: Claude in Chrome or Codex's browser");
+        "Uses the CLI's own browser");
 
     public string ComputerNote => Note(ComputerMode, ComputerAvailable,
         "Codale's desktop control: mouse and keyboard",
-        "The CLI's own computer use (Codex, or Claude's if set up)");
+        "Uses the CLI's own computer use");
 
     public string PhoneNote => Note(PhoneMode, PhoneAvailable,
         "Codale's adb tools: an Android device or emulator",

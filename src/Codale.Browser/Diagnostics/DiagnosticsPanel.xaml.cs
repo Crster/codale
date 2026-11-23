@@ -171,9 +171,13 @@ public sealed partial class DiagnosticsPanel : UserControl
         var started = rows.Min(r => r.Start);
         var ended = rows.Where(r => r.Finished).Select(r => r.End).DefaultIfEmpty(started).Max();
         var failed = rows.Count(r => r.Failed);
-        return $"{(rows.Count == 1 ? "1 request" : rows.Count + " requests")} · {DownloadRow.Format(bytes)} transferred · {Math.Max(0, ended - started):0.00} s"
+        return $"{(rows.Count == 1 ? "1 request" : rows.Count + " requests")} · {FormatBytes(bytes)} transferred · {Math.Max(0, ended - started):0.00} s"
             + (failed > 0 ? $" · {failed} failed" : "");
     }
+
+    private static string FormatBytes(long bytes) => bytes < 1024 ? $"{bytes} B"
+        : bytes < 1024 * 1024 ? $"{bytes / 1024d:0.0} KB"
+        : $"{bytes / 1048576d:0.0} MB";
 
     private void FilterBox_TextChanged(object sender, TextChangedEventArgs e) => _feed?.SetFilter(FilterBox.Text.Trim());
 

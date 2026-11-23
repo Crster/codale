@@ -2246,8 +2246,7 @@
                                         <Button
                                             HorizontalAlignment="Stretch"
                                             Command="{x:Bind ViewModel.McpTools.OpenBrowserCommand}"
-                                            Content="Open browser"
-                                            IsEnabled="{x:Bind ViewModel.McpTools.CanOpenBrowser, Mode=OneWay}" />
+                                            Content="Open browser" />
                                         <TextBlock
                                             FontSize="11.5"
                                             Foreground="{ThemeResource SystemFillColorCriticalBrush}"
