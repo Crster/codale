@@ -702,7 +702,7 @@ public sealed partial class WorkspacePage : Page
 
     private void RefreshChatTabIcon(ChatTabEntry entry)
     {
-        var isByok = ViewModel.Smart.Settings.FindByok(entry.Chat.EndpointName) is { IsAccount: false };
+        var isByok = false;
         entry.Item.IconSource.Foreground = CliEndpointViewModel.ProfileBrush(entry.Chat.CliId, isByok);
     }
 

@@ -26,7 +26,7 @@ public sealed class ApplicationServices : IAsyncDisposable
 
     public ApplicationServices(IAgentSessionFactory? agentSessions = null, IGitRepositoryFactory? gitRepositories = null, ICliHistoryReaderFactory? cliHistory = null)
     {
-        Database = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale"));
+        Database = new(McpServerSettings.CodaleDataRoot());
         Settings = new(Database);
         Shortcuts = new(Settings);
         Codale.Core.Syntax.SyntaxService.Initialize(Path.Combine(Database.Folder, "syntax"));
