@@ -53,14 +53,22 @@
   <!-- Build before evaluating payload globs, including on a fresh checkout. -->
   <Target Name="IncludeBundledServers" BeforeTargets="AssignTargetPaths" Condition="'$(DesignTimeBuild)' != 'true'">
     <MSBuild Condition="'$(NoBuild)' != 'true'" Projects="@(BundledMcpProject)" Targets="Build" BuildInParallel="true" Properties="Configuration=$(Configuration)" RemoveProperties="RuntimeIdentifier;Platform;TargetFramework;SelfContained;PublishReadyToRun;GenerateAppxPackageOnBuild" />
+    <!-- Ask the browser project where its output really went (Platform/RuntimeIdentifier subfolders vary); never guess the path. -->
+    <MSBuild Projects="..\Codale.Browser\Codale.Browser.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)" RemoveProperties="RuntimeIdentifier;Platform;TargetFramework;SelfContained;PublishReadyToRun;GenerateAppxPackageOnBuild">
+      <Output TaskParameter="TargetOutputs" ItemName="_BrowserTargetPath" />
+    </MSBuild>
+    <PropertyGroup>
+      <_BrowserOutDir>%(_BrowserTargetPath.RootDir)%(_BrowserTargetPath.Directory)</_BrowserOutDir>
+    </PropertyGroup>
     <ItemGroup>
-      <_BrowserPayload Include="..\Codale.Browser\bin\$(Configuration)\net10.0-windows10.0.26100.0\**\*.*" Condition="Exists('..\Codale.Browser\bin\$(Configuration)\net10.0-windows10.0.26100.0\Codale.Browser.exe')" />
+      <_BrowserPayload Include="$(_BrowserOutDir)**\*.*" Condition="'$(_BrowserOutDir)' != '' And Exists('$(_BrowserOutDir)Codale.Browser.exe')" />
       <_BrowserPayload Update="@(_BrowserPayload)">
         <Link>Codale.Browser\%(_BrowserPayload.RecursiveDir)%(_BrowserPayload.Filename)%(_BrowserPayload.Extension)</Link>
         <TargetPath>Codale.Browser\%(_BrowserPayload.RecursiveDir)%(_BrowserPayload.Filename)%(_BrowserPayload.Extension)</TargetPath>
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </_BrowserPayload>
-      <Content Include="@(_BrowserPayload)" />
+      <!-- None, not Content: Content is indexed into this app's PRI and the browser's MainWindow.xbf would conflict. -->
+      <None Include="@(_BrowserPayload)" />
       <_McpBrowserPayload
         Include="..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\**\*.*"
         Condition="Exists('..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\Codale.Mcp.Browser.exe')" />
