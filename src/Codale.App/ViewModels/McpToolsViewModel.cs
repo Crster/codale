@@ -185,13 +185,28 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
         var exe = Path.Combine(AppContext.BaseDirectory, "Codale.Browser", "Codale.Browser.exe");
         try
         {
-            var theme = _appSettings.Theme;
-            var startInfo = new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe) };
-            startInfo.Environment["CODALE_APP_THEME"] = theme;
-            Process.Start(startInfo)?.Dispose();
+            if (!File.Exists(exe))
+            {
+                OpenBrowserError = $"Codale Browser is missing: {exe}";
+                return;
+            }
+
+            // Hand the data root and theme over by file: the browser is started through the shell (below), which cannot
+            // pass env. The user profile root is not virtualised for packaged apps, so both sides see the same file.
+            var handoff = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codale", "browser-launch.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(handoff)!);
+            File.WriteAllText(handoff, System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string>
+            {
+                ["dataRoot"] = Codale.Core.Projects.CodalePaths.DataRoot,
+                ["theme"] = _appSettings.Theme ?? "",
+            }));
+
+            // When Codale runs packaged (dotnet run does that) a direct child inherits its package identity, which the
+            // unpackaged browser cannot start under. Explorer launches it as a plain unpackaged process.
+            using var process = Process.Start(new ProcessStartInfo("explorer.exe") { Arguments = $"\"{exe}\"", UseShellExecute = false });
             OpenBrowserError = null;
         }
-        catch (Win32Exception ex)
+        catch (Exception ex)
         {
             OpenBrowserError = $"Could not open Codale Browser: {ex.Message}";
         }

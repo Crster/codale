@@ -162,7 +162,10 @@ public sealed partial class MainWindow : Window
         if (inset > 0) CaptionInset.Width = new GridLength(inset);
     }
 
-    private static bool InitialDarkTheme() => Environment.GetEnvironmentVariable("CODALE_APP_THEME") switch
+    private static string? AppTheme() =>
+        Environment.GetEnvironmentVariable("CODALE_APP_THEME") is { Length: > 0 } env ? env : LaunchHandoff.Get("theme");
+
+    private static bool InitialDarkTheme() => AppTheme() switch
     {
         "Light" => false,
         "Dark" => true,
