@@ -7,6 +7,7 @@ using System.Text;
 using Codale.Core.Features;
 using Codale.Core.Projects;
 using Codale.Db;
+using Codale.Workspace;
 
 namespace Codale.Search;
 
@@ -15,9 +16,32 @@ namespace Codale.Search;
 /// the topics of earlier Codale turns, and Git summaries loaded on demand. Ranking runs on the in-memory source
 /// snapshot; excerpts are read from disk and verified by hash. Indexing is asynchronous.
 /// </summary>
-public sealed partial class ProjectKnowledgeIndex(CodaleDatabase db, ISourceIndexes? sources = null) : IDisposable
+public sealed partial class ProjectKnowledgeIndex : IDisposable
 {
-    private readonly ISourceIndexes _sources = sources ?? SharedSourceIndexes.Instance;
+    private readonly ISourceIndexes _sources;
+    private readonly CodaleDatabase? _database;
+    private readonly IWorkspaceData? _data;
+
+    public ProjectKnowledgeIndex(CodaleDatabase db, ISourceIndexes? sources = null)
+    {
+        _database = db;
+        _sources = sources ?? SharedSourceIndexes.Instance;
+    }
+
+    public ProjectKnowledgeIndex(IWorkspaceData data)
+    {
+        _data = data;
+        _sources = SharedSourceIndexes.Instance;
+    }
+
+    private T Use<T>(Func<CodaleDatabase, T> work) =>
+        _database is { } database ? work(database) : _data!.UseRecords(work);
+
+    private void Use(Action<CodaleDatabase> work)
+    {
+        if (_database is { } database) work(database);
+        else _data!.UseRecords(work);
+    }
 
     /// <summary>The cosine a trained embedding model's neighbour needs without lexical support.</summary>
     private const float ModelMatchSimilarity = 0.3f;

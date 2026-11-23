@@ -10,7 +10,7 @@ public sealed partial class CodaleDatabase
     public void WriteBatch(Action<RecordBatch> prepare)
     {
         ArgumentNullException.ThrowIfNull(prepare);
-        var batch = new RecordBatch();
+        var batch = new RecordBatch(this);
         prepare(batch);
         var items = batch.Items.Values.ToArray();
         Access(() =>
@@ -34,7 +34,11 @@ public sealed partial class CodaleDatabase
     {
         internal sealed record Item(string Type, string Key, byte[]? Value, PreparedSearch? Search);
         internal Dictionary<(string Type, string Key), Item> Items { get; } = [];
-        internal RecordBatch() { }
+        private readonly CodaleDatabase _database;
+
+        internal RecordBatch(CodaleDatabase database) => _database = database;
+
+        public SemanticIndex Index(string name) => _database.Index(name);
 
         public void Put<T>(string key, T value, SemanticKey? search = null)
         {

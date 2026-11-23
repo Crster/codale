@@ -3,5 +3,6 @@
   <ItemGroup>
     <ProjectReference Include="../Codale.Agents/Codale.Agents.csproj" />
     <ProjectReference Include="../Codale.Db/Codale.Db.csproj" />
+    <ProjectReference Include="../Codale.Workspace/Codale.Workspace.csproj" />
   </ItemGroup>
 </Project>

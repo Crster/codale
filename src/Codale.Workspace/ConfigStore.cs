@@ -17,6 +17,8 @@ public sealed record SavedCommand(string Name, string Command, string? Cwd = nul
 /// </summary>
 public sealed class ConfigStore(string directory, WorkspaceDatabasePool? databases = null)
 {
+    public string Directory => directory;
+
     private const string CommandsKey = "commands";
     private sealed record Configuration(string Value);
     private WorkspaceDatabasePool Pool => databases ?? WorkspaceDb.Shared;
@@ -97,6 +99,4 @@ public sealed class ConfigStore(string directory, WorkspaceDatabasePool? databas
     private static List<SavedCommand> ReadCommands(RecordKey<Configuration> record) =>
         record.Get() is { } saved ? JsonSerializer.Deserialize<List<SavedCommand>>(saved.Value) ?? [] : [];
 
-    /// <summary>The folder beside the database where generated script files live, never in the workspace.</summary>
-    public string ScriptsDirectory => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(directory))!, "command-scripts");
 }

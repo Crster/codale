@@ -33,16 +33,19 @@ public sealed partial class ProjectKnowledgeIndex
         var id = Guid.NewGuid().ToString("N");
         var now = Now;
         var record = new FeatureRecord(name, description, "", 0, 0, "", now, now);
-        db.WriteBatch(batch => StageFeature(batch, id, record, []));
+        Use(db => db.WriteBatch(batch => StageFeature(batch, id, record, [])));
         FeaturesChanged?.Invoke();
         return ToInfo(id, record);
     }
 
     /// <summary>Most recently active first.</summary>
     public IReadOnlyList<FeatureInfo> ListFeatures() =>
-        [.. db.Record<FeatureRecord>().Find().OrderByDescending(row => row.Value.UpdatedAt).Select(row => ToInfo(row.Key, row.Value))];
+        Use<IReadOnlyList<FeatureInfo>>(db => [.. db.Record<FeatureRecord>().Find().OrderByDescending(row => row.Value.UpdatedAt).Select(row => ToInfo(row.Key, row.Value))]);
 
     public FeatureInfo? GetFeature(string id) =>
+        Use(db => ToFeature(db, id));
+
+    private static FeatureInfo? ToFeature(CodaleDatabase db, string id) =>
         db.Record<FeatureRecord>().Key(id).Get() is { } record ? ToInfo(id, record) : null;
 
     public void RenameFeature(string id, string name) => ChangeFeature(id, r => r with { Name = name });
@@ -67,26 +70,33 @@ public sealed partial class ProjectKnowledgeIndex
     {
         lock (_featureGate)
         {
-            if (db.Record<FeatureRecord>().Key(id).Get() is not { } record) return;
-            var updated = change(record);
-            var prefix = Scope(id);
-            var files = db.Record<FeatureFile>().Keys(prefix).Select(key => key[prefix.Length..]);
-            db.WriteBatch(batch => StageFeature(batch, id, updated, files));
+            if (!Use(db =>
+            {
+                if (db.Record<FeatureRecord>().Key(id).Get() is not { } record) return false;
+                var updated = change(record);
+                var prefix = Scope(id);
+                var files = db.Record<FeatureFile>().Keys(prefix).Select(key => key[prefix.Length..]);
+                db.WriteBatch(batch => StageFeature(batch, id, updated, files));
+                return true;
+            })) return;
         }
         FeaturesChanged?.Invoke();
     }
 
-    /// <summary>Removes a feature with its files and provider session; its log folder and turn topics are the caller's.</summary>
+    /// <summary>Removes a feature with its files and provider session; its transcript and turn topics are the caller's.</summary>
     public void DeleteFeature(string id)
     {
         lock (_featureGate)
         {
-            var files = db.Record<FeatureFile>().Keys(Scope(id));
-            db.WriteBatch(batch =>
+            Use(db =>
             {
-                batch.Delete<FeatureRecord>(id);
-                batch.Delete<ProviderSession>(id);
-                foreach (var file in files) batch.Delete<FeatureFile>(file);
+                var files = db.Record<FeatureFile>().Keys(Scope(id));
+                db.WriteBatch(batch =>
+                {
+                    batch.Delete<FeatureRecord>(id);
+                    batch.Delete<ProviderSession>(id);
+                    foreach (var file in files) batch.Delete<FeatureFile>(file);
+                });
             });
         }
         FeaturesChanged?.Invoke();
@@ -98,14 +108,14 @@ public sealed partial class ProjectKnowledgeIndex
         var terms = SearchText.MatchQueryTerms(text);
         return terms.Count == 0
             ? []
-            : [.. db.Index(FeatureField).FindKeywords(Terms(terms), limit)
-            .Select(hit => GetFeature(hit.Key))
-            .OfType<FeatureInfo>()];
+            : Use<IReadOnlyList<FeatureInfo>>(db => [.. db.Index(FeatureField).FindKeywords(Terms(terms), limit)
+                .Select(hit => ToFeature(db, hit.Key))
+                .OfType<FeatureInfo>()]);
     }
 
     /// <summary>Rebuilds a feature's search entry from its name, description, summary, recent prompts and file paths.</summary>
-    private void StageFeature(CodaleDatabase.RecordBatch batch, string id, FeatureRecord r, IEnumerable<string> paths) =>
-        batch.Put(id, r, db.Index(FeatureField).Key([r.Name, r.Description, r.Summary, r.Prompts, string.Join(' ', paths)], mode: SemanticMode.Bm25));
+    private static void StageFeature(CodaleDatabase.RecordBatch batch, string id, FeatureRecord r, IEnumerable<string> paths) =>
+        batch.Put(id, r, batch.Index(FeatureField).Key([r.Name, r.Description, r.Summary, r.Prompts, string.Join(' ', paths)], mode: SemanticMode.Bm25));
 
     private static string Tail(string text) => text.Length <= RecentPromptChars ? text : text[^RecentPromptChars..];
 
@@ -120,24 +130,24 @@ public sealed partial class ProjectKnowledgeIndex
         var prefix = Scope(sessionId);
         var now = Now;
         lock (_featureGate)
-            db.Record<FeatureFile>().PutMany(files.Select(path => new KeyValuePair<string, FeatureFile>(prefix + path, new(path, now))));
+            Use(db => db.Record<FeatureFile>().PutMany(files.Select(path => new KeyValuePair<string, FeatureFile>(prefix + path, new(path, now)))));
         FeaturesChanged?.Invoke();
     }
 
     /// <summary>Paths the agent wrote for a feature, newest first.</summary>
     public IReadOnlyList<string> FilesOf(string featureId, int limit)
     {
-        return [.. db.Record<FeatureFile>().FindPrefix(Scope(featureId))
+        return Use<IReadOnlyList<string>>(db => [.. db.Record<FeatureFile>().FindPrefix(Scope(featureId))
             .OrderByDescending(x => x.Value.At)
             .Take(limit)
-            .Select(x => x.Value.Path)];
+            .Select(x => x.Value.Path)]);
     }
 
-    public int FileCount(string featureId) => db.Record<FeatureFile>().Keys(Scope(featureId)).Count;
+    public int FileCount(string featureId) => Use(db => db.Record<FeatureFile>().Keys(Scope(featureId)).Count);
 
     // ---- provider sessions
 
-    public void SetProviderSession(ProviderSession session) => db.Record<ProviderSession>().Key(session.SessionId).Value(session);
+    public void SetProviderSession(ProviderSession session) => Use(db => db.Record<ProviderSession>().Key(session.SessionId).Value(session));
 
-    public ProviderSession? GetProviderSession(string id) => db.Record<ProviderSession>().Key(id).Get();
+    public ProviderSession? GetProviderSession(string id) => Use(db => db.Record<ProviderSession>().Key(id).Get());
 }

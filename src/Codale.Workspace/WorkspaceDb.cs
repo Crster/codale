@@ -3,24 +3,38 @@ using Codale.Db;
 
 namespace Codale.Workspace;
 
-/// <summary>
-/// The workspace's own database, kept in Codale's data folder and never in the workspace itself, so the
-/// project tree stays clean. It houses four things: <c>history</c> (every chat's log, tool calls included),
-/// <c>memory</c> (notes the agent saves and recalls), <c>config</c> (what used to live in <c>.codale/</c>) and
-/// <c>env</c> (secrets, encrypted per value with a key only this Windows account can unwrap).
-/// </summary>
-/// <remarks>
-/// The app and the agents' tool servers are separate processes and one process owns a database folder at a
-/// time, so nothing holds it for long: <see cref="Use{T}"/> opens it for one operation and keeps it a moment
-/// afterwards (a burst of writes does not reopen it each time), but never longer than a second and a half, so
-/// another process always gets its turn.
-/// </remarks>
+/// <summary>Shares the workspace's database lease across stores and releases the lock for tool server processes.</summary>
 public static class WorkspaceDb
 {
     internal static WorkspaceDatabasePool Shared { get; } = new();
 
-    public static string DirectoryFor(string projectPath) =>
-        Path.Combine(ProjectPaths.KnowledgeDirectory(projectPath), "workspace-db");
+    private sealed record Owner(string Repository);
+
+    public static string DirectoryFor(string projectPath) => DirectoryFor(projectPath,
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "workspace"));
+
+    internal static string DirectoryFor(string projectPath, string root)
+    {
+        var repository = ProjectPaths.RepositoryIdentity(projectPath);
+        var project = Path.GetFileName(repository).Equals(".git", StringComparison.OrdinalIgnoreCase)
+            ? Path.GetDirectoryName(repository)! : repository;
+        var name = ProjectPaths.WorkspaceName(project);
+
+        for (var suffix = 1; ; suffix++)
+        {
+            var directory = Path.Combine(root, suffix == 1 ? name : FormattableString.Invariant($"{name}_{suffix}"));
+            var claimed = Use(directory, db =>
+            {
+                var owner = db.Record<Owner>().Key("repository");
+                if (owner.Get() is { } saved)
+                    return string.Equals(saved.Repository, repository, StringComparison.OrdinalIgnoreCase);
+
+                owner.Value(new(repository));
+                return true;
+            });
+            if (claimed) return directory;
+        }
+    }
 
     public static void Use(string directory, Action<CodaleDatabase> action) => Shared.UseRecords(directory, action);
     public static T Use<T>(string directory, Func<CodaleDatabase, T> work) => Shared.UseRecords(directory, work);

@@ -1,7 +1,6 @@
 using Codale.Agents.History;
 using Codale.Core.Features;
 using Codale.Core.Projects;
-using Codale.Db;
 using Codale.Search;
 using Codale.Workspace;
 
@@ -9,8 +8,8 @@ namespace Codale.App.Services;
 
 /// <summary>
 /// One repository's session history and shared knowledge. Each entry keeps its own log and provider
-/// mapping; project context is retrieved independently of those session boundaries. Owns the project's
-/// <see cref="CodaleDatabase"/>; every call is safe from any thread, and indexing runs in the
+/// mapping; project context is retrieved independently of those session boundaries. Calls are safe
+/// from any thread, and indexing runs in the
 /// background so the chat never waits for it.
 /// </summary>
 public sealed partial class FeatureService : IDisposable
@@ -18,7 +17,6 @@ public sealed partial class FeatureService : IDisposable
     private readonly string _projectPath;
     private readonly IWorkspaceData _data;
     internal IWorkspaceData Data => _data;
-    private readonly CodaleDatabase _db;
 
     public ProjectKnowledgeIndex Knowledge { get; }
     private readonly Timer _historyRefresh;
@@ -33,15 +31,12 @@ public sealed partial class FeatureService : IDisposable
         _projectPath = projectPath;
         _data = data;
         _embedder = new SmartEmbedder(smart);
-        try
+        Knowledge = new ProjectKnowledgeIndex(data)
         {
-            (_db, Knowledge) = OpenDatabase(projectPath, _embedder);
-        }
-        catch
-        {
-            _embedder.Dispose();
-            throw;
-        }
+            CompactEmbedder = _embedder,
+            CompactEmbeddingsEnabled = () => _embedder.UsesModel,
+            ReadFileHistory = ReadGitFileHistoryAsync,
+        };
         _activity = FeatureActivity.For(projectPath);
         _activity.HistoryDeleted += OnHistoryDeleted;
         _historyRefresh = new Timer(_ => Changed?.Invoke(this, EventArgs.Empty));
@@ -54,30 +49,6 @@ public sealed partial class FeatureService : IDisposable
     {
         try { _historyRefresh.Change(TimeSpan.FromMilliseconds(300), Timeout.InfiniteTimeSpan); }
         catch (ObjectDisposedException) { }
-    }
-
-    /// <summary>The project's database; a throwaway one when it cannot be opened (a path too long, a folder another process holds), so history never keeps the window from opening.</summary>
-    private static (CodaleDatabase Database, ProjectKnowledgeIndex Index) OpenDatabase(string projectPath, SmartEmbedder embedder)
-    {
-        try
-        {
-            return Open(Path.Combine(ProjectPaths.FeatureDatabasePath(projectPath), "records"));
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException)
-        {
-            return Open(Path.Combine(CodalePaths.TempDirectory, "features", Guid.NewGuid().ToString("N")));
-        }
-
-        (CodaleDatabase, ProjectKnowledgeIndex) Open(string folder)
-        {
-            var db = new CodaleDatabase(folder, new() { Embedder = embedder });
-            var index = new ProjectKnowledgeIndex(db)
-            {
-                CompactEmbeddingsEnabled = () => embedder.UsesModel,
-                ReadFileHistory = ReadGitFileHistoryAsync,
-            };
-            return (db, index);
-        }
     }
 
     /// <summary>The feature list changed: one was created, renamed, deleted or has a new summary.</summary>
@@ -119,7 +90,7 @@ public sealed partial class FeatureService : IDisposable
             Knowledge.DeleteFeature(id);
             LogOf(id).Delete();
             Knowledge.RemoveTurnTopics(id);
-            _db.Record<TopicCheckpoint>().Key(id).Delete();
+            _data.UseRecords(db => db.Record<TopicCheckpoint>().Key(id).Delete());
         }
         _activity.NotifyHistoryDeleted(id);
     }
@@ -175,7 +146,6 @@ public sealed partial class FeatureService : IDisposable
         _historyRefresh.Dispose();
         _activity.HistoryDeleted -= OnHistoryDeleted;
         Knowledge.Dispose();
-        _db.Dispose();
         _embedder.Dispose();
     }
 }

@@ -19,12 +19,14 @@ public sealed partial class ProjectKnowledgeIndex
         {
             if (_nextId < 0 || _nextId >= _idLimit)
             {
-                var counter = db.Record<Sequence>().Key("profile-id");
-                var start = _nextId < 0 ? counter.Get()?.Limit ?? 0 : _idLimit;
-                var limit = start + IdBlock;
-                counter.Value(new(limit));
-                _nextId = start;
-                _idLimit = limit;
+                _nextId = Use(db =>
+                {
+                    var counter = db.Record<Sequence>().Key("profile-id");
+                    var start = counter.Get()?.Limit ?? 0;
+                    counter.Value(new(start + IdBlock));
+                    return start;
+                });
+                _idLimit = _nextId + IdBlock;
             }
             return ++_nextId;
         }

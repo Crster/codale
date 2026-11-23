@@ -57,10 +57,6 @@ public sealed partial class WorkspacePage
         : SplitTabs.TabItems.Contains(item) ? SplitTabs
         : null;
 
-    /// <summary>True while the tab is on screen: selected in either visible group.</summary>
-    private bool IsTabShowing(object item) =>
-        ReferenceEquals(CentreTabs.SelectedItem, item) || (IsSplit && ReferenceEquals(SplitTabs.SelectedItem, item));
-
     private void SetActiveGroup(TabView group)
     {
         if (ReferenceEquals(ActiveGroup, group))

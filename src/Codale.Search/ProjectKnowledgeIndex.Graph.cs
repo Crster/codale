@@ -1,3 +1,4 @@
+using Codale.Db;
 using Codale.Search.Engine;
 
 namespace Codale.Search;
@@ -47,7 +48,7 @@ public sealed partial class ProjectKnowledgeIndex
     public IReadOnlyList<(string Path, string Relation)> RelatedFiles(string worktree, string path)
     {
         worktree = Core.Projects.ProjectPaths.Normalize(worktree);
-        var node = db.Record<GraphNeighbors>().Key(WorktreeKey(worktree, path.Replace('/', Path.DirectorySeparatorChar))).Get();
+        var node = Use(db => db.Record<GraphNeighbors>().Key(WorktreeKey(worktree, path.Replace('/', Path.DirectorySeparatorChar))).Get());
         return node is null ? [] : node.Edges.Select(edge => (edge.Path, edge.Relation)).ToArray();
     }
 
@@ -55,6 +56,11 @@ public sealed partial class ProjectKnowledgeIndex
     internal void UpdateGraph(string worktree, SourceSnapshot snapshot)
     {
         var wanted = GraphEdges(snapshot);
+        Use(db => UpdateGraphRecords(db, worktree, wanted));
+    }
+
+    private void UpdateGraphRecords(CodaleDatabase db, string worktree, Dictionary<string, HashSet<(string Relation, string Target)>> wanted)
+    {
         var existing = db.Record<GraphNeighbors>().FindPrefix(Scope(worktree)).ToDictionary(row => row.Key, row => row.Value);
         db.WriteBatch(batch =>
         {

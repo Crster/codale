@@ -76,9 +76,12 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
 
     /// <summary>The account name or email initials; CLI profiles do not expose a profile photo.</summary>
     public Microsoft.UI.Xaml.Media.Brush AccountStatusBrush =>
-        new Microsoft.UI.Xaml.Media.SolidColorBrush(IsActive
+        ProfileBrush(Selected?.CliId ?? _chat?.CliId, IsActive);
+
+    internal static Microsoft.UI.Xaml.Media.Brush ProfileBrush(string? cliId, bool isByok) =>
+        new Microsoft.UI.Xaml.Media.SolidColorBrush(isByok
             ? Windows.UI.Color.FromArgb(255, 34, 197, 139)
-            : (Selected?.CliId ?? _chat?.CliId) == "codex"
+            : cliId == "codex"
                 ? Windows.UI.Color.FromArgb(255, 59, 130, 246)
                 : Windows.UI.Color.FromArgb(255, 217, 119, 87));
 

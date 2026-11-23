@@ -1,13 +1,13 @@
 using Codale.Smart;
+using Codale.Workspace;
 
 namespace Codale.App.Services;
 
 /// <summary>Routes each Smart task to the model role configured for it.</summary>
-public sealed class SmartExperienceHost(AppSettingsStore settings) : IAsyncDisposable, ISmartTaskHost
+public sealed class SmartExperienceHost(AppSettingsStore settings, IWorkspaceDataFactory workspaceData) : IAsyncDisposable, ISmartTaskHost
 {
     public AppSettingsStore Settings => settings;
-    public SmartExperience Instance { get; } = new(
-        Path.Combine(settings.DataFolder, "smart", "history"));
+    public SmartExperience Instance { get; } = new(new SmartHistory(workspaceData.Open));
     private bool _started;
     private string? _configuration;
     private SmartFeatureRouter? _router;

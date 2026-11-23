@@ -1,6 +1,7 @@
 using System.Text.Json;
 
 using Codale.Core.Projects;
+using Codale.Workspace;
 
 namespace Codale.App.Services;
 
@@ -11,13 +12,12 @@ namespace Codale.App.Services;
 /// live for this window only and have to be attached again after Codale reopens. A change
 /// reaches a Claude chat on its next turn (the CLI restarts) and a Codex chat on its next turn.
 /// </summary>
-public sealed class WorkspaceFolders(string projectPath, ApplicationDatabase database)
+public sealed class WorkspaceFolders(string projectPath, ConfigStore config)
 {
     private readonly Lock _gate = new();
     private readonly List<string> _folders = [];
 
     private readonly string _projectPath = projectPath;
-    private readonly ApplicationDatabase _database = database;
 
     public event EventHandler? Changed;
 
@@ -78,7 +78,7 @@ public sealed class WorkspaceFolders(string projectPath, ApplicationDatabase dat
         {
             try
             {
-                return _database.GetProjectSetting(_projectPath, RecentKey) is { Length: > 0 } json
+                return config.Get(RecentKey + ":" + ProjectPaths.InstanceKey(_projectPath)) is { Length: > 0 } json
                     ? (JsonSerializer.Deserialize<List<string>>(json) ?? []).Where(Directory.Exists).ToList()
                     : [];
             }

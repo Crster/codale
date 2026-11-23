@@ -24,17 +24,17 @@ public sealed partial class CodaleDatabase
     private static byte[] ReferenceId(StoredReference reference) => JsonSerializer.SerializeToUtf8Bytes(reference);
     private static string SemanticMembership(StoredReference reference) => "semantic:" + Convert.ToBase64String(ReferenceId(reference));
 
-    public SemanticIndex Index(string name) => new(this, ValidateKey(name));
+    public SemanticIndex Index(string name, IEmbedder? embedder = null) => new(this, ValidateKey(name), embedder);
     public string EmbeddingModel { get { lock (_embeddingGate) return _embedder.Model; } }
 
     internal sealed record PreparedSearch(CodaleDatabase Owner, string File, byte[] Model, byte[] Vector, string? Text);
 
-    internal PreparedSearch PrepareSemantic(string name, string tags, float[]? suppliedVector, SemanticMode mode)
+    internal PreparedSearch PrepareSemantic(string name, string tags, float[]? suppliedVector, SemanticMode mode, IEmbedder? embedder)
     {
         var file = FolderStorage.IndexFile(name);
         var lexical = mode is SemanticMode.Bm25 or SemanticMode.Hybrid;
         var vector = mode is SemanticMode.Vector or SemanticMode.Hybrid;
-        var (model, embedding) = vector ? Embed(tags, suppliedVector) : (string.Empty, Array.Empty<float>());
+        var (model, embedding) = vector ? Embed(tags, suppliedVector, embedder) : (string.Empty, Array.Empty<float>());
         if (suppliedVector is not null && (embedding.Length == 0 || !vector))
             throw new ArgumentException("Supply a nonzero vector with vector or hybrid search.", nameof(suppliedVector));
         return new(this, file, embedding.Length == 0 ? [] : Id(model), VectorMath.ToBytes(embedding), lexical ? SearchText.ForIndex(tags) : null);
@@ -83,14 +83,14 @@ public sealed partial class CodaleDatabase
         changes.Add(new(FolderStorage.Records, bucket, null));
     }
 
-    internal IReadOnlyList<SemanticHit> FindSemantic(string name, string? query, float[]? vector, int limit)
+    internal IReadOnlyList<SemanticHit> FindSemantic(string name, string? query, float[]? vector, int limit, IEmbedder? embedder)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(limit);
         if (limit == 0) return [];
         var file = FolderStorage.IndexFile(name);
         var ftsQuery = query is null ? null : SearchText.ToMatchQuery(query);
         string model;
-        lock (_embeddingGate) model = _embedder.Model;
+        lock (_embeddingGate) model = (embedder ?? _embedder).Model;
         var snapshot = Access(() =>
         {
             var modelKey = Id(model);
@@ -104,7 +104,7 @@ public sealed partial class CodaleDatabase
         foreach (var hit in snapshot.Words) scores[hit.Id] = hit.Score;
         if (snapshot.Vectors.Count > 0)
         {
-            var (queryModel, embedding) = Embed(query ?? string.Empty, vector);
+            var (queryModel, embedding) = Embed(query ?? string.Empty, vector, embedder);
             if (model == queryModel && embedding.Length > 0)
                 foreach (var candidate in snapshot.Vectors)
                 {
@@ -126,10 +126,12 @@ public sealed partial class CodaleDatabase
             }).ToArray();
     }
 
-    internal bool HasVector(string name, RecordReference record)
+    internal bool HasVector(string name, RecordReference record, IEmbedder? embedder)
     {
         var reference = Reference(record);
-        var model = Id(EmbeddingModel);
+        string modelName;
+        lock (_embeddingGate) modelName = (embedder ?? _embedder).Model;
+        var model = Id(modelName);
         return Access(() => _storage.HasSort(FolderStorage.IndexFile(name), SemanticBucket, ReferenceId(reference), model));
     }
 
@@ -147,12 +149,12 @@ public sealed partial class CodaleDatabase
             }).ToArray());
     }
 
-    private (string Model, float[] Vector) Embed(string text, float[]? vector)
+    private (string Model, float[] Vector) Embed(string text, float[]? vector, IEmbedder? embedder)
     {
         lock (_embeddingGate)
         {
-            var model = _embedder.Model;
-            return (model, Normalize(vector ?? _embedder.Embed(text)));
+            var model = (embedder ?? _embedder).Model;
+            return (model, Normalize(vector ?? (embedder ?? _embedder).Embed(text)));
         }
     }
 

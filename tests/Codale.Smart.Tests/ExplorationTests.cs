@@ -260,14 +260,20 @@ public sealed class ExplorationTests : IDisposable
     }
 
     [Fact]
-    public void History_prunes_old_runs_and_ignores_corrupt_files()
+    public void History_prunes_old_runs_in_the_database()
     {
         var directory = Path.Combine(_root, "history"); var history = new SmartHistory(directory);
         for (int i = 0; i < 205; i++) history.Save(new(i.ToString(), Context(), DateTimeOffset.UtcNow.AddSeconds(i), "completed"));
         Assert.Equal(SmartHistory.MaxRuns, history.Read(_root).Count);
-        var folder = Directory.EnumerateDirectories(directory).Single(); File.WriteAllText(Path.Combine(folder, "corrupt.json"), "bad json");
-        Assert.NotEmpty(history.Read(_root));
+        Assert.Empty(Directory.EnumerateDirectories(directory));
     }
 
-    public void Dispose() => Directory.Delete(_root, true);
+    public void Dispose()
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try { Directory.Delete(_root, true); return; }
+            catch (IOException) when (attempt < 20) { Thread.Sleep(50); }
+        }
+    }
 }

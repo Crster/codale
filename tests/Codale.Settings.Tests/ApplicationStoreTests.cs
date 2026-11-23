@@ -1,3 +1,5 @@
+using Codale.Workspace;
+
 namespace Codale.Settings.Tests;
 
 public sealed class ApplicationStoreTests
@@ -89,7 +91,7 @@ public sealed class ApplicationStoreTests
         using var first = new ApplicationDatabase(Path.Combine(root, "first"));
         using var other = new ApplicationDatabase(Path.Combine(root, "other"));
         var recents = new RecentProjects(first);
-        var history = new CommandHistory(first);
+        var history = new CommandHistory(_ => new WorkspaceData(Path.Combine(root, "workspace")));
         recents.Record(root);
         recents.Record(root);
         Assert.Single(recents.Load());
@@ -98,11 +100,11 @@ public sealed class ApplicationStoreTests
         history.Record(root, "dotnet test", "terminal");
         Assert.Contains("dotnet build", history.Recent(root));
         Assert.Contains("dotnet build", history.Suggest(root, "dotnet b"));
-        Assert.Empty(new CommandHistory(other).Recent(root));
+        Assert.Empty(new CommandHistory(_ => new WorkspaceData(Path.Combine(root, "other_workspace"))).Recent(root));
         recents.Clear();
         Assert.Empty(recents.Load());
         first.Dispose();
         Assert.Throws<ObjectDisposedException>(() => first.UseRecords(_ => true));
-        Assert.Empty(history.Recent(root));
+        Assert.Contains("dotnet build", history.Recent(root));
     }
 }

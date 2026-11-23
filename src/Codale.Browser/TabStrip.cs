@@ -10,7 +10,7 @@ namespace Codale.Browser;
 internal sealed class TabStrip : Control
 {
     private const int Gap = 8;
-    private const int Top_ = 6;
+    private const int Top_ = 0;
     private static readonly Font TitleFont = new("Segoe UI", 9f);
     private static readonly Font GlyphFont = new("Segoe MDL2 Assets", 7.5f);
     private static readonly Font PlusFont = new("Segoe MDL2 Assets", 9f);
@@ -22,16 +22,19 @@ internal sealed class TabStrip : Control
     private int _hover = -1;
     private bool _hoverClose, _hoverPlus;
     private bool _dark;
-    private Color _back, _selected, _hoverBack, _text, _muted, _line, _closeHover;
+    private Color _bar, _back, _selected, _hoverBack, _text, _muted, _line, _closeHover;
 
     public event Action<BrowserTab>? Selected;
     public event Action<BrowserTab>? Closed;
     public event Action? NewTab;
 
+    /// <summary>A left press on the empty part of the strip (not a tab or the + button): the window can be dragged from here.</summary>
+    public event Action<MouseEventArgs>? EmptyAreaMouseDown;
+
     public TabStrip()
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-        Height = 40;
+        Height = 34;
         ApplyTheme(false);
     }
 
@@ -44,6 +47,8 @@ internal sealed class TabStrip : Control
     public void ApplyTheme(bool dark)
     {
         _dark = dark;
+        // The empty part of the strip takes the toolbar's colour so the top reads as one bar; only inactive tabs keep their own shade.
+        _bar = dark ? Color.FromArgb(31, 34, 40) : Color.White;
         _back = dark ? Color.FromArgb(23, 24, 27) : Color.FromArgb(233, 235, 238);
         _selected = dark ? Color.FromArgb(31, 34, 40) : Color.White;
         _hoverBack = dark ? Color.FromArgb(38, 41, 47) : Color.FromArgb(244, 245, 247);
@@ -51,7 +56,7 @@ internal sealed class TabStrip : Control
         _muted = dark ? Color.FromArgb(150, 156, 166) : Color.FromArgb(98, 106, 117);
         _line = dark ? Color.FromArgb(48, 51, 58) : Color.FromArgb(210, 214, 220);
         _closeHover = dark ? Color.FromArgb(62, 67, 76) : Color.FromArgb(222, 225, 230);
-        BackColor = _back;
+        BackColor = _bar;
         Invalidate();
     }
 
@@ -59,9 +64,9 @@ internal sealed class TabStrip : Control
 
     private Rectangle TabRect(int index) => new(Gap + index * TabWidth, Top_, TabWidth, Height - Top_);
 
-    private static Rectangle CloseRect(Rectangle tab) => new(tab.Right - 26, tab.Top + (tab.Height - 20) / 2, 20, 20);
+    private static Rectangle CloseRect(Rectangle tab) => new(tab.Right - 23, tab.Top + (tab.Height - 16) / 2, 16, 16);
 
-    private Rectangle PlusRect => new(Gap + _tabs.Count * TabWidth + 6, Top_ + (Height - Top_ - 28) / 2, 28, 28);
+    private Rectangle PlusRect => new(Gap + _tabs.Count * TabWidth + 6, Top_ + (Height - Top_ - 24) / 2, 24, 24);
 
     private static GraphicsPath TopRounded(Rectangle r, int radius)
     {
@@ -77,7 +82,7 @@ internal sealed class TabStrip : Control
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
-        g.Clear(_back);
+        g.Clear(_bar);
         for (var i = 0; i < _tabs.Count; i++)
         {
             var tab = _tabs[i];
@@ -87,7 +92,8 @@ internal sealed class TabStrip : Control
 
             g.SmoothingMode = SmoothingMode.AntiAlias;
             var fill = active ? _selected : hovered ? _hoverBack : _back;
-            using (var path = TopRounded(r, 8))
+            // Inactive tabs keep their shade; the rounded top corners show the bar behind them.
+            using (var path = TopRounded(r, 6))
             {
                 using (var brush = new SolidBrush(fill)) g.FillPath(brush, path);
                 if (tab.AgentColor is { } hue)
@@ -185,6 +191,12 @@ internal sealed class TabStrip : Control
         base.OnMouseLeave(e);
         _hover = -1; _hoverClose = _hoverPlus = false;
         Invalidate();
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+        if (e.Button == MouseButtons.Left && HitTab(e.Location) < 0 && !PlusRect.Contains(e.Location)) EmptyAreaMouseDown?.Invoke(e);
     }
 
     protected override void OnMouseUp(MouseEventArgs e)

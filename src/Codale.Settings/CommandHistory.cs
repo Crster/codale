@@ -1,5 +1,6 @@
 using Codale.Db;
 using Codale.Core.Projects;
+using Codale.Workspace;
 
 namespace Codale.Settings;
 
@@ -9,10 +10,9 @@ namespace Codale.Settings;
 /// </summary>
 /// <remarks>
 /// History is an aid, so a failed read or write never blocks a command: it is logged by being
-/// skipped. Each project's commands live under <c>project.KEY.command</c> in <see cref="ApplicationDatabase"/>, one entry per
-/// distinct command holding its source, use count and last use.
+/// skipped. Each worktree has one record per distinct command, with its source, use count and last use.
 /// </remarks>
-public sealed class CommandHistory(ApplicationDatabase database)
+public sealed class CommandHistory(Func<string, IWorkspaceData> workspaceFor)
 {
     private const int MaxCommandLength = 2_000;
     private const int MaxSuggestions = 8;
@@ -27,7 +27,7 @@ public sealed class CommandHistory(ApplicationDatabase database)
 
     private const string PrefixIndex = "command-prefix";
 
-    private T Use<T>(string projectPath, Func<CodaleDatabase, string, T> work) => database.UseRecords(db =>
+    private T Use<T>(string projectPath, Func<CodaleDatabase, string, T> work) => workspaceFor(projectPath).UseRecords(db =>
     {
         var project = ProjectPaths.InstanceKey(projectPath) + ":";
         _ = db.Record<Entry>().Index(PrefixIndex).Build(entry => entry.Prefix);

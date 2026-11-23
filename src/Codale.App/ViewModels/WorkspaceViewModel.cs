@@ -25,7 +25,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     private readonly IGitRepositoryFactory _gitRepositories;
     private readonly ISmartDecider _decider;
     private readonly IProjectCommandService _commands;
-    private readonly ApplicationDatabase _database;
     private readonly CommandHistory _commandHistory;
 
 
@@ -41,7 +40,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     {
         _agentSessions = agentSessions;
         CliHistory = cliHistory;
-        _database = database;
         Shortcuts = shortcuts;
         Syntax = syntax;
         _commandHistory = commandHistory;
@@ -53,7 +51,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         DisplayName = ProjectPaths.DisplayName(ProjectPath);
         Data = workspaceData.Open(ProjectPath);
 
-        ExtraFolders = new WorkspaceFolders(ProjectPath, database);
+        ExtraFolders = new WorkspaceFolders(ProjectPath, Data.Config);
         Files = new FileTreeViewModel(ProjectPath, ExtraFolders);
         Git = new GitViewModel(ProjectPath, gitRepositories, smart);
         Features = new FeatureService(ProjectPath, smart, Data);
@@ -63,7 +61,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         DiffViewer = CreateDiffViewer();
         Sessions = new SessionsViewModel(Features);
         _endpoints = new CliEndpointSettings(smart.Settings);
-        _mcp = new McpServerSettings(ProjectPath, database);
+        _mcp = new McpServerSettings(ProjectPath, database, Data);
         Health = new WorkspaceHealthViewModel(ProjectPath, Features.Knowledge);
         SmartActivity = new SmartActivityViewModel(ProjectPath, smart.Instance);
         SmartActivity.ObserveIndex(Features.Knowledge);
@@ -161,7 +159,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// </summary>
     public ChatViewModel CreateTerminalSession(Codale.Agents.CliDescriptor cli)
     {
-        var session = new ChatViewModel(ProjectPath, new StatusViewModel(), _endpoints, _mcp, _agentSessions, Smart, _decider) { ExtraFolders = ExtraFolders, FolderServers = FolderServers, TerminalCli = cli };
+        var session = new ChatViewModel(ProjectPath, Data.Directory, new StatusViewModel(), _endpoints, _mcp, _agentSessions, Smart, _decider) { ExtraFolders = ExtraFolders, FolderServers = FolderServers, TerminalCli = cli };
         session.Terminals = new TerminalSource(this, session);
         TerminalSessions.Add(session);
         return session;
@@ -235,7 +233,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     /// <summary>A new conversation with its own status, wired to the workspace's refreshes. Null <paramref name="cliId"/> keeps the default CLI.</summary>
     public ChatViewModel CreateChat(string? cliId = null)
     {
-        var chat = new ChatViewModel(ProjectPath, new StatusViewModel(), _endpoints, _mcp, _agentSessions, Smart, _decider)
+        var chat = new ChatViewModel(ProjectPath, Data.Directory, new StatusViewModel(), _endpoints, _mcp, _agentSessions, Smart, _decider)
         {
             Features = Features,
             ExtraFolders = ExtraFolders,
@@ -1000,11 +998,15 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         }
     }
 
+    private sealed record SessionTodo(string Content, string Status);
+    private sealed record SessionTodoList(SessionTodo[] Items);
+
     private void OnTodosChanged(object? sender, IReadOnlyList<TodoItem> todos)
     {
         if (sender is ChatViewModel { SessionId: { Length: > 0 } id })
         {
-            _database.SaveSessionTodos(id, [.. todos.Select(todo => new ApplicationDatabase.SessionTodo(todo.Content, todo.Status.ToString()))]);
+            var snapshot = new SessionTodoList([.. todos.Select(todo => new SessionTodo(todo.Content, todo.Status.ToString()))]);
+            Data.UseRecords(db => db.Record<SessionTodoList>().Key(id).Value(snapshot));
         }
     }
 

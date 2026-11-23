@@ -285,7 +285,7 @@ public sealed class ProjectCommandService : IProjectCommandService
 
         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(name.Trim().ToLowerInvariant())))[..8].ToLowerInvariant();
-        return Path.Combine(config.ScriptsDirectory, $"{safe}-{hash}{Extension(kind)}");
+        return Path.Combine(config.Directory, $"{safe}-{hash}{Extension(kind)}");
     }
 
     /// <summary>Writes the body when it changed and returns the script's path; the file keeps a predictable name.</summary>

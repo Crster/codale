@@ -1,4 +1,3 @@
-using Codale.Core.Projects;
 using Codale.Db;
 
 namespace Codale.Settings;
@@ -61,8 +60,6 @@ public sealed class ApplicationDatabase(string folder) : IDisposable
     }
 
     private sealed record SettingRecord(string Value);
-    private sealed record SessionTodoList(SessionTodo[] Items);
-    public sealed record SessionTodo(string Content, string Status);
 
     private T UseSetting<T>(string key, Func<RecordKey<SettingRecord>, T> work) => UseRecords(db => work(db.Record<SettingRecord>().Key(key)));
 
@@ -71,18 +68,6 @@ public sealed class ApplicationDatabase(string folder) : IDisposable
     public void UpdateSetting(string name, Func<string?, string> update) => UseSetting("global:" + name, node =>
     {
         node.Value(new(update(node.Get()?.Value)));
-        return true;
-    });
-
-    public string? GetProjectSetting(string projectPath, string name) =>
-        UseSetting("project:" + ProjectPaths.InstanceKey(projectPath) + ":" + name, node => node.Get()?.Value);
-
-    public void SetProjectSetting(string projectPath, string name, string value) =>
-        UseSetting("project:" + ProjectPaths.InstanceKey(projectPath) + ":" + name, node => { node.Value(new(value)); return true; });
-
-    public void SaveSessionTodos(string id, SessionTodo[] todos) => UseRecords(db =>
-    {
-        db.Record<SessionTodoList>().Key(id).Value(new(todos));
         return true;
     });
 

@@ -79,10 +79,6 @@ public static class ProjectPaths
         return sb.ToString();
     }
 
-    /// <summary>The project's database folder: features, summaries, findings and the source index.</summary>
-    public static string FeatureDatabasePath(string projectPath) =>
-        Path.Combine(KnowledgeDirectory(projectPath), "project-db");
-
     /// <summary>The common git directory identifies a repository across linked worktrees.</summary>
     public static string RepositoryIdentity(string projectPath)
     {
@@ -107,12 +103,7 @@ public static class ProjectPaths
         return Normalize(projectPath);
     }
 
-    public static string KnowledgeDirectory(string projectPath) => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale", "knowledge",
-        InstanceKey(RepositoryIdentity(projectPath)));
-
-    /// <summary>Readable workspace-model database directory. Distinct roots with the same name share this database.</summary>
-    public static string WorkspaceModelDirectory(string projectPath)
+    public static string WorkspaceName(string projectPath)
     {
         var name = DisplayName(projectPath);
         name = Regex.Replace(name, @"([A-Z]+)([A-Z][a-z])", "$1_$2");
@@ -122,7 +113,7 @@ public static class ProjectPaths
         // Windows device names are reserved even when they have a suffix such as .db.
         if (Regex.IsMatch(name, @"^(con|prn|aux|nul|com[1-9]|lpt[1-9])$", RegexOptions.IgnoreCase))
             name += "_workspace";
-        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale", "workspace", name);
+        return name.Length <= 100 ? name : name[..100].TrimEnd('_');
     }
 
     /// <summary>

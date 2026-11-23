@@ -148,7 +148,7 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
     }.OfType<string>());
 
     public string BrowserNote => Note(BrowserMode, BrowserAvailable,
-        "Codale's browser: browse and check web pages",
+        "On for agents",
         "The CLI's own: Claude in Chrome or Codex's browser");
 
     public string ComputerNote => Note(ComputerMode, ComputerAvailable,

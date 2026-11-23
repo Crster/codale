@@ -2,15 +2,39 @@ using Codale.Db;
 
 namespace Codale.Workspace;
 
-/// <summary>Owns short-lived leases on typed workspace databases.</summary>
+/// <summary>Owns or borrows short-lived leases on typed workspace databases.</summary>
 public sealed class WorkspaceDatabasePool : IDisposable
 {
-    private readonly CodaleDatabasePool _records = new(TimeSpan.FromMilliseconds(300), new() { LockTimeout = TimeSpan.FromSeconds(5) },
-        maxHold: TimeSpan.FromSeconds(1.5));
+    private readonly CodaleDatabasePool _records;
+    private readonly bool _ownsPool;
+    private volatile bool _disposed;
 
-    public T UseRecords<T>(string directory, Func<CodaleDatabase, T> work) => _records.Use(Path.Combine(directory, "records"), work);
+    public WorkspaceDatabasePool()
+    {
+        _records = new(TimeSpan.FromMilliseconds(300), new() { LockTimeout = TimeSpan.FromSeconds(5) },
+            maxHold: TimeSpan.FromSeconds(1.5));
+        _ownsPool = true;
+    }
 
-    public void UseRecords(string directory, Action<CodaleDatabase> work) => _records.Use(Path.Combine(directory, "records"), work);
+    private WorkspaceDatabasePool(CodaleDatabasePool records) => _records = records;
 
-    public void Dispose() => _records.Dispose();
+    internal WorkspaceDatabasePool Borrow() => new(_records);
+
+    public T UseRecords<T>(string directory, Func<CodaleDatabase, T> work)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _records.Use(directory, work);
+    }
+
+    public void UseRecords(string directory, Action<CodaleDatabase> work) => UseRecords(directory, db =>
+    {
+        work(db);
+        return true;
+    });
+
+    public void Dispose()
+    {
+        _disposed = true;
+        if (_ownsPool) _records.Dispose();
+    }
 }

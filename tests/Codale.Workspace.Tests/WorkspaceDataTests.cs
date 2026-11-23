@@ -26,12 +26,12 @@ public sealed class WorkspaceDataTests
         {
             using var pool = new WorkspaceDatabasePool();
             var old = new UserTodo(Guid.NewGuid().ToString("N"), "old task", DateTimeOffset.UnixEpoch);
-            using (var legacy = new Codale.Db.CodaleDb(directory.FullName))
+            using (var legacy = new Codale.Db.CodaleDb(Path.Combine(directory.FullName, "legacy")))
                 legacy.Open("user-todos").Open(old.Id).WriteJson(old);
             var store = new UserTodoStore(directory.FullName, pool);
             var added = store.Add("new task");
             Assert.Equal([added], store.List());
-            Assert.True(System.IO.File.Exists(Path.Combine(directory.FullName, "records", "index__records.db")));
+            Assert.True(System.IO.File.Exists(Path.Combine(directory.FullName, "index__records.db")));
             Assert.False(store.Complete(old.Id));
             Assert.True(store.Complete(added.Id));
             Assert.Empty(store.List());

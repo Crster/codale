@@ -131,7 +131,7 @@ public sealed class WorkspaceModelTests : IDisposable
         for (var i = 0; i < 100; i++) model.Put(Make($"file{i}.cs", $"class Initial{i} {{ }}"));
         model.Save();
 
-        long RecordBytes() => Directory.EnumerateFiles(Path.Combine(path, "records"), "record_*.db").Sum(file => new FileInfo(file).Length);
+        long RecordBytes() => Directory.EnumerateFiles(path, "record_*.db").Sum(file => new FileInfo(file).Length);
         var baseline = RecordBytes();
         model.Put(Make("file0.cs", "class UpdatedName { }"));
         model.Remove("file1.cs");

@@ -77,16 +77,16 @@ public sealed partial class FeatureService
     private bool BackfillPage(string session)
     {
         if (Get(session) is null) return false;
-        var saved = _db.Record<TopicCheckpoint>().Key(session).Get() ?? new(default, new(StringComparer.Ordinal));
+        var saved = _data.UseRecords(db => db.Record<TopicCheckpoint>().Key(session).Get()) ?? new(default, new(StringComparer.Ordinal));
         var (next, records) = LogOf(session).ReadIndexPage(saved.Position, 64);
         if (next == saved.Position) return false;
 
-        _db.WriteBatch(batch =>
+        _data.UseRecords(db => db.WriteBatch(batch =>
         {
             foreach (var record in records)
                 IndexHistoryRecord(batch, session, saved.Pending, record);
             batch.Put(session, saved with { Position = next });
-        });
+        }));
         return true;
     }
 

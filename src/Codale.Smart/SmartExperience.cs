@@ -58,6 +58,8 @@ public sealed partial class SmartExperience(Func<ISmartRuntime> factory, Func<Sm
             (_, _, _) => throw new InvalidOperationException("No native model installer configured."), historyDirectory)
     { }
 
+    public SmartExperience(SmartHistory history) : this() => _history = history;
+
     public SmartExperience(string modelDirectory, string nativeDirectory, string? historyDirectory = null)
         : this(() => new NativeRuntime(nativeDirectory), (model, progress, ct) => new ModelInstaller(modelDirectory, model).EnsureAsync(progress, ct), historyDirectory) { }
     public SmartExperience(Func<ISmartRuntime> factory, Func<IProgress<double>, CancellationToken, Task<string>> install, string? historyDirectory = null)

@@ -18,7 +18,6 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Navigation;
 
 using Windows.Storage.Pickers;
@@ -149,7 +148,6 @@ public sealed partial class WorkspacePage : Page
 
             foreach (var entry in _chatTabs)
             {
-                StopTabAttention(entry);
                 entry.Chat.LoginRequired -= OnChatLoginRequired;
                 entry.Chat.AttentionNeeded -= OnChatAttentionNeeded;
                 entry.Chat.PlanProposed -= OnChatPlanProposed;
@@ -168,6 +166,7 @@ public sealed partial class WorkspacePage : Page
         foreach (var entry in _chatTabs)
         {
             entry.Tab.ApplyAppSettings();
+            RefreshChatTabIcon(entry);
         }
 
         foreach (var entry in _editorTabs)
@@ -229,11 +228,6 @@ public sealed partial class WorkspacePage : Page
         if (ViewModel is null)
         {
             return;
-        }
-
-        foreach (var chatTab in _chatTabs)
-        {
-            RefreshTabAttention(chatTab);
         }
 
         var activeItem = ActiveTabItem as TabViewItem;
@@ -568,7 +562,7 @@ public sealed partial class WorkspacePage : Page
 
     /// <summary>
     /// A chat needs the reader. When Codale is the window in front, the transcript
-    /// already shows it (the question card, the amber status and tab dot), so nothing
+    /// already shows it (the question card, the amber status and tab title), so nothing
     /// more is said. Otherwise the taskbar button flashes until the window is brought
     /// forward, a notification says what is waiting - clicking it opens this project's
     /// window - and on return the chat that asked is brought to the front.
@@ -642,9 +636,7 @@ public sealed partial class WorkspacePage : Page
     private void OnChatActivationRequested(object? sender, ChatViewModel chat) => ShowChatTab(chat);
 
     /// <summary>
-    /// Brings a chat's tab to the front, creating it the first time. The tab header
-    /// carries the conversation's title and a pulsing dot while it works, so a turn
-    /// running in a background tab stays visible.
+    /// Brings a chat's tab to the front, creating it the first time.
     /// </summary>
     private void ShowChatTab(ChatViewModel chat)
     {
@@ -666,14 +658,17 @@ public sealed partial class WorkspacePage : Page
             chat.SpecialistDetailsRequested += OnChatSpecialistOpenRequested;
             chat.PropertyChanged += OnChatPropertyChanged;
 
+            var title = ChatTabHeader(chat);
             var item = new TabViewItem
             {
                 IsClosable = true,
                 IconSource = new FontIconSource { Glyph = "\uE8BD" },
-                Header = ChatTabHeader(chat),
+                Header = title,
                 Content = tab,
             };
-            entry = new ChatTabEntry(item, tab, chat);
+            entry = new ChatTabEntry(item, tab, chat, title);
+            RefreshChatTabIcon(entry);
+            RefreshChatTabTitle(entry);
             _chatTabs.Add(entry);
             AddTab(item);
             UpdateEmptyState();
@@ -683,100 +678,55 @@ public sealed partial class WorkspacePage : Page
         SelectTab(entry.Item);
     }
 
-    private void OnChatPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    private void OnChatPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(ChatViewModel.IsWaitingForYou) &&
-            _chatTabs.FirstOrDefault(t => ReferenceEquals(t.Chat, sender)) is { } entry)
+        switch (e.PropertyName)
         {
-            RefreshTabAttention(entry);
+            case nameof(ChatViewModel.CliId):
+            case nameof(ChatViewModel.EndpointName):
+                if (_chatTabs.FirstOrDefault(t => ReferenceEquals(t.Chat, sender)) is { } providerTab)
+                {
+                    RefreshChatTabIcon(providerTab);
+                }
+                break;
+            case nameof(ChatViewModel.IsWaitingForYou):
+            case nameof(ChatViewModel.IsBusyWorking):
+            case nameof(ChatViewModel.ComposerNotice):
+                if (_chatTabs.FirstOrDefault(t => ReferenceEquals(t.Chat, sender)) is { } statusTab)
+                {
+                    RefreshChatTabTitle(statusTab);
+                }
+                break;
         }
     }
 
-    /// <summary>
-    /// Tints the whole tab amber and breathes it while its chat is waiting on the reader (a question,
-    /// a permission, a plan) and the tab is not the one in front - with several chats
-    /// open, the small amber dot alone is easy to miss. Looking at the tab stops it.
-    /// Only the brush pulses, so the icon, title and close button stay steady.
-    /// </summary>
-    private void RefreshTabAttention(ChatTabEntry entry)
+    private void RefreshChatTabIcon(ChatTabEntry entry)
     {
-        var active = entry.Chat.IsWaitingForYou && !IsTabShowing(entry.Item);
-        if (active == entry.AttentionPulse is not null)
-        {
-            return;
-        }
-
-        if (!active)
-        {
-            StopTabAttention(entry);
-            return;
-        }
-
-        // TabViewItem's template paints its whole container (icon, title, close button)
-        // with Background, so a local value covers the tab edge to edge.
-        var warn = ((SolidColorBrush)ChatPaletteTheme.Brush("StatusWarnBrush")).Color;
-        var tint = new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, warn.R, warn.G, warn.B)) { Opacity = 0.45 };
-        entry.Item.Background = tint;
-
-        var breathe = new DoubleAnimation
-        {
-            From = 0.45,
-            To = 0.15,
-            Duration = new Duration(TimeSpan.FromMilliseconds(900)),
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-            EnableDependentAnimation = true,
-            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
-        };
-        Storyboard.SetTarget(breathe, tint);
-        Storyboard.SetTargetProperty(breathe, "Opacity");
-
-        var storyboard = new Storyboard { Children = { breathe } };
-        entry.AttentionPulse = storyboard;
-        storyboard.Begin();
+        var isByok = ViewModel.Smart.Settings.FindByok(entry.Chat.EndpointName) is { IsAccount: false };
+        entry.Item.IconSource.Foreground = CliEndpointViewModel.ProfileBrush(entry.Chat.CliId, isByok);
     }
 
-    /// <summary>Ends a tab's attention pulse and hands its background back to the theme.</summary>
-    private static void StopTabAttention(ChatTabEntry entry)
+    private static void RefreshChatTabTitle(ChatTabEntry entry)
     {
-        entry.AttentionPulse?.Stop();
-        entry.AttentionPulse = null;
-        entry.Item.ClearValue(Control.BackgroundProperty);
+        switch (entry.Chat)
+        {
+            case { IsWaitingForYou: true }:
+                entry.Title.Foreground = ChatPaletteTheme.Brush("StatusWarnBrush");
+                break;
+            case { ComposerNotice.Severity: NoticeSeverity.Error or NoticeSeverity.Warning }:
+                entry.Title.Foreground = ChatPaletteTheme.Brush("StatusFailedBrush");
+                break;
+            case { IsBusyWorking: true }:
+                entry.Title.Foreground = ChatPaletteTheme.Brush("StatusRunningBrush");
+                break;
+            default:
+                entry.Title.ClearValue(TextBlock.ForegroundProperty);
+                break;
+        }
     }
 
-    private static StackPanel ChatTabHeader(ChatViewModel chat)
+    private static TextBlock ChatTabHeader(ChatViewModel chat)
     {
-        var dot = new Microsoft.UI.Xaml.Shapes.Ellipse
-        {
-            Width = 7,
-            Height = 7,
-            VerticalAlignment = VerticalAlignment.Center,
-            Fill = ChatPaletteTheme.Brush("StatusRunningBrush"),
-        };
-        dot.SetBinding(VisibilityProperty, new Binding
-        {
-            Path = new PropertyPath(nameof(ChatViewModel.IsBusyWorking)),
-            Source = chat,
-            Converter = new BoolToVisibilityConverter(),
-        });
-        dot.SetBinding(Pulse.IsActiveProperty, new Binding { Path = new PropertyPath(nameof(ChatViewModel.IsBusyWorking)), Source = chat });
-
-        // Amber while the chat waits on the reader, so a question in a background tab is findable.
-        var waiting = new Microsoft.UI.Xaml.Shapes.Ellipse
-        {
-            Width = 7,
-            Height = 7,
-            VerticalAlignment = VerticalAlignment.Center,
-            Fill = ChatPaletteTheme.Brush("StatusWarnBrush"),
-        };
-        waiting.SetBinding(VisibilityProperty, new Binding
-        {
-            Path = new PropertyPath(nameof(ChatViewModel.IsWaitingForYou)),
-            Source = chat,
-            Converter = new BoolToVisibilityConverter(),
-        });
-        waiting.SetBinding(Pulse.IsActiveProperty, new Binding { Path = new PropertyPath(nameof(ChatViewModel.IsWaitingForYou)), Source = chat });
-
         var title = new TextBlock
         {
             MaxWidth = 180,
@@ -786,7 +736,7 @@ public sealed partial class WorkspacePage : Page
         title.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(nameof(ChatViewModel.TabTitle)), Source = chat });
         title.SetBinding(ToolTipService.ToolTipProperty, new Binding { Path = new PropertyPath(nameof(ChatViewModel.TabTitle)), Source = chat });
 
-        return new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7, Children = { dot, waiting, title } };
+        return title;
     }
 
     private ChatTabEntry? ChatTabInFront() =>
@@ -2123,7 +2073,6 @@ public sealed partial class WorkspacePage : Page
             // and it stays reachable through the session list. Fire and forget: a tab
             // close cannot await.
             _chatTabs.Remove(chatEntry);
-            StopTabAttention(chatEntry);
             chatEntry.Chat.LoginRequired -= OnChatLoginRequired;
             chatEntry.Chat.AttentionNeeded -= OnChatAttentionNeeded;
             chatEntry.Chat.PlanProposed -= OnChatPlanProposed;
@@ -3995,7 +3944,7 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>One open chat tab: its <see cref="TabViewItem"/>, its transcript view and its conversation.</summary>
-    private sealed class ChatTabEntry(TabViewItem item, ChatTab tab, ChatViewModel chat)
+    private sealed class ChatTabEntry(TabViewItem item, ChatTab tab, ChatViewModel chat, TextBlock title)
     {
         public TabViewItem Item { get; } = item;
 
@@ -4003,8 +3952,7 @@ public sealed partial class WorkspacePage : Page
 
         public ChatViewModel Chat { get; } = chat;
 
-        /// <summary>The running "waiting for you" pulse on the tab's background, or null when it is calm.</summary>
-        public Storyboard? AttentionPulse { get; set; }
+        public TextBlock Title { get; } = title;
     }
 
     /// <summary>

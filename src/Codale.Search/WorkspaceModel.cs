@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 
 using Codale.Db;
 using Codale.Search.Engine;
+using Codale.Workspace;
 
 namespace Codale.Search;
 
@@ -48,15 +49,25 @@ public static class ModelChannels
 /// </remarks>
 /// <param name="path">Database directory; null keeps the model in memory only.</param>
 /// <param name="key">Workspace identity within the database.</param>
-public sealed class WorkspaceModel(string? path = null, string key = "model")
+public sealed class WorkspaceModel
 {
-    private static readonly CodaleDatabasePool Storage = new(TimeSpan.FromMilliseconds(300), new() { LockTimeout = TimeSpan.FromSeconds(2) });
+    public WorkspaceModel(string? path = null, string key = "model")
+    {
+        _directory = path is null ? null : new Lazy<string>(() => File.Exists(path) ? path + ".records" : path);
+        _key = key;
+    }
+
+    internal WorkspaceModel(Func<string> directory, string key)
+    {
+        _directory = new Lazy<string>(directory, LazyThreadSafetyMode.PublicationOnly);
+        _key = key;
+    }
     private static readonly Dictionary<string, int> CurrentChannels = new(ModelChannels.Current);
 
     private readonly Lock _gate = new();
     private readonly Lock _saveGate = new();
-    private readonly string? _path = path;
-    private readonly string _key = key;
+    private readonly Lazy<string>? _directory;
+    private readonly string _key;
     private readonly Dictionary<string, Entry> _files = [with(StringComparer.OrdinalIgnoreCase)];
     private readonly Dictionary<string, int> _termFiles = [with(StringComparer.Ordinal)];
     private readonly Dictionary<string, Dictionary<SourceSymbolKind, int>> _symbols = [with(StringComparer.OrdinalIgnoreCase)];
@@ -382,9 +393,9 @@ public sealed class WorkspaceModel(string? path = null, string key = "model")
                 return;
             }
 
-            _loaded = true;
-            if (_path is null || !Directory.Exists(StoragePath))
+            if (_directory is null)
             {
+                _loaded = true;
                 return;
             }
 
@@ -398,6 +409,7 @@ public sealed class WorkspaceModel(string? path = null, string key = "model")
                 return;
             }
 
+            _loaded = true;
             foreach (var row in stored)
             {
                 var file = row.Value;
@@ -426,7 +438,7 @@ public sealed class WorkspaceModel(string? path = null, string key = "model")
     /// <summary>Saves the model if anything changed since it was last saved. Failures leave it dirty for the next try.</summary>
     public void Save()
     {
-        if (_path is null)
+        if (_directory is null)
         {
             return;
         }
@@ -486,9 +498,7 @@ public sealed class WorkspaceModel(string? path = null, string key = "model")
     private string StoragePrefix => FormattableString.Invariant($"{_key.Length}:{_key}:");
     private string StorageKey(string path) => StoragePrefix + path.ToUpperInvariant();
 
-    private string StoragePath => File.Exists(_path) ? _path + ".records" : Path.Combine(_path!, "records");
-
-    private T UseStorage<T>(Func<CodaleDatabase, T> action) => Storage.Use(StoragePath, action);
+    private T UseStorage<T>(Func<CodaleDatabase, T> action) => WorkspaceDb.Use(_directory!.Value, action);
 
     /// <summary>A loaded file's words become the pool's, so it holds no copies of its own.</summary>
     private void Intern(StoredFile file)

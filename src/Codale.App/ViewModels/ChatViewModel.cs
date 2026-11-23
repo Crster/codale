@@ -29,6 +29,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
     private readonly IAgentSessionFactory _agentSessions;
+    private readonly string _artifactsDirectory;
     private readonly SmartExperienceHost _smart;
     private readonly ISmartDecider _decider;
 
@@ -182,7 +183,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>True when this chat's panel session is a Codex CLI session.</summary>
     private bool IsCodexSession => TerminalCli is null && SessionCli.Id == "codex";
 
-    public ChatViewModel(string projectPath, StatusViewModel status, CliEndpointSettings? endpointSettings, McpServerSettings? mcpSettings, IAgentSessionFactory agentSessions, SmartExperienceHost smart, ISmartDecider decider)
+    public ChatViewModel(string projectPath, string artifactsDirectory, StatusViewModel status, CliEndpointSettings? endpointSettings, McpServerSettings? mcpSettings, IAgentSessionFactory agentSessions, SmartExperienceHost smart, ISmartDecider decider)
     {
         _agentSessions = agentSessions;
         _smart = smart;
@@ -190,6 +191,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         PermissionMode = smart.Settings.DefaultChatMode;
         _decider = decider;
         ProjectPath = projectPath;
+        _artifactsDirectory = artifactsDirectory;
         Status = status;
         _endpointSettings = endpointSettings;
         _mcpSettings = mcpSettings;
@@ -3299,8 +3301,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>Where saved tool images and agent-written markdown documents live.</summary>
-    private static string ArtifactsDirectory { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale", "artifacts");
 
     /// <summary>Saved tool images are only session artifacts; a week is long enough to reopen one. Documents saved beside them (.md) are left alone.</summary>
     private static void PruneOldImages(string dir)
@@ -3345,7 +3345,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             var paths = await Task.Run(() =>
             {
-                var dir = ArtifactsDirectory;
+                var dir = _artifactsDirectory;
                 Directory.CreateDirectory(dir);
                 PruneOldImages(dir);
 
@@ -3452,8 +3452,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             try
             {
-                Directory.CreateDirectory(ArtifactsDirectory);
-                path = Path.Combine(ArtifactsDirectory, $"{DateTime.Now:yyyyMMdd-HHmmss-fff}.md");
+                Directory.CreateDirectory(_artifactsDirectory);
+                path = Path.Combine(_artifactsDirectory, $"{DateTime.Now:yyyyMMdd-HHmmss-fff}.md");
                 File.WriteAllText(path, markdown);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

@@ -1,9 +1,13 @@
+using Codale.Db;
+
 namespace Codale.Workspace;
 
 /// <summary>Workspace-scoped access to stores sharing the same database identity.</summary>
 public interface IWorkspaceData
 {
     string Directory { get; }
+    T UseRecords<T>(Func<CodaleDatabase, T> work);
+    void UseRecords(Action<CodaleDatabase> work);
     MemoryStore Memory { get; }
     HistoryStore History { get; }
     ConfigStore Config { get; }
@@ -18,7 +22,11 @@ public interface IWorkspaceDataFactory
 
 public sealed class WorkspaceData : IWorkspaceData
 {
+    private readonly WorkspaceDatabasePool _databases;
     public string Directory { get; }
+
+    public T UseRecords<T>(Func<CodaleDatabase, T> work) => _databases.UseRecords(Directory, work);
+    public void UseRecords(Action<CodaleDatabase> work) => _databases.UseRecords(Directory, work);
     public MemoryStore Memory { get; }
     public HistoryStore History { get; }
     public ConfigStore Config { get; }
@@ -28,6 +36,7 @@ public sealed class WorkspaceData : IWorkspaceData
     public WorkspaceData(string directory, WorkspaceDatabasePool? databases = null)
     {
         Directory = Path.GetFullPath(directory);
+        _databases = databases ?? WorkspaceDb.Shared;
         Memory = new(Directory, databases);
         History = new(Directory, databases);
         Config = new(Directory, databases);
@@ -38,7 +47,7 @@ public sealed class WorkspaceData : IWorkspaceData
 
 public sealed class WorkspaceDataFactory(Func<string, string>? directoryFor = null) : IWorkspaceDataFactory, IDisposable
 {
-    private readonly WorkspaceDatabasePool _databases = new();
+    private readonly WorkspaceDatabasePool _databases = WorkspaceDb.Shared.Borrow();
     private bool _disposed;
     public void Dispose()
     {

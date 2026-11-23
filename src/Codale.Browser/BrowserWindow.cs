@@ -22,9 +22,15 @@ internal sealed class BrowserWindow : Form
         Color.FromArgb(236, 72, 153), Color.FromArgb(249, 115, 22), Color.FromArgb(99, 102, 241), Color.FromArgb(20, 184, 166),
     ];
 
+    // Frameless: this bar replaces the system title bar. It drags the window and holds the window controls at the far right.
+    private readonly Panel _titleBar = new() { Dock = DockStyle.Top, Height = 34 };
+    private readonly Label _titleLabel = new() { Dock = DockStyle.Left, AutoSize = true, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 0, 0, 0), Font = new Font("Segoe UI", 9f) };
+    private readonly FlowLayoutPanel _windowButtons = new() { Dock = DockStyle.Right, AutoSize = true, WrapContents = false, Margin = Padding.Empty, Padding = Padding.Empty };
+    private readonly Button _minimizeButton = new() { Text = "", AccessibleName = "Minimize", Size = new Size(46, 34), Margin = Padding.Empty, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe MDL2 Assets", 10f), Cursor = Cursors.Hand, TabStop = false };
+    private readonly Button _closeButton = new() { Text = "", AccessibleName = "Close", Size = new Size(46, 34), Margin = Padding.Empty, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe MDL2 Assets", 10f), Cursor = Cursors.Hand, TabStop = false };
     private readonly Panel _stage = new() { Dock = DockStyle.Fill };
-    private readonly TabStrip _strip = new() { Dock = DockStyle.Top };
-    private readonly TableLayoutPanel _toolbar = new() { Dock = DockStyle.Top, Height = 54, ColumnCount = 8, RowCount = 1, Padding = new Padding(10, 7, 10, 7), BackColor = Color.White };
+    private readonly TabStrip _strip = new() { Dock = DockStyle.Fill };
+    private readonly TableLayoutPanel _toolbar = new() { Dock = DockStyle.Top, Height = 44, ColumnCount = 7, RowCount = 1, Padding = new Padding(8, 4, 8, 4), BackColor = Color.White };
     private readonly TextBox _address = new() { BorderStyle = BorderStyle.None, Font = new Font("Segoe UI", 10f), ForeColor = Color.FromArgb(48, 53, 61), BackColor = Color.FromArgb(240, 242, 245) };
     private readonly Panel _addressBox = new() { Dock = DockStyle.Fill, Margin = new Padding(8, 3, 8, 3) };
     private readonly Label _addressIcon = new() { Text = "", Font = new Font("Segoe MDL2 Assets", 10f), ForeColor = Color.FromArgb(122, 131, 142), AutoSize = false, TextAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Left, Width = 34 };
@@ -44,6 +50,76 @@ internal sealed class BrowserWindow : Form
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr window);
 
+    [DllImport("user32.dll")]
+    private static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+
+    private const int WmNcLButtonDown = 0x00A1;
+    private const int HtCaption = 2;
+    private const int WsThickFrame = 0x00040000;
+
+    // Without a caption, WS_THICKFRAME keeps the window resizable from its edges.
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var parameters = base.CreateParams;
+            parameters.Style |= WsThickFrame;
+            return parameters;
+        }
+    }
+
+    private const int WmNcCalcSize = 0x0083;
+    private const int WmNcHitTest = 0x0084;
+    private const int ResizeBorder = 6;
+
+    /// <summary>
+    /// The system draws the thick frame in the window class's white, which shows above and beside the
+    /// dark bars. Making the whole window client area removes that frame; the edges still resize via
+    /// hit-testing. A maximized window keeps the system frame so it does not overflow the screen.
+    /// </summary>
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WmNcCalcSize && m.WParam != IntPtr.Zero && WindowState != FormWindowState.Maximized)
+        {
+            m.Result = IntPtr.Zero;
+            return;
+        }
+
+        base.WndProc(ref m);
+        if (m.Msg == WmNcHitTest && m.Result == (IntPtr)1 && WindowState != FormWindowState.Maximized)
+        {
+            var screen = m.LParam.ToInt64();
+            var point = PointToClient(new Point((short)(screen & 0xFFFF), (short)((screen >> 16) & 0xFFFF)));
+            m.Result = ResizeHitTest(point);
+        }
+    }
+
+    /// <summary>Which resize handle (or the client area) a client point falls on; 1 is HTCLIENT.</summary>
+    private IntPtr ResizeHitTest(Point p)
+    {
+        var left = p.X < ResizeBorder;
+        var right = p.X >= ClientSize.Width - ResizeBorder;
+        var top = p.Y < ResizeBorder;
+        var bottom = p.Y >= ClientSize.Height - ResizeBorder;
+        const int HtClient = 1, HtLeft = 10, HtRight = 11, HtTop = 12, HtTopLeft = 13, HtTopRight = 14, HtBottom = 15, HtBottomLeft = 16, HtBottomRight = 17;
+        var code = (top, bottom, left, right) switch
+        {
+            (true, _, true, _) => HtTopLeft,
+            (true, _, _, true) => HtTopRight,
+            (_, true, true, _) => HtBottomLeft,
+            (_, true, _, true) => HtBottomRight,
+            (true, _, _, _) => HtTop,
+            (_, true, _, _) => HtBottom,
+            (_, _, true, _) => HtLeft,
+            (_, _, _, true) => HtRight,
+            _ => HtClient,
+        };
+        return (IntPtr)code;
+    }
+
     public BrowserWindow()
     {
         Text = "Codale Browser";
@@ -51,12 +127,13 @@ internal sealed class BrowserWindow : Form
         Width = 1280;
         Height = 850;
         KeyPreview = true;
+        FormBorderStyle = FormBorderStyle.None;
 
         _toolbar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         _toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 40));
         _toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 40));
         _toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        for (var i = 0; i < 5; i++) _toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 40));
+        for (var i = 0; i < 4; i++) _toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 40));
 
         _addressBox.Controls.Add(_address);
         _addressBox.Controls.Add(_addressIcon);
@@ -67,13 +144,27 @@ internal sealed class BrowserWindow : Form
         _toolbar.Controls.Add(IconButton("", "Hard refresh (reload without cache)", async (_, _) => await HardReloadAsync()), 1, 0);
         _toolbar.Controls.Add(_addressBox, 2, 0);
         _breakpointButton = IconButton(Breakpoint.NoneGlyph, "View breakpoint: fill window", (_, _) => _breakpointMenu.Show(_breakpointButton!, new Point(0, _breakpointButton!.Height + 2)));
-        _toolbar.Controls.Add(_breakpointButton, 3, 0);
+        // The breakpoint lives in the top bar, at the far right, beside minimize and close.
+        _breakpointButton.Dock = DockStyle.None;
+        _breakpointButton.Size = new Size(46, 34);
+        _breakpointButton.Margin = Padding.Empty;
         _themeButton = IconButton("", "Switch to dark mode", (_, _) => ApplyTheme(!_dark));
-        _toolbar.Controls.Add(_themeButton, 4, 0);
-        _toolbar.Controls.Add(IconButton("", "Copy element path", async (_, _) => await PickAsync()), 5, 0);
-        _toolbar.Controls.Add(IconButton("", "Console", (_, _) => ToggleDiagnostics("console")), 6, 0);
-        _toolbar.Controls.Add(IconButton("", "Requests", (_, _) => ToggleDiagnostics("requests")), 7, 0);
+        _toolbar.Controls.Add(_themeButton, 3, 0);
+        _toolbar.Controls.Add(IconButton("", "Copy element path", async (_, _) => await PickAsync()), 4, 0);
+        _toolbar.Controls.Add(IconButton("", "Console", (_, _) => ToggleDiagnostics("console")), 5, 0);
+        _toolbar.Controls.Add(IconButton("", "Requests", (_, _) => ToggleDiagnostics("requests")), 6, 0);
         BuildBreakpointMenu();
+
+        _minimizeButton.Click += (_, _) => WindowState = FormWindowState.Minimized;
+        _closeButton.Click += (_, _) => Close();
+        _windowButtons.Controls.Add(_breakpointButton);
+        _windowButtons.Controls.Add(_minimizeButton);
+        _windowButtons.Controls.Add(_closeButton);
+        _titleBar.Controls.Add(_strip);
+        _titleBar.Controls.Add(_windowButtons);
+        _titleBar.MouseDown += DragWindow;
+        _strip.EmptyAreaMouseDown += e => DragWindow(_strip, e);
+        _titleLabel.Text = Text;
 
         _strip.Tabs = _tabs;
         _strip.Selected += Activate;
@@ -85,12 +176,19 @@ internal sealed class BrowserWindow : Form
 
         Controls.Add(_stage);
         Controls.Add(_toolbar);
-        Controls.Add(_strip);
+        Controls.Add(_titleBar);
         ApplyTheme(false);
 
         _pipe = new ControlPipe(HandleControlAsync);
         Shown += async (_, _) => await InitializeAsync();
         FormClosed += (_, _) => _pipe.Dispose();
+    }
+
+    private void DragWindow(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left) return;
+        ReleaseCapture();
+        SendMessage(Handle, WmNcLButtonDown, (IntPtr)HtCaption, IntPtr.Zero);
     }
 
     private Button IconButton(string glyph, string label, EventHandler action)
@@ -209,8 +307,11 @@ internal sealed class BrowserWindow : Form
         _strip.Invalidate();
     }
 
-    private void UpdateTitle() =>
+    private void UpdateTitle()
+    {
         Text = _active is null ? "Codale Browser" : $"{(_picking ? "Select an element — " : "")}{_active.Title} — Codale Browser";
+        _titleLabel.Text = Text;
+    }
 
     /// <summary>
     /// Requests from agents (see <see cref="ControlPipe"/>), run on the UI thread. A new agent tab is
@@ -305,7 +406,21 @@ internal sealed class BrowserWindow : Form
         var surface = dark ? Color.FromArgb(31, 34, 40) : Color.White;
         var field = dark ? Color.FromArgb(47, 51, 59) : Color.FromArgb(240, 242, 245);
         var foreground = dark ? Color.FromArgb(225, 229, 235) : Color.FromArgb(75, 83, 94);
+        BackColor = surface;
         _toolbar.BackColor = surface;
+        _titleBar.BackColor = surface;
+        _titleLabel.ForeColor = foreground;
+        foreach (var button in _windowButtons.Controls.OfType<Button>())
+        {
+            button.BackColor = surface;
+            button.ForeColor = foreground;
+            button.FlatAppearance.BorderSize = 0;
+            button.FlatAppearance.MouseOverBackColor = dark ? Color.FromArgb(57, 62, 71) : Color.FromArgb(240, 242, 245);
+            button.FlatAppearance.MouseDownBackColor = dark ? Color.FromArgb(68, 74, 84) : Color.FromArgb(228, 231, 236);
+        }
+        _closeButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(232, 17, 35);
+        _closeButton.FlatAppearance.MouseDownBackColor = Color.FromArgb(241, 112, 122);
+        _closeButton.ForeColor = foreground;
         _addressBox.BackColor = _addressIcon.BackColor = _address.BackColor = field;
         _addressIcon.ForeColor = dark ? Color.FromArgb(164, 173, 185) : Color.FromArgb(122, 131, 142);
         _address.ForeColor = foreground;

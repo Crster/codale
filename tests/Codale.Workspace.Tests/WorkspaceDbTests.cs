@@ -26,6 +26,41 @@ public sealed class WorkspaceDbTests : IDisposable
     }
 
     [Fact]
+    public void Linked_worktrees_share_a_flat_database_and_same_named_projects_stay_separate()
+    {
+        var main = Path.Combine(_directory, "MyRepo");
+        var worktree = Path.Combine(_directory, "checkout");
+        var other = Path.Combine(_directory, "another", "MyRepo");
+        var common = Path.Combine(main, ".git");
+        var linked = Path.Combine(common, "worktrees", "checkout");
+        Directory.CreateDirectory(linked);
+        Directory.CreateDirectory(worktree);
+        Directory.CreateDirectory(other);
+        File.WriteAllText(Path.Combine(worktree, ".git"), "gitdir: " + linked);
+        File.WriteAllText(Path.Combine(linked, "commondir"), "../..");
+
+        var root = Path.Combine(_directory, "workspace");
+        using var factory = new WorkspaceDataFactory(project => WorkspaceDb.DirectoryFor(project, root));
+        var data = factory.Open(main);
+        var checkout = factory.Open(worktree);
+        var unrelated = factory.Open(other);
+        Assert.Equal(Path.Combine(root, "my_repo"), data.Directory);
+        Assert.Equal(data.Directory, checkout.Directory);
+        Assert.Equal(Path.Combine(root, "my_repo_2"), unrelated.Directory);
+        data.UseRecords(db => checkout.UseRecords(checkoutDb => Assert.Same(db, checkoutDb)));
+
+        data.Config.Set("theme", "dark");
+        data.History.Append("main-session", "main transcript");
+        checkout.History.Append("checkout-session", "checkout transcript");
+        Assert.Equal("dark", checkout.Config.Get("theme"));
+        Assert.Equal(["main transcript"], checkout.History.Lines("main-session", HistoryStore.Current));
+        Assert.Equal(["checkout transcript"], data.History.Lines("checkout-session", HistoryStore.Current));
+        Assert.Empty(unrelated.History.Lines("main-session", HistoryStore.Current));
+        Assert.True(File.Exists(Path.Combine(data.Directory, "index__records.db")));
+        Assert.Empty(Directory.EnumerateDirectories(data.Directory));
+    }
+
+    [Fact]
     public void History_keeps_byte_offsets_and_archives_what_a_summary_read()
     {
         var history = new HistoryStore(_directory);

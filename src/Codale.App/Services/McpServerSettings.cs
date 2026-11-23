@@ -1,4 +1,6 @@
 using Codale.Core.Agents;
+using Codale.Core.Projects;
+using Codale.Workspace;
 using Codale.Mcp;
 
 namespace Codale.App.Services;
@@ -12,7 +14,7 @@ namespace Codale.App.Services;
 /// act on real hardware, so they are per project and default to Block. Like <see cref="CliEndpointSettings"/>
 /// the values are re-read on every access, so a change applies to the next session start.
 /// </summary>
-public sealed class McpServerSettings(string projectPath, ApplicationDatabase database, string? baseDirectory = null)
+public sealed class McpServerSettings(string projectPath, ApplicationDatabase database, IWorkspaceData data, string? baseDirectory = null)
 {
     // Named for what they do, so an agent reading its tool list knows each server's purpose.
     public const string BrowserName = "browser-use";
@@ -34,6 +36,7 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
 
     private readonly string _projectPath = projectPath;
     private readonly ApplicationDatabase _database = database;
+    private readonly string _worktreeKey = ProjectPaths.InstanceKey(projectPath);
     private readonly McpHostExecutables _hosts = new(baseDirectory ?? AppContext.BaseDirectory, StagingRoot());
 
     /// <summary>Allow unless the user changed it; a global preference.</summary>
@@ -54,11 +57,11 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
     {
         get
         {
-            return ParseMode(_database.GetProjectSetting(_projectPath, ComputerKey), AgentToolMode.Block);
+            return ParseMode(data.Config.Get(ComputerKey + ":" + _worktreeKey), AgentToolMode.Block);
         }
         set
         {
-            _database.SetProjectSetting(_projectPath, ComputerKey, FormatMode(value));
+            data.Config.Set(ComputerKey + ":" + _worktreeKey, FormatMode(value));
         }
     }
 
@@ -67,11 +70,11 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
     {
         get
         {
-            return ParseMode(_database.GetProjectSetting(_projectPath, PhoneKey), AgentToolMode.Block);
+            return ParseMode(data.Config.Get(PhoneKey + ":" + _worktreeKey), AgentToolMode.Block);
         }
         set
         {
-            _database.SetProjectSetting(_projectPath, PhoneKey, FormatMode(value));
+            data.Config.Set(PhoneKey + ":" + _worktreeKey, FormatMode(value));
         }
     }
 
@@ -383,32 +386,18 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
     /// <summary>One file per project and session: each CLI carries its own pipe and token, so two launches must not share one.</summary>
     private string StagedPath(string cli, string key)
     {
-        var directory = Path.Combine(StagingRoot(), "cli");
-        Directory.CreateDirectory(directory);
-        return Path.Combine(directory, $"{cli}-{ProjectHash()}-{key}.json");
+        Directory.CreateDirectory(data.Directory);
+        return Path.Combine(data.Directory, $"launch-{key}-{cli}.json");
     }
-
-    private string ProjectHash() =>
-        Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(_projectPath)))[..12];
 
     /// <summary>Removes what a session's launch staged once the session has ended.</summary>
     public void ClearStaged(string key)
     {
         try
         {
-            var directory = Path.Combine(StagingRoot(), "cli");
-            if (Directory.Exists(directory))
-            {
-                foreach (var file in Directory.EnumerateFiles(directory, $"*-{ProjectHash()}-{key}*"))
-                {
+            if (Directory.Exists(data.Directory))
+                foreach (var file in Directory.EnumerateFiles(data.Directory, $"launch-{key}-*.json"))
                     File.Delete(file);
-                }
-
-                foreach (var dir in Directory.EnumerateDirectories(directory, $"*-{ProjectHash()}-{key}*"))
-                {
-                    Directory.Delete(dir, recursive: true);
-                }
-            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

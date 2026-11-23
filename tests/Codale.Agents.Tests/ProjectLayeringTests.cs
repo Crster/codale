@@ -15,13 +15,13 @@ public sealed class ProjectLayeringTests
         ["Codale.Db"] = ["Codale.Core"],
         ["Codale.Editor"] = ["Codale.Core"],
         ["Codale.Git"] = ["Codale.Core"],
-        ["Codale.Terminal"] = [],
-        ["Codale.Smart"] = ["Codale.Core"],
+        ["Codale.Terminal"] = ["Codale.Core"],
+        ["Codale.Smart"] = ["Codale.Core", "Codale.Workspace"],
         ["Codale.Workspace"] = ["Codale.Core", "Codale.Db"],
         ["Codale.Agents"] = ["Codale.Core", "Codale.Workspace"],
         ["Codale.Commands"] = ["Codale.Workspace"],
-        ["Codale.Search"] = ["Codale.Core", "Codale.Db", "Codale.Smart"],
-        ["Codale.Settings"] = ["Codale.Agents", "Codale.Db"],
+        ["Codale.Search"] = ["Codale.Core", "Codale.Db", "Codale.Smart", "Codale.Workspace"],
+        ["Codale.Settings"] = ["Codale.Agents", "Codale.Db", "Codale.Workspace"],
         ["Codale.Mcp.Common"] = [],
         ["Codale.Browser"] = [],
         ["Codale.Mcp.Browser"] = ["Codale.Core", "Codale.Mcp.Common"],
@@ -55,8 +55,8 @@ public sealed class ProjectLayeringTests
         Assert.Empty(SourceProjectReferences()["Codale.Core"]);
 
     [Fact]
-    public void SmartDependsOnlyOnCore() =>
-        Assert.Equal(["Codale.Core"], SourceProjectReferences()["Codale.Smart"]);
+    public void SmartOnlyUsesCoreAndWorkspaceStorage() =>
+        Assert.Equal(["Codale.Core", "Codale.Workspace"], SourceProjectReferences()["Codale.Smart"].Order().ToArray());
 
     [Fact]
     public void AgentsDoNotReachTheSmartOrTheApplication()

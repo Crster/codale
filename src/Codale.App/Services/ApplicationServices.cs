@@ -32,8 +32,8 @@ public sealed class ApplicationServices : IAsyncDisposable
         Codale.Core.Syntax.SyntaxService.Initialize(Path.Combine(Database.Folder, "syntax"));
         Syntax = new(Settings, Database.Folder, Codale.Core.Syntax.SyntaxService.Store, Codale.Core.Syntax.SyntaxService.Catalog);
         RecentProjects = new(Database);
-        CommandHistory = new(Database);
-        Smart = new(Settings);
+        CommandHistory = new(WorkspaceData.Open);
+        Smart = new(Settings, WorkspaceData);
         AgentSessions = agentSessions ?? new AgentSessionFactory();
         GitRepositories = gitRepositories ?? new GitRepositoryFactory();
         CliHistory = cliHistory ?? new CliHistoryReaderFactory();

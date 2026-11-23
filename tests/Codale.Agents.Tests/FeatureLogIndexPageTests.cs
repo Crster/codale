@@ -11,8 +11,9 @@ public sealed class FeatureLogIndexPageTests
         var root = Directory.CreateTempSubdirectory("codale-topic-history-").FullName;
         try
         {
-            using var data = new WorkspaceDataFactory(_ => root);
-            var log = new FeatureLog(data.Open("project").History, "feature", "chat");
+            using var pool = new WorkspaceDatabasePool();
+            var data = new WorkspaceData(root, pool);
+            var log = new FeatureLog(data.History, "feature", "chat");
             log.AppendUser("improve credential storage");
             var first = log.ReadIndexPage(default, 1);
             Assert.Equal("user", Assert.Single(first.Records).GetProperty("type").GetString());

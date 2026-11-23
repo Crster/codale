@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 
 using Codale.Core.Projects;
 using Codale.Core.Syntax;
+using Codale.Workspace;
 
 namespace Codale.Search.Engine;
 
@@ -75,11 +76,16 @@ public sealed class SourceIndex : IDisposable
     private bool _disposed;
     private int _scanning;
 
-    public SourceIndex(string root, SourceIndexOptions? options = null)
+    public SourceIndex(string root, SourceIndexOptions? options = null) : this(root, options, false) { }
+
+    private SourceIndex(string root, SourceIndexOptions? options, bool persist)
     {
         Root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         _options = options ?? new SourceIndexOptions();
-        Model = new WorkspaceModel(_options.ModelPath, ProjectPaths.InstanceKey(Root));
+        var modelKey = ProjectPaths.InstanceKey(Root);
+        Model = persist
+            ? new WorkspaceModel(() => WorkspaceDb.DirectoryFor(Root), modelKey)
+            : new WorkspaceModel(_options.ModelPath, modelKey);
         _syntaxStore = SyntaxService.Store;
         _syntaxStore.Changed += GrammarsChanged;
     }
@@ -95,7 +101,7 @@ public sealed class SourceIndex : IDisposable
     {
         var key = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         var used = Interlocked.Increment(ref s_useClock);
-        var entry = Shared.AddOrUpdate(key, k => (new SourceIndex(k, new SourceIndexOptions { ModelPath = ModelPathFor(k) }), used), (_, e) => (e.Index, used));
+        var entry = Shared.AddOrUpdate(key, k => (new SourceIndex(k, null, persist: true), used), (_, e) => (e.Index, used));
 
         if (Shared.Count > MaxShared)
         {
@@ -115,9 +121,6 @@ public sealed class SourceIndex : IDisposable
     }
 
     public string Root { get; }
-
-    /// <summary>The workspace-model database directory for a project.</summary>
-    private static string ModelPathFor(string root) => ProjectPaths.WorkspaceModelDirectory(root);
 
     /// <summary>The latest finished snapshot, or null before the first scan completes.</summary>
     public SourceSnapshot? Current => Volatile.Read(ref _current);

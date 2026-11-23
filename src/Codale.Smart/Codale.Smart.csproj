@@ -3,4 +3,5 @@
   <ItemGroup><InternalsVisibleTo Include="Codale.Smart.Tests" /></ItemGroup>
   <ItemGroup><InternalsVisibleTo Include="Codale.Smart.Smoke" /></ItemGroup>
   <ItemGroup><ProjectReference Include="../Codale.Core/Codale.Core.csproj" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="../Codale.Workspace/Codale.Workspace.csproj" /></ItemGroup>
 </Project>
