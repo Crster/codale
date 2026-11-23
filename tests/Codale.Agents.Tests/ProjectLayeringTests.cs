@@ -23,6 +23,7 @@ public sealed class ProjectLayeringTests
         ["Codale.Search"] = ["Codale.Core", "Codale.Db", "Codale.Smart"],
         ["Codale.Settings"] = ["Codale.Agents", "Codale.Db"],
         ["Codale.Mcp.Common"] = [],
+        ["Codale.Browser"] = [],
         ["Codale.Mcp.Browser"] = ["Codale.Core", "Codale.Mcp.Common"],
         ["Codale.Mcp.Computer"] = ["Codale.Mcp.Common"],
         ["Codale.Mcp.Phone"] = ["Codale.Mcp.Common"],
@@ -30,7 +31,7 @@ public sealed class ProjectLayeringTests
         ["Codale.App"] =
         [
             "Codale.Agents", "Codale.Commands", "Codale.Core", "Codale.Db", "Codale.Editor", "Codale.Git",
-            "Codale.Mcp.Browser", "Codale.Mcp.Computer", "Codale.Mcp.Phone", "Codale.Mcp.Tasks",
+            "Codale.Browser", "Codale.Mcp.Browser", "Codale.Mcp.Computer", "Codale.Mcp.Phone", "Codale.Mcp.Tasks",
             "Codale.Search", "Codale.Settings", "Codale.Smart", "Codale.Terminal", "Codale.Workspace",
         ],
     };

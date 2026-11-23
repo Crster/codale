@@ -1,4 +1,5 @@
 using Codale.Db;
+using Codale.Core.Projects;
 
 namespace Codale.Settings;
 
@@ -21,9 +22,17 @@ public sealed class CommandHistory(ApplicationDatabase database)
 
     private readonly Lock _gate = new();
 
-    private sealed record Entry(string Source, int Uses, long LastUsed);
+    private sealed record Entry(string Text, string Prefix, string Source, int Uses, long LastUsed);
+    private sealed record Total(int Count);
 
-    private static DbNode CommandsOf(CodaleDb db, string projectPath) => db.Project(projectPath).Open("command");
+    private const string PrefixIndex = "command-prefix";
+
+    private T Use<T>(string projectPath, Func<CodaleDatabase, string, T> work) => database.UseRecords(db =>
+    {
+        var project = ProjectPaths.InstanceKey(projectPath) + ":";
+        _ = db.Record<Entry>().Index(PrefixIndex).Build(entry => entry.Prefix);
+        return work(db, project);
+    });
 
     /// <summary>Records a command run from <paramref name="source"/> ("shell" or "terminal") in a project.</summary>
     public void Record(string projectPath, string command, string source)
@@ -91,62 +100,39 @@ public sealed class CommandHistory(ApplicationDatabase database)
     }
 
     /// <summary>A new command is kept; a repeat counts another use and moves to the front of the recent list.</summary>
-    internal void Record(string projectPath, string command, string source, DateTimeOffset when)
+    internal void Record(string projectPath, string command, string source, DateTimeOffset when) => Use(projectPath, (db, project) =>
     {
-        using var db = database.Open();
-        var commands = CommandsOf(db, projectPath);
-        var node = commands.Open(command.Replace('', ' '));
-        db.Batch(() =>
+        var text = command.Replace('\u001f', ' ');
+        var key = project + text;
+        var commands = db.Record<Entry>();
+        var previous = commands.Key(key).Get();
+        var saved = new Entry(text, project + text.ToUpperInvariant(), source, (previous?.Uses ?? 0) + 1, when.ToUnixTimeMilliseconds());
+        if (previous is not null)
         {
-            var uses = node.ReadJson<Entry>()?.Uses ?? 0;
-            node.WriteJson(new Entry(source, uses + 1, when.ToUnixTimeMilliseconds()));
+            commands.Key(key).Value(saved);
+            return true;
+        }
 
-            // Pruned in slices of a hundred, so a full history does not rescan every command on every keystroke.
-            if (commands.ChildCount() <= MaxCommandsPerProject + 100)
-            {
-                return;
-            }
-
-            foreach (var old in commands.Descendants()
-                .Select(n => (Node: n, Entry: n.ReadJson<Entry>()))
-                .OrderByDescending(x => x.Entry?.LastUsed ?? 0)
-                .Skip(MaxCommandsPerProject))
-            {
-                old.Node.Remove();
-            }
+        var count = (db.Record<Total>().Key(project).Get()?.Count ?? 0) + 1;
+        var trim = count > MaxCommandsPerProject + 100
+            ? commands.FindPrefix(project).Append(new(key, saved)).OrderByDescending(row => row.Value.LastUsed)
+                .ThenBy(row => row.Key, StringComparer.Ordinal).Skip(MaxCommandsPerProject).Select(row => row.Key).ToArray()
+            : [];
+        db.WriteBatch(batch =>
+        {
+            batch.Put(key, saved);
+            foreach (var old in trim) batch.Delete<Entry>(old);
+            batch.Put(project, new Total(count - trim.Length));
         });
-    }
+        return true;
+    });
 
     /// <summary>The project's commands, most recently used first.</summary>
-    internal IReadOnlyList<string> RecentCommands(string projectPath, int max = 500)
-    {
-        using var db = database.Open();
-        return [.. Entries(CommandsOf(db, projectPath))
-            .OrderByDescending(x => x.Entry.LastUsed)
-            .Take(max)
-            .Select(x => x.Text)];
-    }
+    internal IReadOnlyList<string> RecentCommands(string projectPath, int max = 500) => Use(projectPath, (db, project) =>
+        db.Record<Entry>().FindPrefix(project).OrderByDescending(row => row.Value.LastUsed).Take(max).Select(row => row.Value.Text).ToArray());
 
     /// <summary>The project's commands that begin with <paramref name="prefix"/> (case-insensitively), the most often used first and then the most recent.</summary>
-    internal IReadOnlyList<string> CommandsStartingWith(string projectPath, string prefix, int max = 8)
-    {
-        using var db = database.Open();
-        return [.. Entries(CommandsOf(db, projectPath))
-            .Where(x => x.Text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && x.Text != prefix)
-            .OrderByDescending(x => x.Entry.Uses)
-            .ThenByDescending(x => x.Entry.LastUsed)
-            .Take(max)
-            .Select(x => x.Text)];
-    }
-
-    private static IEnumerable<(string Text, Entry Entry)> Entries(DbNode commands)
-    {
-        foreach (var node in commands.Descendants())
-        {
-            if (node.ReadJson<Entry>() is { } entry)
-            {
-                yield return (node.Name, entry);
-            }
-        }
-    }
+    internal IReadOnlyList<string> CommandsStartingWith(string projectPath, string prefix, int max = 8) => Use(projectPath, (db, project) =>
+        db.Record<Entry>().Index<string>(PrefixIndex).FindPrefix(project + prefix.ToUpperInvariant(), row => row.Text != prefix)
+            .OrderByDescending(row => row.Value.Uses).ThenByDescending(row => row.Value.LastUsed).Take(max).Select(row => row.Value.Text).ToArray());
 }

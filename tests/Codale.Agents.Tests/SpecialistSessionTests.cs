@@ -6,6 +6,20 @@ namespace Codale.Agents.Tests;
 
 public sealed class SpecialistSessionTests
 {
+    [Fact]
+    public void Replay_keeps_recent_history_with_a_fixed_size_budget()
+    {
+        var snapshot = new SpecialistSnapshot { Briefing = "parent context" };
+        snapshot.Messages.Add(new("user", new string('x', 20000)));
+        snapshot.Messages.Add(new("assistant", "recent response"));
+        snapshot.Messages.Add(new("user", "current request"));
+        var replay = SpecialistSession.ReplayContext(snapshot);
+        Assert.StartsWith("parent context", replay);
+        Assert.Contains("recent response", replay);
+        Assert.DoesNotContain("current request", replay);
+        Assert.True(replay.Length <= "parent context\n\nEarlier child conversation:\n".Length + 12000);
+    }
+
     private static AgentSessionRequest Request => new()
     {
         CliId = "claude", WorkingDirectory = Path.GetTempPath(), Model = "parent-model", Effort = "medium",

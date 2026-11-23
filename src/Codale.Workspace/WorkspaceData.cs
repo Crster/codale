@@ -8,6 +8,7 @@ public interface IWorkspaceData
     HistoryStore History { get; }
     ConfigStore Config { get; }
     EnvStore Secrets { get; }
+    UserTodoStore UserTodos { get; }
 }
 
 public interface IWorkspaceDataFactory
@@ -22,6 +23,7 @@ public sealed class WorkspaceData : IWorkspaceData
     public HistoryStore History { get; }
     public ConfigStore Config { get; }
     public EnvStore Secrets { get; }
+    public UserTodoStore UserTodos { get; }
 
     public WorkspaceData(string directory, WorkspaceDatabasePool? databases = null)
     {
@@ -30,6 +32,7 @@ public sealed class WorkspaceData : IWorkspaceData
         History = new(Directory, databases);
         Config = new(Directory, databases);
         Secrets = new(Directory, databases);
+        UserTodos = new(Directory, databases);
     }
 }
 

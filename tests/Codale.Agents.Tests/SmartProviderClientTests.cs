@@ -539,48 +539,4 @@ public sealed class SmartProviderClientTests
         Assert.DoesNotContain("test-key", error.Message);
         Assert.DoesNotContain("secret server detail", error.Message);
     }
-
-    [Fact]
-    public void Legacy_groups_migrate_developer_tools_to_general_once()
-    {
-        var values = new Dictionary<string, string>
-        {
-            ["ai.smart.groups.assistance.provider"] = "openai",
-            ["ai.smart.groups.assistance.openai.profile"] = "router",
-            ["ai.smart.openai.groups.assistance.model"] = "flash-model",
-            ["ai.smart.groups.context.provider"] = "claude",
-            ["ai.smart.claude.groups.context.model"] = "context-model",
-            ["ai.smart.groups.completion.provider"] = "openai",
-            ["ai.smart.openai.groups.completion.model"] = "fim-model",
-            ["ai.smart.groups.embedding.provider"] = "off",
-            ["ai.smartThinking"] = "0",
-        };
-        Assert.True(SmartFeatureSettings.MigrateLegacyGroups(values));
-        Assert.Equal("openai", values["ai.smart.groups.general.provider"]);
-        Assert.Equal("router", values["ai.smart.groups.general.openai.profile"]);
-        Assert.Equal("flash-model", values["ai.smart.openai.groups.general.model"]);
-        Assert.Equal("fim-model", values["ai.smart.openai.groups.completion.model"]);
-        Assert.Equal("off", values["ai.smart.groups.decision.provider"]);
-        Assert.DoesNotContain(values.Keys, k => k.Contains(".assistance.") || k.Contains(".context.") || k == "ai.smartThinking");
-
-        values["ai.smart.groups.general.provider"] = "codex";
-        Assert.False(SmartFeatureSettings.MigrateLegacyGroups(values));
-        Assert.Equal("codex", values["ai.smart.groups.general.provider"]);
-    }
-
-    [Fact]
-    public void Legacy_codebase_context_becomes_general_when_developer_tools_was_off()
-    {
-        var values = new Dictionary<string, string>
-        {
-            ["ai.smart.groups.assistance.provider"] = "off",
-            ["ai.smart.groups.context.provider"] = "anthropic",
-            ["ai.smart.groups.context.anthropic.profile"] = "direct",
-            ["ai.smart.anthropic.groups.context.model"] = "haiku",
-        };
-        Assert.True(SmartFeatureSettings.MigrateLegacyGroups(values));
-        Assert.Equal("anthropic", values["ai.smart.groups.general.provider"]);
-        Assert.Equal("direct", values["ai.smart.groups.general.anthropic.profile"]);
-        Assert.Equal("haiku", values["ai.smart.anthropic.groups.general.model"]);
-    }
 }

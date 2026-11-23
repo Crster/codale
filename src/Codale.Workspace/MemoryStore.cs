@@ -1,5 +1,7 @@
 using System.Text;
 
+using Codale.Db;
+
 namespace Codale.Workspace;
 
 /// <summary>A note the agent saved about the workspace.</summary>
@@ -16,12 +18,24 @@ public sealed record MemorySource(string? SessionId, string Kind, string Evidenc
 /// things are, what the user prefers). Saving a note under a title that exists replaces it. Recall ranks by
 /// meaning (the database's embeddings) and by the words themselves, so an exact term still finds its note.
 /// </summary>
-/// <remarks>Layout: <c>memory.ID</c> is the note as JSON; the note's text is embedded on that same node.</remarks>
 public sealed class MemoryStore(string directory, WorkspaceDatabasePool? databases = null)
 {
     private const int MaxText = 8000;
+    private const string SearchIndex = "workspace-memory";
+    private WorkspaceDatabasePool Pool => databases ?? WorkspaceDb.Shared;
+
+    private T Use<T>(Func<CodaleDatabase, T> work) => Pool.UseRecords(directory, work);
+
+    private static void StageNote(CodaleDatabase db, CodaleDatabase.RecordBatch batch, string id, MemoryNote note) =>
+        batch.Put(id, note, db.Index(SearchIndex).Key([note.Title, string.Join(' ', note.Tags), Searchable(note)]));
     /// <exception cref="ArgumentException">There is no text, or no title to name it by.</exception>
     public MemoryNote Save(string title, string text, IEnumerable<string>? tags = null, string? category = null, MemorySource? source = null)
+    {
+        var note = CreateNote(title, text, tags, category, source);
+        return Use(db => Save(db, note, Notes(db)));
+    }
+
+    private static MemoryNote CreateNote(string title, string text, IEnumerable<string>? tags, string? category, MemorySource? source)
     {
         title = title.Trim();
         text = text.Trim();
@@ -35,31 +49,28 @@ public sealed class MemoryStore(string directory, WorkspaceDatabasePool? databas
             throw new ArgumentException($"A memory is a short note: keep it under {MaxText} characters.");
         }
 
-        var note = new MemoryNote(IdOf(title), title, text,
+        return new MemoryNote(IdOf(title), title, text,
             [.. (tags ?? []).Select(t => t.Trim()).Where(t => t.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)],
             DateTimeOffset.Now) { Category = category, Source = source };
-        (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Batch(() =>
+    }
+
+    private static MemoryNote[] Notes(CodaleDatabase db) => db.Record<MemoryNote>().Find().Select(row => row.Value).ToArray();
+
+    private static MemoryNote Save(CodaleDatabase db, MemoryNote note, MemoryNote[] all)
+    {
+        var text = note.Text;
+        var normalized = Normalize(text);
+        var duplicate = all.FirstOrDefault(n => n.Id != note.Id && Normalize(n.Text) == normalized);
+        if (duplicate is not null) return duplicate;
+        var similar = all.Where(n => n.Id != note.Id).Select(n => (Note: n, Score: Similarity(n.Text, text)))
+            .Where(match => match.Score >= 0.8).OrderByDescending(match => match.Score).FirstOrDefault().Note;
+        if (similar is not null)
         {
-            var all = Everything(db).ToList();
-            var duplicate = all.FirstOrDefault(n => n.Id != note.Id && Normalize(n.Text) == Normalize(text));
-            if (duplicate is not null)
-            {
-                note = duplicate;
-                return;
-            }
-            // A reworded version of an existing note is an update of it, not a second note saying the same thing.
-            var similar = all.Where(n => n.Id != note.Id && Similarity(n.Text, text) >= 0.8)
-                .OrderByDescending(n => Similarity(n.Text, text)).FirstOrDefault();
-            if (similar is not null)
-            {
-                note = note with { Id = similar.Id, Title = similar.Title, Tags = [.. similar.Tags.Concat(note.Tags).Distinct(StringComparer.OrdinalIgnoreCase)] };
-            }
-            var node = db.Open("memory").Open(note.Id);
-            if (node.ReadJson<MemoryNote>() is { } previous)
-                note = note with { Category = note.Category ?? previous.Category, Source = note.Source ?? previous.Source };
-            node.WriteJson(note);
-            node.Embed(Searchable(note));
-        }));
+            note = note with { Id = similar.Id, Title = similar.Title, Tags = [.. similar.Tags.Concat(note.Tags).Distinct(StringComparer.OrdinalIgnoreCase)] };
+        }
+        if (all.FirstOrDefault(n => n.Id == note.Id) is { } previous)
+            note = note with { Category = note.Category ?? previous.Category, Source = note.Source ?? previous.Source };
+        db.WriteBatch(batch => StageNote(db, batch, note.Id, note));
         return note;
     }
 
@@ -67,38 +78,44 @@ public sealed class MemoryStore(string directory, WorkspaceDatabasePool? databas
     public MemoryNote? Remember(string title, string text, string category, MemorySource source, string? replacesId = null)
     {
         if (MemoryCapture.ContainsSecret(text) || MemoryCapture.ContainsSecret(source.Evidence)) return null;
-        var existing = List();
-        if (existing.Any(n => Normalize(n.Text) == Normalize(text) || Similarity(n.Text, text) >= 0.9)) return null;
-        var replaced = replacesId is not null ? existing.FirstOrDefault(n => n.Id == replacesId) : null;
-        return Save(replaced?.Title ?? title, text, [category], category, source);
+        return Use<MemoryNote?>(db =>
+        {
+            var existing = Notes(db);
+            var normalized = Normalize(text);
+            if (existing.Any(n => Normalize(n.Text) == normalized || Similarity(n.Text, text) >= 0.9)) return null;
+            var replaced = replacesId is not null ? existing.FirstOrDefault(n => n.Id == replacesId) : null;
+            return Save(db, CreateNote(replaced?.Title ?? title, text, [category], category, source), existing);
+        });
     }
 
     private static string Normalize(string text) => string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToLowerInvariant().TrimEnd('.', '!');
 
     public MemoryNote? Get(string id) =>
-        (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("memory").Open(IdOf(id)).ReadJson<MemoryNote>());
+        Use(db => db.Record<MemoryNote>().Key(IdOf(id)).Get());
 
     public bool Forget(string id) =>
-        (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("memory").Open(IdOf(id)).Remove());
+        Use(db => db.Record<MemoryNote>().Key(IdOf(id)).TryDelete(out _));
 
     /// <summary>Every note, newest first.</summary>
-    public IReadOnlyList<MemoryNote> List() => (databases ?? WorkspaceDb.Shared).Use(directory, db =>
-        (IReadOnlyList<MemoryNote>)[.. Everything(db).OrderByDescending(n => n.SavedAt)]);
+    public IReadOnlyList<MemoryNote> List() => Use(db => db.Record<MemoryNote>().Find().Select(row => row.Value)
+        .OrderByDescending(n => n.SavedAt).ToArray());
 
     /// <summary>
     /// The notes that best answer <paramref name="query"/>, best first; empty when none relate to it. Words found in a
     /// note's title or tags count for more than words in its body, and the meaning-based (embedding) score adds to the
     /// word score instead of replacing it, so a note both related and worded alike rises above one that is only either.
     /// </summary>
-    public IReadOnlyList<MemoryNote> Search(string query, int limit = 5) => (databases ?? WorkspaceDb.Shared).Use(directory, db =>
+    public IReadOnlyList<MemoryNote> Search(string query, int limit = 5) => Use<IReadOnlyList<MemoryNote>>(db =>
     {
         query = query.Trim();
-        if (query.Length == 0) return (IReadOnlyList<MemoryNote>)[];
+        if (query.Length == 0 || limit <= 0) return [];
         var terms = Terms(query);
         var scores = new Dictionary<string, (MemoryNote Note, double Score)>();
         var now = DateTimeOffset.Now;
-        foreach (var note in Everything(db))
+        var candidates = db.Index(SearchIndex).Find(query, (int)Math.Clamp((long)limit * 5, 16, int.MaxValue));
+        foreach (var hit in candidates)
         {
+            if (hit.Record<MemoryNote>()?.Get() is not { } note) continue;
             var head = Terms($"{note.Title} {string.Join(' ', note.Tags)}");
             var body = Terms(note.Text);
             var score = 0.0;
@@ -109,14 +126,7 @@ public sealed class MemoryStore(string directory, WorkspaceDatabasePool? databas
                 score = inBody * 0.6 + inHead * 0.4;
             }
             if (Searchable(note).Contains(query, StringComparison.OrdinalIgnoreCase)) score = Math.Max(score, 1);
-            if (score > 0) scores[note.Id] = (note, score);
-        }
-
-        foreach (var hit in db.Open("memory").Query(query, Math.Max(limit * 2, 10)))
-        {
-            if (hit.Score < 0.35 || hit.Node.ReadJson<MemoryNote>() is not { } note) continue;
-            var lexical = scores.TryGetValue(note.Id, out var existing) ? existing.Score : 0;
-            scores[note.Id] = (note, lexical + hit.Score * 0.5);
+            if (score > 0 || hit.Score >= 0.35f) scores[note.Id] = (note, score + Math.Min(hit.Score, 1) * 0.5);
         }
 
         // A recent note edges out an equally good old one; the nudge is small so relevance still decides.
@@ -138,18 +148,6 @@ public sealed class MemoryStore(string directory, WorkspaceDatabasePool? databas
         var small = Math.Min(x.Count, y.Count);
         if (small < 4 || small < Math.Max(x.Count, y.Count) / 2) return 0; // too short or too lopsided to call a rewording
         return x.Count(y.Contains) / (double)small;
-    }
-
-    private static IEnumerable<MemoryNote> Everything(Codale.Db.CodaleDb db)
-    {
-        var memory = db.Open("memory");
-        foreach (var id in memory.Children())
-        {
-            if (memory.Open(id).ReadJson<MemoryNote>() is { } note)
-            {
-                yield return note;
-            }
-        }
     }
 
     private static string Searchable(MemoryNote note) => $"{note.Title}\n{note.Text}\n{string.Join(' ', note.Tags)}";

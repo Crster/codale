@@ -18,7 +18,7 @@ public sealed class CompactIndexTests : IDisposable
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var finish = new TaskCompletionSource<IReadOnlyList<ProjectKnowledgeIndex.FileCommit>>(TaskCreationOptions.RunContinuationsAsynchronously);
         var calls = 0;
-        using var db = new CodaleDb(Path.Combine(_temp, "index"));
+        using var db = new CodaleDatabase(Path.Combine(_temp, "index"));
         using var index = new ProjectKnowledgeIndex(db)
         {
             ReadFileHistory = (_, _, _) =>
@@ -44,7 +44,7 @@ public sealed class CompactIndexTests : IDisposable
         var root = Directory.CreateDirectory(Path.Combine(_temp, "repo")).FullName;
         await File.WriteAllTextAsync(Path.Combine(root, "Writer.cs"), "public class Writer {}");
         var embedder = new UnavailableEmbedder();
-        using var db = new CodaleDb(Path.Combine(_temp, "index"), new() { Embedder = embedder });
+        using var db = new CodaleDatabase(Path.Combine(_temp, "index"), new() { Embedder = embedder });
         using (var index = new ProjectKnowledgeIndex(db)
         {
             CompactEmbeddingsEnabled = () => enabled
@@ -76,13 +76,13 @@ public sealed class CompactIndexTests : IDisposable
         var root = ProjectPaths.Normalize(Directory.CreateDirectory(Path.Combine(_temp, "repo")).FullName);
         await File.WriteAllTextAsync(Path.Combine(root, "Writer.cs"), "/// <summary>Durable journal recovery</summary>\npublic class Writer {}");
         await File.WriteAllTextAsync(Path.Combine(root, "Other.cs"), "// Many mentions: Writer Writer Writer\npublic class Other {}");
-        using var db = new CodaleDb(Path.Combine(_temp, "index"));
+        using var db = new CodaleDatabase(Path.Combine(_temp, "index"));
         using var index = new ProjectKnowledgeIndex(db);
         await index.RefreshAsync(root);
         Assert.Equal("Writer.cs", index.Search(root, "Writer")[0].Path);
         Assert.Equal("Writer.cs", index.Search(root, "durable journal recovery")[0].Path);
-        Assert.Equal(2, db.Open("compact-source-v1").Open(root).ChildCount());
-        Assert.False(db.Open("source").Open(root).Open("chunk").Descendants().Any());
+        Assert.Equal(2, index.ProfileCount(root));
+        Assert.Single(Directory.GetFiles(Path.Combine(_temp, "index"), "index_profile-*.db"));
     }
 
     [Fact]
@@ -121,7 +121,7 @@ public sealed class CompactIndexTests : IDisposable
             }
             """);
         await File.WriteAllTextAsync(Path.Combine(root, "ChatRouting.cs"), "// Route the chat turn by the auto mode the user picked\npublic class ChatRouting { public void RouteByMode() { } }");
-        using var db = new CodaleDb(Path.Combine(_temp, "index"));
+        using var db = new CodaleDatabase(Path.Combine(_temp, "index"));
         using var index = new ProjectKnowledgeIndex(db);
         await index.RefreshAsync(root);
         Assert.Equal("BranchWatch.cs", index.Search(root, "same branch check when HEAD moves between refreshes")[0].Path);

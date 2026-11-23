@@ -79,7 +79,8 @@ public sealed class SpecialistSession(IAgentSessionFactory factory, AgentSession
         try
         {
             if (_pump is { IsCompleted: false } priorPump && _session is null) await priorPump;
-            if (_session is null)
+            var needsBriefing = _session is null;
+            if (needsBriefing)
             {
                 _lifetime?.Dispose();
                 _lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -101,13 +102,12 @@ public sealed class SpecialistSession(IAgentSessionFactory factory, AgentSession
                 if (!ReferenceEquals(starting, _session)) return;
                 _pump = PumpAsync(starting, lifetime.Token);
             }
-            var context = Snapshot.Briefing + "\n\nEarlier child conversation:\n" +
-                string.Join("\n\n", Snapshot.Messages.SkipLast(1).TakeLast(20).Select(m => $"{m.Role}: {m.Text}"));
+            var context = needsBriefing ? ReplayContext(Snapshot) : null;
             var sending = _session ?? throw new OperationCanceledException("The specialist was stopped.");
             await sending.SendAsync(new(text)
             {
                 PlanOnly = Snapshot.Planner, AskOnly = !Snapshot.Planner,
-                Attachments = attachments ?? [], ContextPrefix = SessionBriefing.ConversationBlock(context),
+                Attachments = attachments ?? [], ContextPrefix = context is null ? null : SessionBriefing.ConversationBlock(context),
             }, _lifetime?.Token ?? ct);
             if (!ReferenceEquals(sending, _session)) return;
             Snapshot = Snapshot with { Status = "Working", InterviewAnswered = Snapshot.InterviewAnswered || Snapshot.Planner && Snapshot.Messages.Count(m => m.Role == "user") > 1 };
@@ -120,6 +120,14 @@ public sealed class SpecialistSession(IAgentSessionFactory factory, AgentSession
             Changed?.Invoke();
             await CloseProcessAsync();
         }
+    }
+
+    internal static string ReplayContext(SpecialistSnapshot snapshot)
+    {
+        const int maxHistoryChars = 12000;
+        var history = string.Join("\n\n", snapshot.Messages.SkipLast(1).TakeLast(20).Select(m => $"{m.Role}: {m.Text}"));
+        if (history.Length > maxHistoryChars) history = history[^maxHistoryChars..];
+        return snapshot.Briefing + (history.Length == 0 ? "" : "\n\nEarlier child conversation:\n" + history);
     }
 
     private async Task PumpAsync(IAgentSession session, CancellationToken ct)

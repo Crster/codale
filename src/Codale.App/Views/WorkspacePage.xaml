@@ -1447,7 +1447,7 @@
                                     Click="OnSessionSectionClick"
                                     IsChecked="True"
                                     Style="{StaticResource SectionHeader}">
-                                    <TextBlock Text="MEMORY &amp; SECRETS" />
+                                    <TextBlock Text="MEMORY &amp; TODOS" />
                                 </ToggleButton>
                                 <StackPanel
                                     Margin="0,0,4,0"
@@ -1456,11 +1456,11 @@
                                     Orientation="Horizontal">
                                     <Button
                                         Padding="6,3"
-                                        AutomationProperties.Name="Add secret"
+                                        AutomationProperties.Name="Add todo"
                                         Background="Transparent"
                                         BorderBrush="Transparent"
-                                        Click="OnAddSecretClick"
-                                        ToolTipService.ToolTip="Add secret">
+                                        Click="OnAddTodoClick"
+                                        ToolTipService.ToolTip="Add todo">
                                         <FontIcon FontSize="12" Glyph="&#xE710;" />
                                     </Button>
                                     <Button
@@ -1484,7 +1484,7 @@
                                 VerticalAlignment="Top"
                                 FontSize="12"
                                 Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                Text="Notes and secrets the agent saves for this workspace appear here."
+                                Text="Saved memories and user todos for this workspace appear here."
                                 TextAlignment="Center"
                                 TextWrapping="Wrap" />
                             <ListView
@@ -1507,6 +1507,7 @@
                                                 <MenuFlyout>
                                                     <MenuFlyoutItem
                                                         Click="OnForgetKnowledgeClick"
+                                                        Visibility="{x:Bind ForgetVisibility}"
                                                         Foreground="{ThemeResource SystemFillColorCriticalBrush}"
                                                         Text="{x:Bind DeleteText}">
                                                         <MenuFlyoutItem.Icon>

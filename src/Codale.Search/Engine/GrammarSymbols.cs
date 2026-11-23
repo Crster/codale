@@ -148,6 +148,7 @@ internal static class GrammarSymbols
                 !IsScope(scope, "punctuation.squarebracket.close") &&
                 !IsScope(scope, "punctuation.squarebracket.open") &&
                 !IsScope(scope, "punctuation.separator.comma") &&
+                !IsScope(scope, "punctuation.separator.question-mark") &&
                 !IsScope(scope, "keyword.operator.nullable")) return false;
             previous = PreviousToken(tokens, previous);
         }

@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json;
 
+using Codale.Core.Projects;
+
 namespace Codale.Terminal;
 
 /// <summary>
@@ -160,7 +162,7 @@ public static class BlockCommand
     }
 
     /// <summary>The folder the per-block state and script files go in.</summary>
-    public static string DefaultStateDirectory => Path.Combine(Path.GetTempPath(), "codale-blocks");
+    public static string DefaultStateDirectory => Path.Combine(CodalePaths.TempDirectory, "blocks");
 
     /// <summary>
     /// Builds the launch for <paramref name="command"/> under <paramref name="shell"/>. Files go in

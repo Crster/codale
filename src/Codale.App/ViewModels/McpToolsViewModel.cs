@@ -166,12 +166,6 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
         _ => "Off for agents",
     };
 
-    /// <summary>
-    /// Must match <c>McpDefaults.BrowserAttachPort</c> (Codale.Mcp.Common), which the browser
-    /// server attaches to; this project does not reference that one, so the value is repeated.
-    /// </summary>
-    private const int BrowserAttachPort = 9333;
-
     /// <summary>Why <see cref="OpenBrowserCommand"/> could not open a browser; null when it did (or has not run).</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasOpenBrowserError))]
@@ -180,31 +174,21 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
     public bool HasOpenBrowserError => OpenBrowserError is { Length: > 0 };
 
     /// <summary>
-    /// Opens a visible Edge (or Chrome) the agent's browser tools attach to instead of
-    /// their usual headless one. Its own profile keeps it separate from the user's
-    /// everyday browser, and a debugging port is only honored on a non-default profile.
+    /// Opens Codale's WebView2 browser for the agent to attach to.
     /// </summary>
     [RelayCommand]
     private void OpenBrowser()
     {
-        var profile = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale", "browser-profile");
-        var args = $"--remote-debugging-port={BrowserAttachPort} --user-data-dir=\"{profile}\" --no-first-run about:blank";
-        foreach (var exe in new[] { "msedge.exe", "chrome.exe" })
+        var exe = Path.Combine(AppContext.BaseDirectory, "Codale.Browser", "Codale.Browser.exe");
+        try
         {
-            try
-            {
-                Process.Start(new ProcessStartInfo(exe, args) { UseShellExecute = true })?.Dispose();
-                OpenBrowserError = null;
-                return;
-            }
-            catch (Win32Exception)
-            {
-                // Not installed; try the next one.
-            }
+            Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true })?.Dispose();
+            OpenBrowserError = null;
         }
-
-        OpenBrowserError = "Neither Microsoft Edge nor Google Chrome was found. Install one to open a browser the agent can use.";
+        catch (Win32Exception ex)
+        {
+            OpenBrowserError = $"Could not open Codale Browser: {ex.Message}";
+        }
     }
 
     public void Reload()

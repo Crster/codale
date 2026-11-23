@@ -232,7 +232,7 @@ public sealed class SourceExplorerTests : IDisposable
     [Fact]
     public async Task Short_keywords_rank_semantic_hits_after_files_holding_the_words()
     {
-        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
+        using var store = new CodaleDatabase(Path.Combine(_root, "knowledge.db"));
         using var knowledge = await KnowledgeAsync(store);
         var result = await new SourceExplorer(_index, null) { Knowledge = knowledge, ExactKeywordFirst = true, MaxRelated = 0 }
             .RunAsync("RetryPolicy");
@@ -256,7 +256,7 @@ public sealed class SourceExplorerTests : IDisposable
     [Fact]
     public async Task Fused_ranking_leads_with_the_file_both_indexes_agree_on()
     {
-        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
+        using var store = new CodaleDatabase(Path.Combine(_root, "knowledge.db"));
         using var knowledge = await KnowledgeAsync(store);
         var result = await new SourceExplorer(_index, null) { Knowledge = knowledge, FuseSemanticRanks = true, MaxRelated = 0 }
             .RunAsync("where is the retry backoff computed?");
@@ -322,7 +322,7 @@ public sealed class SourceExplorerTests : IDisposable
                     Source="Assets/AppIcon.ico" />
             </Grid>
             """);
-        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
+        using var store = new CodaleDatabase(Path.Combine(_root, "knowledge.db"));
         using var knowledge = new ProjectKnowledgeIndex(store);
         await knowledge.RefreshAsync(_root);
         var model = new ScriptedModel(Review([new
@@ -351,7 +351,7 @@ public sealed class SourceExplorerTests : IDisposable
             }
         });
 
-    private async Task<ProjectKnowledgeIndex> KnowledgeAsync(CodaleDb store)
+    private async Task<ProjectKnowledgeIndex> KnowledgeAsync(CodaleDatabase store)
     {
         var knowledge = new ProjectKnowledgeIndex(store);
         await knowledge.RefreshAsync(_root);
@@ -361,7 +361,7 @@ public sealed class SourceExplorerTests : IDisposable
     [Fact]
     public async Task Review_drops_unrelated_retrieved_files_and_keeps_its_order()
     {
-        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
+        using var store = new CodaleDatabase(Path.Combine(_root, "knowledge.db"));
         using var knowledge = await KnowledgeAsync(store);
         var model = new ScriptedModel(Review([
             new { path = "src/RetryPolicy.cs", reason = "computes the backoff delay",
@@ -381,7 +381,7 @@ public sealed class SourceExplorerTests : IDisposable
     [Fact]
     public async Task Review_rows_that_drifted_are_realigned_onto_the_line_holding_the_word()
     {
-        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
+        using var store = new CodaleDatabase(Path.Combine(_root, "knowledge.db"));
         using var knowledge = await KnowledgeAsync(store);
         // Execute is declared on line 6; the provider is three lines off.
         var model = new ScriptedModel(Review([new
@@ -405,7 +405,7 @@ public sealed class SourceExplorerTests : IDisposable
             .atlas-chat { display: flex; background: var(--surface); border: 1px solid var(--line); }
             .nle__top { gap: 8px; padding: 10px; }
             """);
-        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
+        using var store = new CodaleDatabase(Path.Combine(_root, "knowledge.db"));
         using var knowledge = await KnowledgeAsync(store);
         var model = new ScriptedModel(Review([new
         {
@@ -441,7 +441,7 @@ public sealed class SourceExplorerTests : IDisposable
     [Fact]
     public async Task A_review_with_invented_words_keeps_the_retrieved_results()
     {
-        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
+        using var store = new CodaleDatabase(Path.Combine(_root, "knowledge.db"));
         using var knowledge = await KnowledgeAsync(store);
         var model = new ScriptedModel(Review([new
         {
@@ -511,7 +511,7 @@ public sealed class SourceExplorerTests : IDisposable
     [Fact]
     public async Task Search_results_stream_before_review_and_skip_keyword_generation()
     {
-        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
+        using var store = new CodaleDatabase(Path.Combine(_root, "knowledge.db"));
         using var knowledge = new ProjectKnowledgeIndex(store);
         await knowledge.RefreshAsync(_root);
         var retrieved = knowledge.Search(_root, "retry backoff");
@@ -586,7 +586,7 @@ public sealed class SourceExplorerTests : IDisposable
     [Fact]
     public async Task Search_results_survive_an_unavailable_background_provider()
     {
-        using var store = new CodaleDb(Path.Combine(_root, "knowledge.db"));
+        using var store = new CodaleDatabase(Path.Combine(_root, "knowledge.db"));
         using var knowledge = new ProjectKnowledgeIndex(store);
         await knowledge.RefreshAsync(_root);
         var model = new ScriptedModel { Throw = () => new HelperModelException("offline") };

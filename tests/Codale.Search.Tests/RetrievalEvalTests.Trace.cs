@@ -45,12 +45,11 @@ public sealed partial class RetrievalEvalTests
         var output = Environment.GetEnvironmentVariable("CODALE_COMPACT_TRACE");
         if (string.IsNullOrWhiteSpace(output)) return;
 
-        using var store = new CodaleDb(Path.Combine(_directory, "trace.db"));
+        using var store = new CodaleDatabase(Path.Combine(_directory, "trace.db"));
         using var index = new ProjectKnowledgeIndex(store);
         await index.RefreshAsync(_corpus);
         var root = ProjectPaths.Normalize(_corpus);
         var snapshot = SourceIndex.For(root).Current ?? throw new InvalidOperationException("The refresh left no source snapshot.");
-        var profiles = store.Open("compact-source-v1").Open(root);
         static string Slash(string path) => path.Replace('\\', '/');
 
         var queries = _labels.Select(l => (Kind: "natural", l.Query, l.Path, l.Symbol))
@@ -67,9 +66,9 @@ public sealed partial class RetrievalEvalTests
             if (terms.Count > 0)
             {
                 var position = 0;
-                foreach (var hit in profiles.Match("profile", [.. SearchText.RetrievalQueryTerms(query).Select(t => new KeywordTerm(t.Word, t.Prefix))], 200))
+                foreach (var hit in index.MatchProfiles(root, SearchText.RetrievalQueryTerms(query).Select(t => new KeywordTerm(t.Word, t.Prefix)), 200))
                 {
-                    var entry = At(hit.Node.Name);
+                    var entry = At(hit.Path);
                     entry.ProfilePos = position++;
                     entry.ProfileScore = hit.Score;
                 }

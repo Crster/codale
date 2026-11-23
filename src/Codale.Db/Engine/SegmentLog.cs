@@ -18,6 +18,7 @@ internal enum RecordType : byte
     /// <summary>Opens a batch: everything up to the matching <see cref="Commit"/> is one unit, dropped at open if the commit never made it.</summary>
     Begin = 7,
     Commit = 8,
+    Value = 9,
 }
 
 internal delegate void ReplayHandler(int segment, long offset, int size, RecordType type, byte flags, ReadOnlySpan<byte> body);
@@ -28,7 +29,7 @@ internal delegate void ReplayHandler(int segment, long offset, int size, RecordT
 /// itself and length counts type + flags + body. Writes go straight to the OS (no user-space buffer),
 /// so a read through the same handle always sees them; durability is a separate <see cref="Sync"/>.
 /// </summary>
-internal sealed class SegmentLog(string directory, long segmentBytes) : IDisposable
+internal sealed class SegmentLog(string directory, long segmentBytes, bool recordBlocks = false) : IDisposable
 {
     public const int HeaderSize = 10;
     private const int MaxRecord = 1 << 30;
@@ -46,8 +47,30 @@ internal sealed class SegmentLog(string directory, long segmentBytes) : IDisposa
     /// <summary>Opens every segment, replays its records in order and truncates a torn tail on the last one.</summary>
     public void Open(ReplayHandler handler)
     {
-        var ids = Directory.EnumerateFiles(_dir, "seg-*.log")
-            .Select(f => int.TryParse(Path.GetFileNameWithoutExtension(f)[4..], NumberStyles.None, CultureInfo.InvariantCulture, out var id) ? id : -1)
+        OpenFiles();
+        Scan(handler);
+    }
+
+    /// <summary>Indexed values are read by offset. Unreferenced tails can be left in place after a crash.</summary>
+    public void OpenForAppend()
+    {
+        OpenFiles();
+        foreach (var (id, handle) in _handles)
+        {
+            var length = RandomAccess.GetLength(handle);
+            _lengths[id] = length;
+            TotalBytes += length;
+            _active = id;
+            _tail = length;
+        }
+    }
+
+    private void OpenFiles()
+    {
+        var prefix = recordBlocks ? "record_" : "seg-";
+        var extension = recordBlocks ? ".db" : ".log";
+        var ids = Directory.EnumerateFiles(_dir, prefix + "*" + extension)
+            .Select(f => int.TryParse(Path.GetFileNameWithoutExtension(f)[prefix.Length..], NumberStyles.None, CultureInfo.InvariantCulture, out var id) ? id : -1)
             .Where(id => id > 0)
             .Order()
             .ToList();
@@ -55,7 +78,6 @@ internal sealed class SegmentLog(string directory, long segmentBytes) : IDisposa
 
         foreach (var id in ids)
             _handles[id] = OpenSegment(SegmentPath(id));
-        Scan(handler);
     }
 
     /// <summary>Replays every open segment from the start.</summary>
@@ -200,15 +222,16 @@ internal sealed class SegmentLog(string directory, long segmentBytes) : IDisposa
 
     public void Read(int segment, long offset, Span<byte> destination)
     {
-        if (!ReadFull(_handles[segment], destination, offset)) throw new InvalidDataException($"Segment {segment} is shorter than the index expects.");
+        if (!_handles.TryGetValue(segment, out var handle) || !ReadFull(handle, destination, offset))
+            throw new InvalidDataException($"Segment {segment} is missing or shorter than the index expects.");
     }
 
     /// <summary>Forces the newest segment to stable storage.</summary>
     public void Sync()
     {
         if (!_dirty) return;
-        _dirty = false;
         RandomAccess.FlushToDisk(_handles[_active]);
+        _dirty = false;
     }
 
     private void Roll()
@@ -294,12 +317,15 @@ internal sealed class SegmentLog(string directory, long segmentBytes) : IDisposa
         }
     }
 
-    private string SegmentPath(int id) => Path.Combine(_dir, $"seg-{id:D8}.log");
+    private string SegmentPath(int id) => Path.Combine(_dir, recordBlocks ? $"record_{id:D8}.db" : $"seg-{id:D8}.log");
 
     public void Dispose()
     {
-        try { Sync(); } catch (ObjectDisposedException) { }
-        foreach (var handle in _handles.Values) handle.Dispose();
-        _handles.Clear();
+        try { Sync(); }
+        finally
+        {
+            foreach (var handle in _handles.Values) handle.Dispose();
+            _handles.Clear();
+        }
     }
 }

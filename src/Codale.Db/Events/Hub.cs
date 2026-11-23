@@ -3,23 +3,24 @@ using System.Threading.Channels;
 namespace Codale.Db.Events;
 
 /// <summary>
-/// Fan-out to subscribers. Every subscriber owns a bounded queue and a pump task, so a slow or throwing
-/// handler never blocks a writer or another subscriber (the oldest queued item is dropped on overflow).
+/// Fan-out to subscribers. Each subscriber owns a queue and a pump task, so its handler never blocks a writer
+/// or another subscriber. Bounded subscriptions drop their oldest queued item on overflow.
 /// </summary>
 /// <param name="matches">(subscribedPath, itemPath, item) → whether the subscriber should see the item.</param>
-internal sealed class Hub<T>(Func<string, string, T, bool> matches) : IDisposable
+internal sealed class Hub<T>(Func<string, string, T, bool> matches, bool unbounded = false) : IDisposable
 {
     private const int QueueCapacity = 1024;
 
     private readonly Func<string, string, T, bool> _matches = matches;
     private readonly Lock _gate = new();
-    private Subscription[] _subscriptions = [];
+    private volatile Subscription[] _subscriptions = [];
 
     public bool IsEmpty => _subscriptions.Length == 0;
+    public bool HasSubscriber(string path) => _subscriptions.Any(subscription => subscription.Path == path);
 
     public IDisposable Subscribe(string path, Action<T> handler)
     {
-        var subscription = new Subscription(this, path, handler);
+        var subscription = new Subscription(this, path, handler, unbounded);
         lock (_gate) _subscriptions = [.. _subscriptions, subscription];
         return subscription;
     }
@@ -50,18 +51,20 @@ internal sealed class Hub<T>(Func<string, string, T, bool> matches) : IDisposabl
             all = _subscriptions;
             _subscriptions = [];
         }
-        foreach (var subscription in all) subscription.Queue.Writer.TryComplete();
+        foreach (var subscription in all) subscription.Stop();
     }
 
     private sealed class Subscription : IDisposable
     {
         private readonly Hub<T> _hub;
+        private volatile bool _stopped;
 
-        public Subscription(Hub<T> hub, string path, Action<T> handler)
+        public Subscription(Hub<T> hub, string path, Action<T> handler, bool unbounded)
         {
             _hub = hub;
             Path = path;
-            Queue = Channel.CreateBounded<T>(new BoundedChannelOptions(QueueCapacity)
+            Queue = unbounded ? Channel.CreateUnbounded<T>(new UnboundedChannelOptions { SingleReader = true })
+                : Channel.CreateBounded<T>(new BoundedChannelOptions(QueueCapacity)
             {
                 FullMode = BoundedChannelFullMode.DropOldest,
                 SingleReader = true,
@@ -70,6 +73,7 @@ internal sealed class Hub<T>(Func<string, string, T, bool> matches) : IDisposabl
             {
                 await foreach (var item in Queue.Reader.ReadAllAsync().ConfigureAwait(false))
                 {
+                    if (_stopped) break;
                     try { handler(item); }
                     catch { /* a subscriber's bug must not stop its own later deliveries */ }
                 }
@@ -82,6 +86,12 @@ internal sealed class Hub<T>(Func<string, string, T, bool> matches) : IDisposabl
         public void Dispose()
         {
             _hub.Remove(this);
+            Stop();
+        }
+
+        public void Stop()
+        {
+            _stopped = true;
             Queue.Writer.TryComplete();
         }
     }

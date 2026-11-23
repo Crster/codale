@@ -5,7 +5,7 @@ namespace Codale.Settings;
 /// <summary>
 /// Decides which language colours a file: the user's per-file override first, then whatever the
 /// catalog detects from the name or first line. Also owns the app-side start-up of the syntax
-/// store, so the grammars live next to settings.json.
+/// store, so the grammars live in the application's data folder.
 /// </summary>
 public sealed class SyntaxSelection(AppSettingsStore settings, string dataFolder, SyntaxStore? store = null, LanguageCatalog? catalog = null)
 {

@@ -85,7 +85,7 @@ public sealed partial class SpecialistItem : ChatItem
     [ObservableProperty] public partial bool HasQuestions { get; set; }
     [ObservableProperty] public partial bool CanSend { get; set; }
     [ObservableProperty] public partial bool CanRetry { get; set; }
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsIdle))] public partial bool IsWorking { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsIdle), nameof(ShowComposer))] public partial bool IsWorking { get; set; }
     /// <summary>Nothing in the pane but Stop takes input while the specialist works.</summary>
     public bool IsIdle => !IsWorking;
     /// <summary>Auto Mode planning offers exactly two actions: Continue (answer / implement the plan) and Skip (implement without a plan).</summary>
@@ -96,9 +96,9 @@ public sealed partial class SpecialistItem : ChatItem
     [ObservableProperty] public partial bool CanRevise { get; set; }
     public bool ShowActions => CanContinue || CanSkip;
     public bool ShowActionBar => ShowActions && !IsRevising;
-    /// <summary>Answers always have the follow-up input; the planner shows it only while revising.</summary>
-    public bool ShowComposer => !IsPlanner || IsRevising;
-    public bool ShowStatusStop => IsPlanner && IsWorking;
+    /// <summary>Show the follow-up input when idle; the planner only needs it while revising.</summary>
+    public bool ShowComposer => !IsWorking && (!IsPlanner || IsRevising);
+    public bool ShowStatusStop => IsWorking;
     public bool IsPlanner => Session.Snapshot.Planner;
     public string PrimaryLabel => HasQuestions ? "Continue" : "Accept";
     public string ReviseLabel => Session.Snapshot.Plan is not null ? "Revise" : "Reply";
@@ -222,17 +222,4 @@ public sealed class SpecialistAnswersItem : ChatItem
             Pairs = [.. lines.Select(l => l.IndexOf("?: ", StringComparison.Ordinal) + 1).Zip(lines, (i, l) => new SpecialistAnswer(l[..i], l[(i + 1)..].Trim()))],
         };
     }
-}
-
-public sealed partial class MemoryNoticeItem : ChatItem
-{
-    public override TranscriptBlock Block => TranscriptBlock.Prose;
-    public required string Text { get; init; }
-    public required Action Open { get; init; }
-    public required Func<Task<bool>> Forget { get; init; }
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(Label), nameof(CanForget))] public partial bool IsForgotten { get; set; }
-    public string Label => IsForgotten ? "Forgotten" : "Remembered";
-    public bool CanForget => !IsForgotten;
-    [RelayCommand] private void OpenMemory() => Open();
-    [RelayCommand] private async Task ForgetMemoryAsync() { IsForgotten = await Forget(); }
 }

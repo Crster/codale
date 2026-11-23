@@ -46,15 +46,23 @@
   <ItemGroup>
     <ProjectReference Include="..\Codale.Mcp.Browser\Codale.Mcp.Browser.csproj;..\Codale.Mcp.Computer\Codale.Mcp.Computer.csproj;..\Codale.Mcp.Phone\Codale.Mcp.Phone.csproj;..\Codale.Mcp.Tasks\Codale.Mcp.Tasks.csproj" ReferenceOutputAssembly="false" Private="false" PrivateAssets="all" />
     <BundledMcpProject Include="..\Codale.Mcp.Browser\Codale.Mcp.Browser.csproj;..\Codale.Mcp.Computer\Codale.Mcp.Computer.csproj;..\Codale.Mcp.Phone\Codale.Mcp.Phone.csproj;..\Codale.Mcp.Tasks\Codale.Mcp.Tasks.csproj" />
+    <ProjectReference Include="..\Codale.Browser\Codale.Browser.csproj" ReferenceOutputAssembly="false" Private="false" PrivateAssets="all" />
+    <BundledMcpProject Include="..\Codale.Browser\Codale.Browser.csproj" />
   </ItemGroup>
 
   <!-- Build before evaluating payload globs, including on a fresh checkout. -->
   <Target Name="IncludeBundledServers" BeforeTargets="AssignTargetPaths" Condition="'$(DesignTimeBuild)' != 'true'">
     <MSBuild Condition="'$(NoBuild)' != 'true'" Projects="@(BundledMcpProject)" Targets="Build" BuildInParallel="true" Properties="Configuration=$(Configuration)" RemoveProperties="RuntimeIdentifier;Platform;TargetFramework;SelfContained;PublishReadyToRun;GenerateAppxPackageOnBuild" />
     <ItemGroup>
+      <_BrowserPayload Include="..\Codale.Browser\bin\$(Configuration)\net10.0-windows\**\*.*" Condition="Exists('..\Codale.Browser\bin\$(Configuration)\net10.0-windows\Codale.Browser.exe')" />
+      <_BrowserPayload Update="@(_BrowserPayload)">
+        <Link>Codale.Browser\%(_BrowserPayload.RecursiveDir)%(_BrowserPayload.Filename)%(_BrowserPayload.Extension)</Link>
+        <TargetPath>Codale.Browser\%(_BrowserPayload.RecursiveDir)%(_BrowserPayload.Filename)%(_BrowserPayload.Extension)</TargetPath>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </_BrowserPayload>
+      <Content Include="@(_BrowserPayload)" />
       <_McpBrowserPayload
         Include="..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\**\*.*"
-        Exclude="..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\.playwright\package\lib\vite\**;..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\.playwright\node\darwin*\**;..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\.playwright\node\linux*\**"
         Condition="Exists('..\Codale.Mcp.Browser\bin\$(Configuration)\net10.0\Codale.Mcp.Browser.exe')" />
       <_McpBrowserPayload Update="@(_McpBrowserPayload)">
         <Link>Codale.Mcp.Browser\%(_McpBrowserPayload.RecursiveDir)%(_McpBrowserPayload.Filename)%(_McpBrowserPayload.Extension)</Link>

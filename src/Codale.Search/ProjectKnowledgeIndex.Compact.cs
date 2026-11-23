@@ -16,7 +16,8 @@ public sealed partial class ProjectKnowledgeIndex
 
     public sealed record FileCommit(string Id, string Subject, int FilesChanged);
     public sealed record TurnFile(string Path, bool Edited);
-    private sealed record CompactFile(long Id, string Path, string Hash, SourceSymbol[] Symbols, string[] Subjects);
+    private sealed record CompactFile(long Id, string Path, string Hash, SourceSymbol[] Symbols, string[] Subjects, long Length = -1, long Written = 0);
+    private sealed record ProfileVector(string Path, string Hash);
     private sealed record IndexedTurn(string Worktree, string Session, string Turn, string[] Terms, TurnFile[] Files);
     private sealed record GitSummary(string Hash, string Revision, FileCommit[] Commits);
     private readonly ConcurrentDictionary<(string Root, string Path), GitSummary> _gitSummaries = new();
@@ -30,8 +31,18 @@ public sealed partial class ProjectKnowledgeIndex
     /// <summary>How long a search waits for a missing source snapshot; within the caller's retrieval budget.</summary>
     private static readonly TimeSpan SnapshotWait = TimeSpan.FromMilliseconds(900);
 
-    private DbNode CompactRoot(string root) => db.Open("compact-source-v1").Open(root);
-    private DbNode TurnsRoot => db.Open("turn-topics-v1");
+    private static string WorktreeKey(string root, string path) => Scope(root) + path;
+    private RecordKey<CompactFile> Profile(string root, string path) => db.Record<CompactFile>().Key(WorktreeKey(root, path));
+    private SemanticIndex Profiles(string root) => db.Index("profile-" + Hash(root));
+    private SemanticIndex Vectors(string root) => db.Index("profile-vector-" + Hash(root));
+    private SemanticIndex Turns(string root) => db.Index("turn-topics-" + Hash(root));
+
+    internal int ProfileCount(string worktree) => db.Record<CompactFile>().Keys(Scope(worktree)).Count;
+    internal IReadOnlyList<(string Path, float Score)> MatchProfiles(string worktree, IEnumerable<KeywordTerm> terms, int limit)
+    {
+        var prefix = Scope(worktree);
+        return [.. Profiles(worktree).FindKeywords(terms, limit).Select(hit => (hit.Key[prefix.Length..], hit.Score))];
+    }
 
     private static readonly string[][] TopicAliases =
     [
@@ -54,7 +65,8 @@ public sealed partial class ProjectKnowledgeIndex
         return [.. terms];
     }
 
-    public void RecordTurnTopic(string session, string turn, string worktree, string topic, IEnumerable<TurnFile> evidence)
+    public void RecordTurnTopic(string session, string turn, string worktree, string topic, IEnumerable<TurnFile> evidence,
+        CodaleDatabase.RecordBatch? batch = null)
     {
         worktree = ProjectPaths.Normalize(worktree);
         // Normalize paths while preserving the action attached to each file.
@@ -71,25 +83,27 @@ public sealed partial class ProjectKnowledgeIndex
         }
         var terms = TopicTerms(topic);
         if (terms.Length == 0 || normalized.Count == 0) return;
-        var node = TurnsRoot.Open(worktree).Open(session).Open(turn);
-        db.Batch(() =>
-        {
-            node.WriteJson(new IndexedTurn(worktree, session, turn, terms, [.. normalized.Select(f => new TurnFile(f.Key, f.Value))]));
-            node.Index("topic", terms.Concat(normalized.Keys.SelectMany(SearchText.Tokens).Select(SearchText.Stem)).Distinct());
-        });
+        var record = new IndexedTurn(worktree, session, turn, terms, [.. normalized.Select(f => new TurnFile(f.Key, f.Value))]);
+        if (batch is null) db.WriteBatch(write => StageTurn(write, record));
+        else StageTurn(batch, record);
     }
+
+    private void StageTurn(CodaleDatabase.RecordBatch batch, IndexedTurn turn) =>
+        batch.Put(Scope(turn.Session) + Scope(turn.Worktree) + turn.Turn, turn, Turns(turn.Worktree)
+            .Key(turn.Terms.Concat(turn.Files.SelectMany(f => SearchText.Tokens(f.Path)).Select(SearchText.Stem)).Distinct(), mode: SemanticMode.Bm25));
 
     public void RemoveTurnTopics(string session)
     {
-        foreach (var worktree in TurnsRoot.Children()) TurnsRoot.Open(worktree).Open(session).Remove();
+        var keys = db.Record<IndexedTurn>().Keys(Scope(session));
+        db.WriteBatch(batch => { foreach (var key in keys) batch.Delete<IndexedTurn>(key); });
     }
 
     private IReadOnlyList<IndexedTurn> MatchTurns(string root, string query, string? excludeSession = null)
     {
         var terms = TopicTerms(query);
         return terms.Length == 0 ? [] :
-            [.. TurnsRoot.Open(root).Match("topic", terms.Select(t => new KeywordTerm(t, false)).ToArray(), 40)
-                .Select(hit => hit.Node.ReadJson<IndexedTurn>()).OfType<IndexedTurn>()
+            [.. Turns(root).FindKeywords(terms.Select(t => new KeywordTerm(t)), 40)
+                .Select(hit => hit.Record<IndexedTurn>()?.Get()).OfType<IndexedTurn>()
                 .Where(t => t.Session != excludeSession && string.Equals(t.Worktree, root, StringComparison.OrdinalIgnoreCase))
                 .Where(t => t.Terms.Intersect(terms).Any(term => term.StartsWith("topic", StringComparison.Ordinal))
                     || t.Terms.Intersect(terms).Count() >= Math.Min(2, terms.Length)
@@ -110,17 +124,30 @@ public sealed partial class ProjectKnowledgeIndex
             QueueCompactVectors(root);
             return changed;
         }
-        var directory = CompactRoot(root);
+        var collection = db.Record<CompactFile>();
+        var prefix = Scope(root);
+        var initial = _snapshots.ContainsKey(root) ? null : collection.FindPrefix(prefix).ToDictionary(row => row.Key, row => row.Value, StringComparer.Ordinal);
         var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // Profile writes are committed in groups: one batch per file takes the database's write lock and commits
         // once per file, which costs more than the profiling itself on a large first scan.
-        var pending = new List<Action>();
+        var pending = new List<(CompactFile Profile, SourceFile File, bool ContentChanged)>();
         void Flush()
         {
             if (pending.Count == 0) return;
-            var writes = pending.ToArray();
+            db.WriteBatch(batch =>
+            {
+                foreach (var (record, _, contentChanged) in pending)
+                {
+                    if (contentChanged)
+                    {
+                        StageProfile(batch, root, record);
+                        batch.Delete<ProfileVector>(WorktreeKey(root, record.Path));
+                    }
+                    else batch.Put(WorktreeKey(root, record.Path), record);
+                }
+            });
+            foreach (var (_, file, _) in pending) _indexedFiles[root + "\n" + file.RelativePath] = file;
             pending.Clear();
-            db.Batch(() => { foreach (var write in writes) write(); });
         }
         try
         {
@@ -132,32 +159,28 @@ public sealed partial class ProjectKnowledgeIndex
                 present.Add(path);
                 var identity = root + "\n" + path;
                 if (_indexedFiles.TryGetValue(identity, out var old) && ReferenceEquals(old, file)) continue;
-                var source = ReadSource(root, path);
+                var key = WorktreeKey(root, path);
+                var previous = initial is null ? collection.Key(key).Get() : initial.GetValueOrDefault(key);
+                if (!file.IsRetained && previous?.Length == file.Length && previous.Written == file.LastWriteUtc.Ticks)
+                {
+                    _indexedFiles[identity] = file;
+                    continue;
+                }
+                var source = ReadSource(root, path, file);
                 if (source is null) { present.Remove(path); continue; }
-                var node = directory.Open(path);
-                var previous = node.ReadJson<CompactFile>();
                 var hash = Hash(source);
-                if (previous?.Hash != hash)
+                var contentChanged = previous?.Hash != hash;
+                if (contentChanged || !previous!.Symbols.SequenceEqual(file.SymbolArray))
                 {
                     var subjects = Regex.Matches(source, """(?m)^[ \t]*(?:///|//|/\*+|\*|#+|"{3}|'{3})[ \t]*(?:<summary>[ \t]*)?([^<\r\n]+)""")
                         .Select(m => Clip(m.Groups[1].Value.Trim(), 140)).Where(s => s.Length > 0).Distinct().Take(12).ToArray();
-                    var record = new CompactFile(previous?.Id ?? NextId(), path, hash, [.. file.Symbols], subjects);
-                    pending.Add(() =>
-                    {
-                        node.Remove();
-                        node.WriteJson(record);
-                        node.Index("profile", SearchText.Tokens(ProfileText(record)).Select(SearchText.Stem).Distinct());
-                    });
-                    if (pending.Count >= ProfileBatch) Flush();
-                    if (previous is not null) changed.Add(path);
+                    pending.Add((new(previous?.Id ?? NextId(), path, hash, [.. file.Symbols], subjects, file.Length, file.LastWriteUtc.Ticks), file, true));
+                    if (contentChanged && previous is not null) changed.Add(path);
                 }
-                _indexedFiles[identity] = file;
-            }
-            Flush();
-            foreach (var path in directory.Children().Where(p => !present.Contains(p)))
-            {
-                directory.Open(path).Remove();
-                _indexedFiles.TryRemove(root + "\n" + path, out _);
+                else if (previous!.Length != file.Length || previous.Written != file.LastWriteUtc.Ticks)
+                    pending.Add((previous with { Length = file.Length, Written = file.LastWriteUtc.Ticks }, file, false));
+                else _indexedFiles[identity] = file;
+                if (pending.Count >= ProfileBatch) Flush();
             }
         }
         finally
@@ -165,6 +188,16 @@ public sealed partial class ProjectKnowledgeIndex
             // Files already marked as profiled must reach the database even when the refresh is cancelled part-way.
             Flush();
         }
+        var removed = collection.Keys(prefix).Where(key => !present.Contains(key[prefix.Length..])).ToArray();
+        db.WriteBatch(batch =>
+        {
+            foreach (var key in removed)
+            {
+                batch.Delete<CompactFile>(key);
+                batch.Delete<ProfileVector>(key);
+            }
+        });
+        foreach (var key in removed) _indexedFiles.TryRemove(root + "\n" + key[prefix.Length..], out _);
         _snapshots[root] = snapshot.BuiltAt;
         QueueCompactVectors(root);
         return changed;
@@ -172,6 +205,10 @@ public sealed partial class ProjectKnowledgeIndex
 
     /// <summary>Profile writes committed per database batch during a refresh.</summary>
     private const int ProfileBatch = 256;
+
+    private void StageProfile(CodaleDatabase.RecordBatch batch, string root, CompactFile record) =>
+        batch.Put(WorktreeKey(root, record.Path), record,
+            Profiles(root).Key(SearchText.Tokens(ProfileText(record)).Select(SearchText.Stem).Distinct(), mode: SemanticMode.Bm25));
 
     private static string ProfileText(CompactFile file) =>
         file.Path + "\n" + string.Join(' ', file.Symbols.Select(s => s.Name)) + "\n" + string.Join(' ', file.Subjects);
@@ -197,13 +234,12 @@ public sealed partial class ProjectKnowledgeIndex
             if (snapshot is null) return [];
         }
         var terms = SearchText.RetrievalTerms(prompt);
-        var directory = CompactRoot(root);
         var scores = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         void Add(string path, double score) => scores[path] = scores.GetValueOrDefault(path) + score;
         var rank = 0;
         if (terms.Count > 0)
-            foreach (var hit in directory.Match("profile", Terms(SearchText.RetrievalQueryTerms(prompt)), 48))
-                Add(hit.Node.Name, 6.0 / (3 + rank++));
+            foreach (var hit in MatchProfiles(root, Terms(SearchText.RetrievalQueryTerms(prompt)), 48))
+                Add(hit.Path, 6.0 / (3 + rank++));
 
         var words = Regex.Matches(SearchText.WithoutAttachments(prompt), @"[\w./\\-]+").Select(m => m.Value.TrimEnd('.')).ToArray();
         for (var i = 0; i < words.Length; i++)
@@ -216,7 +252,7 @@ public sealed partial class ProjectKnowledgeIndex
             // lexical ranking; matching them against declarations buried the file the request was about.
             if (words.Length != 1 && !IsIdentifierWord(name)) continue;
             // Once per file: two locals named head must not outweigh the file that declares the check.
-            foreach (var path in snapshot.Definitions(name).Take(12).Select(d => d.File.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase))
+            foreach (var path in DefinitionCandidates(snapshot, name))
                 Add(path, 30);
         }
         if (terms.Count > 0)
@@ -238,13 +274,24 @@ public sealed partial class ProjectKnowledgeIndex
         foreach (var path in CompactVectorCandidates(root, prompt))
             if (scores.ContainsKey(path)) Add(path, 1);
 
+        // Multiple query words in a file name help distinguish the named component from generic implementations.
+        if (terms.Count > 1)
+        {
+            var queryTerms = terms.ToHashSet(StringComparer.Ordinal);
+            foreach (var path in scores.Keys.ToArray())
+            {
+                var nameTerms = SearchText.Tokens(Path.GetFileNameWithoutExtension(path)).Select(SearchText.Stem);
+                if (nameTerms.Where(queryTerms.Contains).Distinct().Skip(1).Any()) Add(path, 1);
+            }
+        }
+
         var revision = _revisions.GetValueOrDefault(root, "unknown");
         var wantsDocs = terms.Any(t => DocOrTestTerms.Contains(t));
         double Score(string path, double score) => !wantsDocs && CodeDiscovery.IsTestOrDoc(path) && score < 30 ? score * DocWeight : score;
         foreach (var path in scores.OrderByDescending(p => p.Value).Take(16).Select(p => p.Key).ToArray())
         {
             if (_gitSummaries.TryGetValue((root, path), out var summary) && summary.Revision == revision
-                && directory.Open(path).ReadJson<CompactFile>()?.Hash == summary.Hash
+                && Profile(root, path).Get()?.Hash == summary.Hash
                 && summary.Commits.Any(c => SearchText.RetrievalTerms(c.Subject).Intersect(terms).Any()))
                 Add(path, 0.5);
         }
@@ -253,7 +300,7 @@ public sealed partial class ProjectKnowledgeIndex
         foreach (var score in scores.OrderByDescending(x => Score(x.Key, x.Value))
                      .ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase).Take(Math.Max(48, maxFiles * 3)))
         {
-            if (directory.Open(score.Key).ReadJson<CompactFile>() is not { } file) continue;
+            if (Profile(root, score.Key).Get() is not { } file) continue;
             var source = ReadSource(root, file.Path);
             if (source is null) { stale = true; continue; }
             // Changed since it was profiled (an agent mid-turn, before the index catches up): the profile still says
@@ -283,6 +330,11 @@ public sealed partial class ProjectKnowledgeIndex
 
     private static bool IsIdentifierWord(string word) =>
         word.Skip(1).Any(char.IsUpper) || word.Contains('_') || (word.Any(char.IsDigit) && word.Any(char.IsLetter));
+
+    private static IEnumerable<string> DefinitionCandidates(SourceSnapshot snapshot, string name) => snapshot.Definitions(name)
+        .OrderByDescending(definition => definition.Symbol.Name.Equals(name, StringComparison.Ordinal))
+        .ThenBy(definition => definition.Symbol.Kind == SourceSymbolKind.Variable)
+        .Select(definition => definition.File.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Take(12);
 
     private static int SymbolRelevance(string name, string prompt, IReadOnlyList<string> terms) =>
         (prompt.Contains(name, StringComparison.OrdinalIgnoreCase) ? 20 : 0)
@@ -316,17 +368,17 @@ public sealed partial class ProjectKnowledgeIndex
             try
             {
                 var model = db.EmbeddingModel;
-                var directory = CompactRoot(root);
+                var vector = Vectors(root);
                 var count = 0;
-                foreach (var name in directory.Children())
+                foreach (var key in db.Record<CompactFile>().Keys(Scope(root)))
                 {
                     if (_stopping.IsCancellationRequested || !CompactEmbeddingsEnabled() || model != db.EmbeddingModel) break;
-                    var node = directory.Open(name);
-                    if (node.ReadJson<CompactFile>() is not { } file) continue;
-                    var vector = node.Open(file.Hash);
-                    if (vector.HasVector()) continue;
-                    vector.Embed(Clip(ProfileText(file), 1400));
-                    if (node.ReadJson<CompactFile>()?.Hash != file.Hash) vector.Remove();
+                    var node = db.Record<CompactFile>().Key(key);
+                    var target = db.Record<ProfileVector>().Key(key);
+                    if (vector.HasVector(target) || node.Get() is not { } file) continue;
+                    db.WriteBatch(batch => batch.Put(key, new ProfileVector(file.Path, file.Hash),
+                        vector.Key([Clip(ProfileText(file), 1400)], mode: SemanticMode.Vector)));
+                    if (node.Get()?.Hash != file.Hash) target.Delete();
                     if (++count >= 12) break;
                 }
                 if (count > 0)
@@ -344,13 +396,12 @@ public sealed partial class ProjectKnowledgeIndex
         if (_vectorResults.TryGetValue(key, out var cached)) return cached;
         QueueVectorWork(() =>
         {
-            var directory = CompactRoot(root);
-            var results = directory.Query(query, 12);
+            var results = Vectors(root).Find(query, 12);
             if (_vectorResults.Count >= 96) _vectorResults.Clear();
             if (results.Count > 0 && key.Item2 == db.EmbeddingModel)
                 _vectorResults[key] = [.. results.Where(hit => hit.Score >= ModelMatchSimilarity)
-                    .Select(hit => (Path: hit.Node.Location.Segments[^2], Hash: hit.Node.Name))
-                    .Where(hit => directory.Open(hit.Path).ReadJson<CompactFile>()?.Hash == hit.Hash)
+                    .Select(hit => hit.Record<ProfileVector>()?.Get()).OfType<ProfileVector>()
+                    .Where(hit => Profile(root, hit.Path).Get()?.Hash == hit.Hash)
                     .Select(hit => hit.Path)];
         }, () => { });
         return [];

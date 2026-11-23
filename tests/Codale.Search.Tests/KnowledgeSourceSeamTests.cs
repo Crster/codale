@@ -35,7 +35,7 @@ public sealed class KnowledgeSourceSeamTests : IDisposable
         var root = Path.Combine(_directory, "project");
         Directory.CreateDirectory(root);
         File.WriteAllText(Path.Combine(root, "a.cs"), "class A {}");
-        using var store = new CodaleDb(Path.Combine(_directory, "project.db"));
+        using var store = new CodaleDatabase(Path.Combine(_directory, "project.db"));
         var sources = new RecordingSources();
         using var index = new ProjectKnowledgeIndex(store, sources);
 

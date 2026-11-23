@@ -22,6 +22,6 @@ public static class WorkspaceDb
     public static string DirectoryFor(string projectPath) =>
         Path.Combine(ProjectPaths.KnowledgeDirectory(projectPath), "workspace-db");
 
-    public static void Use(string directory, Action<CodaleDb> action) => Shared.Use(directory, action);
-    public static T Use<T>(string directory, Func<CodaleDb, T> work) => Shared.Use(directory, work);
+    public static void Use(string directory, Action<CodaleDatabase> action) => Shared.UseRecords(directory, action);
+    public static T Use<T>(string directory, Func<CodaleDatabase, T> work) => Shared.UseRecords(directory, work);
 }

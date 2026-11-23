@@ -5,6 +5,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 
 using Codale.Core.Agents;
+using Codale.Core.Projects;
 
 namespace Codale.Agents.Providers;
 
@@ -405,7 +406,7 @@ public sealed class SmartProviderClient(string role, string provider, ByokProvid
     {
         var executable = CliLocator.Find(Provider) ?? throw new InvalidOperationException($"Install and sign in to {Provider} first.");
         if (CliLocator.IsShim(executable)) throw new InvalidOperationException("Smart features require the native CLI executable; install the native CLI package.");
-        var folder = Path.Combine(Path.GetTempPath(), "codale-smart-" + Guid.NewGuid().ToString("N"));
+        var folder = Path.Combine(CodalePaths.TempDirectory, "smart", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
         var output = Path.Combine(folder, "answer.txt");
         var start = BuildCliStartInfo(executable, folder, output, model, system);

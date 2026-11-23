@@ -150,7 +150,6 @@ public sealed partial class WorkspacePage : Page
             foreach (var entry in _chatTabs)
             {
                 StopTabAttention(entry);
-                entry.Chat.MemoryViewRequested -= OnChatMemoryViewRequested;
                 entry.Chat.LoginRequired -= OnChatLoginRequired;
                 entry.Chat.AttentionNeeded -= OnChatAttentionNeeded;
                 entry.Chat.PlanProposed -= OnChatPlanProposed;
@@ -661,7 +660,6 @@ public sealed partial class WorkspacePage : Page
             tab.ArtifactRequested += (_, artifact) => ShowArtifactFromChat(artifact);
             tab.UpdateCliRequested += (_, cmd) => _ = UpdateCliAsync(cmd);
             tab.RunningTaskPeekRequested += (_, task) => SetPeek(ReferenceEquals(PeekPane.Task, task) && PeekPane.Visibility == Visibility.Visible ? null : task);
-            chat.MemoryViewRequested += OnChatMemoryViewRequested;
             chat.LoginRequired += OnChatLoginRequired;
             chat.AttentionNeeded += OnChatAttentionNeeded;
             chat.PlanProposed += OnChatPlanProposed;
@@ -683,14 +681,6 @@ public sealed partial class WorkspacePage : Page
 
         ViewModel.Chat = chat;
         SelectTab(entry.Item);
-    }
-
-    private void OnChatMemoryViewRequested(object? sender, EventArgs e)
-    {
-        HistoryTabButton.IsChecked = true;
-        SessionKnowledgeSection.IsChecked = true;
-        OnSessionSectionClick(SessionKnowledgeSection, new RoutedEventArgs());
-        RefreshKnowledge();
     }
 
     private void OnChatPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -2134,7 +2124,6 @@ public sealed partial class WorkspacePage : Page
             // close cannot await.
             _chatTabs.Remove(chatEntry);
             StopTabAttention(chatEntry);
-            chatEntry.Chat.MemoryViewRequested -= OnChatMemoryViewRequested;
             chatEntry.Chat.LoginRequired -= OnChatLoginRequired;
             chatEntry.Chat.AttentionNeeded -= OnChatAttentionNeeded;
             chatEntry.Chat.PlanProposed -= OnChatPlanProposed;

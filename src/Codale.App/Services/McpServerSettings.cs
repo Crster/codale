@@ -41,13 +41,11 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
     {
         get
         {
-            using var db = _database.Open();
-            return ParseMode(db.Setting(BrowserKey).Read(), AgentToolMode.Allow);
+            return ParseMode(_database.GetSetting(BrowserKey), AgentToolMode.Allow);
         }
         set
         {
-            using var db = _database.Open();
-            db.Setting(BrowserKey).Write(FormatMode(value));
+            _database.SetSetting(BrowserKey, FormatMode(value));
         }
     }
 
@@ -56,13 +54,11 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
     {
         get
         {
-            using var db = _database.Open();
-            return ParseMode(db.Project(_projectPath).Open("ui").Open(ComputerKey).Read(), AgentToolMode.Block);
+            return ParseMode(_database.GetProjectSetting(_projectPath, ComputerKey), AgentToolMode.Block);
         }
         set
         {
-            using var db = _database.Open();
-            db.Project(_projectPath).Open("ui").Open(ComputerKey).Write(FormatMode(value));
+            _database.SetProjectSetting(_projectPath, ComputerKey, FormatMode(value));
         }
     }
 
@@ -71,13 +67,11 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
     {
         get
         {
-            using var db = _database.Open();
-            return ParseMode(db.Project(_projectPath).Open("ui").Open(PhoneKey).Read(), AgentToolMode.Block);
+            return ParseMode(_database.GetProjectSetting(_projectPath, PhoneKey), AgentToolMode.Block);
         }
         set
         {
-            using var db = _database.Open();
-            db.Project(_projectPath).Open("ui").Open(PhoneKey).Write(FormatMode(value));
+            _database.SetProjectSetting(_projectPath, PhoneKey, FormatMode(value));
         }
     }
 
@@ -128,7 +122,7 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
     public bool TasksAvailable => File.Exists(ExePath("Codale.Mcp.Tasks"));
 
     /// <summary>
-    /// Codale's workspace servers (<see cref="CodaleServers"/>: panel, command, terminal, memory, secret), each
+    /// Codale's workspace servers (<see cref="CodaleServers"/>: panel, command, terminal, memory, todo), each
     /// the same exe started with <c>--server NAME</c> and wired to this chat's pipe. Empty when the exe did not ship.
     /// </summary>
     /// <param name="runDirectory">Where the chat's tasks run; the command list itself is always the project's.</param>
@@ -184,7 +178,7 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
         "run_command (runs one by name in a terminal tab). The user's own terminals: list_terminals then read_terminal (read-only). " +
         "Project memory: use codale-memory memory_search before work or repeated questions; automatically memory_save user-stated preferences, " +
         "accepted decisions and verified durable conventions. Search first, update the same title for corrections, memory_forget stale notes. " +
-        "Never remember unaccepted suggestions, progress, source-code facts or secrets. Current user instructions override memories. Stored secrets: codale-secret. " +
+        "Never remember unaccepted suggestions, progress, source-code facts or secrets. Current user instructions override memories. User todos: use codale-todo to list and verify unfinished items; complete only after they are satisfied. " +
         "MANDATORY when a request needs tools: your FIRST action is mcp__codale-panel__todos_set with the whole list (2-6 short steps, one in_progress), " +
         "called again as each step starts and when the last finishes. TodoWrite, TaskCreate and TaskUpdate are off; do not look for them. " +
         "Deliverables that are not project source (report, document, image, data) go to mcp__codale-panel__artifact_add (a path or markdown). " +
@@ -198,7 +192,7 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
         "run_command (runs one by name in a terminal tab) tools. The user's own terminals: list_terminals then read_terminal (read-only). " +
         "Project memory: use codale-memory memory_search before work or repeated questions; automatically memory_save user-stated preferences, " +
         "accepted decisions and verified durable conventions. Search first, update the same title for corrections, memory_forget stale notes. " +
-        "Never remember unaccepted suggestions, progress, source-code facts or secrets. Current user instructions override memories. Stored secrets: codale-secret. " +
+        "Never remember unaccepted suggestions, progress, source-code facts or secrets. Current user instructions override memories. User todos: use codale-todo to list and verify unfinished items; complete only after they are satisfied. " +
         "When a request needs tools, report the step list with the codale-panel todos_set tool (2-6 short steps, one in_progress) as each step starts and when the last finishes. " +
         "If todos_set is not available, skip it and do the work anyway: never stop or refuse because a checklist tool is missing. " +
         "Deliverables that are not project source go to the codale-panel artifact_add tool when available.";

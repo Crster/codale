@@ -1,7 +1,5 @@
 using System.Text.Json;
 
-using Codale.Db;
-
 namespace Codale.Settings;
 
 /// <summary>One entry in the welcome screen's recent-projects list.</summary>
@@ -19,15 +17,10 @@ public sealed class RecentProjects(ApplicationDatabase database)
 
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = false };
 
-    public IReadOnlyList<RecentProject> Load()
-    {
-        using var db = database.Open();
-        return Load(db);
-    }
+    public IReadOnlyList<RecentProject> Load() => Parse(database.GetSetting(SettingName));
 
-    private static IReadOnlyList<RecentProject> Load(CodaleDb db)
+    private static IReadOnlyList<RecentProject> Parse(string? json)
     {
-        var json = db.Setting(SettingName).Read();
         if (string.IsNullOrEmpty(json))
         {
             return [];
@@ -45,11 +38,7 @@ public sealed class RecentProjects(ApplicationDatabase database)
     }
 
     /// <summary>Removes every entry from the MRU, e.g. from the picker's Clear link.</summary>
-    public void Clear()
-    {
-        using var db = database.Open();
-        db.Setting(SettingName).Write(string.Empty);
-    }
+    public void Clear() => database.SetSetting(SettingName, string.Empty);
 
     /// <summary>Moves the project to the top of the MRU, adding it if new, and trims the tail.</summary>
     public void Record(string projectPath)
@@ -57,19 +46,11 @@ public sealed class RecentProjects(ApplicationDatabase database)
         var normalized = Codale.Core.Projects.ProjectPaths.Normalize(projectPath);
         var name = System.IO.Path.GetFileName(normalized) is { Length: > 0 } leaf ? leaf : normalized;
 
-        // One lease for the read-modify-write.
-        using var db = database.Open();
-
-        var entries = Load(db)
-            .Where(p => !string.Equals(p.Path, normalized, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        entries.Insert(0, new RecentProject(normalized, name, DateTimeOffset.Now));
-
-        if (entries.Count > MaxEntries)
+        database.UpdateSetting(SettingName, previous =>
         {
-            entries.RemoveRange(MaxEntries, entries.Count - MaxEntries);
-        }
-
-        db.Setting(SettingName).Write(JsonSerializer.Serialize(entries, SerializerOptions));
+            var entries = Parse(previous).Where(p => !string.Equals(p.Path, normalized, StringComparison.OrdinalIgnoreCase))
+                .Prepend(new RecentProject(normalized, name, DateTimeOffset.Now)).Take(MaxEntries);
+            return JsonSerializer.Serialize(entries, SerializerOptions);
+        });
     }
 }

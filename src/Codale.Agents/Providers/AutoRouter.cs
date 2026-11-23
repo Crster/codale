@@ -6,6 +6,16 @@ namespace Codale.Agents.Providers;
 /// <summary>Model-first, bounded assessment. A partial answer never discards fields already resolved.</summary>
 public static class AutoRouter
 {
+    public static Task<AutoAssessment> AssessLocalFirstAsync(string text, object state, Dictionary<string, SmartQuestion> questions,
+        Func<object, IReadOnlyDictionary<string, SmartQuestion>, CancellationToken, Task<IReadOnlyDictionary<string, SmartDecision>?>> decision,
+        Func<string, string, CancellationToken, Task<string?>> general, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return MessageRouting.TryRouteLocally(text) is not null
+            ? Task.FromResult(AutoAssessment.Local(text) with { Confidence = 1 })
+            : AssessAsync(text, state, questions, decision, general, ct);
+    }
+
     public static async Task<AutoAssessment> AssessAsync(string text, object state, Dictionary<string, SmartQuestion> questions,
         Func<object, IReadOnlyDictionary<string, SmartQuestion>, CancellationToken, Task<IReadOnlyDictionary<string, SmartDecision>?>> decision,
         Func<string, string, CancellationToken, Task<string?>> general, CancellationToken ct)

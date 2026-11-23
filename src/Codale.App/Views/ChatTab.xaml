@@ -1458,53 +1458,6 @@
             </Border>
         </DataTemplate>
 
-        <DataTemplate x:Key="MemoryNoticeTemplate" x:DataType="vm:MemoryNoticeItem">
-            <!--  A quiet one-line entry like compaction; View / Forget live in the right-click menu.  -->
-            <StackPanel
-                views:TextBaseline.IsAligned="True"
-                Margin="{x:Bind RowMargin, Mode=OneWay}"
-                Background="Transparent"
-                Orientation="Horizontal"
-                Spacing="8"
-                ToolTipService.ToolTip="Right-click to view or forget this memory">
-                <StackPanel.ContextFlyout>
-                    <MenuFlyout>
-                        <MenuFlyoutItem Command="{x:Bind OpenMemoryCommand}" Text="View memory">
-                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE82D;" /></MenuFlyoutItem.Icon>
-                        </MenuFlyoutItem>
-                        <MenuFlyoutItem Command="{x:Bind ForgetMemoryCommand}" IsEnabled="{x:Bind CanForget, Mode=OneWay}" Text="Forget">
-                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74D;" /></MenuFlyoutItem.Icon>
-                        </MenuFlyoutItem>
-                    </MenuFlyout>
-                </StackPanel.ContextFlyout>
-                <Grid
-                    Width="20"
-                    Height="20"
-                    Margin="1,3,1,3"
-                    VerticalAlignment="Center">
-                    <Border Background="{StaticResource KindOtherTintBrush}" CornerRadius="10" />
-                    <FontIcon
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center"
-                        FontSize="{x:Bind S10, Mode=OneWay}"
-                        Foreground="{StaticResource KindOtherBrush}"
-                        Glyph="&#xE82D;" />
-                </Grid>
-                <TextBlock
-                    VerticalAlignment="Center"
-                    FontSize="{x:Bind S12, Mode=OneWay}"
-                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                    Text="{x:Bind Label, Mode=OneWay}" />
-                <TextBlock
-                    MaxWidth="420"
-                    VerticalAlignment="Center"
-                    FontSize="{x:Bind S12, Mode=OneWay}"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Text="{x:Bind Text}"
-                    TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-        </DataTemplate>
-
         <DataTemplate x:Key="NoticeTemplate" x:DataType="vm:NoticeItem">
             <Grid
                 Margin="{x:Bind RowMargin, Mode=OneWay}"
@@ -1896,7 +1849,6 @@
         <views:ChatItemTemplateSelector
             x:Key="ChatTemplateSelector"
             SpecialistTemplate="{StaticResource SpecialistTemplate}"
-            MemoryNoticeTemplate="{StaticResource MemoryNoticeTemplate}"
             ActivityTemplate="{StaticResource ActivityTemplate}"
             AssistantTemplate="{StaticResource AssistantTemplate}"
             BriefingTemplate="{StaticResource BriefingTemplate}"
@@ -2388,7 +2340,7 @@
                                     FontSize="11.5"
                                     FontWeight="SemiBold"
                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Text="Todos" />
+                                    Text="Checklist" />
                                 <TextBlock FontSize="11.5" Foreground="{ThemeResource TextFillColorTertiaryBrush}">
                                     <Run Text="{x:Bind ViewModel.TasksDone, Mode=OneWay}" /><Run Text="/" /><Run Text="{x:Bind ViewModel.TasksTotal, Mode=OneWay}" />
                                 </TextBlock>

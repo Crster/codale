@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Codale.Core.Projects;
 
@@ -109,6 +110,20 @@ public static class ProjectPaths
     public static string KnowledgeDirectory(string projectPath) => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale", "knowledge",
         InstanceKey(RepositoryIdentity(projectPath)));
+
+    /// <summary>Readable workspace-model database directory. Distinct roots with the same name share this database.</summary>
+    public static string WorkspaceModelDirectory(string projectPath)
+    {
+        var name = DisplayName(projectPath);
+        name = Regex.Replace(name, @"([A-Z]+)([A-Z][a-z])", "$1_$2");
+        name = Regex.Replace(name, @"([a-z0-9])([A-Z])", "$1_$2");
+        name = Regex.Replace(name, @"[^\p{L}\p{Nd}]+", "_").Trim('_').ToLowerInvariant();
+        if (name.Length == 0) name = "workspace";
+        // Windows device names are reserved even when they have a suffix such as .db.
+        if (Regex.IsMatch(name, @"^(con|prn|aux|nul|com[1-9]|lpt[1-9])$", RegexOptions.IgnoreCase))
+            name += "_workspace";
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale", "workspace", name);
+    }
 
     /// <summary>
     /// True when <paramref name="path"/> is <paramref name="root"/> itself or lies beneath it.

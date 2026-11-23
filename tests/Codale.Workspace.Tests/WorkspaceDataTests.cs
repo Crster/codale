@@ -13,8 +13,30 @@ public sealed class WorkspaceDataTests
         factory.Dispose();
         Assert.Throws<ObjectDisposedException>(() => factory.Open("project"));
         Assert.Throws<ObjectDisposedException>(() => data.Config.Get("theme"));
+        Assert.Throws<ObjectDisposedException>(() => data.UserTodos.List());
         using var next = new WorkspaceDataFactory(_ => root);
         Assert.Equal("dark", next.Open("project").Config.Get("theme"));
+    }
+
+    [Fact]
+    public void Todos_use_typed_storage_and_ignore_old_records()
+    {
+        var directory = System.IO.Directory.CreateTempSubdirectory("codale-workspace-todos-");
+        try
+        {
+            using var pool = new WorkspaceDatabasePool();
+            var old = new UserTodo(Guid.NewGuid().ToString("N"), "old task", DateTimeOffset.UnixEpoch);
+            using (var legacy = new Codale.Db.CodaleDb(directory.FullName))
+                legacy.Open("user-todos").Open(old.Id).WriteJson(old);
+            var store = new UserTodoStore(directory.FullName, pool);
+            var added = store.Add("new task");
+            Assert.Equal([added], store.List());
+            Assert.True(System.IO.File.Exists(Path.Combine(directory.FullName, "records", "index__records.db")));
+            Assert.False(store.Complete(old.Id));
+            Assert.True(store.Complete(added.Id));
+            Assert.Empty(store.List());
+        }
+        finally { directory.Delete(recursive: true); }
     }
 
     [Fact]
@@ -24,22 +46,22 @@ public sealed class WorkspaceDataTests
         using var pool = new WorkspaceDatabasePool();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var proceed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var work = Task.Run(() => pool.Use(root, db =>
+        var work = Task.Run(() => pool.UseRecords(root, db =>
         {
             entered.SetResult();
             proceed.Task.GetAwaiter().GetResult();
-            db.Open("value").Write("saved");
+            db.Open<string>().Key("value").Value("saved");
         }));
         try
         {
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
             pool.Dispose();
-            Assert.Throws<ObjectDisposedException>(() => pool.Use(root, _ => { }));
+            Assert.Throws<ObjectDisposedException>(() => pool.UseRecords(root, _ => { }));
         }
         finally { proceed.TrySetResult(); }
         await work.WaitAsync(TimeSpan.FromSeconds(10));
         using var next = new WorkspaceDatabasePool();
-        Assert.Equal("saved", next.Use(root, db => db.Open("value").Read()));
+        Assert.Equal("saved", next.UseRecords(root, db => db.Open<string>().Key("value").Get()));
     }
 
     [Fact]

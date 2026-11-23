@@ -28,11 +28,8 @@ public sealed partial class ChatViewModel
     private async Task StartSpecialistAsync(string text, IReadOnlyList<TurnAttachment> attachments, RouteIntent intent, CancellationToken ct)
     {
         if (_connectedRequest is null) return;
-        var previousReply = LastRoutingReply;
         _preShown = null;
         RecordUserTurn(text);
-        _memoryTurnUser = text;
-        _ = CaptureMemoryAsync(text, previousReply);
         var routingTurn = _activeTurn;
         EndTurn(TurnOutcome.Completed);
         if (routingTurn is not null) { Items.Remove(routingTurn); Reflow(); }
@@ -123,9 +120,6 @@ public sealed partial class ChatViewModel
             {
                 var state = session.Snapshot;
                 EndFeatureTurn(state.Status);
-                var lastUser = state.Messages.LastOrDefault(m => m.Role == "user")?.Text ?? state.OriginalPrompt;
-                var answer = state.Messages.LastOrDefault(m => m.Role == "assistant")?.Text;
-                if (!state.Status.StartsWith("Failed") && !state.Status.StartsWith("Stopped")) _ = CaptureMemoryAsync(lastUser, answer);
                 AttentionNeeded?.Invoke(this, new AttentionRequest(state.Status.StartsWith("Failed") ? AttentionKind.TurnFailed : state.Plan is not null ? AttentionKind.Plan : AttentionKind.TurnFinished,
                     state.Status.StartsWith("Failed") ? state.Status : state.Plan is not null ? "The planner has a plan for review."
                     : state.Status.StartsWith("Stopped") ? "The specialist was stopped." : "The specialist response is ready."));
@@ -165,7 +159,6 @@ public sealed partial class ChatViewModel
         Add(new AssistantMessageItem { Text = answer });
         _featureLog?.Append(new AssistantMessageCompleted { MessageId = Guid.NewGuid().ToString("N"), Model = "Codale", Text = answer });
         EndFeatureTurn("configuration applied");
-        _ = CaptureMemoryAsync(text, answer);
         return true;
     }
 
@@ -262,7 +255,6 @@ public sealed partial class ChatViewModel
         try
         {
             await item.Session.StopAsync();
-            _ = CaptureMemoryAsync(state.OriginalPrompt, acceptedPlan: state.Plan);
             var prompt = $"Implement this approved plan (planner {state.Id}, version {state.PlanVersion}).\n\n" +
                 $"Original request:\n{state.OriginalPrompt}\n\nApproved plan:\n{state.Plan}\n\n" +
                 "The user approved this plan. Follow its agreed requirements and constraints; implement and validate it.";

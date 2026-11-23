@@ -104,6 +104,13 @@ public sealed partial class RunningTaskItem : ObservableObject
 
     public RunningTaskKind Kind { get; init; }
 
+    /// <summary>Heading shown before the first task in a session-panel category.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasCategoryHeading))]
+    public partial string CategoryHeading { get; set; } = "";
+
+    public bool HasCategoryHeading => CategoryHeading.Length > 0;
+
     /// <summary>An MCP terminal owned by the workspace, independent of the provider process.</summary>
     public bool IsWorkspaceTerminal { get; init; }
 

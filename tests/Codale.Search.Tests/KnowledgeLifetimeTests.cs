@@ -1,6 +1,7 @@
 using System.Diagnostics;
 
 using Codale.Db;
+using Codale.Search.Engine;
 
 namespace Codale.Search.Tests;
 
@@ -39,7 +40,7 @@ public sealed class KnowledgeLifetimeTests : IDisposable
     [Fact]
     public async Task DisposingDuringARefreshStopsItPromptly()
     {
-        using var store = new CodaleDb(Path.Combine(_directory, "project.db"));
+        using var store = new CodaleDatabase(Path.Combine(_directory, "project.db"));
         var index = new ProjectKnowledgeIndex(store);
         var refresh = index.RefreshAsync(_root);
 
@@ -55,7 +56,7 @@ public sealed class KnowledgeLifetimeTests : IDisposable
     [Fact]
     public void RefreshAfterDisposeDoesNothing()
     {
-        using var store = new CodaleDb(Path.Combine(_directory, "project.db"));
+        using var store = new CodaleDatabase(Path.Combine(_directory, "project.db"));
         var index = new ProjectKnowledgeIndex(store);
         index.Dispose();
 
@@ -67,7 +68,7 @@ public sealed class KnowledgeLifetimeTests : IDisposable
     [Fact]
     public void DisposingTwiceIsSafe()
     {
-        using var store = new CodaleDb(Path.Combine(_directory, "project.db"));
+        using var store = new CodaleDatabase(Path.Combine(_directory, "project.db"));
         var index = new ProjectKnowledgeIndex(store);
 
         index.Dispose();
@@ -77,7 +78,7 @@ public sealed class KnowledgeLifetimeTests : IDisposable
     [Fact]
     public void ASearchAfterDisposeAnswersWithoutThrowing()
     {
-        using var store = new CodaleDb(Path.Combine(_directory, "project.db"));
+        using var store = new CodaleDatabase(Path.Combine(_directory, "project.db"));
         var index = new ProjectKnowledgeIndex(store);
         index.Dispose();
 
@@ -85,21 +86,25 @@ public sealed class KnowledgeLifetimeTests : IDisposable
     }
 
     [Fact]
-    public async Task IndexingReportsBusyThenIdleEvenWhenTheSnapshotIsReused()
+    public async Task IndexingReportsBusyThenIdleEvenWhenSourceFilesAreReused()
     {
-        using var store = new CodaleDb(Path.Combine(_directory, "busy.db"));
+        using var store = new CodaleDatabase(Path.Combine(_directory, "busy.db"));
         using var index = new ProjectKnowledgeIndex(store);
         var states = new List<bool>();
         index.IndexingChanged += () => states.Add(index.IsIndexing);
         await index.RefreshAsync(_root);
+        var source = SourceIndex.For(_root);
+        var unchanged = source.Current!.Files[0];
+        source.Invalidate();
         await index.RefreshAsync(_root);
+        Assert.Same(unchanged, source.Current!.Files[0]);
         Assert.Equal(new[] { true, false, true, false }, states);
     }
 
     [Fact]
     public async Task ARefreshThatFinishesBeforeDisposeLeavesNoWorkBehind()
     {
-        using var store = new CodaleDb(Path.Combine(_directory, "project.db"));
+        using var store = new CodaleDatabase(Path.Combine(_directory, "project.db"));
         var index = new ProjectKnowledgeIndex(store);
         await index.RefreshAsync(_root);
 

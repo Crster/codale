@@ -1,7 +1,8 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 
-using Microsoft.Playwright;
+using Codale.Core.Projects;
 
 namespace Codale.Mcp.Browser;
 
@@ -27,7 +28,7 @@ public sealed record ViewportPreset(string Name, int Width, int Height, double S
 
     public static string Names => string.Join(", ", All.Select(p => $"{p.Name} ({p.Width}x{p.Height})"));
 
-    /// <summary>True when switching between the two needs no new context (only the size differs).</summary>
+    /// <summary>True when switching between the two needs no reload (only the size differs).</summary>
     public bool SameProfileAs(ViewportPreset other) =>
         Scale == other.Scale && Mobile == other.Mobile && UserAgent == other.UserAgent;
 
@@ -35,64 +36,61 @@ public sealed record ViewportPreset(string Name, int Width, int Height, double S
 }
 
 /// <summary>
-/// One lazily-launched browser (the installed Edge, then Chrome, then bundled Chromium)
-/// with a set of tabs, or - when the user opened one with the app's "Open browser" button -
-/// that browser, attached over its debugging port. Headless by default. Logins survive
-/// restarts and headless/visible switches through a saved storage-state file. Element
-/// handles are stable refs stamped onto the DOM by <see cref="SnapshotScript"/>.
+/// The agent's handle on Codale Browser, the app's WebView2 window. It asks the window for a tab of
+/// this session's own (marked in the session's colour) and attaches to that tab's DevTools target,
+/// starting the window first when it is not open, so the user always sees what the agent does and
+/// parallel agents never share a page. Logins live in the window's own profile. Device and media emulation belong
+/// to this connection: they are dropped when it closes and never outlive the agent's session.
+/// Element handles are refs stamped onto the DOM by <see cref="SnapshotScript"/>.
 /// </summary>
 public sealed class BrowserSession : IAsyncDisposable
 {
     private const int MaxLogEntries = 200;
 
-    /// <summary>
-    /// The port a browser the user opened by hand listens on for automation. The app's
-    /// "Open browser" button launches Edge with it; see <see cref="McpDefaults.BrowserAttachPort"/>.
-    /// </summary>
+    /// <summary>The DevTools port Codale Browser listens on; see <see cref="McpDefaults.BrowserAttachPort"/>.</summary>
     public const int AttachPort = McpDefaults.BrowserAttachPort;
 
     public int DebuggingPort { get; init; } = AttachPort;
 
+    /// <summary>How long a freshly started window gets to bring its page up.</summary>
+    public TimeSpan StartupTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(3) };
+
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly List<IPage> _pages = [];
-    private readonly Dictionary<IPage, List<string>> _console = [];
-    private readonly Dictionary<IPage, List<string>> _network = [];
-    private sealed record ViewportState((int Width, int Height)? Size, int WindowId, JsonElement Bounds);
-    private readonly Dictionary<IPage, ViewportState> _originalViewports = [];
-    private readonly HashSet<IPage> _windowSizedPages = [];
-    private readonly Dictionary<IPage, ICDPSession> _viewportSessions = [];
-    private readonly Dictionary<IPage, (int Width, int Height)> _attachedSizes = [];
-    private IPlaywright? _playwright;
-    private IBrowser? _browser;
-    private IBrowserContext? _context;
-    private int _current;
-    private bool _attached;
-    private bool? _headlessOverride;
+    private readonly List<string> _console = [];
+    private readonly List<string> _network = [];
+    private readonly Dictionary<string, (string Method, string Url)> _requests = [];
+    private readonly Dictionary<string, string> _downloads = [];
+    private CdpConnection? _cdp;
+    private CdpPage? _page;
     private ViewportPreset? _device;
     private (int Width, int Height)? _customSize;
-    private ColorScheme? _colorScheme;
-    private ReducedMotion? _reducedMotion;
+    private string? _colorScheme;
+    private string? _reducedMotion;
     private bool _offline;
     private bool _acceptDialogs = true;
     private string? _promptText;
 
-    /// <summary>Headless unless CODALE_BROWSER_HEADLESS=0, so agent work never pops a window up on its own.</summary>
-    public bool Headless { get; init; } = Environment.GetEnvironmentVariable("CODALE_BROWSER_HEADLESS") != "0";
-
-    private bool CurrentHeadless => _headlessOverride ?? Headless;
+    private static string DownloadDirectory => Path.Combine(CodalePaths.TempDirectory, "downloads");
 
     /// <summary>
-    /// Cookies and local storage saved between runs so a login only has to happen once. The file
-    /// is plaintext session data, protected only by the per-user ACL of the local app-data folder.
+    /// Codale Browser's executable: CODALE_BROWSER_EXE, else the copy the app ships beside this
+    /// server (…\Codale.Browser\Codale.Browser.exe next to …\Codale.Mcp.Browser\).
     /// </summary>
-    public static string StatePath { get; } = Environment.GetEnvironmentVariable("CODALE_BROWSER_STATE") is { Length: > 0 } p
-        ? p
-        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale", "browser-state.json");
+    public static string? BrowserExecutable
+    {
+        get
+        {
+            if (Environment.GetEnvironmentVariable("CODALE_BROWSER_EXE") is { Length: > 0 } configured) return configured;
+            var bundled = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Codale.Browser", "Codale.Browser.exe"));
+            return File.Exists(bundled) ? bundled : null;
+        }
+    }
 
-    private static string DownloadDirectory =>
-        Path.Combine(Path.GetTempPath(), "codale-downloads");
+    // ---- Attaching ---------------------------------------------------------------------
 
-    private async Task<bool> AttachAvailableAsync()
+    private async Task<bool> PortOpenAsync()
     {
         try
         {
@@ -107,245 +105,243 @@ public sealed class BrowserSession : IAsyncDisposable
         }
     }
 
-    private bool IsAlive => _context is not null && _browser is { IsConnected: true };
+    /// <summary>
+    /// Which agent session this server works for. The app sets CODALE_BROWSER_SESSION per chat, so
+    /// a chat keeps one tab even when its CLI restarts this server; without it the process is the session.
+    /// </summary>
+    public string SessionKey { get; init; } = Environment.GetEnvironmentVariable("CODALE_BROWSER_SESSION") is { Length: > 0 } key
+        ? key : $"process-{Environment.ProcessId}";
 
-    private async Task<IBrowserContext> EnsureContextAsync()
+    /// <summary>The name on the session's tab (CODALE_BROWSER_LABEL), e.g. the CLI and chat title.</summary>
+    public string SessionLabel { get; init; } = Environment.GetEnvironmentVariable("CODALE_BROWSER_LABEL") is { Length: > 0 } label ? label : "Agent";
+
+    /// <summary>Codale Browser's per-user request channel (Codale.Browser, ControlPipe): the same name is spelled out there.</summary>
+    public static string ControlPipeName => "Codale.Browser.Control." + Environment.UserName;
+
+    /// <summary>
+    /// Sends one request to Codale Browser's control pipe and returns the answer, or null when no
+    /// Codale Browser is answering there (another Chromium on the port, or one still starting up).
+    /// </summary>
+    private async Task<JsonElement?> ControlAsync(object request, TimeSpan timeout)
     {
-        var attachable = await AttachAvailableAsync();
-
-        // A browser the user opened after we went headless takes over; the headless one is dropped.
-        if (IsAlive && (_attached || !attachable))
+        // The pipe belongs to the window on the standard port; a browser on any other port is not it.
+        if (DebuggingPort != AttachPort) return null;
+        using var cts = new CancellationTokenSource(timeout);
+        try
         {
-            return _context!;
+            await using var pipe = new System.IO.Pipes.NamedPipeClientStream(".", ControlPipeName, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
+            await pipe.ConnectAsync(cts.Token).ConfigureAwait(false);
+            using var reader = new StreamReader(pipe, leaveOpen: true);
+            await using var writer = new StreamWriter(pipe, leaveOpen: true) { AutoFlush = true };
+            await writer.WriteLineAsync(JsonSerializer.Serialize(request).AsMemory(), cts.Token).ConfigureAwait(false);
+            if (await reader.ReadLineAsync(cts.Token).ConfigureAwait(false) is not { } line) return null;
+            using var answer = JsonDocument.Parse(line);
+            return answer.RootElement.Clone();
         }
-
-        // A crashed browser gets relaunched, but its old process, context and tracked
-        // tabs must not be abandoned - each crash/close cycle would leak all three.
-        await CloseBrowserAsync(saveState: false);
-
-        _playwright ??= await Playwright.CreateAsync();
-
-        // Anything listening on the attach port is trusted as the user's own browser: the
-        // port is loopback-only, but a hostile local process could squat on it. Kept as is
-        // on purpose - the "Open browser" button depends on it.
-        if (attachable && await TryAttachAsync())
+        catch (Exception ex) when (ex is IOException or OperationCanceledException or TimeoutException or JsonException or UnauthorizedAccessException)
         {
-            return _context!;
+            return null;
         }
-
-        await LaunchAsync();
-        _context = await CreateContextAsync();
-        ResetTabs();
-        return _context;
     }
 
-    private async Task<bool> TryAttachAsync()
+    /// <summary>This session's own tab in Codale Browser (created on first use), or null when no tab service answers.</summary>
+    private async Task<string?> RequestTabAsync(TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (true)
+        {
+            var remaining = deadline - DateTime.UtcNow;
+            if (remaining <= TimeSpan.Zero) return null;
+            var answer = await ControlAsync(new { op = "open", session = SessionKey, label = SessionLabel }, remaining);
+            if (answer is null) return null;
+            if (answer.Value.TryGetProperty("targetId", out var id) && id.GetString() is { Length: > 0 } targetId) return targetId;
+            if (answer.Value.TryGetProperty("error", out var error) && !error.GetString()!.Contains("starting", StringComparison.Ordinal))
+            {
+                throw new McpToolException($"Codale Browser could not open a tab: {error.GetString()}");
+            }
+
+            await Task.Delay(250);
+        }
+    }
+
+    /// <summary>
+    /// A page target's WebSocket address: the one with <paramref name="targetId"/>, or (when null)
+    /// the first page - for a Chromium that is not Codale Browser. Null while it is not listed yet.
+    /// </summary>
+    private async Task<Uri?> FindPageAsync(string? targetId = null)
     {
         try
         {
-            _browser = await _playwright!.Chromium.ConnectOverCDPAsync($"http://127.0.0.1:{DebuggingPort}");
-            _attached = true;
-            _context = _browser.Contexts.Count > 0
-                ? _browser.Contexts[0]
-                : await _browser.NewContextAsync(new BrowserNewContextOptions { ViewportSize = ViewportSize.NoViewport });
-            ResetTabs();
-            foreach (var existing in _context.Pages)
+            var json = await Http.GetStringAsync($"http://127.0.0.1:{DebuggingPort}/json/list").ConfigureAwait(false);
+            using var targets = JsonDocument.Parse(json);
+            foreach (var target in targets.RootElement.EnumerateArray())
             {
-                Adopt(existing);
+                if (target.GetProperty("type").GetString() != "page") continue;
+                if (targetId is not null && target.GetProperty("id").GetString() != targetId) continue;
+                if (target.TryGetProperty("url", out var url) && url.GetString()?.StartsWith("devtools://", StringComparison.Ordinal) == true) continue;
+                if (target.TryGetProperty("webSocketDebuggerUrl", out var ws) && ws.GetString() is { Length: > 0 } address) return new Uri(address);
             }
-
-            _current = Math.Max(0, _pages.Count - 1);
-            return true;
         }
-        catch (PlaywrightException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or KeyNotFoundException)
         {
-            _browser = null;
-            _context = null;
-            _attached = false;
-            return false;
+            // Not up yet.
         }
+
+        return null;
     }
 
-    private async Task LaunchAsync()
+    private void StartBrowser()
     {
-        var errors = new StringBuilder();
-        foreach (var channel in new string?[] { "msedge", "chrome", null })
-        {
-            try
-            {
-                _browser = await _playwright!.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
-                {
-                    Channel = channel,
-                    Headless = CurrentHeadless,
-                });
-                _attached = false;
-                return;
-            }
-            catch (PlaywrightException ex)
-            {
-                errors.AppendLine($"{channel ?? "chromium"}: {ex.Message.Split('\n')[0]}");
-            }
-        }
-
-        throw new McpToolException("Could not launch a browser. Install Microsoft Edge or Chrome.\n" + errors);
-    }
-
-    /// <summary>A context carrying the saved logins and the current device emulation.</summary>
-    private async Task<IBrowserContext> CreateContextAsync()
-    {
-        var options = new BrowserNewContextOptions { AcceptDownloads = true };
-
-        if (_device is { } d)
-        {
-            options.ViewportSize = new ViewportSize { Width = d.Width, Height = d.Height };
-            options.DeviceScaleFactor = (float)d.Scale;
-            options.IsMobile = d.Mobile;
-            options.HasTouch = d.Mobile;
-            options.UserAgent = d.UserAgent;
-        }
-        else if (_customSize is { } c)
-        {
-            options.ViewportSize = new ViewportSize { Width = c.Width, Height = c.Height };
-        }
-        else
-        {
-            // Headless has no window to follow, so it gets a fixed size; a visible one follows its window.
-            options.ViewportSize = CurrentHeadless ? new ViewportSize { Width = 1280, Height = 800 } : ViewportSize.NoViewport;
-        }
-
-        if (_colorScheme is { } scheme) options.ColorScheme = scheme;
-        if (_reducedMotion is { } motion) options.ReducedMotion = motion;
-
-        if (File.Exists(StatePath))
-        {
-            options.StorageStatePath = StatePath;
-        }
-
-        IBrowserContext context;
+        var exe = BrowserExecutable
+            ?? throw new McpToolException("Codale Browser is not installed with this build. Open it from Codale (Open browser) and try again.");
         try
         {
-            context = await _browser!.NewContextAsync(options);
+            Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe) })?.Dispose();
         }
-        catch (PlaywrightException) when (options.StorageStatePath is not null)
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or FileNotFoundException)
         {
-            // A damaged state file must not lock the browser out.
-            options.StorageStatePath = null;
-            context = await _browser!.NewContextAsync(options);
+            throw new McpToolException($"Could not start Codale Browser ({exe}): {ex.Message}");
         }
-
-        if (_offline) await context.SetOfflineAsync(true);
-        return context;
     }
 
-    private void ResetTabs()
+    /// <summary>The page, attaching to Codale Browser (and starting it) when there is no live connection.</summary>
+    private async Task<CdpPage> EnsurePageAsync()
     {
-        _pages.Clear();
-        _console.Clear();
-        _network.Clear();
-        _originalViewports.Clear();
-        _windowSizedPages.Clear();
-        _viewportSessions.Clear();
-        _attachedSizes.Clear();
-        _current = 0;
-    }
+        if (_cdp is { IsOpen: true } && _page is not null) return _page;
+        await DropConnectionAsync();
 
-    /// <summary>Saves the login state, then closes the browser (or lets go of an attached one).</summary>
-    private async Task CloseBrowserAsync(bool saveState)
-    {
-        if (saveState)
+        var started = false;
+        if (!await PortOpenAsync())
         {
-            await SaveStateAsync();
+            StartBrowser();
+            started = true;
         }
 
-        if (_browser is not null)
+        // Each session drives a tab of its own. Codale Browser hands it out over its control pipe;
+        // a plain Chromium on the port (no pipe) is driven through its first page instead.
+        var targetId = await RequestTabAsync(started ? StartupTimeout : TimeSpan.FromSeconds(3));
+        var deadline = DateTime.UtcNow + (started ? StartupTimeout : TimeSpan.FromSeconds(5));
+        Uri? address;
+        while ((address = await FindPageAsync(targetId)) is null)
         {
-            if (_attached)
+            if (DateTime.UtcNow >= deadline)
             {
-                await RestoreAttachedViewportsAsync();
+                throw new McpToolException(started
+                    ? "Codale Browser did not come up in time. Check that its window opened (WebView2 must be installed), then try again."
+                    : $"Something is listening on port {DebuggingPort} but it has no page to drive. Close it, or open Codale Browser from Codale.");
             }
 
-            try { await _browser.CloseAsync(); }
-            catch (Exception ex) when (ex is PlaywrightException or IOException or InvalidOperationException or ObjectDisposedException)
-            {
-                // Already gone; that is why we are here.
-            }
+            await Task.Delay(250);
         }
 
-        _browser = null;
-        _context = null;
-        _attached = false;
-        ResetTabs();
-    }
-
-    private async Task SaveStateAsync()
-    {
-        if (_context is null || _attached || _browser is not { IsConnected: true })
-        {
-            return;
-        }
-
+        // Anything on the loopback port that serves a page is trusted as Codale Browser: a hostile
+        // local process could squat on it, but the window is the only thing meant to listen there.
+        var cdp = await CdpConnection.ConnectAsync(address);
+        Wire(cdp);
+        await cdp.SendAsync("Page.enable");
+        await cdp.SendAsync("Runtime.enable");
+        await cdp.SendAsync("Network.enable");
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(StatePath)!);
-            await _context.StorageStateAsync(new BrowserContextStorageStateOptions { Path = StatePath });
+            Directory.CreateDirectory(DownloadDirectory);
+            await cdp.SendAsync("Browser.setDownloadBehavior", new { behavior = "allowAndName", downloadPath = DownloadDirectory, eventsEnabled = true });
         }
-        catch (Exception ex) when (ex is PlaywrightException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is CdpException or IOException or UnauthorizedAccessException)
         {
-            // Losing the saved login is an inconvenience, never a failure of the tool call.
+            // The window's own download handling stays in charge.
         }
+
+        _cdp = cdp;
+        _page = new CdpPage(cdp);
+        await ApplyEmulationAsync(_page, reload: false);
+        return _page;
     }
 
-    private void Adopt(IPage page)
+    private void Wire(CdpConnection cdp)
     {
-        page.SetDefaultTimeout(15_000);
-        Track(page);
+        cdp.On("Runtime.consoleAPICalled", e =>
+        {
+            var text = e.TryGetProperty("args", out var args)
+                ? string.Join(" ", args.EnumerateArray().Select(a => a.TryGetProperty("value", out var v) ? v.ToString() : a.TryGetProperty("description", out var d) ? d.GetString() : ""))
+                : "";
+            Append(_console, $"[{e.GetProperty("type").GetString()}] {text}");
+        });
+        cdp.On("Runtime.exceptionThrown", e =>
+        {
+            var details = e.GetProperty("exceptionDetails");
+            var text = details.TryGetProperty("exception", out var ex) && ex.TryGetProperty("description", out var d) ? d.GetString() : details.GetProperty("text").GetString();
+            Append(_console, $"[pageerror] {text}");
+        });
+        cdp.On("Network.requestWillBeSent", e =>
+        {
+            var request = e.GetProperty("request");
+            lock (_requests)
+            {
+                _requests[e.GetProperty("requestId").GetString() ?? ""] = (request.GetProperty("method").GetString() ?? "", request.GetProperty("url").GetString() ?? "");
+                if (_requests.Count > 2000) _requests.Clear();
+            }
+        });
+        cdp.On("Network.responseReceived", e =>
+        {
+            var response = e.GetProperty("response");
+            var method = Request(e).Method;
+            Append(_network, $"{response.GetProperty("status").GetInt32()} {method} {response.GetProperty("url").GetString()}".Replace("  ", " "));
+        });
+        cdp.On("Network.loadingFailed", e =>
+        {
+            var (method, url) = Request(e);
+            Append(_network, $"FAILED {method} {url} {e.GetProperty("errorText").GetString()}");
+        });
+        cdp.On("Page.javascriptDialogOpening", e =>
+        {
+            var accept = _acceptDialogs;
+            Append(_console, $"[dialog:{e.GetProperty("type").GetString()}] {e.GetProperty("message").GetString()} -> {(accept ? "accepted" : "dismissed")}");
+
+            // Handlers run on the receive loop, which must stay free to read the reply.
+            _ = Task.Run(async () =>
+            {
+                try { await cdp.SendAsync("Page.handleJavaScriptDialog", new { accept, promptText = accept ? _promptText : null }); }
+                catch (CdpException) { /* the page moved on */ }
+            });
+        });
+        cdp.On("Browser.downloadWillBegin", e =>
+        {
+            lock (_downloads) _downloads[e.GetProperty("guid").GetString() ?? ""] = e.GetProperty("suggestedFilename").GetString() ?? "download";
+        });
+        cdp.On("Browser.downloadProgress", e =>
+        {
+            var state = e.GetProperty("state").GetString();
+            if (state is not ("completed" or "canceled")) return;
+            string? name;
+            var guid = e.GetProperty("guid").GetString() ?? "";
+            lock (_downloads) { _downloads.Remove(guid, out name); }
+            name ??= "download";
+            if (state == "canceled") { Append(_console, $"[download] {name} was cancelled"); return; }
+            try
+            {
+                var path = UniqueDownloadPath(name);
+                File.Move(Path.Combine(DownloadDirectory, guid), path);
+                Append(_console, $"[download] {name} saved to {path}");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Append(_console, $"[download] {name} failed: {ex.Message}");
+            }
+        });
     }
 
-    private void Track(IPage page)
+    private (string Method, string Url) Request(JsonElement e)
     {
-        _pages.Add(page);
-        if (page.ViewportSize is null) _windowSizedPages.Add(page);
-        var console = _console[page] = [];
-        var network = _network[page] = [];
-        page.Console += (_, m) => Append(console, $"[{m.Type}] {m.Text}");
-        page.PageError += (_, e) => Append(console, $"[pageerror] {e}");
-        page.Response += (_, r) => Append(network, $"{r.Status} {r.Request.Method} {r.Url}");
-        page.RequestFailed += (_, r) => Append(network, $"FAILED {r.Method} {r.Url} {r.Failure}");
-        page.Dialog += async (_, d) =>
-        {
-            Append(console, $"[dialog:{d.Type}] {d.Message} -> {(_acceptDialogs ? "accepted" : "dismissed")}");
-            try
-            {
-                if (_acceptDialogs) await d.AcceptAsync(_promptText); else await d.DismissAsync();
-            }
-            catch (PlaywrightException) { /* the page moved on */ }
-        };
-        page.Download += async (_, d) =>
-        {
-            try
-            {
-                Directory.CreateDirectory(DownloadDirectory);
-                var path = UniqueDownloadPath(d.SuggestedFilename);
-                await d.SaveAsAsync(path);
-                Append(console, $"[download] {d.SuggestedFilename} saved to {path}");
-            }
-            catch (Exception ex) when (ex is PlaywrightException or IOException)
-            {
-                Append(console, $"[download] {d.SuggestedFilename} failed: {ex.Message}");
-            }
-        };
-        page.Close += (_, _) =>
-        {
-            var idx = _pages.IndexOf(page);
-            _pages.Remove(page);
-            _console.Remove(page);
-            _network.Remove(page);
-            _originalViewports.Remove(page);
-            _windowSizedPages.Remove(page);
-            _viewportSessions.Remove(page);
-            _attachedSizes.Remove(page);
-            if (idx >= 0 && _current >= idx && _current > 0) _current--;
-        };
+        lock (_requests) return _requests.TryGetValue(e.GetProperty("requestId").GetString() ?? "", out var r) ? r : ("", "");
+    }
+
+    /// <summary>Lets go of the window. Closing the connection drops every override it set.</summary>
+    private async Task DropConnectionAsync()
+    {
+        if (_cdp is not null) await _cdp.DisposeAsync();
+        _cdp = null;
+        _page = null;
+        lock (_requests) _requests.Clear();
     }
 
     /// <summary>
@@ -391,51 +387,17 @@ public sealed class BrowserSession : IAsyncDisposable
         }
     }
 
-    private async Task<IPage> NewPageAsync(IBrowserContext context)
-    {
-        var page = await context.NewPageAsync();
-        Adopt(page);
-        await ApplyMediaAsync(page);
-        return page;
-    }
-
-    private async Task ApplyMediaAsync(IPage page)
-    {
-        if (_colorScheme is null && _reducedMotion is null)
-        {
-            return;
-        }
-
-        await page.EmulateMediaAsync(new PageEmulateMediaOptions
-        {
-            ColorScheme = _colorScheme,
-            ReducedMotion = _reducedMotion,
-        });
-    }
-
-    /// <summary>The active page, opening one if none exists. All tool work is serialized through the gate.</summary>
-    private async Task<IPage> CurrentPageAsync()
-    {
-        var context = await EnsureContextAsync();
-        if (_pages.Count == 0)
-        {
-            await NewPageAsync(context);
-            _current = 0;
-        }
-
-        return _pages[Math.Clamp(_current, 0, _pages.Count - 1)];
-    }
-
-    public async Task<T> WithPageAsync<T>(Func<IPage, Task<T>> action)
+    /// <summary>Runs a tool against the page. All tool work is serialized through the gate.</summary>
+    public async Task<T> WithPageAsync<T>(Func<CdpPage, Task<T>> action)
     {
         await _gate.WaitAsync();
         try
         {
-            return await action(await CurrentPageAsync());
+            return await action(await EnsurePageAsync());
         }
-        catch (PlaywrightException ex)
+        catch (CdpException ex)
         {
-            throw new McpToolException(ex.Message.Split('\n')[0]);
+            throw new McpToolException(ex.Message);
         }
         finally
         {
@@ -443,263 +405,99 @@ public sealed class BrowserSession : IAsyncDisposable
         }
     }
 
-    public async Task<T> WithSessionAsync<T>(Func<IBrowserContext, Task<T>> action)
-    {
-        await _gate.WaitAsync();
-        try
-        {
-            return await action(await EnsureContextAsync());
-        }
-        catch (PlaywrightException ex)
-        {
-            throw new McpToolException(ex.Message.Split('\n')[0]);
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
-    public Task<string> ListTabsAsync() => WithSessionAsync(async _ =>
-    {
-        var sb = new StringBuilder();
-        for (var i = 0; i < _pages.Count; i++)
-        {
-            sb.AppendLine($"{(i == _current ? "*" : " ")} [{i}] {await _pages[i].TitleAsync()} - {_pages[i].Url}");
-        }
-
-        return sb.Length == 0 ? "(no tabs)" : sb.ToString().TrimEnd();
-    });
-
-    public Task<string> NewTabAsync(string? url) => WithSessionAsync(async ctx =>
-    {
-        var page = await NewPageAsync(ctx);
-        _current = _pages.Count - 1;
-        if (url is { Length: > 0 })
-        {
-            await page.GotoAsync(RequireWebUrl(url));
-        }
-
-        return $"Opened tab [{_current}].";
-    });
-
-    public Task<string> SelectTabAsync(int index) => WithSessionAsync(async _ =>
-    {
-        if (index < 0 || index >= _pages.Count) throw new McpToolException($"No tab [{index}].");
-        _current = index;
-        await _pages[index].BringToFrontAsync();
-        return $"Selected tab [{index}].";
-    });
-
-    public Task<string> CloseTabAsync(int? index) => WithSessionAsync(async _ =>
-    {
-        var i = index ?? _current;
-        if (i < 0 || i >= _pages.Count) throw new McpToolException($"No tab [{i}].");
-        await _pages[i].CloseAsync();
-        return $"Closed tab [{i}].";
-    });
-
-    // ---- Device emulation -------------------------------------------------------------
+    // ---- Device and media emulation ------------------------------------------------------
 
     /// <summary>
-    /// Switches to a device preset, a custom size, or (both null) back to the default. A
-    /// change of touch/pixel-ratio/user agent needs a fresh context, so the tabs reopen at
-    /// their URLs with the saved logins; a plain size change resizes in place.
+    /// Switches to a device preset, a custom size, or (both null) back to the window's own size.
+    /// A change of touch, pixel ratio or user agent reloads the page so it sees the new device.
     /// </summary>
-    public Task<string> SetViewportAsync(ViewportPreset? device, (int Width, int Height)? size) => WithSessionAsync(async _ =>
+    public Task<string> SetViewportAsync(ViewportPreset? device, (int Width, int Height)? size) => WithPageAsync(async page =>
     {
-        await ApplyDeviceAsync(device, size);
+        await ApplyDeviceAsync(page, device, size);
         return device is not null
             ? $"Viewport: {device}."
-            : size is { } s ? $"Viewport: {s.Width}x{s.Height}." : "Viewport reset to the default.";
+            : size is { } s ? $"Viewport: {s.Width}x{s.Height}." : "Viewport reset to the window's size.";
     });
 
-    private async Task ApplyDeviceAsync(ViewportPreset? device, (int Width, int Height)? size)
+    private async Task ApplyDeviceAsync(CdpPage page, ViewportPreset? device, (int Width, int Height)? size)
     {
-        var previous = _device;
+        var before = _device;
         _device = device;
         _customSize = device is null ? size : null;
-
-        var target = device is not null ? (device.Width, device.Height) : size;
-
-        if (_attached)
+        var reload = (before, device) switch
         {
-            // The user's own browser: only the size can change, without touching their profile.
-            if (target is { } t)
-            {
-                foreach (var page in _pages)
-                {
-                    if (!_originalViewports.ContainsKey(page))
-                    {
-                        _originalViewports[page] = await CaptureViewportAsync(page);
-                    }
-                }
-
-                foreach (var page in _pages)
-                {
-                    await RestoreViewportAsync(page, t);
-                }
-            }
-            else
-            {
-                await RestoreAttachedViewportsAsync();
-            }
-
-            return;
-        }
-
-        // Only the size differs (or a plain size is asked for while no device is active): resize in place.
-        var resizeInPlace = target is not null &&
-            ((previous is not null && device is not null && previous.SameProfileAs(device)) ||
-             (previous is null && device is null));
-        if (resizeInPlace)
-        {
-            foreach (var page in _pages)
-            {
-                await page.SetViewportSizeAsync(target!.Value.Width, target.Value.Height);
-            }
-
-            return;
-        }
-
-        await RecreateContextAsync();
+            (null, null) => false,
+            ({ } a, { } b) => !a.SameProfileAs(b),
+            ({ Mobile: false, UserAgent: null }, null) or (null, { Mobile: false, UserAgent: null }) => false,
+            _ => true,
+        };
+        await ApplyEmulationAsync(page, reload);
     }
 
-    private (int Width, int Height)? ReadViewport(IPage page) =>
-        _attachedSizes.TryGetValue(page, out var attachedSize) ? attachedSize :
-        !_windowSizedPages.Contains(page) && page.ViewportSize is { } size ? (size.Width, size.Height) : null;
-
-    private async Task<ViewportState> CaptureViewportAsync(IPage page)
+    /// <summary>Puts this session's device and media settings on the page (a new connection starts clean).</summary>
+    private async Task ApplyEmulationAsync(CdpPage page, bool reload)
     {
-        var cdp = await page.Context.NewCDPSessionAsync(page);
-        try
+        var cdp = page.Cdp;
+        if (_device is { } d)
         {
-            var window = (await cdp.SendAsync("Browser.getWindowForTarget"))!.Value;
-            return new ViewportState(ReadViewport(page), window.GetProperty("windowId").GetInt32(), window.GetProperty("bounds").Clone());
+            await cdp.SendAsync("Emulation.setDeviceMetricsOverride", new { width = d.Width, height = d.Height, deviceScaleFactor = d.Scale, mobile = d.Mobile });
         }
-        finally { await cdp.DetachAsync(); }
-    }
-
-    private async Task RestoreViewportAsync(IPage page, ViewportState state)
-    {
-        await RestoreViewportAsync(page, state.Size);
-        var cdp = await page.Context.NewCDPSessionAsync(page);
-        try
+        else if (_customSize is { } c)
         {
-            // Playwright can resize the actual Chromium window as part of emulation.
-            // Preserve maximized/fullscreen state as well as a normal window's bounds.
-            var windowState = state.Bounds.GetProperty("windowState").GetString();
-            var bounds = windowState == "normal"
-                ? JsonSerializer.Deserialize<Dictionary<string, object>>(state.Bounds.GetRawText())!
-                : new Dictionary<string, object> { ["windowState"] = windowState! };
-            await cdp.SendAsync("Browser.setWindowBounds", new Dictionary<string, object>
+            await cdp.SendAsync("Emulation.setDeviceMetricsOverride", new { width = c.Width, height = c.Height, deviceScaleFactor = 0, mobile = false });
+        }
+        else
+        {
+            await cdp.SendAsync("Emulation.clearDeviceMetricsOverride");
+        }
+
+        var mobile = _device?.Mobile == true;
+        await cdp.SendAsync("Emulation.setTouchEmulationEnabled", new { enabled = mobile, maxTouchPoints = mobile ? 5 : 1 });
+        await cdp.SendAsync("Emulation.setUserAgentOverride", new { userAgent = _device?.UserAgent ?? "" });
+        await cdp.SendAsync("Emulation.setEmulatedMedia", new
+        {
+            features = new[]
             {
-                ["windowId"] = state.WindowId,
-                ["bounds"] = bounds,
-            });
+                new { name = "prefers-color-scheme", value = _colorScheme ?? "" },
+                new { name = "prefers-reduced-motion", value = _reducedMotion ?? "" },
+            },
+        });
+        if (_offline)
+        {
+            await cdp.SendAsync("Network.emulateNetworkConditions", new { offline = true, latency = 0, downloadThroughput = -1, uploadThroughput = -1 });
         }
-        finally { await cdp.DetachAsync(); }
+
+        if (reload && !(await page.UrlAsync()).StartsWith("about:", StringComparison.Ordinal))
+        {
+            try { await page.ReloadAsync(); }
+            catch (McpToolException) { /* keep the new profile even when the page will not come back */ }
+        }
     }
 
-    private async Task RestoreViewportAsync(IPage page, (int Width, int Height)? size)
-    {
-        // Keep emulation on our own CDP session, so clearing it also releases the
-        // override. Playwright's SetViewportSize leaves an override on its session.
-        if (!_viewportSessions.TryGetValue(page, out var cdp))
-        {
-            cdp = await page.Context.NewCDPSessionAsync(page);
-            _viewportSessions[page] = cdp;
-        }
-
-        if (size is { } fixedSize)
-        {
-            await cdp.SendAsync("Emulation.setDeviceMetricsOverride", new Dictionary<string, object>
-            {
-                ["width"] = fixedSize.Width,
-                ["height"] = fixedSize.Height,
-                ["deviceScaleFactor"] = 0,
-                ["mobile"] = false,
-            });
-            _attachedSizes[page] = fixedSize;
-            _windowSizedPages.Remove(page);
-            return;
-        }
-
-        // A null viewport follows the actual browser window. Setting the old pixel
-        // dimensions would leave another fixed override, so clear Chromium's emulation.
-        try { await cdp.SendAsync("Emulation.clearDeviceMetricsOverride"); }
-        finally { await cdp.DetachAsync(); }
-        _viewportSessions.Remove(page);
-        _attachedSizes.Remove(page);
-        _windowSizedPages.Add(page);
-    }
-
-    private async Task RestoreAttachedViewportsAsync()
-    {
-        foreach (var (page, size) in _originalViewports.ToArray())
-        {
-            if (!page.IsClosed)
-            {
-                try { await RestoreViewportAsync(page, size); }
-                catch (PlaywrightException) { /* a tab can close during cleanup */ }
-            }
-        }
-
-        _originalViewports.Clear();
-    }
-
-    /// <summary>Releases the agent's viewport overrides without opening an unused browser.</summary>
+    /// <summary>Releases the agent's viewport override (end of a turn) without starting a browser.</summary>
     public async Task RestoreViewportAsync()
     {
         await _gate.WaitAsync();
         try
         {
-            if (!IsAlive) return;
-            if (_attached)
+            if (_device is null && _customSize is null) return;
+            if (_page is null || _cdp is not { IsOpen: true })
             {
-                await RestoreAttachedViewportsAsync();
                 _device = null;
                 _customSize = null;
+                return;
             }
-            else if (_device is not null || _customSize is not null)
-            {
-                await ApplyDeviceAsync(null, null);
-            }
+
+            await ApplyDeviceAsync(_page, null, null);
+        }
+        catch (Exception ex) when (ex is CdpException or McpToolException)
+        {
+            // The window went away; nothing is left to restore.
         }
         finally { _gate.Release(); }
     }
 
-    /// <summary>A fresh context (same browser, same logins) with its tabs reopened where they were.</summary>
-    private async Task RecreateContextAsync()
-    {
-        var urls = _pages.Select(p => p.Url).ToList();
-        var current = _current;
-        await SaveStateAsync();
-
-        try { await _context!.CloseAsync(); }
-        catch (PlaywrightException) { /* already closed */ }
-
-        _context = await CreateContextAsync();
-        ResetTabs();
-        await ReopenAsync(urls, current);
-    }
-
-    private async Task ReopenAsync(List<string> urls, int current)
-    {
-        foreach (var url in urls)
-        {
-            var page = await NewPageAsync(_context!);
-            if (url is { Length: > 0 } && !url.StartsWith("about:", StringComparison.Ordinal))
-            {
-                try { await page.GotoAsync(url); }
-                catch (PlaywrightException) { /* keep the tab even when the page is unreachable */ }
-            }
-        }
-
-        _current = Math.Clamp(current, 0, Math.Max(0, _pages.Count - 1));
-    }
-
-    public Task<string> EmulateAsync(string? colorScheme, string? reducedMotion, bool? offline) => WithSessionAsync(async ctx =>
+    public Task<string> EmulateAsync(string? colorScheme, string? reducedMotion, bool? offline) => WithPageAsync(async page =>
     {
         var notes = new List<string>();
 
@@ -707,8 +505,8 @@ public sealed class BrowserSession : IAsyncDisposable
         {
             _colorScheme = colorScheme.ToLowerInvariant() switch
             {
-                "dark" => ColorScheme.Dark,
-                "light" => ColorScheme.Light,
+                "dark" => "dark",
+                "light" => "light",
                 "none" or "default" or "no-preference" => null,
                 var other => throw new McpToolException($"Unknown colorScheme '{other}': use dark, light or default."),
             };
@@ -719,36 +517,28 @@ public sealed class BrowserSession : IAsyncDisposable
         {
             _reducedMotion = reducedMotion.ToLowerInvariant() switch
             {
-                "reduce" => ReducedMotion.Reduce,
+                "reduce" => "reduce",
                 "none" or "default" or "no-preference" => null,
                 var other => throw new McpToolException($"Unknown reducedMotion '{other}': use reduce or default."),
             };
             notes.Add($"reducedMotion={reducedMotion}");
         }
 
-        foreach (var page in _pages)
-        {
-            await page.EmulateMediaAsync(new PageEmulateMediaOptions
-            {
-                ColorScheme = _colorScheme ?? ColorScheme.NoPreference,
-                ReducedMotion = _reducedMotion ?? ReducedMotion.NoPreference,
-            });
-        }
-
         if (offline is { } off)
         {
             _offline = off;
-            await ctx.SetOfflineAsync(off);
+            await page.Cdp.SendAsync("Network.emulateNetworkConditions", new { offline = off, latency = 0, downloadThroughput = -1, uploadThroughput = -1 });
             notes.Add($"offline={off}");
         }
 
+        await ApplyEmulationAsync(page, reload: false);
         return notes.Count == 0 ? "Nothing to change." : "Emulating " + string.Join(", ", notes) + ".";
     });
 
     /// <summary>A screenshot at each preset, then the previous viewport restored: the quick responsive check.</summary>
-    public Task<IReadOnlyList<McpContent>> ResponsiveShotsAsync(IReadOnlyList<ViewportPreset> presets, bool fullPage) => WithSessionAsync(async _ =>
+    public Task<IReadOnlyList<McpContent>> ResponsiveShotsAsync(IReadOnlyList<ViewportPreset> presets, bool fullPage) => WithPageAsync(async page =>
     {
-        if (_pages.Count == 0)
+        if ((await page.UrlAsync()).StartsWith("about:", StringComparison.Ordinal))
         {
             throw new McpToolException("Open a page first (browser_navigate).");
         }
@@ -756,183 +546,101 @@ public sealed class BrowserSession : IAsyncDisposable
         var previousDevice = _device;
         var previousSize = _customSize;
         var results = new List<McpContent>();
-
-        // The user's own browser cannot be reset by "no device", so put each tab's size back by hand.
-        var originalSizes = new Dictionary<IPage, ViewportState>();
-        if (_attached)
-        {
-            foreach (var page in _pages) originalSizes[page] = await CaptureViewportAsync(page);
-        }
         try
         {
             foreach (var preset in presets)
             {
-                await ApplyDeviceAsync(preset, null);
-                var page = _pages[Math.Clamp(_current, 0, _pages.Count - 1)];
+                await ApplyDeviceAsync(page, preset, null);
                 await Task.Delay(400);
-                var bytes = await page.ScreenshotAsync(new PageScreenshotOptions
-                {
-                    FullPage = fullPage,
-                    Type = ScreenshotType.Jpeg,
-                    Quality = 75,
-                });
-                results.Add(McpContent.FromText($"{preset} - {page.Url}"));
+                var bytes = await page.ScreenshotAsync(fullPage, jpeg: true);
+                results.Add(McpContent.FromText($"{preset} - {await page.UrlAsync()}"));
                 results.Add(McpContent.FromImage(bytes, "image/jpeg"));
             }
         }
         finally
         {
-            await ApplyDeviceAsync(previousDevice, previousSize);
-
-            foreach (var (page, size) in originalSizes)
-            {
-                if (!page.IsClosed)
-                {
-                    await RestoreViewportAsync(page, size);
-                }
-            }
+            await ApplyDeviceAsync(page, previousDevice, previousSize);
         }
 
         return (IReadOnlyList<McpContent>)results;
     });
 
-    // ---- Visible / hidden, and handing a login to the user ------------------------------
-
-    /// <summary>Restarts the browser visible or hidden, keeping the tabs' URLs and the logins.</summary>
-    public Task<string> SetModeAsync(bool headless) => WithSessionAsync(async _ =>
-    {
-        if (_attached)
-        {
-            throw new McpToolException("This is a browser you opened yourself, so it is already visible and stays as you left it.");
-        }
-
-        if (CurrentHeadless == headless)
-        {
-            return headless ? "Already hidden (headless)." : "Already visible.";
-        }
-
-        await SwitchModeAsync(headless);
-        return headless ? "Now hidden (headless)." : "Now visible.";
-    });
-
-    private async Task SwitchModeAsync(bool headless)
-    {
-        var urls = _pages.Select(p => p.Url).ToList();
-        var current = _current;
-        await CloseBrowserAsync(saveState: true);
-
-        _headlessOverride = headless;
-        await LaunchAsync();
-        _context = await CreateContextAsync();
-        await ReopenAsync(urls, current);
-    }
+    // ---- Handing a step to the user -----------------------------------------------------
 
     /// <summary>
     /// Lets the user do something only they can - sign in, pass a captcha, approve an SSO
-    /// prompt - in a visible window, then carries on. The logins are saved, so the agent's
-    /// hidden browser is signed in afterwards.
+    /// prompt - in the Codale Browser window, then carries on once the page shows it is done.
     /// </summary>
-    public Task<string> HandoffAsync(string? url, string? untilUrl, string? untilText, int timeoutSeconds, bool returnToHidden, CancellationToken ct = default) => WithSessionAsync(async _ =>
+    public Task<string> HandoffAsync(string? url, string? untilUrl, string? untilText, int timeoutSeconds, CancellationToken ct = default) => WithPageAsync(async page =>
     {
-        var wasHidden = !_attached && CurrentHeadless;
-        if (wasHidden)
-        {
-            await SwitchModeAsync(headless: false);
-        }
-
-        IPage Active() => _pages[Math.Clamp(_current, 0, _pages.Count - 1)];
-
-        if (_pages.Count == 0)
-        {
-            await NewPageAsync(_context!);
-            _current = 0;
-        }
-
         if (url is { Length: > 0 })
         {
-            await Active().GotoAsync(RequireWebUrl(url));
+            await page.NavigateAsync(RequireWebUrl(url));
         }
 
-        await Active().BringToFrontAsync();
-        var startUrl = Active().Url;
+        // Show the user this session's tab and raise the window; a plain Chromium only gets bringToFront.
+        if (await ControlAsync(new { op = "focus", session = SessionKey }, TimeSpan.FromSeconds(3)) is null)
+        {
+            try { await page.Cdp.SendAsync("Page.bringToFront"); } catch (CdpException) { }
+        }
+        var startUrl = await page.UrlAsync();
         var sawPassword = false;
         var satisfied = 0;
         var deadline = DateTime.UtcNow.AddSeconds(Math.Clamp(timeoutSeconds, 10, 900));
         var done = false;
+        var where = startUrl;
 
         while (DateTime.UtcNow < deadline && !done)
         {
             await Task.Delay(700, ct);
-            if (!IsAlive || _pages.Count == 0)
+            if (_cdp is not { IsOpen: true })
             {
-                throw new McpToolException("The browser window was closed before the sign-in finished.");
+                throw new McpToolException("The Codale Browser window was closed before the user finished.");
             }
 
             try
             {
-                var page = Active();
-                var hasPassword = await page.Locator("input[type=password]:visible").CountAsync() > 0;
+                where = await page.UrlAsync();
+                var hasPassword = await page.EvaluateAsync(PasswordVisibleScript) is { ValueKind: JsonValueKind.True };
                 sawPassword |= hasPassword;
 
                 var ok = untilUrl is { Length: > 0 }
-                    ? page.Url.Contains(untilUrl, StringComparison.OrdinalIgnoreCase)
+                    ? where.Contains(untilUrl, StringComparison.OrdinalIgnoreCase)
                     : untilText is { Length: > 0 }
-                        ? await page.GetByText(untilText).First.IsVisibleAsync()
-                        : sawPassword ? !hasPassword : page.Url != startUrl;
+                        ? await page.EvaluateAsync($"document.body.innerText.includes({JsonSerializer.Serialize(untilText)})") is { ValueKind: JsonValueKind.True }
+                        : sawPassword ? !hasPassword : where != startUrl;
 
                 // Two quiet polls in a row: a redirect chain or a spinner is not "finished".
                 satisfied = ok ? satisfied + 1 : 0;
                 done = satisfied >= 2;
             }
-            catch (PlaywrightException)
+            catch (McpToolException)
             {
-                satisfied = 0; // mid-navigation or a closed popup; look again
+                satisfied = 0; // mid-navigation; look again
             }
         }
 
-        var where = _pages.Count > 0 ? Active().Url : "(no page)";
-        if (!done)
-        {
-            return $"Timed out waiting for the user; the browser window is still open at {where}. Try browser_handoff again or continue without signing in.";
-        }
-
-        await SaveStateAsync();
-        if (returnToHidden && wasHidden)
-        {
-            await SwitchModeAsync(headless: true);
-            return $"The user finished; login saved and the browser is hidden again. Current page: {(_pages.Count > 0 ? Active().Url : where)}";
-        }
-
-        return $"The user finished. Current page: {where}";
+        return done
+            ? $"The user finished. Current page: {where}"
+            : $"Timed out waiting for the user; Codale Browser is still open at {where}. Try browser_handoff again or continue without signing in.";
     });
 
-    public Task<string> SessionAsync(string action) => WithSessionAsync(async ctx =>
+    public Task<string> SessionAsync(string action) => WithPageAsync(async page =>
     {
         switch (action)
         {
             case "save":
-                await SaveStateAsync();
-                return _attached ? "Attached to your own browser; its sessions are already yours." : $"Saved logins to {StatePath}.";
+                return "Codale Browser keeps logins in its own profile as they happen; there is nothing to save.";
 
             case "clear":
-                await ctx.ClearCookiesAsync();
-                try
-                {
-                    File.Delete(StatePath);
-                }
-                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-                {
-                    return $"Cleared cookies, but could not delete the saved logins at {StatePath}: {e.Message}";
-                }
-
-                return "Cleared cookies and the saved logins. Local storage of open pages is untouched until they reload.";
+                await page.Cdp.SendAsync("Network.clearBrowserCookies");
+                return "Cleared all cookies in Codale Browser. Local storage of open pages is untouched until they reload.";
 
             case "info":
-                var cookies = await ctx.CookiesAsync();
-                var domains = cookies.Select(c => c.Domain.TrimStart('.')).Distinct().OrderBy(d => d).ToList();
-                return $"{cookies.Count} cookies across {domains.Count} domains" +
-                    (domains.Count > 0 ? ": " + string.Join(", ", domains.Take(30)) : "") +
-                    $"\nSaved state: {(File.Exists(StatePath) ? StatePath : "none")}";
+                var cookies = (await page.Cdp.SendAsync("Network.getAllCookies")).GetProperty("cookies");
+                var domains = cookies.EnumerateArray().Select(c => (c.GetProperty("domain").GetString() ?? "").TrimStart('.')).Distinct().Order().ToList();
+                return $"{cookies.GetArrayLength()} cookies across {domains.Count} domains" +
+                    (domains.Count > 0 ? ": " + string.Join(", ", domains.Take(30)) : "");
 
             default:
                 throw new McpToolException("action must be save, clear or info.");
@@ -945,55 +653,34 @@ public sealed class BrowserSession : IAsyncDisposable
         _promptText = promptText;
     }
 
+    private const string PasswordVisibleScript =
+        "[...document.querySelectorAll('input[type=password]')].some(e => { const r = e.getBoundingClientRect(), s = getComputedStyle(e); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; })";
+
     /// <summary>The current page's login-wall tell: a visible password field, or a sign-in style address.</summary>
-    public static async Task<bool> LooksLikeLoginAsync(IPage page)
+    public static async Task<bool> LooksLikeLoginAsync(CdpPage page)
     {
         try
         {
-            if (await page.Locator("input[type=password]:visible").CountAsync() > 0)
-            {
-                return true;
-            }
+            if (await page.EvaluateAsync(PasswordVisibleScript) is { ValueKind: JsonValueKind.True }) return true;
+            return System.Text.RegularExpressions.Regex.IsMatch(await page.UrlAsync(), @"/(log-?in|sign-?in|sso|oauth2?|auth(?:orize)?)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         }
-        catch (PlaywrightException)
+        catch (McpToolException)
         {
             return false;
         }
-
-        return System.Text.RegularExpressions.Regex.IsMatch(page.Url, @"/(log-?in|sign-?in|sso|oauth2?|auth(?:orize)?)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     }
 
-    public string ConsoleLog(IPage page, bool clear) => Drain(_console, page, clear);
+    public string ConsoleLog(bool clear) => Drain(_console, clear);
 
-    public string NetworkLog(IPage page, bool clear) => Drain(_network, page, clear);
+    public string NetworkLog(bool clear) => Drain(_network, clear);
 
-    private static string Drain(Dictionary<IPage, List<string>> logs, IPage page, bool clear)
+    private static string Drain(List<string> log, bool clear)
     {
-        if (!logs.TryGetValue(page, out var log)) return "(none)";
         lock (log)
         {
             var text = log.Count == 0 ? "(none)" : string.Join('\n', log);
             if (clear) log.Clear();
             return text;
-        }
-    }
-
-    public static ILocator Resolve(IPage page, string target)
-    {
-        target = target.Trim();
-        return target.Length > 1 && target[0] == 'e' && target[1..].All(char.IsAsciiDigit)
-            ? page.Locator($"[data-codale-ref=\"{target}\"]")
-            : page.Locator(target);
-    }
-
-    /// <summary>True when target names a snapshot ref that no element carries any more (a stale or unknown ref).</summary>
-    public static async Task EnsureRefExistsAsync(IPage page, string target)
-    {
-        target = target.Trim();
-        if (target.Length > 1 && target[0] == 'e' && target[1..].All(char.IsAsciiDigit) &&
-            await page.Locator($"[data-codale-ref=\"{target}\"]").CountAsync() == 0)
-        {
-            throw new McpToolException($"No element {target} on this page. Refs only last until the next browser_snapshot (or a navigation): take a fresh browser_snapshot and use its refs.");
         }
     }
 
@@ -1042,13 +729,21 @@ public sealed class BrowserSession : IAsyncDisposable
         }
         """;
 
-    /// <summary>Closes the browser for the browser_close tool, waiting its turn so an in-flight tool is not torn down mid-call.</summary>
+    /// <summary>
+    /// For the browser_close tool: lets go of Codale Browser and forgets this session's emulation,
+    /// waiting its turn so an in-flight tool is not torn down mid-call. The window stays open.
+    /// </summary>
     public async Task CloseAsync()
     {
         await _gate.WaitAsync();
         try
         {
-            await DisposeAsync();
+            await DropConnectionAsync();
+            _device = null;
+            _customSize = null;
+            _colorScheme = null;
+            _reducedMotion = null;
+            _offline = false;
         }
         finally
         {
@@ -1058,9 +753,7 @@ public sealed class BrowserSession : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await CloseBrowserAsync(saveState: true);
-        _playwright?.Dispose();
-        _playwright = null;
+        await CloseAsync();
         CleanupDownloads();
     }
 

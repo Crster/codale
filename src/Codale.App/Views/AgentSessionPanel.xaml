@@ -495,8 +495,8 @@
                 </Button>
                 <Border Height="1" Margin="8,2" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
-                <Button Style="{StaticResource CompactAction}" AutomationProperties.Name="Todos"
-                        ToolTipService.ToolTip="Todos">
+                <Button Style="{StaticResource CompactAction}" AutomationProperties.Name="Checklist"
+                        ToolTipService.ToolTip="Checklist">
                     <StackPanel Spacing="1" VerticalAlignment="Center">
                         <FontIcon Glyph="&#xE9D5;" FontSize="13"
                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
@@ -507,7 +507,7 @@
                         <Flyout x:Name="TodosFlyout" AreOpenCloseAnimationsEnabled="False"
                                 Opening="OnDetailFlyoutOpening" Closed="OnDetailFlyoutClosed" Placement="LeftEdgeAlignedTop" FlyoutPresenterStyle="{StaticResource DetailFlyout}">
                             <StackPanel Width="340" Spacing="10">
-                                <TextBlock Text="No todos yet." FontSize="12" Margin="8"
+                                <TextBlock Text="No checklist yet." FontSize="12" Margin="8"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                            Visibility="{x:Bind Session.Todos.Count, Mode=OneWay, Converter={StaticResource CountToInverseVisibility}}" />
                                 <ScrollViewer MaxHeight="480" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
@@ -515,7 +515,7 @@
                                     <StackPanel Spacing="2" Visibility="{x:Bind Session.Todos.Count, Mode=OneWay, Converter={StaticResource CountToVisibility}}">
                                 <Border Padding="4,2,4,8">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <TextBlock Text="Todos" />
+                                        <TextBlock Text="Checklist" />
                                         <Border
                                             Background="{StaticResource KindTodoTintBrush}"
                                             Style="{StaticResource CountChip}"
@@ -616,7 +616,12 @@
                                     SelectionMode="None">
                                     <ListView.ItemTemplate>
                                         <DataTemplate x:DataType="vm:RunningTaskItem">
-                                            <Grid ColumnSpacing="10" ToolTipService.ToolTip="{x:Bind TitleTip}">
+                                            <StackPanel>
+                                                <TextBlock Margin="4,10,4,5" FontSize="11" FontWeight="SemiBold"
+                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                           Text="{x:Bind CategoryHeading, Mode=OneWay}"
+                                                           Visibility="{x:Bind HasCategoryHeading, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                                <Grid ColumnSpacing="10" ToolTipService.ToolTip="{x:Bind TitleTip}">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
@@ -673,7 +678,8 @@
                                                     <FontIcon FontSize="9" Glyph="&#xE71A;" />
                                                 </Button>
                                             </Grid>
-                                        </DataTemplate>
+                                            </StackPanel>
+                                            </DataTemplate>
                                     </ListView.ItemTemplate>
                                 </ListView>
                                 

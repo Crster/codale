@@ -15,7 +15,7 @@ namespace Codale.Search;
 /// the topics of earlier Codale turns, and Git summaries loaded on demand. Ranking runs on the in-memory source
 /// snapshot; excerpts are read from disk and verified by hash. Indexing is asynchronous.
 /// </summary>
-public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? sources = null) : IDisposable
+public sealed partial class ProjectKnowledgeIndex(CodaleDatabase db, ISourceIndexes? sources = null) : IDisposable
 {
     private readonly ISourceIndexes _sources = sources ?? SharedSourceIndexes.Instance;
 
@@ -222,7 +222,9 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
         !CodeDiscovery.IsNoisePath(Path.DirectorySeparatorChar + path) &&
         !new[] { ".db", ".sqlite", ".sqlite3", ".db-wal", ".db-shm" }.Any(ext => path.EndsWith(ext, StringComparison.OrdinalIgnoreCase));
 
-    public static string? ReadSource(string root, string relative)
+    public static string? ReadSource(string root, string relative) => ReadSource(root, relative, null);
+
+    private static string? ReadSource(string root, string relative, SourceFile? scanned)
     {
         try
         {
@@ -235,8 +237,9 @@ public sealed partial class ProjectKnowledgeIndex(CodaleDb db, ISourceIndexes? s
                 if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) return null;
             var info = new FileInfo(path);
             if (!info.Exists || info.Length > MaxFileBytes) return null;
-            var content = File.ReadAllText(path);
-            return IsIndexable(content) ? content : null;
+            var content = scanned is { IsRetained: true } && scanned.Length == info.Length && scanned.LastWriteUtc == info.LastWriteTimeUtc
+                ? scanned.ReadText() : File.ReadAllText(path);
+            return content is not null && IsIndexable(content) ? content : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { return null; }
     }

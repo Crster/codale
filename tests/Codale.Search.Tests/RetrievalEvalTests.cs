@@ -61,7 +61,7 @@ public sealed partial class RetrievalEvalTests : IDisposable
     {
         var exact = _labels.Select(l => new Label(l.Symbol, l.Path, l.Symbol)).ToArray();
         var dbPath = Path.Combine(_directory, "benchmark.db");
-        using var store = new CodaleDb(dbPath);
+        using var store = new CodaleDatabase(dbPath);
         using var index = new ProjectKnowledgeIndex(store);
         var clock = System.Diagnostics.Stopwatch.StartNew();
         await index.RefreshAsync(_corpus);

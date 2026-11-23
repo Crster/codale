@@ -396,7 +396,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Background shells and subagents this conversation started, oldest first.</summary>
     public ObservableCollection<RunningTaskItem> RunningTasks { get; } = [];
 
-    /// <summary>The same tasks for the session panels: running ones first, newest first within each group.</summary>
+    /// <summary>Session-panel tasks grouped by running subagent, running shell, and finished, newest first.</summary>
     public ObservableCollection<RunningTaskItem> SortedTasks { get; } = [];
 
     private static readonly TimeSpan TaskCaptureDelay = TimeSpan.FromSeconds(10);
@@ -407,7 +407,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         var now = DateTimeOffset.Now;
         var wanted = RunningTasks.Where(t => SortedTasks.Contains(t) ||
                 (t.IsRunning && now - t.StartedAt >= TaskCaptureDelay))
-            .OrderByDescending(t => t.IsRunning).ThenByDescending(t => t.StartedAt).ToList();
+            .OrderBy(t => !t.IsRunning ? 2 : t.Kind == RunningTaskKind.Subagent ? 0 : 1)
+            .ThenByDescending(t => t.StartedAt).ToList();
         for (var i = SortedTasks.Count - 1; i >= 0; i--)
         {
             if (!wanted.Contains(SortedTasks[i]))
@@ -427,6 +428,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             {
                 SortedTasks.Move(at, i);
             }
+        }
+
+        string? previousCategory = null;
+        foreach (var task in SortedTasks)
+        {
+            var category = !task.IsRunning ? "Finished" : task.Kind == RunningTaskKind.Subagent ? "Subagent" : "Shell";
+            task.CategoryHeading = category == previousCategory ? "" : category;
+            previousCategory = category;
         }
 
         SyncActiveTasks();
@@ -2639,8 +2648,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     // cap it. Flattening newlines turned a directory table into one
                     // unwrapped-in-any-language line of text.
                     call.Output = CapOutput(completed.ResultText);
-                    if (!completed.IsError && ToolCallItem.IsShellName(call.ToolName) && completed.ResultText is { Length: > 0 } verified && _memoryVerifiedEvidence.Length < 6000)
-                        _memoryVerifiedEvidence += "\nVerified command output:\n" + verified[..Math.Min(verified.Length, 2000)];
 
                     // A question's raw result is one long "q"="a" line; the step shows each
                     // question with its answer instead, for when the reader reopens it.
@@ -2827,8 +2834,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
                 _interruptPending = false;
                 _autoModeUnavailable = false;
-                if (outcome == TurnOutcome.Completed)
-                    _ = CaptureMemoryAsync(_memoryTurnUser, Items.OfType<AssistantMessageItem>().LastOrDefault()?.Text, verifiedEvidence: _memoryVerifiedEvidence);
                 EndTurn(outcome);
 
                 // The reader asked for nothing, so an idle compaction finishing is no reason to call them back.
@@ -4365,7 +4370,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private async Task SendTurnAsync(string text, IReadOnlyList<TurnAttachment> attachments, bool planOnly, bool askOnly, CancellationToken preparationToken = default, string? displayText = null)
     {
-        var previousReply = LastRoutingReply;
         _idleCompactTimer.Stop();
         var compact = IsCompactCommand(text);
         if (!compact)
@@ -4453,9 +4457,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (!compact)
         {
             RecordUserTurn(displayText ?? text);
-            _memoryTurnUser = text;
-            _memoryVerifiedEvidence = "";
-            _ = CaptureMemoryAsync(text, previousReply);
         }
 
         try
@@ -5443,7 +5444,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        _memoryLifetime.Cancel();
         foreach (var task in RunningTasks.Where(t => t.IsWorkspaceTerminal && t.IsRunning).ToList())
             task.Cancel?.Invoke();
         _taskCaptureTimer?.Stop();

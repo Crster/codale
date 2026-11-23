@@ -9,6 +9,31 @@ public sealed class AutoRouterTests
     private static SmartDecision Choice(string choice, double confidence = .95) =>
         new("choice", choice, null, null, new Dictionary<string, double>(), confidence);
 
+    [Theory]
+    [InlineData("rename Save to Apply", RouteIntent.Act)]
+    [InlineData("why does the login page redirect twice?", RouteIntent.Ask)]
+    [InlineData("create a snake game", RouteIntent.Plan)]
+    public async Task Clear_requests_use_local_routing_without_calling_a_provider(string text, RouteIntent intent)
+    {
+        var assessment = await AutoRouter.AssessLocalFirstAsync(text, new { }, AutoDecisions.Questions(),
+            (_, _, _) => throw new Exception("Decision must not run"),
+            (_, _, _) => throw new Exception("General must not run"), default);
+        Assert.Equal(intent, (assessment with { FreshTopic = true }).Intent);
+        Assert.Equal("Local", assessment.Source);
+    }
+
+    [Fact]
+    public async Task Ambiguous_requests_still_use_the_provider()
+    {
+        const string text = "This is behaving strangely";
+        Assert.Null(MessageRouting.TryRouteLocally(text));
+        var calls = 0;
+        await AutoRouter.AssessLocalFirstAsync(text, new { }, AutoDecisions.Questions(),
+            (_, _, _) => { calls++; return Task.FromResult<IReadOnlyDictionary<string, SmartDecision>?>(null); },
+            (_, _, _) => Task.FromResult<string?>(null), default);
+        Assert.Equal(1, calls);
+    }
+
     [Fact]
     public async Task Decision_is_asked_even_when_local_rules_are_confident_and_valid_answers_win()
     {

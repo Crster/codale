@@ -12,7 +12,7 @@ public sealed record TopicRedirect(string Text, string? FeatureId, string? Featu
 }
 
 /// <summary>
-/// Model-first assessment of independent topic, intent, difficulty, planning, clarity and preference dimensions.
+/// Local-first assessment of topic, intent, difficulty, planning, clarity and preference dimensions.
 /// </summary>
 public sealed partial class ChatViewModel
 {
@@ -54,7 +54,7 @@ public sealed partial class ChatViewModel
             memory,
         };
         var general = _smart.CreateClient(SmartFeatureSettings.General);
-        var assessment = await AutoRouter.AssessAsync(text, state, questions,
+        var assessment = await AutoRouter.AssessLocalFirstAsync(text, state, questions,
             (input, qs, token) => _smart.Settings.SmartFeatureEnabled("routing") && _decider.IsAvailable
                 ? _decider.AskAsync(input, qs, token) : Task.FromResult<IReadOnlyDictionary<string, SmartDecision>?>(null),
             async (system, input, token) => _smart.Settings.SmartFeatureEnabled("routing") && general.IsEnabled
@@ -124,7 +124,7 @@ public sealed partial class ChatViewModel
     }
 
     /// <summary>
-    /// A history is named after its latest prompt: at once from the prompt itself, then by the General model when it is set.
+    /// A history is named locally after its latest prompt.
     /// A prompt with no subject of its own ("yes", "continue", "commit this", a slash command) keeps the current name.
     /// </summary>
     private void RenameSessionFromPrompt(FeatureService features, string id, string prompt)
@@ -135,7 +135,6 @@ public sealed partial class ChatViewModel
             features.Rename(id, title);
             Title = FeatureName = title;
         }
-        NameSessionAsync(id, prompt, title);
     }
 
     /// <summary>The newest prompt the user sent in this chat, or null before the first.</summary>
@@ -150,24 +149,4 @@ public sealed partial class ChatViewModel
         return title.Length > 0 ? title : null;
     }
 
-    /// <summary>The General model names the session from a prompt; the quick name stands until then, or when it is off.</summary>
-    private async void NameSessionAsync(string id, string prompt, string placeholder)
-    {
-        if (!_smart.Settings.SmartFeatureEnabled("title") || Features is not { } features) return;
-        try
-        {
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            var named = await _smart.Instance.TitleAsync(new(ProjectPath, ProjectPath, "title", _chatId), prompt, deadline.Token);
-            if (named?.Value is not { Length: > 0 } title) return;
-            _dispatcher.TryEnqueue(() =>
-            {
-                // The user (or a redirect) may have named it meanwhile: only the placeholder is replaced.
-                if (features.Get(id) is not { } session || session.Name != placeholder) return;
-                features.Rename(id, title);
-                if (FeatureId == id) Title = FeatureName = title;
-            });
-        }
-        catch (OperationCanceledException) { }
-        catch (InvalidOperationException) { }
-    }
 }

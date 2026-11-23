@@ -17,7 +17,7 @@ public sealed class ProjectMemoryTests : IDisposable
     [Fact]
     public void Separate_sessions_with_identical_topics_are_never_merged()
     {
-        using var db = new CodaleDb(Folder);
+        using var db = new CodaleDatabase(Folder);
         using var index = new ProjectKnowledgeIndex(db);
         Assert.Empty(index.ListFeatures());
         var first = index.CreateFeature("Fix login", "same topic");
@@ -31,7 +31,7 @@ public sealed class ProjectMemoryTests : IDisposable
     [Fact]
     public void A_feature_round_trips_and_lists_newest_first()
     {
-        using var db = new CodaleDb(Folder);
+        using var db = new CodaleDatabase(Folder);
         using var index = new ProjectKnowledgeIndex(db);
         var login = index.CreateFeature("Login", "Sign in flow");
         Thread.Sleep(5);
@@ -45,11 +45,11 @@ public sealed class ProjectMemoryTests : IDisposable
     public void Features_survive_reopening_the_database()
     {
         string id;
-        using (var db = new CodaleDb(Folder))
+        using (var db = new CodaleDatabase(Folder))
         using (var index = new ProjectKnowledgeIndex(db))
             id = index.CreateFeature("Login", "Sign in flow").Id;
 
-        using var reopened = new CodaleDb(Folder);
+        using var reopened = new CodaleDatabase(Folder);
         using var again = new ProjectKnowledgeIndex(reopened);
         Assert.Equal("Login", again.GetFeature(id)!.Name);
         Assert.Equal(id, again.SearchFeatures("login", 3).Single().Id);
@@ -58,7 +58,7 @@ public sealed class ProjectMemoryTests : IDisposable
     [Fact]
     public void Search_finds_the_feature_by_its_name_summary_and_prompts()
     {
-        using var db = new CodaleDb(Folder);
+        using var db = new CodaleDatabase(Folder);
         using var index = new ProjectKnowledgeIndex(db);
         var login = index.CreateFeature("Login", "");
         var dashboard = index.CreateFeature("Dashboard", "");
@@ -73,7 +73,7 @@ public sealed class ProjectMemoryTests : IDisposable
     [Fact]
     public void Summary_and_progress_are_kept()
     {
-        using var db = new CodaleDb(Folder);
+        using var db = new CodaleDatabase(Folder);
         using var index = new ProjectKnowledgeIndex(db);
         var f = index.CreateFeature("Login", "");
         index.RecordProgress(f.Id, 500, "fix redirect");
@@ -91,7 +91,7 @@ public sealed class ProjectMemoryTests : IDisposable
     [Fact]
     public void Written_files_are_listed_newest_first_and_make_the_feature_findable_by_path()
     {
-        using var db = new CodaleDb(Folder);
+        using var db = new CodaleDatabase(Folder);
         using var index = new ProjectKnowledgeIndex(db);
         var login = index.CreateFeature("Login", "");
         index.RecordSessionFile(login.Id, "src/Auth.cs");
@@ -108,7 +108,7 @@ public sealed class ProjectMemoryTests : IDisposable
     [Fact]
     public void Deleting_a_feature_removes_it_its_files_and_its_search_entries()
     {
-        using var db = new CodaleDb(Folder);
+        using var db = new CodaleDatabase(Folder);
         using var index = new ProjectKnowledgeIndex(db);
         var f = index.CreateFeature("Login", "");
         index.RecordSessionFile(f.Id, "src/Auth.cs");
@@ -124,7 +124,7 @@ public sealed class ProjectMemoryTests : IDisposable
     [Fact]
     public void Renaming_updates_what_search_finds()
     {
-        using var db = new CodaleDb(Folder);
+        using var db = new CodaleDatabase(Folder);
         using var index = new ProjectKnowledgeIndex(db);
         var f = index.CreateFeature("Auth", "");
         index.RenameFeature(f.Id, "Authentication");
@@ -135,7 +135,7 @@ public sealed class ProjectMemoryTests : IDisposable
     [Fact]
     public void Files_recorded_for_a_session_that_is_not_a_feature_do_not_appear_in_the_history()
     {
-        using var db = new CodaleDb(Folder);
+        using var db = new CodaleDatabase(Folder);
         using var index = new ProjectKnowledgeIndex(db);
         index.RecordSessionFile("global-search", "src/Auth.cs");
 
@@ -148,14 +148,14 @@ public sealed class ProjectMemoryTests : IDisposable
     public void Explicit_provider_mapping_survives_restart_and_reconfiguration(string provider)
     {
         string sessionId;
-        using (var db = new CodaleDb(Folder))
+        using (var db = new CodaleDatabase(Folder))
         using (var index = new ProjectKnowledgeIndex(db))
         {
             sessionId = index.CreateFeature("First prompt", "").Id;
             index.SetProviderSession(new ProviderSession(sessionId, provider, "native", "checkout", "endpoint"));
         }
 
-        using var reopenedDb = new CodaleDb(Folder);
+        using var reopenedDb = new CodaleDatabase(Folder);
         using var reopened = new ProjectKnowledgeIndex(reopenedDb);
         Assert.Equal(new ProviderSession(sessionId, provider, "native", "checkout", "endpoint"), reopened.GetProviderSession(sessionId));
         reopened.SetProviderSession(new ProviderSession(sessionId, provider, "replacement", "checkout", "endpoint2"));
@@ -166,7 +166,7 @@ public sealed class ProjectMemoryTests : IDisposable
     [Fact]
     public void Deleting_a_session_removes_its_provider_mapping()
     {
-        using var db = new CodaleDb(Folder);
+        using var db = new CodaleDatabase(Folder);
         using var index = new ProjectKnowledgeIndex(db);
         var session = index.CreateFeature("Session", "");
         index.SetProviderSession(new ProviderSession(session.Id, "codex", "native", "checkout", ""));

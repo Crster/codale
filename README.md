@@ -41,13 +41,15 @@ The `Codale.Mcp.Tasks` executable hosts five separate workspace servers, selecte
 | `codale-command` | `list_commands`, `add_command`, `run_command` for saved and detected commands |
 | `codale-terminal` | `list_terminals`, `read_terminal`, `run_in_terminal`, `stop_terminal` |
 | `codale-memory` | `memory_save`, `memory_search`, `memory_list`, `memory_forget` |
-| `codale-secret` | `env_list`, `env_get`, `env_set` for workspace secrets |
+| `codale-todo` | `todo_list`, `todo_complete` for user-defined workspace todos |
 
 `run_command` and `run_in_terminal` open visible terminal tabs. `stop_terminal` only interrupts terminals opened by the agent through those tools. The old MCP `explore` tool is no longer exposed.
 
 Three additional executables supply optional tools:
 
-- **`codale-browser`**: Playwright browser navigation, snapshots, screenshots, interaction, uploads, viewport/emulation checks, and user handoff. Uploads are restricted to the project directory.
+- **`codale-browser`**: drives Codale Browser for navigation, snapshots, screenshots, interaction, uploads, viewport/emulation checks, and user handoff. Uploads are restricted to the project directory.
+
+Codale Browser is the app's WebView2 window; the **Open browser** command opens it, and the browser MCP opens it on its first call if it is not running, then drives it over the DevTools Protocol on its loopback debugging port (9333). Each chat's agent works in a tab of its own, marked with that session's colour (a bar, tint and dot); tabs you open yourself stay plain, and a new agent tab opens in the background when you are on a page of your own. Agents ask for their tab over a per-user control pipe, so parallel chats never share a page. The agent's work is always visible there, and logins stay in the window's profile (shared by all tabs). Ctrl+T, Ctrl+W, Ctrl+Tab and Ctrl+L work as in other browsers. Enter an address and press Enter; Point copies the selected element's path to the clipboard. Console and Requests show recent page activity, and the toolbar's theme button switches both the window and the page's `prefers-color-scheme`. Device and media emulation the agent sets lasts only while it is attached.
 - **`codale-computer`**: Windows desktop screenshots and mouse/keyboard control.
 - **`codale-phone`**: Android device and emulator control through `adb`, including screenshots, UI trees, input, deployment, logs, and port forwarding. Project file transfers are restricted to the project directory.
 
@@ -57,7 +59,7 @@ Tool availability and approvals depend on the selected tool and permission modes
 
 Smart features use independently configured **General**, **Auto Complete**, **Embedding**, and **Decision** model roles. All roles start Off. General supports Claude/Codex CLI accounts and compatible API profiles; completion and embedding require supported OpenAI-compatible endpoints and explicit models.
 
-Configured roles provide commit messages, session names, shell translation, search refinement, summaries, completion, embeddings, and routing/risk decisions. Local search and indexing remain available with Smart roles off. Remote features may send source code to the selected provider. Background provider exploration uses read tools.
+Configured roles provide commit messages, shell translation, search refinement, summaries, completion, embeddings, and routing/risk decisions. Session names are generated locally. Local search and indexing remain available with Smart roles off. Remote features may send source code to the selected provider. Background provider exploration uses read tools.
 
 The status bar shows Off, Idle, Suggesting, Processing, or Error. Hover over it for status details. The app no longer downloads, packages, or loads a local inference model. Native inference code remains for development and evaluation only.
 
@@ -77,7 +79,7 @@ See [Smart provider configuration and behavior](src/Codale.Smart/README.md) and 
 
 Open Settings to configure appearance, shortcuts, terminal/editor preferences, agent accounts, endpoint profiles, and Smart roles. The user-data folder button opens the active data location.
 
-Settings live in `%LOCALAPPDATA%\Codale\settings.json`, subject to Windows package redirection for MSIX installs. External edits are watched and reloaded. Application data lives beside settings; workspace stores and CLI transcripts have separate owners and lifetimes. Secrets use Windows protection and encrypted storage.
+Preferences are stored in the application database under `%LOCALAPPDATA%\Codale\data\records`, subject to Windows package redirection for MSIX installs. Use the Settings window to edit preferences. Workspace stores and CLI transcripts have separate owners and lifetimes. Secrets use Windows protection and encrypted storage.
 
 Example preference keys:
 
@@ -121,7 +123,7 @@ Requirements:
 - Windows 11 with the Windows SDK needed by the app's `net10.0-windows10.0.26100.0` target.
 - .NET SDK 10.0.401 or newer, selected by `global.json` with major-version roll-forward. Projects target .NET 10; the current verification used SDK 11.0.100.
 - Visual Studio 2026 with Desktop development with C++ and the MSVC v145 toolset for the Explorer shell extension.
-- Git for Git features; installed/authenticated agent CLIs for agent sessions. Browser tools use Playwright Chromium; phone tools require Android SDK `adb` and a device or emulator.
+- Git for Git features; installed/authenticated agent CLIs for agent sessions. Browser tools use Codale Browser, which needs the WebView2 runtime; phone tools require Android SDK `adb` and a device or emulator.
 
 From the repository root:
 

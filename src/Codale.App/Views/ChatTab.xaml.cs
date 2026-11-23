@@ -4,6 +4,7 @@ using Codale.App.Controls;
 using Codale.App.Services;
 using Codale.App.ViewModels;
 using Codale.Core.Agents;
+using Codale.Core.Projects;
 using Codale.Core.Text;
 
 using Microsoft.UI.Xaml;
@@ -1801,9 +1802,9 @@ public sealed partial class ChatTab : UserControl
         }
     }
 
-    /// <summary>Where pasted text and images are written: <c>%TEMP%\codale\paste</c>, created on demand.</summary>
+    /// <summary>Where pasted text and images are written, created on demand.</summary>
     private static string PasteDirectory() =>
-        Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codale", "paste")).FullName;
+        Directory.CreateDirectory(Path.Combine(CodalePaths.TempDirectory, "paste")).FullName;
 
     private async void OnAttachClick(object sender, RoutedEventArgs e)
     {

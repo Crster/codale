@@ -868,26 +868,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         }
     }
 
-    /// <summary>The session's opening message is named, never answered: it often is a task the model would happily start on.</summary>
-    /// The General model names it when configured; the local heuristic answers otherwise, or when the model is slow.
-    public async Task<string?> SuggestTitleAsync(SessionListItem item, CancellationToken ct = default)
+    /// <summary>Suggest a local title based on the session's latest prompt.</summary>
+    public Task<string?> SuggestTitleAsync(SessionListItem item, CancellationToken ct = default)
     {
-        // Histories are named after their latest prompt: the open chat knows it, else the one it started with.
+        ct.ThrowIfCancellationRequested();
         var prompt = FindOpenChat(item.SessionId)?.LatestUserPrompt ?? item.Summary.LastPrompt ?? item.Summary.FirstPrompt;
-        if (string.IsNullOrWhiteSpace(prompt)) return null;
-        if (Smart.Settings.SmartFeatureEnabled("title") && Smart.Instance.Status.State == Codale.Smart.SmartState.Ready)
-        {
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            deadline.CancelAfter(TimeSpan.FromSeconds(8));
-            try
-            {
-                var named = await Smart.Instance.TitleAsync(new(ProjectPath, ProjectPath, "title"), prompt, deadline.Token);
-                if (named?.Value is { Length: > 0 } smart) return smart;
-            }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
-        }
+        if (string.IsNullOrWhiteSpace(prompt)) return Task.FromResult<string?>(null);
         var title = SessionTitles.FromPrompt(prompt);
-        return title.Length > 0 ? title : null;
+        return Task.FromResult<string?>(title.Length > 0 ? title : null);
     }
 
     private void OnSessionStateChanged(object? sender, EventArgs e)
@@ -1016,16 +1004,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     {
         if (sender is ChatViewModel { SessionId: { Length: > 0 } id })
         {
-            using var db = _database.Open();
-            var list = db.Open("todos").Open(id);
-            db.Batch(() =>
-            {
-                list.Remove();
-                for (var i = 0; i < todos.Count; i++)
-                {
-                    list.Open(i.ToString("D4")).WriteJson(new { todos[i].Content, Status = todos[i].Status.ToString() });
-                }
-            });
+            _database.SaveSessionTodos(id, [.. todos.Select(todo => new ApplicationDatabase.SessionTodo(todo.Content, todo.Status.ToString()))]);
         }
     }
 

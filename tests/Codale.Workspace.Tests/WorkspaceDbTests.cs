@@ -58,6 +58,27 @@ public sealed class WorkspaceDbTests : IDisposable
     }
 
     [Fact]
+    public void Workspace_history_pages_keep_utf8_offsets_across_reopen()
+    {
+        using (var pool = new WorkspaceDatabasePool())
+        {
+            var history = new HistoryStore(_directory, pool);
+            history.Append("f", "archived");
+            history.ArchiveUpTo("f", history.Length("f"));
+            history.Append("f", "猫");
+            history.Append("f", "next");
+            Assert.Equal(["arc.1", "log"], history.Generations("f"));
+            Assert.Equal([(4L, "猫"), (9L, "next")], history.Page("f", HistoryStore.Current, 0, 2));
+            Assert.Empty(history.Page("f", HistoryStore.Current, 1, 2));
+            history.ArchiveUpTo("f", 4);
+            Assert.Equal(["猫"], history.Lines("f", "arc.2"));
+            Assert.Equal([(5L, "next")], history.Page("f", HistoryStore.Current, 0, 2));
+        }
+        using var reopened = new WorkspaceDatabasePool();
+        Assert.Equal(["archived"], new HistoryStore(_directory, reopened).Lines("f", "arc.1"));
+    }
+
+    [Fact]
     public void Memory_replaces_a_note_by_title_and_recalls_it()
     {
         var memory = new MemoryStore(_directory);

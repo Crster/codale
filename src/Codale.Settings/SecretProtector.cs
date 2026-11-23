@@ -4,9 +4,9 @@ using System.Text;
 namespace Codale.Settings;
 
 /// <summary>
-/// Wraps a secret (a BYOK API key) for storage in settings.json with the Windows Data
+/// Wraps a secret (a BYOK API key) for database storage with the Windows Data
 /// Protection API, CurrentUser scope: only the same Windows account can read the blob
-/// back, so a copied or synced settings file does not leak the key. Stored values are
+/// back. Stored values are
 /// <c>enc:</c> plus base64; a value without that prefix is not a stored secret and reads as empty.
 /// </summary>
 /// <remarks>

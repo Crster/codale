@@ -115,6 +115,23 @@ public sealed class GrammarSymbolTests
     }
 
     [Fact]
+    public void Csharp_nullable_return_type_is_recognized_as_a_declaration()
+    {
+        const string text = """
+            class Example
+            {
+                public static string? Validate(string value)
+                {
+                    return value.Length > 0 ? Other() : null;
+                }
+            }
+            """;
+        var symbols = GrammarSymbols.Extract("sample.cs", text, null).ToArray();
+        Assert.Contains(symbols, symbol => symbol.Name == "Validate" && symbol.Kind == SourceSymbolKind.Function);
+        Assert.DoesNotContain(symbols, symbol => symbol.Name == "Other");
+    }
+
+    [Fact]
     public void Installed_grammar_drives_extraction_and_reloads_after_replacement()
     {
         var root = Directory.CreateTempSubdirectory("codale-variable-grammar-").FullName;

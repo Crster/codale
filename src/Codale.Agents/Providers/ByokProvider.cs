@@ -25,7 +25,7 @@ public sealed class ByokProvider
     /// <summary>The Anthropic-compatible base URL for the Messages API (the host root; the CLI appends /v1/messages). Used by Claude sessions; blank means the provider is OpenAI-only.</summary>
     public string AnthropicBaseUrl { get; set; } = "";
 
-    /// <summary>The plain key in memory; settings.json holds it DPAPI-protected (<c>enc:</c> prefix), protected by the application secret store.</summary>
+    /// <summary>The plain key in memory. Stored preferences protect it with DPAPI and an <c>enc:</c> prefix.</summary>
     public string ApiKey { get; set; } = "";
 
     /// <summary>The flash model: what a session starts with, and the everyday / background one.</summary>

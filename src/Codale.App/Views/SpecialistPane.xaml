@@ -95,7 +95,7 @@
                     ToolTipService.ToolTip="Resume the interrupted request"
                     Visibility="{Binding CanRetry, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
             <Button Grid.Column="2" Content="Stop" Command="{Binding CancelSessionCommand}" Style="{StaticResource ShellTextButton}"
-                    ToolTipService.ToolTip="Stop the planner"
+                    ToolTipService.ToolTip="Stop the response"
                     Visibility="{Binding ShowStatusStop, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
         </Grid>
 

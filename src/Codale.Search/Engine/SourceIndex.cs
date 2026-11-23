@@ -38,7 +38,7 @@ public sealed record SourceIndexOptions
 
     public bool Watch { get; init; } = true;
 
-    /// <summary>Where the workspace model is saved between runs; null keeps it in memory for this session only.</summary>
+    /// <summary>Database directory for the workspace model; null keeps it in memory for this session only.</summary>
     public string? ModelPath { get; init; }
 }
 
@@ -79,7 +79,7 @@ public sealed class SourceIndex : IDisposable
     {
         Root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         _options = options ?? new SourceIndexOptions();
-        Model = new WorkspaceModel(_options.ModelPath);
+        Model = new WorkspaceModel(_options.ModelPath, ProjectPaths.InstanceKey(Root));
         _syntaxStore = SyntaxService.Store;
         _syntaxStore.Changed += GrammarsChanged;
     }
@@ -116,8 +116,8 @@ public sealed class SourceIndex : IDisposable
 
     public string Root { get; }
 
-    /// <summary>The model file for a project, beside its knowledge database.</summary>
-    private static string ModelPathFor(string root) => Path.Combine(ProjectPaths.KnowledgeDirectory(root), "workspace-model.json");
+    /// <summary>The workspace-model database directory for a project.</summary>
+    private static string ModelPathFor(string root) => ProjectPaths.WorkspaceModelDirectory(root);
 
     /// <summary>The latest finished snapshot, or null before the first scan completes.</summary>
     public SourceSnapshot? Current => Volatile.Read(ref _current);

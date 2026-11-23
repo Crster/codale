@@ -4,6 +4,7 @@
     <Project Path="src/Codale.App/Codale.App.csproj">
       <Platform Project="x64" />
     </Project>
+    <Project Path="src/Codale.Browser/Codale.Browser.csproj" />
     <Project Path="src/Codale.Commands/Codale.Commands.csproj" />
     <Project Path="src/Codale.Core/Codale.Core.csproj" />
     <Project Path="src/Codale.Git/Codale.Git.csproj" />

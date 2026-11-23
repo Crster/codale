@@ -38,16 +38,16 @@ public static class McpInstructions
         "Search first and reuse an existing title to update a correction rather than duplicate it. Use memory_forget for superseded notes. " +
         "Never save unaccepted proposals, task progress, source-code facts or secrets. Current user instructions override recalled notes.";
 
-    public const string Secret =
-        "env_list, env_get and env_set reach the secrets stored for this workspace. Use a value only where it is needed; never write it into files, code, commits or messages.";
+    public const string UserTodo =
+        "Use todo_list to read user-defined unfinished todos. Verify and fix each item before calling todo_complete; never complete an unverified item.";
 
     public const string Browser =
-        "You can drive a real Chromium browser with the browser-use tools (browser_navigate, browser_snapshot, browser_screenshot, browser_click, " +
+        "You can drive Codale Browser, a real Chromium (WebView2) window the user can watch, with the browser-use tools (browser_navigate, browser_snapshot, browser_screenshot, browser_click, " +
         "browser_type, browser_fill_form, browser_console_messages, browser_handoff, browser_responsive_check). " +
         "MANDATORY: When verifying web pages, UI, or local servers, use these browser tools rather than shell workarounds. After you change " +
         "something a browser can show, open it with browser_navigate, read it with browser_snapshot, look at it with browser_screenshot, " +
         "exercise the changed flow, and check browser_console_messages for errors, before you report the work as done. The browser keeps logins between runs. " +
-        "When a page needs a sign-in, captcha or 2FA, do not give up or ask for credentials: call browser_handoff and the user completes it in a visible window. " +
+        "When a page needs a sign-in, captcha or 2FA, do not give up or ask for credentials: call browser_handoff and the user completes it in the Codale Browser window. " +
         "To check responsive layouts use browser_set_viewport or browser_responsive_check; browser_emulate switches dark mode. Element refs (e12) come from the latest browser_snapshot.";
 
     public const string Computer =

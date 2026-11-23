@@ -22,7 +22,7 @@ public sealed class ModelPreferenceTests
     }
 
     [Fact]
-    public void ExplicitCliDefaultIsDistinctFromLegacyUnsetPreference()
+    public void ExplicitCliDefaultIsDistinctFromAnUnsetPreference()
     {
         var root = Directory.CreateTempSubdirectory("codale-model-default-").FullName;
         using var settings = new AppSettingsStore(root);
@@ -30,5 +30,7 @@ public sealed class ModelPreferenceTests
         settings.SetModelPreference("claude", null, null);
         Assert.Equal((true, (string?)null, (string?)null), settings.ModelPreferenceFor("claude"));
         Assert.False(settings.ModelPreferenceFor("codex").HasValue);
+        settings.SetDefaultMode("claude", "plan");
+        Assert.Equal("plan", settings.DefaultModeFor("claude"));
     }
 }

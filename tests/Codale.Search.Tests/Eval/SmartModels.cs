@@ -8,7 +8,7 @@ namespace Codale.Search.Tests;
 
 /// <summary>
 /// The user's configured Smart models for an eval run, built the way the app's SmartExperienceHost builds them,
-/// from a copy of settings.json so the run never edits the real file.
+/// from a private copy of the stored preferences.
 /// </summary>
 internal sealed class SmartModels : IAsyncDisposable
 {
@@ -30,9 +30,16 @@ internal sealed class SmartModels : IAsyncDisposable
 
     public static SmartModels? Open(string? settingsFolder, string work, bool embed)
     {
-        if (string.IsNullOrWhiteSpace(settingsFolder) || !File.Exists(Path.Combine(settingsFolder, "settings.json"))) return null;
+        if (string.IsNullOrWhiteSpace(settingsFolder)) return null;
+        using var source = new ApplicationDatabase(settingsFolder);
+        if (!File.Exists(Path.Combine(source.DatabasePath, "index__records.db"))) return null;
+        var preferences = source.UseRecords(db => db.Open<Setting>().Find());
         var copy = Directory.CreateDirectory(Path.Combine(work, "settings")).FullName;
-        File.Copy(Path.Combine(settingsFolder, "settings.json"), Path.Combine(copy, "settings.json"), overwrite: true);
+        using (var target = new ApplicationDatabase(copy)) target.UseRecords(db =>
+        {
+            db.Open<Setting>().PutMany(preferences.Select(row => new KeyValuePair<string, Setting>(row.Key, row.Value)));
+            return true;
+        });
         return new SmartModels(new AppSettingsStore(copy), work, embed);
     }
 

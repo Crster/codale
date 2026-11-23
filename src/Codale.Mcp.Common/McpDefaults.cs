@@ -4,8 +4,8 @@ namespace Codale.Mcp;
 public static class McpDefaults
 {
     /// <summary>
-    /// The remote-debugging port a browser the user opened by hand listens on. The app's
-    /// "Open browser" button launches Edge with it and the browser server attaches to it.
+    /// The remote-debugging port Codale Browser (the app's WebView2 window) listens on; the
+    /// browser server drives the window through it. Codale.Browser\Program.cs hard-codes the same value.
     /// </summary>
     public const int BrowserAttachPort = 9333;
 }

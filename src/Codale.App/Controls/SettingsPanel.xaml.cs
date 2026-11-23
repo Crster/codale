@@ -3,6 +3,7 @@ using Codale.App.Services;
 using Codale.App.ViewModels;
 using Codale.Core.Agents;
 using Codale.Core.Helper;
+using Codale.Core.Projects;
 using Codale.Core.Syntax;
 
 using Microsoft.UI.Xaml;
@@ -26,7 +27,7 @@ public sealed partial class SettingsPanel : UserControl
     /// <summary>Populating the controls must not write the values straight back out.</summary>
     private bool _loading = true;
 
-    /// <summary>The providers being edited; every change is written straight back to settings.json.</summary>
+    /// <summary>The providers being edited. Every change is saved to the settings database.</summary>
     private readonly List<ByokProvider> _providers = [];
 
     /// <summary>The user asked to dismiss the pane (close button).</summary>
@@ -73,6 +74,51 @@ public sealed partial class SettingsPanel : UserControl
     private void OnOpenInstallFolderClick(object sender, RoutedEventArgs e) => OpenFolder(AppContext.BaseDirectory);
 
     private void OnOpenDataFolderClick(object sender, RoutedEventArgs e) => OpenFolder(_settings.DataFolder);
+
+    private void OnOpenTempFolderClick(object sender, RoutedEventArgs e) => OpenFolder(CodalePaths.TempDirectory);
+
+    private async void OnClearTempFolderClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = AppDialog.Apply(new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "Clear temporary files?",
+            Content = "This deletes temporary files, including pasted attachments and browser downloads. Finish any active tasks that use them first.",
+            PrimaryButtonText = "Clear",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+        }, DialogTone.Danger, AppDialog.Glyphs.Clear);
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+        try
+        {
+            var root = CodalePaths.TempDirectory;
+            if (!Directory.Exists(root)) return;
+            if ((File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0)
+            {
+                await AppDialog.AlertAsync(XamlRoot, "Could not clear temporary files", "The temporary folder is a link. Open it to manage its contents instead.");
+                return;
+            }
+            var failed = false;
+            foreach (var entry in Directory.EnumerateFileSystemEntries(root))
+            {
+                try
+                {
+                    var attributes = File.GetAttributes(entry);
+                    if ((attributes & FileAttributes.Directory) != 0)
+                        Directory.Delete(entry, recursive: (attributes & FileAttributes.ReparsePoint) == 0);
+                    else
+                        File.Delete(entry);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { failed = true; }
+            }
+            if (failed) await AppDialog.AlertAsync(XamlRoot, "Some files could not be cleared", "Files in use or without permission were left in the temporary folder.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            await AppDialog.AlertAsync(XamlRoot, "Could not clear temporary files", ex.Message);
+        }
+    }
 
     private static void OpenFolder(string path)
     {
@@ -941,7 +987,7 @@ public sealed partial class SettingsPanel : UserControl
         }
     }
 
-    /// <summary>A hand edit of settings.json changed the providers: pick it up instead of writing the stale list back on the next keystroke.</summary>
+    /// <summary>Refreshes the provider editor when the saved list changes.</summary>
     private void ReloadProvidersIfEditedElsewhere()
     {
         if (_loading || _selfWrite)

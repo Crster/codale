@@ -38,7 +38,7 @@ public sealed class TaskToolsTests
     [InlineData("codale-command", new[] { "list_commands", "add_command", "run_command" })]
     [InlineData("codale-terminal", new[] { "list_terminals", "read_terminal", "run_in_terminal", "stop_terminal" })]
     [InlineData("codale-memory", new[] { "memory_save", "memory_search", "memory_list", "memory_forget" })]
-    [InlineData("codale-secret", new[] { "env_list", "env_get", "env_set" })]
+    [InlineData("codale-todo", new[] { "todo_list", "todo_complete" })]
     public void Each_server_has_exactly_its_own_tools(string server, string[] expected)
     {
         var root = Directory.CreateTempSubdirectory("codale-servers-").FullName;
@@ -99,6 +99,26 @@ public sealed class TaskToolsTests
             var secret = await Call(server, "memory_save", """{"title":"Credential","text":"My password is test-only"}""");
             Assert.True(secret.GetProperty("isError").GetBoolean());
             Assert.DoesNotContain("Credential", Text(await Call(server, "memory_list", "{}")));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task User_todos_are_listed_and_only_completed_by_id()
+    {
+        var root = Directory.CreateTempSubdirectory("codale-todo-tools-").FullName;
+        try
+        {
+            var store = new Codale.Workspace.UserTodoStore(Codale.Workspace.WorkspaceDb.DirectoryFor(root));
+            var first = store.Add("Verify login");
+            var second = store.Add("Fix navigation");
+            var server = Server(new FakeTasks(), root);
+            Assert.Contains(first.Id, Text(await Call(server, "todo_list", "{}")));
+            Assert.Contains("completed", Text(await Call(server, "todo_complete", $$"""{"id":"{{first.Id}}"}""")));
+            var remaining = Text(await Call(server, "todo_list", "{}"));
+            Assert.DoesNotContain(first.Id, remaining);
+            Assert.Contains(second.Id, remaining);
+            Assert.True((await Call(server, "todo_complete", """{"id":"../bad"}""")).GetProperty("isError").GetBoolean());
         }
         finally { Directory.Delete(root, true); }
     }

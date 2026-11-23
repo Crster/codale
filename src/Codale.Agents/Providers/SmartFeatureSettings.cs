@@ -72,38 +72,6 @@ public static class SmartFeatureSettings
 
     public static bool IsProvider(string provider) => provider is "claude" or "codex" or "openai" or "anthropic";
 
-    public const string MigratedKey = "ai.smart.rolesMigrated";
-
-    /// <summary>
-    /// One-time move from the old Smart groups (Developer Tools, Codebase Context, Code Completion, Search Embeddings)
-    /// to model roles: General takes Developer Tools' provider, profiles and models (Codebase Context's when Developer
-    /// Tools was off); Auto Complete and Embedding keep their keys; Decision starts off. False when already done.
-    /// </summary>
-    public static bool MigrateLegacyGroups(IDictionary<string, string> values)
-    {
-        if (values.TryGetValue(MigratedKey, out var done) && done == "1") return false;
-        string Provider(string group) => values.TryGetValue($"ai.smart.groups.{group}.provider", out var raw) && IsProvider(raw) ? raw : "off";
-        var source = Provider("assistance") != "off" ? "assistance" : Provider("context") != "off" ? "context" : null;
-        if (source is not null && Provider(General) == "off")
-        {
-            foreach (var (key, value) in values.ToArray())
-            {
-                if (!key.StartsWith("ai.smart.", StringComparison.Ordinal)) continue;
-                var moved = key.Replace($".groups.{source}.", $".groups.{General}.", StringComparison.Ordinal);
-                if (moved != key) values[moved] = value;
-            }
-        }
-        foreach (var key in values.Keys.Where(k => k == "ai.smartThinking" || k.StartsWith("ai.smart.", StringComparison.Ordinal)
-            && (k.Contains(".groups.assistance.", StringComparison.Ordinal) || k.Contains(".groups.context.", StringComparison.Ordinal))).ToArray())
-        {
-            values.Remove(key);
-        }
-        foreach (var (id, label, description, placeholder) in Roles)
-            values.TryAdd($"ai.smart.groups.{id}.provider", "off");
-        values[MigratedKey] = "1";
-        return true;
-    }
-
     public static readonly (string Id, string Label)[] Features =
     [
         ("commit", "Commit messages"), ("title", "Session names"), ("ranking", "Search ranking"), ("brief", "Agent briefs"),

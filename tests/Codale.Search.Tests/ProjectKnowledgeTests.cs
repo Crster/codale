@@ -5,13 +5,13 @@ namespace Codale.Search.Tests;
 public sealed class ProjectKnowledgeTests : IDisposable
 {
     private readonly string _directory = Directory.CreateTempSubdirectory("codale-knowledge-tests-").FullName;
-    private readonly CodaleDb _store;
+    private readonly CodaleDatabase _store;
     private readonly ProjectKnowledgeIndex _index;
     private string Root => Path.Combine(_directory, "project");
     public ProjectKnowledgeTests()
     {
         Directory.CreateDirectory(Root);
-        _store = new CodaleDb(Path.Combine(_directory, "project.db"));
+        _store = new CodaleDatabase(Path.Combine(_directory, "project.db"));
         _index = new ProjectKnowledgeIndex(_store);
     }
     private void Write(string relative, string text)
@@ -90,6 +90,25 @@ public sealed class ProjectKnowledgeTests : IDisposable
         File.WriteAllText(Path.Combine(_directory, "outside.cs"), "sensitive source");
         Assert.Null(ProjectKnowledgeIndex.ReadSource(Root, "../outside.cs"));
         Assert.Null(ProjectKnowledgeIndex.ReadSource(Root, Path.Combine(_directory, "outside.cs")));
+    }
+
+    [Fact]
+    public void Legacy_features_and_turn_topics_are_ignored()
+    {
+        using var legacy = new CodaleDb(Path.Combine(_directory, "old"));
+        legacy.Open("feature").Open("saved").WriteJson(new
+        {
+            Name = "Legacy artifact", Description = "Durable journal migration", Summary = "", SummaryOffset = 0L,
+            LogBytes = 0L, Prompts = "", CreatedAt = 1L, UpdatedAt = 1L,
+        });
+        legacy.Open("turn-topics-v1").Open(Root).Open("saved").Open("turn").WriteJson(new
+        {
+            Worktree = Root, Session = "saved", Turn = "turn", Terms = new[] { "durable", "journal" },
+            Files = new[] { new ProjectKnowledgeIndex.TurnFile("Storage.cs", true) },
+        });
+
+        Assert.Null(_index.GetFeature("saved"));
+        Assert.Empty(_index.TurnEvidence(Root, "durable journal"));
     }
 
     [Fact]

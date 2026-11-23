@@ -13,7 +13,6 @@ namespace Codale.App.Views;
 public sealed partial class ChatItemTemplateSelector : DataTemplateSelector
 {
     public DataTemplate? SpecialistTemplate { get; set; }
-    public DataTemplate? MemoryNoticeTemplate { get; set; }
     public DataTemplate? UserTemplate { get; set; }
     public DataTemplate? AnswersTemplate { get; set; }
     public DataTemplate? AssistantTemplate { get; set; }
@@ -29,7 +28,6 @@ public sealed partial class ChatItemTemplateSelector : DataTemplateSelector
     protected override DataTemplate? SelectTemplateCore(object item) => item switch
     {
         SpecialistHistoryItem => SpecialistTemplate,
-        MemoryNoticeItem => MemoryNoticeTemplate,
         HiddenActivityItem => HiddenActivityTemplate,
         FeatureJumpItem => FeatureJumpTemplate,
         CompactItem => CompactTemplate,

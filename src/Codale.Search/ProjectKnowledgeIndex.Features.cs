@@ -3,14 +3,6 @@ using Codale.Db;
 
 namespace Codale.Search;
 
-/// <summary>
-/// The project's features and the sessions behind them, kept in the project's own database (beside its logs, so
-/// indexing on a background thread never queues behind the UI thread's writes). Layout:
-/// <list type="bullet">
-/// <item><c>feature.ID</c> = the feature (keyword field <c>feature</c>); <c>feature.ID.file.PATH</c> = when the agent last wrote that file.</item>
-/// <item><c>session.ID</c> = the provider conversation behind a feature.</item>
-/// </list>
-/// </summary>
 public sealed partial class ProjectKnowledgeIndex
 {
     private const int RecentPromptChars = 2_000;
@@ -18,8 +10,9 @@ public sealed partial class ProjectKnowledgeIndex
 
     private sealed record FeatureRecord(string Name, string Description, string Summary, long SummaryOffset, long LogBytes,
         string Prompts, long CreatedAt, long UpdatedAt);
-
-    private DbNode FeatureRoot => db.Open("feature");
+    private sealed record FeatureFile(string Path, long At);
+    private readonly Lock _featureGate = new();
+    public event Action? FeaturesChanged;
 
     private static long Now => DateTimeOffset.Now.ToUnixTimeMilliseconds();
 
@@ -39,24 +32,18 @@ public sealed partial class ProjectKnowledgeIndex
     {
         var id = Guid.NewGuid().ToString("N");
         var now = Now;
-        db.Batch(() =>
-        {
-            FeatureRoot.Open(id).WriteJson(new FeatureRecord(name, description, "", 0, 0, "", now, now));
-            RefreshSearch(id);
-        });
-        return GetFeature(id)!;
+        var record = new FeatureRecord(name, description, "", 0, 0, "", now, now);
+        db.WriteBatch(batch => StageFeature(batch, id, record, []));
+        FeaturesChanged?.Invoke();
+        return ToInfo(id, record);
     }
 
     /// <summary>Most recently active first.</summary>
     public IReadOnlyList<FeatureInfo> ListFeatures() =>
-        [.. FeatureRoot.Children()
-            .Select(id => (Id: id, Record: FeatureRoot.Open(id).ReadJson<FeatureRecord>()))
-            .Where(x => x.Record is not null)
-            .OrderByDescending(x => x.Record!.UpdatedAt)
-            .Select(x => ToInfo(x.Id, x.Record!))];
+        [.. db.Record<FeatureRecord>().Find().OrderByDescending(row => row.Value.UpdatedAt).Select(row => ToInfo(row.Key, row.Value))];
 
     public FeatureInfo? GetFeature(string id) =>
-        FeatureRoot.Open(id).ReadJson<FeatureRecord>() is { } record ? ToInfo(id, record) : null;
+        db.Record<FeatureRecord>().Key(id).Get() is { } record ? ToInfo(id, record) : null;
 
     public void RenameFeature(string id, string name) => ChangeFeature(id, r => r with { Name = name });
 
@@ -78,21 +65,32 @@ public sealed partial class ProjectKnowledgeIndex
 
     private void ChangeFeature(string id, Func<FeatureRecord, FeatureRecord> change)
     {
-        var node = FeatureRoot.Open(id);
-        db.Batch(() =>
+        lock (_featureGate)
         {
-            if (node.ReadJson<FeatureRecord>() is not { } record) return;
-            node.WriteJson(change(record));
-            RefreshSearch(id);
-        });
+            if (db.Record<FeatureRecord>().Key(id).Get() is not { } record) return;
+            var updated = change(record);
+            var prefix = Scope(id);
+            var files = db.Record<FeatureFile>().Keys(prefix).Select(key => key[prefix.Length..]);
+            db.WriteBatch(batch => StageFeature(batch, id, updated, files));
+        }
+        FeaturesChanged?.Invoke();
     }
 
     /// <summary>Removes a feature with its files and provider session; its log folder and turn topics are the caller's.</summary>
-    public void DeleteFeature(string id) => db.Batch(() =>
+    public void DeleteFeature(string id)
     {
-        FeatureRoot.Open(id).Remove();
-        db.Open("session").Open(id).Remove();
-    });
+        lock (_featureGate)
+        {
+            var files = db.Record<FeatureFile>().Keys(Scope(id));
+            db.WriteBatch(batch =>
+            {
+                batch.Delete<FeatureRecord>(id);
+                batch.Delete<ProviderSession>(id);
+                foreach (var file in files) batch.Delete<FeatureFile>(file);
+            });
+        }
+        FeaturesChanged?.Invoke();
+    }
 
     /// <summary>Features most likely to own <paramref name="text"/>, best match first.</summary>
     public IReadOnlyList<FeatureInfo> SearchFeatures(string text, int limit)
@@ -100,43 +98,46 @@ public sealed partial class ProjectKnowledgeIndex
         var terms = SearchText.MatchQueryTerms(text);
         return terms.Count == 0
             ? []
-            : [.. FeatureRoot.Match(FeatureField, Terms(terms), limit)
-            .Select(hit => GetFeature(hit.Node.Name))
+            : [.. db.Index(FeatureField).FindKeywords(Terms(terms), limit)
+            .Select(hit => GetFeature(hit.Key))
             .OfType<FeatureInfo>()];
     }
 
     /// <summary>Rebuilds a feature's search entry from its name, description, summary, recent prompts and file paths.</summary>
-    private void RefreshSearch(string id)
-    {
-        var node = FeatureRoot.Open(id);
-        if (node.ReadJson<FeatureRecord>() is not { } r) return;
-        var files = string.Join(' ', node.Open("file").Children());
-        node.Index(FeatureField, SearchText.Tokens($"{r.Name} {r.Description} {r.Summary} {r.Prompts} {files}"));
-    }
+    private void StageFeature(CodaleDatabase.RecordBatch batch, string id, FeatureRecord r, IEnumerable<string> paths) =>
+        batch.Put(id, r, db.Index(FeatureField).Key([r.Name, r.Description, r.Summary, r.Prompts, string.Join(' ', paths)], mode: SemanticMode.Bm25));
 
     private static string Tail(string text) => text.Length <= RecentPromptChars ? text : text[^RecentPromptChars..];
 
     // ---- the files the agent wrote for a feature
 
-    public void RecordSessionFile(string sessionId, string relativePath) =>
-        FeatureRoot.Open(sessionId).Open("file").Open(relativePath).Write(Now.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    public void RecordSessionFile(string sessionId, string relativePath) => RecordSessionFiles(sessionId, [relativePath]);
+
+    public void RecordSessionFiles(string sessionId, IEnumerable<string> relativePaths)
+    {
+        var files = relativePaths.Distinct(StringComparer.Ordinal).ToArray();
+        if (files.Length == 0) return;
+        var prefix = Scope(sessionId);
+        var now = Now;
+        lock (_featureGate)
+            db.Record<FeatureFile>().PutMany(files.Select(path => new KeyValuePair<string, FeatureFile>(prefix + path, new(path, now))));
+        FeaturesChanged?.Invoke();
+    }
 
     /// <summary>Paths the agent wrote for a feature, newest first.</summary>
     public IReadOnlyList<string> FilesOf(string featureId, int limit)
     {
-        var files = FeatureRoot.Open(featureId).Open("file");
-        return [.. files.Children()
-            .Select(path => (Path: path, At: long.TryParse(files.Open(path).Read(), out var at) ? at : 0))
-            .OrderByDescending(x => x.At)
+        return [.. db.Record<FeatureFile>().FindPrefix(Scope(featureId))
+            .OrderByDescending(x => x.Value.At)
             .Take(limit)
-            .Select(x => x.Path)];
+            .Select(x => x.Value.Path)];
     }
 
-    public int FileCount(string featureId) => FeatureRoot.Open(featureId).Open("file").ChildCount();
+    public int FileCount(string featureId) => db.Record<FeatureFile>().Keys(Scope(featureId)).Count;
 
     // ---- provider sessions
 
-    public void SetProviderSession(ProviderSession session) => db.Open("session").Open(session.SessionId).WriteJson(session);
+    public void SetProviderSession(ProviderSession session) => db.Record<ProviderSession>().Key(session.SessionId).Value(session);
 
-    public ProviderSession? GetProviderSession(string id) => db.Open("session").Open(id).ReadJson<ProviderSession>();
+    public ProviderSession? GetProviderSession(string id) => db.Record<ProviderSession>().Key(id).Get();
 }

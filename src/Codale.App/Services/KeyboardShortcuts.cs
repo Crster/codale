@@ -5,7 +5,7 @@ using Windows.UI.Core;
 
 namespace Codale.App.Services;
 
-/// <summary>A key with its modifiers, e.g. <c>Ctrl+Shift+I</c>. The text form is what settings.json stores.</summary>
+/// <summary>A key with its modifiers, such as <c>Ctrl+Shift+I</c>. The settings database stores its text form.</summary>
 public readonly record struct KeyChord(VirtualKey Key, bool Ctrl, bool Shift, bool Alt)
 {
     // The WinRT VirtualKey enum has no names for punctuation; these are the Win32 VK_OEM codes.
@@ -162,7 +162,7 @@ public readonly record struct KeyChord(VirtualKey Key, bool Ctrl, bool Shift, bo
 
 /// <summary>
 /// The window-wide keyboard shortcuts: the actions, their default chords and the
-/// user's overrides from settings.json (<c>shortcut.*</c>). A chord stored as "none"
+/// user's overrides from the settings database (<c>shortcut.*</c>). A chord stored as "none"
 /// disables the action; an unreadable one falls back to the default.
 /// </summary>
 public sealed class KeyboardShortcuts(AppSettingsStore settings) : IDisposable

@@ -18,10 +18,10 @@ public static class CodaleServers
     /// <summary>Notes remembered for the workspace.</summary>
     public const string Memory = "codale-memory";
 
-    /// <summary>Secrets stored for the workspace.</summary>
-    public const string Secret = "codale-secret";
+    /// <summary>User-defined workspace todos.</summary>
+    public const string Todo = "codale-todo";
 
-    public static IReadOnlyList<string> All { get; } = [Panel, Command, Terminal, Memory, Secret];
+    public static IReadOnlyList<string> All { get; } = [Panel, Command, Terminal, Memory, Todo];
 
     /// <summary>The server a tool belongs to; null for a tool none of them has.</summary>
     public static string? Of(string tool) => tool switch
@@ -30,7 +30,7 @@ public static class CodaleServers
         "list_commands" or "add_command" or "run_command" => Command,
         "list_terminals" or "read_terminal" or "run_in_terminal" or "stop_terminal" => Terminal,
         "memory_save" or "memory_search" or "memory_list" or "memory_forget" => Memory,
-        "env_list" or "env_get" or "env_set" => Secret,
+        "todo_list" or "todo_complete" => Todo,
         _ => null,
     };
 
@@ -49,7 +49,7 @@ public static class CodaleServers
         Command => McpInstructions.Command,
         Terminal => McpInstructions.Terminal,
         Memory => McpInstructions.Memory,
-        Secret => McpInstructions.Secret,
+        Todo => McpInstructions.UserTodo,
         _ => null,
     };
 }

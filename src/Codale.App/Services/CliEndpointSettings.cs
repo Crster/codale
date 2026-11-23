@@ -3,7 +3,7 @@ using Codale.Core.Agents;
 namespace Codale.App.Services;
 
 /// <summary>
-/// The agent endpoint a chat uses: a BYOK provider listed in settings.json
+/// The agent endpoint a chat uses, such as a BYOK provider configured in Settings.
 /// (<see cref="settings.ByokProviders"/>), named by the chat. Claude sessions point
 /// straight at the provider's Anthropic-compatible base URL; Codex sessions at its
 /// OpenAI-compatible one. The key and model names reach the CLI as environment variables.

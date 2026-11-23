@@ -3,6 +3,26 @@ namespace Codale.Settings.Tests;
 public sealed class ApplicationStoreTests
 {
     [Fact]
+    public void Preferences_start_fresh_and_persist_in_the_database()
+    {
+        var root = Directory.CreateTempSubdirectory("codale-settings-import-");
+        try
+        {
+            var oldFile = Path.Combine(root.FullName, "settings.json");
+            const string oldJson = """{"chat.fontSize":20}""";
+            File.WriteAllText(oldFile, oldJson);
+            using (var settings = new AppSettingsStore(root.FullName))
+            {
+                Assert.Equal(12.5, settings.ChatFontSize);
+                settings.ChatFontSize = 18;
+            }
+            using (var reopened = new AppSettingsStore(root.FullName)) Assert.Equal(18, reopened.ChatFontSize);
+            Assert.Equal(oldJson, File.ReadAllText(oldFile));
+        }
+        finally { root.Delete(recursive: true); }
+    }
+
+    [Fact]
     public void SettingsStateLivesInTheProductionInstance()
     {
         Assert.Equal("Codale.Settings", typeof(AppSettingsStore).Assembly.GetName().Name);
@@ -12,10 +32,11 @@ public sealed class ApplicationStoreTests
     }
 
     [Fact]
-    public async Task ExternalSettingsEditsInvalidateOnlyTheirOwnersCache()
+    public async Task TypedDatabaseChangesNotifyTheirSettingsOwner()
     {
         var root = Directory.CreateTempSubdirectory("codale-settings-reload-").FullName;
-        using var first = new AppSettingsStore(Path.Combine(root, "first"));
+        using var database = new ApplicationDatabase(Path.Combine(root, "first"));
+        using var first = new AppSettingsStore(database);
         using var other = new AppSettingsStore(Path.Combine(root, "other"));
         Assert.Equal(12.5, first.ChatFontSize);
         Assert.Equal(12.5, other.ChatFontSize);
@@ -24,7 +45,7 @@ public sealed class ApplicationStoreTests
         {
             if (first.ChatFontSize == 20) changed.TrySetResult();
         };
-        File.WriteAllText(Path.Combine(root, "first", "settings.json"), "{\"chat.fontSize\":20}");
+        database.UseRecords(db => { db.Open<Setting>().Key("chat.fontSize").Value(new("20")); return true; });
         await changed.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(20, first.ChatFontSize);
         Assert.Equal(12.5, other.ChatFontSize);
@@ -81,7 +102,7 @@ public sealed class ApplicationStoreTests
         recents.Clear();
         Assert.Empty(recents.Load());
         first.Dispose();
-        Assert.Throws<ObjectDisposedException>(() => first.Open());
+        Assert.Throws<ObjectDisposedException>(() => first.UseRecords(_ => true));
         Assert.Empty(history.Recent(root));
     }
 }

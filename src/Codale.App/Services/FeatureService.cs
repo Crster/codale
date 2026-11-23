@@ -2,7 +2,6 @@ using Codale.Agents.History;
 using Codale.Core.Features;
 using Codale.Core.Projects;
 using Codale.Db;
-using Codale.Db.Search;
 using Codale.Search;
 using Codale.Workspace;
 
@@ -11,7 +10,7 @@ namespace Codale.App.Services;
 /// <summary>
 /// One repository's session history and shared knowledge. Each entry keeps its own log and provider
 /// mapping; project context is retrieved independently of those session boundaries. Owns the project's
-/// <see cref="CodaleDb"/>; every call is safe from any thread, and indexing runs in the
+/// <see cref="CodaleDatabase"/>; every call is safe from any thread, and indexing runs in the
 /// background so the chat never waits for it.
 /// </summary>
 public sealed partial class FeatureService : IDisposable
@@ -19,10 +18,9 @@ public sealed partial class FeatureService : IDisposable
     private readonly string _projectPath;
     private readonly IWorkspaceData _data;
     internal IWorkspaceData Data => _data;
-    private readonly CodaleDb _db;
+    private readonly CodaleDatabase _db;
 
     public ProjectKnowledgeIndex Knowledge { get; }
-    private readonly IDisposable _databaseWatch;
     private readonly Timer _historyRefresh;
 
     /// <summary>Shared with every other window on the project: open chats, running summaries, the create gate.</summary>
@@ -37,23 +35,18 @@ public sealed partial class FeatureService : IDisposable
         _embedder = new SmartEmbedder(smart);
         try
         {
-            _db = OpenDatabase(projectPath, _embedder);
+            (_db, Knowledge) = OpenDatabase(projectPath, _embedder);
         }
         catch
         {
             _embedder.Dispose();
             throw;
         }
-        Knowledge = new ProjectKnowledgeIndex(_db)
-        {
-            CompactEmbeddingsEnabled = () => _embedder.UsesModel,
-            ReadFileHistory = ReadGitFileHistoryAsync
-        };
         _activity = FeatureActivity.For(projectPath);
         _activity.HistoryDeleted += OnHistoryDeleted;
         _historyRefresh = new Timer(_ => Changed?.Invoke(this, EventArgs.Empty));
         // Any change to the feature list (a chat appended to a feature, a summary written) refreshes the history list.
-        _databaseWatch = _db.Open("feature").Watch(_ => ScheduleHistoryRefresh());
+        Knowledge.FeaturesChanged += ScheduleHistoryRefresh;
         Knowledge.Warm(projectPath);
     }
 
@@ -64,15 +57,26 @@ public sealed partial class FeatureService : IDisposable
     }
 
     /// <summary>The project's database; a throwaway one when it cannot be opened (a path too long, a folder another process holds), so history never keeps the window from opening.</summary>
-    private static CodaleDb OpenDatabase(string projectPath, IEmbedder embedder)
+    private static (CodaleDatabase Database, ProjectKnowledgeIndex Index) OpenDatabase(string projectPath, SmartEmbedder embedder)
     {
         try
         {
-            return new CodaleDb(ProjectPaths.FeatureDatabasePath(projectPath), new() { Embedder = embedder });
+            return Open(Path.Combine(ProjectPaths.FeatureDatabasePath(projectPath), "records"));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException)
         {
-            return new CodaleDb(Path.Combine(Path.GetTempPath(), "codale-features-" + Guid.NewGuid().ToString("N")), new() { Embedder = embedder });
+            return Open(Path.Combine(CodalePaths.TempDirectory, "features", Guid.NewGuid().ToString("N")));
+        }
+
+        (CodaleDatabase, ProjectKnowledgeIndex) Open(string folder)
+        {
+            var db = new CodaleDatabase(folder, new() { Embedder = embedder });
+            var index = new ProjectKnowledgeIndex(db)
+            {
+                CompactEmbeddingsEnabled = () => embedder.UsesModel,
+                ReadFileHistory = ReadGitFileHistoryAsync,
+            };
+            return (db, index);
         }
     }
 
@@ -115,7 +119,7 @@ public sealed partial class FeatureService : IDisposable
             Knowledge.DeleteFeature(id);
             LogOf(id).Delete();
             Knowledge.RemoveTurnTopics(id);
-            _db.Open("turn-checkpoint-v1").Open(id).Remove();
+            _db.Record<TopicCheckpoint>().Key(id).Delete();
         }
         _activity.NotifyHistoryDeleted(id);
     }
@@ -149,8 +153,7 @@ public sealed partial class FeatureService : IDisposable
         var root = ProjectPaths.Normalize(worktree);
         try
         {
-            foreach (var relative in Knowledge.ChangedSince(root, startedUtc))
-                if (ProjectKnowledgeIndex.Eligible(relative)) Knowledge.RecordSessionFile(sessionId, relative);
+            Knowledge.RecordSessionFiles(sessionId, Knowledge.ChangedSince(root, startedUtc).Where(ProjectKnowledgeIndex.Eligible));
         }
         catch (Exception)
         {
@@ -168,7 +171,7 @@ public sealed partial class FeatureService : IDisposable
     public void Dispose()
     {
         StopTopicBackfill();
-        _databaseWatch.Dispose();
+        Knowledge.FeaturesChanged -= ScheduleHistoryRefresh;
         _historyRefresh.Dispose();
         _activity.HistoryDeleted -= OnHistoryDeleted;
         Knowledge.Dispose();

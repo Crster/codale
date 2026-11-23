@@ -10,6 +10,11 @@ public sealed partial class ChatViewModel
     private bool _browserViewportChanged;
     private Task _browserViewportRestore = Task.CompletedTask;
 
+    /// <summary>
+    /// Wires this chat into the browser server: the pipe that releases emulation at turn end, and the
+    /// session key and label that give the chat its own colour-marked tab in Codale Browser. The key
+    /// is this chat's pipe name - unique and stable for the chat's life - so a CLI restart reuses the tab.
+    /// </summary>
     private IReadOnlyList<McpServerSpec> WithBrowserControl(IReadOnlyList<McpServerSpec> servers) =>
         [.. servers.Select(server => server.Name == McpServerSettings.BrowserName
             ? server with
@@ -17,6 +22,8 @@ public sealed partial class ChatViewModel
                 Env = new Dictionary<string, string>(server.Env ?? new Dictionary<string, string>())
                 {
                     [BrowserViewportControl.EnvironmentKey] = _browserControlPipe,
+                    ["CODALE_BROWSER_SESSION"] = _browserControlPipe,
+                    ["CODALE_BROWSER_LABEL"] = Title is { Length: > 0 } title ? $"{ProviderName} · {title}" : ProviderName,
                 },
             } : server)];
 

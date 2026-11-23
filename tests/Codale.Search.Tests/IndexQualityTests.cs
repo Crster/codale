@@ -57,7 +57,7 @@ public sealed class IndexQualityTests(ITestOutputHelper output) : IDisposable
         var sourceFiles = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Count();
 
         // ---- cost of the first index
-        using var db = new CodaleDb(Path.Combine(_work, "db"));
+        using var db = new CodaleDatabase(Path.Combine(_work, "db"));
         using var index = new ProjectKnowledgeIndex(db);
         GC.Collect();
         var heap0 = GC.GetTotalMemory(true);

@@ -8,21 +8,22 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 
 namespace Codale.App.Views;
 
-/// <summary>A row of the Session tab's Memory &amp; Secrets group: a saved note, or a secret's name (never its value).</summary>
-public sealed class KnowledgeRow(bool isSecret, string id, string title, string detail, string tooltip)
+/// <summary>A row of the Session tab's Memory &amp; Todos group: a saved note or user-defined todo.</summary>
+public sealed class KnowledgeRow(bool isTodo, string id, string title, string detail, string tooltip)
 {
-    public bool IsSecret { get; } = isSecret;
+    public bool IsTodo { get; } = isTodo;
     public string Id { get; } = id;
     public string Title { get; } = title;
     public string Detail { get; } = detail;
     public string Tooltip { get; } = tooltip;
-    public string Glyph => IsSecret ? "" : "";
-    public string DeleteText => IsSecret ? "Delete secret" : "Forget memory";
+    public string Glyph => IsTodo ? "" : "";
+    public string DeleteText => "Forget memory";
+    public Visibility ForgetVisibility => IsTodo ? Visibility.Collapsed : Visibility.Visible;
 }
 
 /// <summary>
 /// The Session tab: the conversation history, and below it what the agent keeps for the workspace -
-/// memory notes and the names of stored secrets. Read from the workspace database each time the tab shows.
+/// memory notes and unfinished user todos. Read from the workspace database each time the tab shows.
 /// </summary>
 public sealed partial class WorkspacePage
 {
@@ -41,80 +42,28 @@ public sealed partial class WorkspacePage
 
     private void OnRefreshKnowledgeClick(object sender, RoutedEventArgs e) => RefreshKnowledge();
 
-    /// <summary>Stores a new secret (or replaces one by the same name) for the agent to read with env_get.</summary>
-    private async void OnAddSecretClick(object sender, RoutedEventArgs e)
+    private async void OnAddTodoClick(object sender, RoutedEventArgs e)
     {
-        if (ViewModel?.ProjectPath is not { Length: > 0 } project)
-        {
-            return;
-        }
-
-        var name = new TextBox { Header = "Name", PlaceholderText = "API_KEY" };
-        var value = new PasswordBox { Header = "Value" };
-        var error = new TextBlock
-        {
-            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCriticalBrush"],
-            TextWrapping = TextWrapping.Wrap,
-            Visibility = Visibility.Collapsed,
-        };
+        if (ViewModel?.ProjectPath is not { Length: > 0 }) return;
+        var input = new TextBox { Header = "Todo", PlaceholderText = "What should the agent verify or fix?", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinWidth = 320 };
+        var error = new TextBlock { Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCriticalBrush"], TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
         var dialog = AppDialog.Apply(new ContentDialog
         {
-            XamlRoot = XamlRoot,
-            Title = "Add secret",
-            Content = new StackPanel
-            {
-                Spacing = 12,
-                MinWidth = 320,
-                Children =
-                {
-                    name,
-                    value,
-                    error,
-                    new TextBlock
-                    {
-                        FontSize = 12,
-                        Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
-                        Text = "Encrypted for your Windows account. A secret with the same name is replaced.",
-                        TextWrapping = TextWrapping.Wrap,
-                    },
-                },
-            },
-            PrimaryButtonText = "Save",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot, Title = "Add todo",
+            Content = new StackPanel { Spacing = 12, Children = { input, error,
+                new TextBlock { Text = "The agent will verify and complete this todo.", TextWrapping = TextWrapping.Wrap } } },
+            PrimaryButtonText = "Add", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary,
         });
-
         var data = ViewModel.Data;
         dialog.PrimaryButtonClick += async (_, args) =>
         {
             var deferral = args.GetDeferral();
-            try
-            {
-                var key = name.Text.Trim();
-                var secret = value.Password;
-                if (secret.Length == 0)
-                {
-                    throw new ArgumentException("Enter the secret's value.");
-                }
-
-                await Task.Run(() => data.Secrets.Set(key, secret));
-            }
+            try { var text = input.Text; await Task.Run(() => data.UserTodos.Add(text)); }
             catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or InvalidOperationException)
-            {
-                error.Text = ex.Message;
-                error.Visibility = Visibility.Visible;
-                args.Cancel = true;
-            }
-            finally
-            {
-                deferral.Complete();
-            }
+            { error.Text = ex.Message; error.Visibility = Visibility.Visible; args.Cancel = true; }
+            finally { deferral.Complete(); }
         };
-
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
-        {
-            RefreshKnowledge();
-        }
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary) RefreshKnowledge();
     }
 
     private async void RefreshKnowledge()
@@ -139,10 +88,9 @@ public sealed partial class WorkspacePage
                         $"{note.Title}\n\n{note.Text}{tags}"));
                 }
 
-                foreach (var name in data.Secrets.Names())
+                foreach (var todo in data.UserTodos.List())
                 {
-                    list.Add(new KnowledgeRow(true, name, name, "Secret · ••••••••",
-                        $"{name}\nThe value is encrypted and only given to the agent on request."));
+                    list.Add(new KnowledgeRow(true, todo.Id, todo.Text.ReplaceLineEndings(" "), "Todo · awaiting agent verification", todo.Text));
                 }
 
                 return list;
@@ -175,16 +123,13 @@ public sealed partial class WorkspacePage
             return;
         }
 
+        if (row.IsTodo) return;
         var dialog = AppDialog.Apply(new ContentDialog
         {
             XamlRoot = XamlRoot,
-            Title = row.IsSecret ? $"Delete secret \"{row.Title}\"?" : $"Forget \"{row.Title}\"?",
-            Content = row.IsSecret
-                ? "The stored value is removed for good; the agent can no longer read it."
-                : "The agent will no longer recall this note in later conversations.",
-            PrimaryButtonText = row.IsSecret ? "Delete" : "Forget",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close,
+            Title = $"Forget \"{row.Title}\"?",
+            Content = "The agent will no longer recall this note in later conversations.",
+            PrimaryButtonText = "Forget", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close,
         }, DialogTone.Danger, AppDialog.Glyphs.Delete);
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
         {
@@ -194,7 +139,7 @@ public sealed partial class WorkspacePage
         var data = ViewModel.Data;
         try
         {
-            await Task.Run(() => row.IsSecret ? data.Secrets.Remove(row.Id) : data.Memory.Forget(row.Id));
+            await Task.Run(() => data.Memory.Forget(row.Id));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
         {

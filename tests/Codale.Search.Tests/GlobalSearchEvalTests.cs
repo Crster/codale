@@ -10,7 +10,7 @@ namespace Codale.Search.Tests;
 
 /// <summary>
 /// The app's global search (SearchViewModel's SourceExplorer setup) on a real project with the user's own Smart models.
-/// Env-gated: CODALE_SEARCH_PROJECT, CODALE_SEARCH_QUERY (";"-separated), CODALE_LOCATOR_SETTINGS (folder with settings.json),
+/// Env-gated: CODALE_SEARCH_PROJECT, CODALE_SEARCH_QUERY (";"-separated), CODALE_LOCATOR_SETTINGS (Codale data folder),
 /// CODALE_LOCATOR_DB (copy of the project's project-db, reused read-only for vectors), CODALE_LOCATOR_EMBED=1.
 /// </summary>
 public sealed class GlobalSearchEvalTests(ITestOutputHelper output) : IDisposable
@@ -54,7 +54,7 @@ public sealed class GlobalSearchEvalTests(ITestOutputHelper output) : IDisposabl
             Environment.GetEnvironmentVariable("CODALE_LOCATOR_EMBED") is not null);
         if (models is not null) await models.StartAsync();
         output.WriteLine(models is null ? "models: none" : $"models: general={models.GeneralModel} embedding={models.Embedder?.Model ?? "hashed"}");
-        using var db = new CodaleDb(Path.Combine(_work, "db"), new() { Embedder = models?.Embedder });
+        using var db = new CodaleDatabase(Path.Combine(_work, "db"), new() { Embedder = models?.Embedder });
         using var knowledge = new ProjectKnowledgeIndex(db);
         if (string.IsNullOrWhiteSpace(appDb)) await knowledge.RefreshAsync(root);
         var index = SourceIndex.For(root);

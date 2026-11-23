@@ -45,10 +45,12 @@ public sealed partial class CodaleDb : IDisposable
         _dir = Path.GetFullPath(directory);
         Directory.CreateDirectory(_dir);
         // A second process (or a second instance) on the same directory would corrupt the log: refuse it.
-        _directoryLock = LockDirectory(Path.Combine(_dir, "LOCK"), _options.LockTimeout);
+        _directoryLock = FolderLock.Acquire(_dir, _options.LockTimeout);
         _log = new SegmentLog(_dir, _options.SegmentBytes);
         try
         {
+            if (File.Exists(Path.Combine(_dir, "index__records.db")))
+                throw new InvalidDataException("Open this folder with CodaleDatabase.");
             _log.Open(Replay);
             if (_unfinishedBatch is { } batch)
             {
@@ -93,22 +95,6 @@ public sealed partial class CodaleDb : IDisposable
     /// <summary>Starts a path. Free: no I/O happens until a terminal call such as <c>Write</c> or <c>Read</c>.</summary>
     public DbNode Open(string name) => new(this, DbNode.Validate(name));
 
-    private static FileStream LockDirectory(string path, TimeSpan timeout)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-        while (true)
-        {
-            try
-            {
-                return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-            }
-            catch (IOException) when (DateTime.UtcNow < deadline)
-            {
-                Thread.Sleep(15);
-            }
-        }
-    }
-
     public void Dispose()
     {
         if (_sharedKey is not null)
@@ -128,9 +114,12 @@ public sealed partial class CodaleDb : IDisposable
         try
         {
             try { CommitBatch(); } catch (IOException) { }
-            _log.Dispose();
-            _directoryLock.Dispose();
-            if (_masterKey is not null) CryptographicOperations.ZeroMemory(_masterKey);
+            try { _log.Dispose(); }
+            finally
+            {
+                _directoryLock.Dispose();
+                if (_masterKey is not null) CryptographicOperations.ZeroMemory(_masterKey);
+            }
         }
         finally { _lock.ExitWriteLock(); }
     }

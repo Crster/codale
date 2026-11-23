@@ -1,4 +1,6 @@
 using Codale.Search.Engine;
+using Codale.Db;
+using System.Text;
 
 namespace Codale.Search.Tests;
 
@@ -103,7 +105,7 @@ public sealed class WorkspaceModelTests : IDisposable
     [Fact]
     public void A_saved_model_is_reloaded_and_a_stored_file_is_reused_without_its_text()
     {
-        var path = Path.Combine(_directory, "model.json");
+        var path = Path.Combine(_directory, "model");
         var first = new WorkspaceModel(path);
         first.Put(Make("a.cs", "class Alpha { void loadUser() {} }"));
         Assert.True(first.IsDirty);
@@ -122,15 +124,36 @@ public sealed class WorkspaceModelTests : IDisposable
     }
 
     [Fact]
-    public void Entries_stored_under_an_older_channel_version_are_read_again_not_trusted()
+    public void Saving_one_changed_file_appends_only_its_record()
     {
-        var path = Path.Combine(_directory, "stale.json");
-        var first = new WorkspaceModel(path);
-        first.Put(Make("a.cs", "class Alpha { }"));
-        first.Save();
+        var path = Path.Combine(_directory, "incremental");
+        var model = new WorkspaceModel(path);
+        for (var i = 0; i < 100; i++) model.Put(Make($"file{i}.cs", $"class Initial{i} {{ }}"));
+        model.Save();
 
-        var json = File.ReadAllText(path);
-        File.WriteAllText(path, json.Replace("\"symbols\":4", "\"symbols\":0", StringComparison.Ordinal));
+        long RecordBytes() => Directory.EnumerateFiles(Path.Combine(path, "records"), "record_*.db").Sum(file => new FileInfo(file).Length);
+        var baseline = RecordBytes();
+        model.Put(Make("file0.cs", "class UpdatedName { }"));
+        model.Remove("file1.cs");
+        model.Save();
+
+        Assert.InRange(RecordBytes() - baseline, 1, baseline / 10);
+        var reopened = new WorkspaceModel(path);
+        reopened.Load();
+        Assert.Equal(99, reopened.FileCount);
+        Assert.True(reopened.Knows("UpdatedName"));
+        Assert.False(reopened.Knows("Initial1"));
+    }
+
+    [Fact]
+    public void Legacy_snapshots_do_not_populate_the_typed_workspace_model()
+    {
+        var path = Path.Combine(_directory, "stale");
+        using (var db = new CodaleDb(path))
+        {
+            const string json = """{"format":1,"files":[{"path":"a.cs","channels":{"terms":1,"symbols":5,"transitions":1}}]}""";
+            db.Open("workspace_models").Open("model").WriteBlob(Encoding.UTF8.GetBytes(json));
+        }
 
         var reloaded = new WorkspaceModel(path);
         reloaded.Load();
@@ -143,7 +166,7 @@ public sealed class WorkspaceModelTests : IDisposable
     {
         var root = Path.Combine(_directory, "project");
         Directory.CreateDirectory(root);
-        var modelPath = Path.Combine(_directory, "workspace-model.json");
+        var modelPath = Path.Combine(_directory, "workspace-model");
         var file = Path.Combine(root, "app.cs");
         File.WriteAllText(file, "class Alpha {}");
         var written = File.GetLastWriteTimeUtc(file);
@@ -165,6 +188,26 @@ public sealed class WorkspaceModelTests : IDisposable
         Assert.False(stored.IsRetained);
         Assert.Contains(stored.Symbols, s => s.Name == "Alpha");
         Assert.DoesNotContain(stored.Symbols, s => s.Name == "Bravo");
+    }
+
+    [Fact]
+    public void Workspaces_sharing_a_database_keep_their_models_separate()
+    {
+        var path = Path.Combine(_directory, "shared");
+        var first = new WorkspaceModel(path, "first");
+        var second = new WorkspaceModel(path, "second");
+        first.Put(Make("a.cs", "class Alpha {}"));
+        second.Put(Make("b.cs", "class Bravo {}"));
+        first.Save();
+        second.Save();
+
+        var loadedFirst = new WorkspaceModel(path, "first");
+        var loadedSecond = new WorkspaceModel(path, "second");
+        loadedFirst.Load();
+        loadedSecond.Load();
+        Assert.Contains(loadedFirst.Suggest("Alp"), s => s.Text == "Alpha");
+        Assert.Empty(loadedFirst.Suggest("Bra"));
+        Assert.Contains(loadedSecond.Suggest("Bra"), s => s.Text == "Bravo");
     }
 
     public void Dispose()

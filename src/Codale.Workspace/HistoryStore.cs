@@ -1,164 +1,109 @@
+using System.Globalization;
 using System.Text;
 
 using Codale.Db;
 
 namespace Codale.Workspace;
 
-/// <summary>
-/// Chat history in the workspace database: for each history (feature) an append-only list of JSON records.
-/// A record is keyed by the byte offset it starts at, as if the list were one file of lines, so the offsets
-/// that summaries remember stay meaningful, and the list rotates into numbered archives once a summary has
-/// read it.
-/// </summary>
-/// <remarks>Layout: <c>history.FEATURE.log.OFFSET</c> is the current list, <c>history.FEATURE.arc.N.OFFSET</c> an archive.</remarks>
+/// <summary>Chat records addressed by their UTF-8 byte offsets. Archives are ranges over the same immutable records.</summary>
 public sealed class HistoryStore(string directory, WorkspaceDatabasePool? databases = null)
 {
     public const string Current = "log";
-    private const string Archive = "arc";
-    private static readonly Lock Gate = new();
-    private static readonly HashSet<string> Deleted = [with(StringComparer.OrdinalIgnoreCase)];
+    private static readonly State Empty = new(0, 0, []);
+    private WorkspaceDatabasePool Pool => databases ?? WorkspaceDb.Shared;
 
-    private string DeletedKey(string feature) => Path.GetFullPath(directory) + "|" + feature;
+    private sealed record Line(string Text);
+    private sealed record Archive(int Number, long Start, long End);
+    private sealed record State(long Start, long End, Archive[] Archives, bool Deleted = false);
 
-    private static string Offset(long value) => value.ToString("D12");
+    private static string Prefix(string feature) => feature.Length.ToString(CultureInfo.InvariantCulture) + ":" + feature + ":";
+    private static string Key(string feature, long offset) => Prefix(feature) + offset.ToString("D20", CultureInfo.InvariantCulture);
+    private static long SizeOf(string line) => Encoding.UTF8.GetByteCount(line) + 1L;
 
-    private static long SizeOf(string line) => Encoding.UTF8.GetByteCount(line) + 1;
+    private T Use<T>(string feature, Func<CodaleDatabase, State, T> work) =>
+        Pool.UseRecords(directory, db => work(db, db.Record<State>().Key(feature).Get() ?? Empty));
 
-    /// <summary>How many times the list has been archived.</summary>
-    public int Generation(string feature) => (databases ?? WorkspaceDb.Shared).Use(directory, db => Archives(db, feature).Count);
+    public int Generation(string feature) => Use(feature, (_, state) => state.Archives.Length);
+    public long Length(string feature) => Use(feature, (_, state) => state.End - state.Start);
 
-    /// <summary>Bytes in the current list.</summary>
-    public long Length(string feature) => (databases ?? WorkspaceDb.Shared).Use(directory, db => LengthOf(db, feature));
-
-    /// <summary>Kept beside the records so an append does not have to list them to find where it goes.</summary>
-    private static DbNode LengthNode(CodaleDb db, string feature) => db.Open("history").Open(feature).Open("length");
-
-    private static long LengthOf(CodaleDb db, string feature) =>
-        long.TryParse(LengthNode(db, feature).Read(), out var length) ? length : 0;
-
-    /// <summary>Adds one record (a line of JSON) to the current list; nothing once the history was deleted.</summary>
-    public void Append(string feature, string line)
+    public void Append(string feature, string line) => Use(feature, (db, state) =>
     {
-        lock (Gate)
+        if (state.Deleted) return false;
+        db.WriteBatch(batch =>
         {
-            if (Deleted.Contains(DeletedKey(feature)))
-            {
-                return;
-            }
-
-            (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Batch(() =>
-            {
-                var at = LengthOf(db, feature);
-                db.Open("history").Open(feature).Open(Current).Open(Offset(at)).Write(line);
-                LengthNode(db, feature).Write((at + SizeOf(line)).ToString());
-            }));
-        }
-    }
-
-    /// <summary>Every generation of the history, oldest first, the current one last; each name is passed back to <see cref="Lines"/>.</summary>
-    public IReadOnlyList<string> Generations(string feature) => (databases ?? WorkspaceDb.Shared).Use(directory, db =>
-    {
-        var names = Archives(db, feature).Select(n => Archive + "." + n).ToList();
-        if (db.Open("history").Open(feature).Open(Current).ChildCount() > 0)
-        {
-            names.Add(Current);
-        }
-
-        return (IReadOnlyList<string>)names;
+            batch.Put(Key(feature, state.End), new Line(line));
+            batch.Put(feature, state with { End = state.End + SizeOf(line) });
+        });
+        return true;
     });
 
-    /// <summary>The records of a generation from a byte offset on, in order.</summary>
-    public IReadOnlyList<string> Lines(string feature, string generation, long fromOffset = 0) => (databases ?? WorkspaceDb.Shared).Use(directory, db =>
+    public IReadOnlyList<string> Generations(string feature) => Use<IReadOnlyList<string>>(feature, (_, state) =>
     {
-        var node = Node(db, feature, generation);
-        var lines = new List<string>();
-        foreach (var key in node.Children())
-        {
-            if (long.Parse(key) >= fromOffset && node.Open(key).Read() is { } line)
-            {
-                lines.Add(line);
-            }
-        }
-
-        return (IReadOnlyList<string>)lines;
+        var archives = state.Archives.Select(archive => "arc." + archive.Number.ToString(CultureInfo.InvariantCulture));
+        return state.Start < state.End ? archives.Append(Current).ToArray() : archives.ToArray();
     });
 
-    public IReadOnlyList<(long NextOffset, string Line)> Page(string feature, string generation, long offset, int limit) =>
-        (databases ?? WorkspaceDb.Shared).Use(directory, db =>
+    public IReadOnlyList<string> Lines(string feature, string generation, long fromOffset = 0) =>
+        Use<IReadOnlyList<string>>(feature, (db, state) =>
         {
-            var node = Node(db, feature, generation);
-            var page = new List<(long, string)>(limit);
-            // The log is keyed by adjacent byte offsets. Reading the next key directly
-            // avoids sorting every key in the archive on every backfill page.
-            while (page.Count < limit && node.Open(Offset(offset)).Read() is { } line)
-            {
-                offset += SizeOf(line);
-                page.Add((offset, line));
-            }
-            return (IReadOnlyList<(long, string)>)page;
+            var (start, end) = Range(state, generation);
+            var from = Math.Max(0, fromOffset);
+            if (from >= end - start) return [];
+            return [.. db.Record<Line>().FindRange(Key(feature, start + from), Key(feature, end)).Select(row => row.Value.Text)];
         });
 
-    /// <summary>
-    /// Archives the first <paramref name="offset"/> bytes and starts the new current list with whatever was
-    /// appended past them, so no record ever lands in an archive unsummarised.
-    /// </summary>
-    public void ArchiveUpTo(string feature, long offset)
+    public IReadOnlyList<(long NextOffset, string Line)> Page(string feature, string generation, long offset, int limit)
     {
-        lock (Gate)
+        ArgumentOutOfRangeException.ThrowIfNegative(limit);
+        if (offset < 0 || limit == 0) return [];
+        return Use<IReadOnlyList<(long, string)>>(feature, (db, state) =>
         {
-            (databases ?? WorkspaceDb.Shared).Use(directory, db =>
+            var (start, end) = Range(state, generation);
+            if (offset >= end - start) return [];
+            var first = Key(feature, start + offset);
+            var records = db.Record<Line>().FindRange(first, Key(feature, end), limit);
+            if (records.Count == 0 || records[0].Key != first) return [];
+            var page = new List<(long, string)>(records.Count);
+            foreach (var record in records)
             {
-                var history = db.Open("history").Open(feature);
-                var current = history.Open(Current);
-                var keys = current.Children();
-                if (keys.Count == 0)
-                {
-                    return;
-                }
-
-                var next = Archives(db, feature).DefaultIfEmpty(0).Max() + 1;
-                var records = keys.Select(k => (Start: long.Parse(k), Line: current.Open(k).Read() ?? "")).ToList();
-                db.Batch(() =>
-                {
-                    current.Remove();
-                    var archive = history.Open(Archive).Open(next.ToString());
-                    var rebased = 0L;
-                    foreach (var (start, line) in records)
-                    {
-                        if (start < offset)
-                        {
-                            archive.Open(Offset(start)).Write(line);
-                        }
-                        else
-                        {
-                            history.Open(Current).Open(Offset(rebased)).Write(line);
-                            rebased += SizeOf(line);
-                        }
-                    }
-
-                    LengthNode(db, feature).Write(rebased.ToString());
-                });
-            });
-        }
+                offset += SizeOf(record.Value.Text);
+                page.Add((offset, record.Value.Text));
+            }
+            return page;
+        });
     }
 
-    /// <summary>Removes the whole history; late writers of it do nothing.</summary>
-    public void Delete(string feature)
+    public void ArchiveUpTo(string feature, long offset) => Use(feature, (db, state) =>
     {
-        lock (Gate)
+        if (offset <= 0 || state.Start == state.End) return false;
+        var cut = state.End;
+        if (offset < state.End - state.Start)
         {
-            Deleted.Add(DeletedKey(feature));
-            (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("history").Open(feature).Remove());
+            var next = db.Record<Line>().FindRange(Key(feature, state.Start + offset), Key(feature, state.End), 1);
+            if (next.Count > 0) cut = long.Parse(next[0].Key.AsSpan(Prefix(feature).Length), CultureInfo.InvariantCulture);
         }
+        var number = state.Archives.Length == 0 ? 1 : state.Archives[^1].Number + 1;
+        db.Record<State>().Key(feature).Value(state with { Start = cut, Archives = [.. state.Archives, new(number, state.Start, cut)] });
+        return true;
+    });
+
+    public void Delete(string feature) => Use(feature, (db, state) =>
+    {
+        if (state.Deleted) return false;
+        var keys = db.Record<Line>().Keys(Prefix(feature));
+        db.WriteBatch(batch =>
+        {
+            foreach (var key in keys) batch.Delete<Line>(key);
+            batch.Put(feature, Empty with { Deleted = true });
+        });
+        return true;
+    });
+
+    private static (long Start, long End) Range(State state, string generation)
+    {
+        if (generation == Current) return (state.Start, state.End);
+        if (generation.StartsWith("arc.", StringComparison.Ordinal) && int.TryParse(generation.AsSpan(4), out int number) &&
+            state.Archives.FirstOrDefault(archive => archive.Number == number) is { } match) return (match.Start, match.End);
+        return default;
     }
-
-    private static List<int> Archives(CodaleDb db, string feature) =>
-        [.. db.Open("history").Open(feature).Open(Archive).Children()
-            .Select(n => int.TryParse(n, out var number) ? number : 0)
-            .Order()];
-
-    private static DbNode Node(CodaleDb db, string feature, string generation) =>
-        generation == Current
-            ? db.Open("history").Open(feature).Open(Current)
-            : db.Open("history").Open(feature).Open(Archive).Open(generation[(Archive.Length + 1)..]);
 }

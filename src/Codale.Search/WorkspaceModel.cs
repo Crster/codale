@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+using Codale.Db;
 using Codale.Search.Engine;
 
 namespace Codale.Search;
@@ -23,7 +24,7 @@ public static class ModelChannels
     public static IReadOnlyDictionary<string, int> Current { get; } = new Dictionary<string, int>
     {
         [Terms] = 1,
-        [Symbols] = 4,
+        [Symbols] = 5,
         [Transitions] = 1,
     };
 }
@@ -40,18 +41,22 @@ public static class ModelChannels
 /// new one, so a change costs the size of that file, not of the workspace.
 /// </para>
 /// <para>
-/// The model is saved next to the project's knowledge and loaded on the next start. A file whose
+/// The model is saved in a workspace database and loaded on the next start. A file whose
 /// length and write time still match its stored entry is not read again, so a restart needs no
 /// re-tokenising of an unchanged workspace.
 /// </para>
 /// </remarks>
-/// <param name="path">Where the model is saved and loaded; null keeps it in memory only.</param>
-public sealed class WorkspaceModel(string? path = null)
+/// <param name="path">Database directory; null keeps the model in memory only.</param>
+/// <param name="key">Workspace identity within the database.</param>
+public sealed class WorkspaceModel(string? path = null, string key = "model")
 {
-    private const int FormatVersion = 1;
+    private static readonly CodaleDatabasePool Storage = new(TimeSpan.FromMilliseconds(300), new() { LockTimeout = TimeSpan.FromSeconds(2) });
+    private static readonly Dictionary<string, int> CurrentChannels = new(ModelChannels.Current);
 
     private readonly Lock _gate = new();
+    private readonly Lock _saveGate = new();
     private readonly string? _path = path;
+    private readonly string _key = key;
     private readonly Dictionary<string, Entry> _files = [with(StringComparer.OrdinalIgnoreCase)];
     private readonly Dictionary<string, int> _termFiles = [with(StringComparer.Ordinal)];
     private readonly Dictionary<string, Dictionary<SourceSymbolKind, int>> _symbols = [with(StringComparer.OrdinalIgnoreCase)];
@@ -61,7 +66,8 @@ public sealed class WorkspaceModel(string? path = null)
     private string[]? _termIndex;
     private string[]? _symbolIndex;
     private bool _loaded;
-    private bool _dirty;
+    private readonly Dictionary<string, long> _dirty = new(StringComparer.OrdinalIgnoreCase);
+    private long _revision;
 
     /// <summary>The one copy of each word the model and the index's files share.</summary>
     internal StringPool Pool { get; } = new();
@@ -85,7 +91,7 @@ public sealed class WorkspaceModel(string? path = null)
         {
             lock (_gate)
             {
-                return _dirty;
+                return _dirty.Count > 0;
             }
         }
     }
@@ -132,7 +138,7 @@ public sealed class WorkspaceModel(string? path = null)
 
             _files[entry.Path] = entry;
             Apply(entry, +1);
-            _dirty = true;
+            _dirty[entry.Path] = ++_revision;
         }
     }
 
@@ -147,7 +153,7 @@ public sealed class WorkspaceModel(string? path = null)
             }
 
             Apply(entry, -1);
-            _dirty = true;
+            _dirty[entry.Path] = ++_revision;
         }
     }
 
@@ -377,31 +383,26 @@ public sealed class WorkspaceModel(string? path = null)
             }
 
             _loaded = true;
-            if (_path is null || !File.Exists(_path))
+            if (_path is null || !Directory.Exists(StoragePath))
             {
                 return;
             }
 
-            StoredModel? stored;
+            IReadOnlyList<RecordEntry<StoredFile>> stored;
             try
             {
-                using var stream = File.OpenRead(_path);
-                stored = JsonSerializer.Deserialize<StoredModel>(stream);
+                stored = UseStorage(db => db.Record<StoredFile>().FindPrefix(StoragePrefix));
             }
-            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+            catch (Exception ex) when (StorageFailure(ex))
             {
                 return;
             }
 
-            if (stored?.Format != FormatVersion || stored.Files is null)
+            foreach (var row in stored)
             {
-                return;
-            }
-
-            foreach (var file in stored.Files)
-            {
+                var file = row.Value;
                 // A file stored under another channel version is left out: it is read again on the next scan.
-                if (!ChannelsCurrent(file.Channels) || _files.ContainsKey(file.Path))
+                if (!ChannelsCurrent(file.Channels) || _files.ContainsKey(file.Path) || _dirty.ContainsKey(file.Path))
                 {
                     continue;
                 }
@@ -430,61 +431,64 @@ public sealed class WorkspaceModel(string? path = null)
             return;
         }
 
-        StoredModel snapshot;
+        lock (_saveGate) SaveCore();
+    }
+
+    private void SaveCore()
+    {
+        (string Path, long Revision, StoredFile? File)[] snapshot;
         lock (_gate)
         {
-            if (!_dirty)
-            {
-                return;
-            }
-
-            snapshot = new StoredModel
-            {
-                Format = FormatVersion,
-                Files = [.. _files.Values.Select(e => new StoredFile
+            if (_dirty.Count == 0) return;
+            snapshot = [.. _dirty.Select(change => (change.Key, change.Value,
+                _files.TryGetValue(change.Key, out var e) ? new StoredFile
                 {
                     Path = e.Path,
                     Length = e.Length,
                     LastWriteTicks = e.LastWriteTicks,
-                    Channels = [with(ModelChannels.Current)],
+                    Channels = CurrentChannels,
                     Terms = e.Terms,
                     Counts = e.Counts,
                     TokenCount = e.TokenCount,
                     Symbols = e.Symbols,
                     Transitions = e.Transitions,
-                })],
-            };
+                } : null))];
         }
 
-        var directory = Path.GetDirectoryName(_path)!;
-        Directory.CreateDirectory(directory);
-        var temp = _path + ".tmp";
         try
         {
-            using (var stream = File.Create(temp))
+            UseStorage(db =>
             {
-                JsonSerializer.Serialize(stream, snapshot);
-            }
-
-            if (File.Exists(_path))
-            {
-                File.Replace(temp, _path, destinationBackupFileName: null);
-            }
-            else
-            {
-                File.Move(temp, _path);
-            }
+                db.WriteBatch(batch =>
+                {
+                    foreach (var (path, _, file) in snapshot)
+                        if (file is null) batch.Delete<StoredFile>(StorageKey(path));
+                        else batch.Put(StorageKey(path), file);
+                });
+                return true;
+            });
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (StorageFailure(ex))
         {
             return;
         }
 
         lock (_gate)
         {
-            _dirty = false;
+            foreach (var (path, revision, _) in snapshot)
+                if (_dirty.GetValueOrDefault(path) == revision) _dirty.Remove(path);
         }
     }
+
+    private static bool StorageFailure(Exception exception) => exception is IOException or JsonException or UnauthorizedAccessException
+        or InvalidOperationException or InvalidDataException;
+
+    private string StoragePrefix => FormattableString.Invariant($"{_key.Length}:{_key}:");
+    private string StorageKey(string path) => StoragePrefix + path.ToUpperInvariant();
+
+    private string StoragePath => File.Exists(_path) ? _path + ".records" : Path.Combine(_path!, "records");
+
+    private T UseStorage<T>(Func<CodaleDatabase, T> action) => Storage.Use(StoragePath, action);
 
     /// <summary>A loaded file's words become the pool's, so it holds no copies of its own.</summary>
     private void Intern(StoredFile file)
@@ -614,15 +618,6 @@ public sealed class WorkspaceModel(string? path = null)
         WordPair[] Transitions);
 
     // The saved form. Kept apart from Entry so the file format can change without touching the model.
-    private sealed class StoredModel
-    {
-        [JsonPropertyName("format")]
-        public int Format { get; set; }
-
-        [JsonPropertyName("files")]
-        public List<StoredFile>? Files { get; set; }
-    }
-
     private sealed class StoredFile
     {
         [JsonPropertyName("path")]

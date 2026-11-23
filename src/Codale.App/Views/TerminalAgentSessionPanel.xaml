@@ -322,9 +322,9 @@
 
                 <!--  Todos  -->
                 <Button
-                    AutomationProperties.Name="Todos"
+                    AutomationProperties.Name="Checklist"
                     Style="{StaticResource CompactAction}"
-                    ToolTipService.ToolTip="Todos">
+                    ToolTipService.ToolTip="Checklist">
                     <StackPanel VerticalAlignment="Center" Spacing="1">
                         <FontIcon
                             FontSize="13"
@@ -351,7 +351,7 @@
                                     Margin="8"
                                     FontSize="12"
                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Text="No todos yet."
+                                    Text="No checklist yet."
                                     Visibility="{x:Bind Session.Todos.Count, Mode=OneWay, Converter={StaticResource CountToInverseVisibility}}" />
                                 <ScrollViewer
                                     MaxHeight="480"
@@ -365,7 +365,7 @@
                                             IsChecked="True"
                                             Style="{StaticResource SectionHeader}">
                                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <TextBlock Text="Todos" />
+                                                <TextBlock Text="Checklist" />
                                                 <Border
                                                     Background="{StaticResource KindTodoTintBrush}"
                                                     Style="{StaticResource CountChip}"
@@ -486,6 +486,11 @@
                                         Visibility="{x:Bind RunningTasksSection.IsChecked, Mode=OneWay, Converter={StaticResource NullableBoolToVisibility}}">
                                         <ListView.ItemTemplate>
                                             <DataTemplate x:DataType="vm:RunningTaskItem">
+                                                <StackPanel>
+                                                <TextBlock Margin="4,10,4,5" FontSize="11" FontWeight="SemiBold"
+                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                           Text="{x:Bind CategoryHeading, Mode=OneWay}"
+                                                           Visibility="{x:Bind HasCategoryHeading, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                                                 <Grid ColumnSpacing="10" ToolTipService.ToolTip="{x:Bind TitleTip}">
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="Auto" />
@@ -543,6 +548,7 @@
                                                         <FontIcon FontSize="9" Glyph="&#xE71A;" />
                                                     </Button>
                                                 </Grid>
+                                            </StackPanel>
                                             </DataTemplate>
                                         </ListView.ItemTemplate>
                                     </ListView>

@@ -78,8 +78,7 @@ public sealed class WorkspaceFolders(string projectPath, ApplicationDatabase dat
         {
             try
             {
-                using var db = _database.Open();
-                return db.Project(_projectPath).Open("ui").Open(RecentKey).Read() is { Length: > 0 } json
+                return _database.GetProjectSetting(_projectPath, RecentKey) is { Length: > 0 } json
                     ? (JsonSerializer.Deserialize<List<string>>(json) ?? []).Where(Directory.Exists).ToList()
                     : [];
             }

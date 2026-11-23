@@ -1,5 +1,7 @@
 using System.Text.Json;
 
+using Codale.Db;
+
 namespace Codale.Workspace;
 
 /// <summary>A run command saved for the workspace (the commands menu).</summary>
@@ -16,28 +18,32 @@ public sealed record SavedCommand(string Name, string Command, string? Cwd = nul
 public sealed class ConfigStore(string directory, WorkspaceDatabasePool? databases = null)
 {
     private const string CommandsKey = "commands";
+    private sealed record Configuration(string Value);
+    private WorkspaceDatabasePool Pool => databases ?? WorkspaceDb.Shared;
 
-    public string? Get(string name) => (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("config").Open(name).Read());
+    private T Use<T>(Func<RecordCollection<Configuration>, T> work) => Pool.UseRecords(directory, db => work(db.Record<Configuration>()));
 
-    public void Set(string name, string value) => (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("config").Open(name).Write(value));
+    public string? Get(string name) => Use(records => records.Key(name).Get()?.Value);
+
+    public void Set(string name, string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        Use(records => { records.Key(name).Value(new(value)); return true; });
+    }
 
     /// <summary>Claims a durable operation once, including across multiple views of the same workspace.</summary>
-    public bool TrySetIfAbsent(string name, string value) => (databases ?? WorkspaceDb.Shared).Use(directory, db =>
+    public bool TrySetIfAbsent(string name, string value) => Use(records =>
     {
-        var claimed = false;
-        db.Batch(() =>
-        {
-            var node = db.Open("config").Open(name);
-            if (node.Read() is not null) return;
-            node.Write(value);
-            claimed = true;
-        });
-        return claimed;
+        ArgumentNullException.ThrowIfNull(value);
+        var record = records.Key(name);
+        if (record.TryGet(out _)) return false;
+        record.Value(new(value));
+        return true;
     });
 
-    public bool Remove(string name) => (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("config").Open(name).Remove());
+    public bool Remove(string name) => Use(records => records.Key(name).TryDelete(out _));
 
-    public IReadOnlyList<string> Names() => (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Open("config").Children());
+    public IReadOnlyList<string> Names() => Use(records => records.Keys());
 
     public T? GetJson<T>(string name) => Get(name) is { } json ? JsonSerializer.Deserialize<T>(json) : default;
 
@@ -64,35 +70,32 @@ public sealed class ConfigStore(string directory, WorkspaceDatabasePool? databas
         var shell = string.IsNullOrWhiteSpace(command.Shell) ? null : command.Shell.Trim().ToLowerInvariant();
         var saved = new SavedCommand(name, command.Command, string.IsNullOrWhiteSpace(command.Cwd) ? null : command.Cwd.Trim(), shell);
         var replaces = originalName?.Trim();
-        (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Batch(() =>
+        Use(records =>
         {
-            var node = db.Open("config").Open(CommandsKey);
-            var all = (node.ReadJson<List<SavedCommand>>() ?? [])
+            var record = records.Key(CommandsKey);
+            var all = ReadCommands(record)
                 .Where(c => !string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase) &&
                             !string.Equals(c.Name, replaces, StringComparison.OrdinalIgnoreCase))
                 .Append(saved)
                 .ToList();
-            node.WriteJson(all);
-        }));
+            record.Value(new(JsonSerializer.Serialize(all)));
+            return true;
+        });
         return saved;
     }
 
     /// <summary>Removes the command of that name (case-insensitive); false when there was none.</summary>
-    public bool RemoveCommand(string name)
+    public bool RemoveCommand(string name) => Use(records =>
     {
-        var changed = false;
-        (databases ?? WorkspaceDb.Shared).Use(directory, db => db.Batch(() =>
-        {
-            var node = db.Open("config").Open(CommandsKey);
-            var all = node.ReadJson<List<SavedCommand>>() ?? [];
-            changed = all.RemoveAll(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase)) > 0;
-            if (changed)
-            {
-                node.WriteJson(all);
-            }
-        }));
-        return changed;
-    }
+        var record = records.Key(CommandsKey);
+        var all = ReadCommands(record);
+        if (all.RemoveAll(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase)) == 0) return false;
+        record.Value(new(JsonSerializer.Serialize(all)));
+        return true;
+    });
+
+    private static List<SavedCommand> ReadCommands(RecordKey<Configuration> record) =>
+        record.Get() is { } saved ? JsonSerializer.Deserialize<List<SavedCommand>>(saved.Value) ?? [] : [];
 
     /// <summary>The folder beside the database where generated script files live, never in the workspace.</summary>
     public string ScriptsDirectory => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(directory))!, "command-scripts");

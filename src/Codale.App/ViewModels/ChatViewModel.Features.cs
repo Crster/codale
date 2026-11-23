@@ -247,7 +247,6 @@ public sealed partial class ChatViewModel
             // Even a first prompt with no subject of its own names the history: there is nothing better yet.
             SetFeature(features.Create(TitleFromPrompt(text) ?? (text.Trim().Length > 0 ? SessionTitles.FromPrompt(text) : "Attachments"), text));
             Title = FeatureName;
-            if (text.Length > 0) NameSessionAsync(FeatureId!, text, FeatureName);
         }
         else
         {

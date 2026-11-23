@@ -109,7 +109,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
         : ActiveProvider is not { IsAccount: false } provider
             ? $"This chat uses Codale's {_chat?.ProviderName} account."
             : provider.FlashModel.Length == 0 && provider.ProModel.Length == 0
-                ? $"This chat uses {provider.Name.Trim()}. It has no model name yet; add one in settings.json."
+                ? $"This chat uses {provider.Name.Trim()}. Choose a model for it in Settings."
                 : $"This chat uses {provider.Name.Trim()}.";
 
     /// <summary>The agent profile rows shown in the chat's dropdown, plus aliases from folded profile names to their row.</summary>

@@ -204,7 +204,7 @@ public static class TaskTools
     {
         var directory = WorkspaceDb.DirectoryFor(projectRoot);
         var memory = new MemoryStore(directory);
-        var env = new EnvStore(directory);
+        var todos = new UserTodoStore(directory);
 
         static async Task<IReadOnlyList<McpContent>> Guarded(Func<string> work)
         {
@@ -288,38 +288,21 @@ public static class TaskTools
                 (a, _) => Guarded(() => memory.Forget(a.RequiredString("id")) ? "Forgotten." : "No such note.")),
 
             new McpTool(
-                "env_list",
-                "List the names of the secrets stored for this workspace (API keys, tokens, connection strings). Never shows values.",
+                "todo_list",
+                "List unfinished todos added by the user for this workspace, with their ids. Verify and fix relevant items before completing them.",
                 McpTool.Schema(),
                 (_, _) => Guarded(() =>
                 {
-                    var names = env.Names();
-                    return names.Count == 0 ? "No secrets stored." : string.Join('\n', names);
+                    var items = todos.List();
+                    return items.Count == 0 ? "No unfinished todos." : string.Join('\n', items.Select(item => $"[{item.Id}] {item.Text}"));
                 })),
 
             new McpTool(
-                "env_get",
-                "Read one stored secret's value, to use in a command or request you are running for the user. The value is sensitive: " +
-                "use it where it is needed, never write it into files, code, commits or messages, and do not repeat it back.",
-                McpTool.Schema([("name", "string", "The secret's name as env_list shows it.")], "name"),
-                (a, _) => Guarded(() => env.Get(a.RequiredString("name")) ?? throw new McpToolException("No secret by that name. env_list shows the names."))),
+                "todo_complete",
+                "Remove a user todo after verifying it is satisfied and fixing it if needed. Never complete an unfinished or unverified todo.",
+                McpTool.Schema([("id", "string", "The todo id from todo_list.")], "id"),
+                (a, _) => Guarded(() => todos.Complete(a.RequiredString("id")) ? "Todo completed and removed." : "No such unfinished todo.")),
 
-            new McpTool(
-                "env_set",
-                "Store a secret the user gave you and asked you to keep (name and value). It is encrypted for this Windows account. " +
-                "Do not invent values or store anything the user did not ask you to.",
-                McpTool.Schema(
-                    [
-                        ("name", "string", "Letters, digits and underscores, e.g. STRIPE_API_KEY."),
-                        ("value", "string", "The secret."),
-                    ],
-                    "name",
-                    "value"),
-                (a, _) => Guarded(() =>
-                {
-                    env.Set(a.RequiredString("name"), a.RequiredString("value"));
-                    return $"Stored {a.RequiredString("name")}.";
-                })),
         ];
     }
 
