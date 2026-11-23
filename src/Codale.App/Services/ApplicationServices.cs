@@ -26,6 +26,7 @@ public sealed class ApplicationServices : IAsyncDisposable
 
     public ApplicationServices(IAgentSessionFactory? agentSessions = null, IGitRepositoryFactory? gitRepositories = null, ICliHistoryReaderFactory? cliHistory = null)
     {
+        Codale.Core.Projects.CodalePaths.ShareWithChildProcesses();
         Database = new(McpServerSettings.CodaleDataRoot());
         Settings = new(Database);
         Shortcuts = new(Settings);

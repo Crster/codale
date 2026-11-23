@@ -204,7 +204,9 @@ internal sealed class BrowserWindow : Form
     {
         try
         {
-            var profile = Environment.GetEnvironmentVariable("CODALE_WEBVIEW_PROFILE") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale", "webview-browser-profile");
+            var dataRoot = Environment.GetEnvironmentVariable("CODALE_DATA_ROOT") is { Length: > 0 } root && Path.IsPathFullyQualified(root)
+                ? root : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale");
+            var profile = Environment.GetEnvironmentVariable("CODALE_WEBVIEW_PROFILE") ?? Path.Combine(dataRoot, "webview-browser-profile");
             var options = new CoreWebView2EnvironmentOptions { AdditionalBrowserArguments = $"--remote-debugging-port={DebuggingPort}" };
             _environment.TrySetResult(await CoreWebView2Environment.CreateAsync(null, profile, options));
 

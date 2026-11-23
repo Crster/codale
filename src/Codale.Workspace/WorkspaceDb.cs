@@ -10,8 +10,30 @@ public static class WorkspaceDb
 
     private sealed record Owner(string Repository);
 
-    public static string DirectoryFor(string projectPath) => DirectoryFor(projectPath,
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "workspace"));
+    public static string DirectoryFor(string projectPath) => DirectoryFor(projectPath, s_root.Value);
+
+    private static readonly Lazy<string> s_root = new(() =>
+    {
+        var root = CodalePaths.WorkspaceDirectory;
+        MoveLegacyRoot(Path.Combine(Path.GetDirectoryName(CodalePaths.DataRoot)!, "workspace"), root);
+        return root;
+    });
+
+    /// <summary>
+    /// Workspace databases used to live in a <c>workspace</c> folder beside, not inside, the Codale
+    /// data root. Moves that folder in once, if nothing is at the new place yet; on failure (a
+    /// database still open elsewhere) the old one is left as it is and the indexes rebuild.
+    /// </summary>
+    internal static void MoveLegacyRoot(string legacy, string root)
+    {
+        try
+        {
+            if (!Directory.Exists(legacy) || Directory.Exists(root)) return;
+            Directory.CreateDirectory(Path.GetDirectoryName(root)!);
+            Directory.Move(legacy, root);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
 
     internal static string DirectoryFor(string projectPath, string root)
     {

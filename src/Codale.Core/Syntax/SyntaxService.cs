@@ -32,7 +32,7 @@ public static class SyntaxService
     }
 
     public static string DefaultRoot =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale", "syntax");
+        Path.Combine(Codale.Core.Projects.CodalePaths.DataRoot, "syntax");
 
     private static void Ensure()
     {

@@ -154,6 +154,7 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
                 ["CODALE_PROJECT_DIR"] = _projectPath,
                 ["CODALE_RUN_DIR"] = runDirectory ?? _projectPath,
                 ["CODALE_PANEL_PUSH"] = pushToPanel ? "1" : "0",
+                [CodalePaths.DataRootVariable] = CodaleDataRoot(),
             },
         })];
     }
@@ -217,7 +218,7 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
                 AskTools = ["browser_upload", "browser_evaluate"],
 
                 // browser_upload is confined to this folder and refuses without it.
-                Env = new Dictionary<string, string> { ["CODALE_PROJECT_DIR"] = _projectPath },
+                Env = new Dictionary<string, string> { ["CODALE_PROJECT_DIR"] = _projectPath, [CodalePaths.DataRootVariable] = CodaleDataRoot() },
             });
         }
 
@@ -231,6 +232,7 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
 
                 // Looking, moving the pointer and clicking run unasked; typing and key presses can enter commands or data, so those ask.
                 AskTools = ["computer_type", "computer_key"],
+                Env = new Dictionary<string, string> { [CodalePaths.DataRootVariable] = CodaleDataRoot() },
             });
         }
 
@@ -246,7 +248,7 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
                 AskTools = ["phone_install", "phone_uninstall", "phone_clear_data", "phone_push", "phone_shell"],
 
                 // phone_install, phone_push and phone_pull are confined to this folder and refuse without it.
-                Env = new Dictionary<string, string> { ["CODALE_PROJECT_DIR"] = _projectPath },
+                Env = new Dictionary<string, string> { ["CODALE_PROJECT_DIR"] = _projectPath, [CodalePaths.DataRootVariable] = CodaleDataRoot() },
             });
         }
 
@@ -529,20 +531,7 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
     /// The global Codale data directory in the user's local application data folder:
     /// <c>%LOCALAPPDATA%\Codale</c>.
     /// </summary>
-    public static string CodaleDataRoot()
-    {
-        string root;
-        try
-        {
-            root = Windows.Storage.ApplicationData.Current.LocalCacheFolder.Path;
-        }
-        catch (Exception)
-        {
-            root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        }
-
-        return Path.Combine(root, "Codale");
-    }
+    public static string CodaleDataRoot() => Codale.Core.Projects.CodalePaths.DataRoot;
 
     /// <summary>
     /// A physical folder other processes see at the same path. A packaged app's

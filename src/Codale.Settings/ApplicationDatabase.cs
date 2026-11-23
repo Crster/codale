@@ -12,7 +12,34 @@ public sealed class ApplicationDatabase(string folder) : IDisposable
     private bool _disposed;
 
     public string Folder { get; } = Path.GetFullPath(folder);
-    public string DatabasePath => Path.Combine(Folder, "data", "records");
+    public string DatabasePath { get; } = Flattened(Path.Combine(Path.GetFullPath(folder), "data"));
+
+    private static string Flattened(string databasePath)
+    {
+        MoveNestedRecords(databasePath);
+        return databasePath;
+    }
+
+    /// <summary>
+    /// The database briefly lived one level deeper, in <c>data\records</c>. Moves its files up
+    /// once, if <c>data</c> holds no database of its own yet; otherwise the nested copy is left alone.
+    /// </summary>
+    internal static bool MoveNestedRecords(string databasePath)
+    {
+        var nested = Path.Combine(databasePath, "records");
+        try
+        {
+            if (!Directory.Exists(nested) || Directory.EnumerateFiles(databasePath).Any()) return false;
+            foreach (var file in Directory.EnumerateFiles(nested))
+                File.Move(file, Path.Combine(databasePath, Path.GetFileName(file)));
+            Directory.Delete(nested);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
 
     public T UseRecords<T>(Func<CodaleDatabase, T> action) => _records.Use(DatabasePath, db =>
     {

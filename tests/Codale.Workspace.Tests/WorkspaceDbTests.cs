@@ -26,6 +26,24 @@ public sealed class WorkspaceDbTests : IDisposable
     }
 
     [Fact]
+    public void Legacy_workspace_folder_moves_under_the_data_root_once()
+    {
+        var legacy = Path.Combine(_directory, "workspace");
+        var root = Path.Combine(_directory, "Codale", "workspace");
+        Directory.CreateDirectory(Path.Combine(legacy, "my_repo"));
+
+        WorkspaceDb.MoveLegacyRoot(legacy, root);
+        Assert.False(Directory.Exists(legacy));
+        Assert.True(Directory.Exists(Path.Combine(root, "my_repo")));
+
+        // Once the new folder exists a reappearing old one is left alone.
+        Directory.CreateDirectory(Path.Combine(legacy, "other"));
+        WorkspaceDb.MoveLegacyRoot(legacy, root);
+        Assert.True(Directory.Exists(Path.Combine(legacy, "other")));
+        Assert.False(Directory.Exists(Path.Combine(root, "other")));
+    }
+
+    [Fact]
     public void Linked_worktrees_share_a_flat_database_and_same_named_projects_stay_separate()
     {
         var main = Path.Combine(_directory, "MyRepo");

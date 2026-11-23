@@ -124,12 +124,14 @@ public sealed partial class SettingsPanel : UserControl
     {
         try
         {
-            Directory.CreateDirectory(path);
+            var full = System.IO.Path.GetFullPath(path);
+            Directory.CreateDirectory(full);
+            // Shell-open the folder itself; explorer.exe falls back to Documents when it can't parse its argument.
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
-                FileName = "explorer.exe",
-                ArgumentList = { path },
-                UseShellExecute = false,
+                FileName = full,
+                UseShellExecute = true,
+                Verb = "open",
             });
         }
         catch (Exception)

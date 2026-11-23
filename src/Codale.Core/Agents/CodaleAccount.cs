@@ -1,5 +1,4 @@
-using System.Runtime.InteropServices;
-using System.Text;
+using Codale.Core.Projects;
 
 namespace Codale.Core.Agents;
 
@@ -85,43 +84,6 @@ public static class CodaleAccount
         return path;
     }
 
-    /// <summary>
-    /// A physical folder every process sees at the same path. A packaged app's
-    /// %LOCALAPPDATA% is virtualised: a folder it creates there lands in the package's
-    /// local cache, so a login typed into a terminal would find nothing at that path.
-    /// The local cache is where those writes already go, so earlier logins stay put.
-    /// </summary>
-    private static string ResolveRoot()
-    {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var root = PackageFamilyName() is { } family
-            ? Path.Combine(localAppData, "Packages", family, "LocalCache", "Local")
-            : localAppData;
-
-        return Path.Combine(root, "Codale", "accounts");
-    }
-
-    private static string? PackageFamilyName()
-    {
-        try
-        {
-            uint length = 0;
-            if (GetCurrentPackageFamilyName(ref length, null) != ErrorInsufficientBuffer)
-            {
-                return null;
-            }
-
-            var name = new StringBuilder((int)length);
-            return GetCurrentPackageFamilyName(ref length, name) == 0 ? name.ToString() : null;
-        }
-        catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException)
-        {
-            return null;
-        }
-    }
-
-    private const int ErrorInsufficientBuffer = 122;
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-    private static extern int GetCurrentPackageFamilyName(ref uint packageFamilyNameLength, StringBuilder? packageFamilyName);
+    /// <summary>Under the shared data root, so logins made in or outside the app stay put.</summary>
+    private static string ResolveRoot() => Path.Combine(CodalePaths.DataRoot, "accounts");
 }

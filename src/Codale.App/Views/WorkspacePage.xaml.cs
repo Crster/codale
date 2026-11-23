@@ -703,7 +703,12 @@ public sealed partial class WorkspacePage : Page
     private void RefreshChatTabIcon(ChatTabEntry entry)
     {
         var isByok = false;
-        entry.Item.IconSource.Foreground = CliEndpointViewModel.ProfileBrush(entry.Chat.CliId, isByok);
+        // Replace the source: mutating Foreground on the live one doesn't re-render the tab icon.
+        entry.Item.IconSource = new FontIconSource
+        {
+            Glyph = "",
+            Foreground = CliEndpointViewModel.ProfileBrush(entry.Chat.CliId, isByok),
+        };
     }
 
     private static void RefreshChatTabTitle(ChatTabEntry entry)

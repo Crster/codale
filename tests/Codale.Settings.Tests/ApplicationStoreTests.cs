@@ -25,6 +25,29 @@ public sealed class ApplicationStoreTests
     }
 
     [Fact]
+    public void A_database_left_in_data_records_moves_up_to_data()
+    {
+        var source = Directory.CreateTempSubdirectory("codale-settings-nested-src-");
+        var root = Directory.CreateTempSubdirectory("codale-settings-nested-");
+        try
+        {
+            using (var settings = new AppSettingsStore(source.FullName)) settings.ChatFontSize = 17;
+            var nested = Directory.CreateDirectory(Path.Combine(root.FullName, "data", "records"));
+            foreach (var file in Directory.EnumerateFiles(Path.Combine(source.FullName, "data")))
+                File.Copy(file, Path.Combine(nested.FullName, Path.GetFileName(file)));
+
+            using (var reopened = new AppSettingsStore(root.FullName)) Assert.Equal(17, reopened.ChatFontSize);
+            Assert.False(Directory.Exists(nested.FullName));
+            Assert.NotEmpty(Directory.EnumerateFiles(Path.Combine(root.FullName, "data")));
+        }
+        finally
+        {
+            source.Delete(recursive: true);
+            root.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void SettingsStateLivesInTheProductionInstance()
     {
         Assert.Equal("Codale.Settings", typeof(AppSettingsStore).Assembly.GetName().Name);
