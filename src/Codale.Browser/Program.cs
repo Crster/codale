@@ -1,4 +1,4 @@
-using System.Diagnostics;
+using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -7,79 +7,32 @@ using Microsoft.Windows.ApplicationModel.DynamicDependency;
 namespace Codale.Browser;
 
 /// <summary>
-/// Entry point for the unpackaged WinUI 3 browser. One window per user: a second launch brings the
-/// running window forward and exits. The Windows App Runtime is bootstrapped before any WinRT call.
+/// Entry point for the unpackaged WinUI 3 browser. One window per user: a second launch asks the
+/// running window to come forward over its control pipe, then exits. The Windows App Runtime is
+/// bootstrapped before any WinRT call.
 /// </summary>
 public static class Program
 {
     /// <summary>The Windows App Runtime major.minor this build was compiled against (Microsoft.WindowsAppSDK 2.7).</summary>
     private const uint RuntimeMajorMinor = 0x00020007;
     private const string CodalePackageName = "BB9ADD6B-2E64-46A7-ADF5-885B70F99D51";
-    private const int ErrorInsufficientBuffer = 122;
-    private const int AppModelErrorNoPackage = 15700;
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-    private static extern int GetCurrentPackageFullName(ref int length, System.Text.StringBuilder? name);
-
-    /// <summary>True only when launched from Codale.App; other packaged parents (such as the IDE) need their own runtime bootstrap.</summary>
-    private static bool HasCodalePackageIdentity()
-    {
-        var packageFullName = CurrentPackageFullName();
-        return packageFullName.StartsWith(CodalePackageName + "_", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string CurrentPackageFullName()
-    {
-        var length = 0;
-        var result = GetCurrentPackageFullName(ref length, null);
-        if (result == AppModelErrorNoPackage) return "";
-        if (result != ErrorInsufficientBuffer || length <= 0) return $"<GetCurrentPackageFullName returned {result}>";
-
-        var fullName = new System.Text.StringBuilder(length);
-        result = GetCurrentPackageFullName(ref length, fullName);
-        return result == 0 ? fullName.ToString() : $"<GetCurrentPackageFullName returned {result}>";
-    }
-
-    [DllImport("user32.dll")]
-    private static extern bool SetForegroundWindow(IntPtr window);
-
-    [DllImport("user32.dll")]
-    private static extern bool ShowWindow(IntPtr window, int command);
-
-    [DllImport("user32.dll")]
-    private static extern bool IsIconic(IntPtr window);
-
+    /// <summary>
+    /// The only Win32 call left. Before the runtime is up there is no WinUI window to report a missing
+    /// Windows App Runtime, so a native message box is the one way to tell the person.
+    /// </summary>
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int MessageBoxW(IntPtr window, string text, string caption, uint type);
 
     [STAThread]
-    private static int Main()
-    {
-        try
-        {
-            return Run();
-        }
-        catch (Exception ex)
-        {
-            // Surface startup crashes: stderr for the launching app, and a log next to the browser's data.
-            Console.Error.WriteLine(ex.ToString());
-            try
-            {
-                var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale");
-                Directory.CreateDirectory(dir);
-                File.WriteAllText(Path.Combine(dir, "browser-crash.log"), DateTime.Now + Environment.NewLine + ex);
-            }
-            catch (Exception) { }
-            return ex.HResult != 0 ? ex.HResult : 1;
-        }
-    }
+    private static int Main() => Run();
 
     private static int Run()
     {
         using var instance = new Mutex(true, @"Local\Codale.WebViewBrowser", out var created);
         if (!created)
         {
-            FocusExisting();
+            RequestShow();
             return 0;
         }
 
@@ -88,14 +41,12 @@ public static class Program
         {
             if (!packaged) Bootstrap.Initialize(RuntimeMajorMinor, null, default);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or DllNotFoundException or EntryPointNotFoundException)
+        catch (Exception ex) when (ex is InvalidOperationException or COMException or DllNotFoundException or EntryPointNotFoundException)
         {
-            Log("bootstrap-failed", $"{ex.GetType().FullName}; HRESULT=0x{ex.HResult:X8}; package={CurrentPackageFullName()}{Environment.NewLine}{ex}");
             MessageBoxW(IntPtr.Zero, "Codale Browser needs the Windows App Runtime 2.7. Install it from https://aka.ms/windowsappsdk and try again.\n\n" + ex.Message + $"\n\n0x{ex.HResult:X8} ({ex.GetType().Name})", "Codale Browser", 0x10);
             return 1;
         }
 
-        AppDomain.CurrentDomain.UnhandledException += (_, e) => Log("unhandled", e.ExceptionObject);
         try
         {
             WinRT.ComWrappersSupport.InitializeComWrappers();
@@ -113,31 +64,35 @@ public static class Program
         return 0;
     }
 
-    /// <summary>Appends a line to the browser's trace log next to its data (never throws).</summary>
-    internal static void Log(string kind, object? ex)
+    /// <summary>True only when launched from Codale.App; other packaged parents (such as the IDE) need their own runtime bootstrap.</summary>
+    private static bool HasCodalePackageIdentity()
     {
         try
         {
-            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale");
-            Directory.CreateDirectory(dir);
-            File.AppendAllText(Path.Combine(dir, "browser-trace.log"), $"{DateTime.Now:HH:mm:ss.fff} [{kind}] {ex}{Environment.NewLine}");
+            return Windows.ApplicationModel.Package.Current.Id.Name == CodalePackageName;
         }
-        catch (Exception) { }
+        catch (COMException)
+        {
+            // Unpackaged: there is no package identity at all.
+            return false;
+        }
     }
 
-    /// <summary>Brings the window another launch already opened to the front (restoring it when minimized).</summary>
-    private static void FocusExisting()
+    /// <summary>Asks the running window to come forward. Its control pipe does the work; nothing is sent if it is not reachable.</summary>
+    private static void RequestShow()
     {
-        var current = Environment.ProcessId;
-        foreach (var process in Process.GetProcessesByName("Codale.Browser"))
+        try
         {
-            using (process)
-            {
-                if (process.Id == current || process.MainWindowHandle == IntPtr.Zero) continue;
-                if (IsIconic(process.MainWindowHandle)) ShowWindow(process.MainWindowHandle, 9);
-                SetForegroundWindow(process.MainWindowHandle);
-                break;
-            }
+            using var pipe = new NamedPipeClientStream(".", ControlPipe.Name, PipeDirection.InOut, PipeOptions.None);
+            pipe.Connect(2000);
+            using var writer = new StreamWriter(pipe, leaveOpen: true) { AutoFlush = true };
+            using var reader = new StreamReader(pipe, leaveOpen: true);
+            writer.WriteLine("{\"op\":\"show\"}");
+            reader.ReadLine();
+        }
+        catch (Exception ex) when (ex is IOException or TimeoutException or UnauthorizedAccessException)
+        {
+            // The running window is not reachable; this launch simply ends.
         }
     }
 }

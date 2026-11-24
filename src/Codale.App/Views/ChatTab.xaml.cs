@@ -283,7 +283,9 @@ public sealed partial class ChatTab : UserControl
     private void OnTranscriptSizeChanged(object sender, SizeChangedEventArgs e)
     {
         // Streaming text and finished tool output grow rows without adding items, so follow
-        // by size. The transcript is not virtualized, so extents are exact and one snap settles.
+        // by size. The transcript is virtualized: rows that have not been realized yet are
+        // estimated, so the extent can shift as they come on screen. Each shift is one more
+        // snap to the end while the reader is pinned there.
         if (e.NewSize.Height == e.PreviousSize.Height || !_pinnedToBottom) return;
         FollowTranscriptEnd();
     }
