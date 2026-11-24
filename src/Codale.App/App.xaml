@@ -36,6 +36,19 @@
                     <SolidColorBrush x:Key="ShellPopupBackgroundBrush" Color="#202126" />
                     <SolidColorBrush x:Key="ShellPopupStrokeBrush" Color="#2EFFFFFF" />
                     <SolidColorBrush x:Key="ShellKeycapBrush" Color="#14FFFFFF" />
+                    <!--  Tab strip, VS Code style: flat tabs, the selected one joins the editor surface.  -->
+                    <SolidColorBrush x:Key="TabViewBackground" Color="#17181B" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackground" Color="#1F2024" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPointerOver" Color="#26272C" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPressed" Color="#26272C" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="#1B1C20" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderForeground" Color="#8E929A" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderForegroundPointerOver" Color="#D0D3D9" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderForegroundPressed" Color="#D0D3D9" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderForegroundSelected" Color="#F0F1F4" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonForeground" Color="#8E929A" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonForegroundSelected" Color="#C8CBD2" />
+                    <SolidColorBrush x:Key="TabViewItemSeparator" Color="#2A2B31" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
                     <SolidColorBrush x:Key="ShellBackdropTintBrush" Color="#F2EEF0F3" />
@@ -53,6 +66,18 @@
                     <SolidColorBrush x:Key="ShellInputStrokeBrush" Color="#D9DCE1" />
                     <SolidColorBrush x:Key="ShellPopupBackgroundBrush" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ShellPopupStrokeBrush" Color="#D6D9DE" />
+                    <SolidColorBrush x:Key="TabViewBackground" Color="#F6F7F9" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackground" Color="#ECEEF1" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPointerOver" Color="#E3E6EA" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPressed" Color="#E3E6EA" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderForeground" Color="#6B7078" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderForegroundPointerOver" Color="#2B2E33" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderForegroundPressed" Color="#2B2E33" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderForegroundSelected" Color="#1B1D21" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonForeground" Color="#6B7078" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonForegroundSelected" Color="#3A3D43" />
+                    <SolidColorBrush x:Key="TabViewItemSeparator" Color="#DDE0E5" />
                     <SolidColorBrush x:Key="ShellKeycapBrush" Color="#0D000000" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
@@ -77,7 +102,7 @@
             <!--  Modest rounding: soft enough to read as modern, tight enough to stay dense.  -->
             <CornerRadius x:Key="ControlCornerRadius">4</CornerRadius>
             <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
-            <CornerRadius x:Key="TabViewItemCornerRadius">6,6,0,0</CornerRadius>
+            <CornerRadius x:Key="TabViewItemCornerRadius">0</CornerRadius>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

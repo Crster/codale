@@ -695,6 +695,7 @@ public sealed partial class WorkspacePage : Page
                 if (_chatTabs.FirstOrDefault(t => ReferenceEquals(t.Chat, sender)) is { } statusTab)
                 {
                     RefreshChatTabTitle(statusTab);
+                    RefreshChatTabIcon(statusTab);
                 }
                 break;
         }
@@ -702,12 +703,34 @@ public sealed partial class WorkspacePage : Page
 
     private void RefreshChatTabIcon(ChatTabEntry entry)
     {
-        var isByok = false;
+        var chat = entry.Chat;
+        var provider = CliEndpointViewModel.ProfileBrush(chat.CliId, false);
+        static FontIconSource Swapped(string glyph, Brush brush) => new() { Glyph = glyph, Foreground = brush };
+
+        // Needs-you / failed / working swap the provider glyph, as a VS Code tab swaps its icon for state.
         // Replace the source: mutating Foreground on the live one doesn't re-render the tab icon.
+        if (chat.IsWaitingForYou)
+        {
+            entry.Item.IconSource = Swapped("", ChatPaletteTheme.Brush("StatusWarnBrush"));
+            return;
+        }
+
+        if (chat.ComposerNotice is { Severity: NoticeSeverity.Error or NoticeSeverity.Warning })
+        {
+            entry.Item.IconSource = Swapped("", ChatPaletteTheme.Brush("StatusFailedBrush"));
+            return;
+        }
+
+        if (chat.IsBusyWorking)
+        {
+            entry.Item.IconSource = Swapped("", ChatPaletteTheme.Brush("StatusRunningBrush"));
+            return;
+        }
+
         entry.Item.IconSource = new FontIconSource
         {
             Glyph = "",
-            Foreground = CliEndpointViewModel.ProfileBrush(entry.Chat.CliId, isByok),
+            Foreground = provider,
         };
     }
 
@@ -1076,7 +1099,48 @@ public sealed partial class WorkspacePage : Page
         {
             FontSize = 12,
             VerticalAlignment = VerticalAlignment.Center,
-            Glyph = terminal.IsCommandTerminal ? "\uE768" : "\uE756",
+            RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
+            RenderTransform = new RotateTransform(),
+        };
+        icon.SetBinding(FontIcon.GlyphProperty, new Binding
+        {
+            Path = new PropertyPath("Activity"),
+            Source = terminal,
+            Converter = (IValueConverter)Resources["TerminalActivityGlyph"],
+            ConverterParameter = terminal.IsCommandTerminal ? "\uE768" : "\uE756",
+        });
+
+        // Busy = the glyph spins, like VS Code's task spinner.
+        var spin = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
+        var turn = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
+        {
+            From = 0,
+            To = 360,
+            Duration = TimeSpan.FromSeconds(1.1),
+            RepeatBehavior = Microsoft.UI.Xaml.Media.Animation.RepeatBehavior.Forever,
+        };
+        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(turn, icon.RenderTransform);
+        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(turn, "Angle");
+        spin.Children.Add(turn);
+        void SyncSpin()
+        {
+            if (terminal.Activity == TerminalActivity.Busy)
+            {
+                spin.Begin();
+            }
+            else
+            {
+                spin.Stop();
+            }
+        }
+
+        SyncSpin();
+        terminal.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(TerminalViewModel.Activity))
+            {
+                SyncSpin();
+            }
         };
         icon.SetBinding(FontIcon.ForegroundProperty, new Binding
         {
@@ -1944,6 +2008,13 @@ public sealed partial class WorkspacePage : Page
             Path = new PropertyPath("TabState"),
             Source = vm,
             Converter = (IValueConverter)Resources["TabStateToGlyph"],
+        });
+
+        icon.SetBinding(FontIcon.FontFamilyProperty, new Binding
+        {
+            Path = new PropertyPath("TabState"),
+            Source = vm,
+            Converter = (IValueConverter)Resources["TabStateToFontFamily"],
         });
 
         icon.SetBinding(FontIcon.ForegroundProperty, new Binding

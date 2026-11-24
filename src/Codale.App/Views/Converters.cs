@@ -70,24 +70,62 @@ public sealed partial class TabStateToGlyphConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, string language) => value switch
     {
-        "preview" => "\uE8FF",
         "new" => "\uF56E",
-        "edited" => "\uE8A5",
-        _ => "\uE729",
+        "edited" => "\u25CF", // filled dot: unsaved edits, as VS Code shows them
+        _ => "\uE8A5",        // document: saved or preview
     };
 
     public object ConvertBack(object value, Type targetType, object parameter, string language) =>
         throw new NotSupportedException();
 }
 
-/// <summary>Orange icon for an edited (unsaved) tab; every other state keeps the default foreground.</summary>
-public sealed partial class TabStateToBrushConverter : IValueConverter
+/// <summary>The dot glyph is not in the icon font, so the edited state draws it in a text font.</summary>
+public sealed partial class TabStateToFontFamilyConverter : IValueConverter
 {
-    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush Orange =
-        new(Windows.UI.Color.FromArgb(255, 255, 140, 0));
+    private static readonly Microsoft.UI.Xaml.Media.FontFamily Text = new("Segoe UI");
+    private static readonly Microsoft.UI.Xaml.Media.FontFamily Icons = new("Segoe Fluent Icons, Segoe MDL2 Assets");
 
     public object Convert(object value, Type targetType, object parameter, string language) =>
-        value is "edited" ? Orange : Microsoft.UI.Xaml.DependencyProperty.UnsetValue;
+        value is "edited" ? Text : Icons;
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>Amber for unsaved edits, blue for a new file, dimmed for a preview; a saved file keeps the tab's text colour.</summary>
+public sealed partial class TabStateToBrushConverter : IValueConverter
+{
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush Amber =
+        new(Windows.UI.Color.FromArgb(255, 226, 168, 60));
+
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush Blue =
+        new(Windows.UI.Color.FromArgb(255, 86, 156, 214));
+
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush Dim =
+        new(Windows.UI.Color.FromArgb(150, 160, 164, 172));
+
+    public object Convert(object value, Type targetType, object parameter, string language) => value switch
+    {
+        "edited" => Amber,
+        "new" => Blue,
+        "preview" => Dim,
+        _ => Microsoft.UI.Xaml.DependencyProperty.UnsetValue,
+    };
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>Terminal tab glyph by activity: spinner while busy, cross when failed, check once exited; otherwise the parameter glyph.</summary>
+public sealed partial class TerminalActivityGlyphConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language) => value switch
+    {
+        TerminalActivity.Busy => "\uE895",
+        TerminalActivity.Error => "\uEA39",
+        TerminalActivity.Terminated => "\uE73E",
+        _ => parameter as string ?? "\uE756",
+    };
 
     public object ConvertBack(object value, Type targetType, object parameter, string language) =>
         throw new NotSupportedException();
@@ -637,10 +675,10 @@ public sealed partial class TerminalActivityBrushConverter : IValueConverter
 {
     private static readonly Dictionary<TerminalActivity, SolidColorBrush> BrushesByActivity = new()
     {
-        [TerminalActivity.Busy] = new SolidColorBrush(Colors.DodgerBlue),
-        [TerminalActivity.Terminated] = new SolidColorBrush(Colors.SeaGreen),
-        [TerminalActivity.Error] = new SolidColorBrush(Colors.IndianRed),
-        [TerminalActivity.Idle] = new SolidColorBrush(Colors.Gray),
+        [TerminalActivity.Busy] = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 86, 156, 214)),
+        [TerminalActivity.Terminated] = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 115, 201, 145)),
+        [TerminalActivity.Error] = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 241, 76, 76)),
+        [TerminalActivity.Idle] = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 154, 162)),
     };
 
     public object Convert(object value, Type targetType, object parameter, string language) =>

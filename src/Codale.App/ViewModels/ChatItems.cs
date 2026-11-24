@@ -1336,6 +1336,7 @@ public sealed partial class ToolCallItem : ChatItem
     [NotifyPropertyChangedFor(nameof(MetaStatus))]
     [NotifyPropertyChangedFor(nameof(MetaDuration))]
     [NotifyPropertyChangedFor(nameof(ShowOutput))]
+    [NotifyPropertyChangedFor(nameof(ShowOutputBody))]
     [NotifyPropertyChangedFor(nameof(ShowShellCommand))]
     public partial ToolCallStatus Status { get; set; } = ToolCallStatus.Running;
 
@@ -1482,6 +1483,7 @@ public sealed partial class ToolCallItem : ChatItem
     /// can always reopen it.
     /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowOutputBody))]
     public partial bool IsExpanded { get; set; }
 
     /// <summary>Set on the first manual toggle; from then on the step stays as the reader left it.</summary>
@@ -1543,6 +1545,7 @@ public sealed partial class ToolCallItem : ChatItem
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasOutput))]
     [NotifyPropertyChangedFor(nameof(ShowOutput))]
+    [NotifyPropertyChangedFor(nameof(ShowOutputBody))]
     public partial string? Output { get; set; }
 
     public bool HasOutput => Output is { Length: > 0 };
@@ -1566,6 +1569,13 @@ public sealed partial class ToolCallItem : ChatItem
     /// </summary>
     public bool ShowOutput => HasOutput && (Status == ToolCallStatus.Failed || !HasDiff);
 
+    /// <summary>
+    /// The output block is only built while the step is open. A folded step keeps the
+    /// text on the model but realizes nothing, so a finishing call cannot grow or shrink
+    /// a virtualized row's measured height behind the reader's back.
+    /// </summary>
+    public bool ShowOutputBody => IsExpanded && ShowOutput;
+
     /// <summary>The change this call makes: previewed from its input, then replaced by the CLI's own patch.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasDiff))]
@@ -1574,6 +1584,7 @@ public sealed partial class ToolCallItem : ChatItem
     [NotifyPropertyChangedFor(nameof(MetaStatus))]
     [NotifyPropertyChangedFor(nameof(MetaDuration))]
     [NotifyPropertyChangedFor(nameof(ShowOutput))]
+    [NotifyPropertyChangedFor(nameof(ShowOutputBody))]
     [NotifyPropertyChangedFor(nameof(Verb))]
     [NotifyPropertyChangedFor(nameof(InlineDiff))]
     public partial FileDiff? Diff { get; set; }

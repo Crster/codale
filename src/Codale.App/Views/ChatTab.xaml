@@ -830,11 +830,12 @@
 
                     <!--  The result as a terminal page: monospaced, columns intact, scrollable.  -->
                     <Border
+                        x:Name="OutputBlock"
+                        x:Load="{x:Bind ShowOutputBody, Mode=OneWay}"
                         Background="{StaticResource CodeSurfaceBrush}"
                         BorderBrush="{StaticResource DetailStrokeBrush}"
                         BorderThickness="1"
-                        CornerRadius="8"
-                        Visibility="{x:Bind ShowOutput, Mode=OneWay}">
+                        CornerRadius="8">
                         <StackPanel>
                             <Grid
                                 Padding="12,6"
@@ -2032,6 +2033,7 @@
             x:Name="ChatScroller"
             HorizontalScrollMode="Disabled"
             HorizontalScrollBarVisibility="Disabled"
+            Margin="0,0,0,12"
             HorizontalContentAlignment="Stretch"
             VerticalAnchorRatio="1"
             VerticalScrollBarVisibility="Auto">

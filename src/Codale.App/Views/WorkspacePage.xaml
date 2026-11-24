@@ -33,6 +33,8 @@
         <views:IgnoredMuteConverter x:Key="IgnoredMute" />
         <views:TabStateToGlyphConverter x:Key="TabStateToGlyph" />
         <views:TabStateToBrushConverter x:Key="TabStateToBrush" />
+        <views:TabStateToFontFamilyConverter x:Key="TabStateToFontFamily" />
+        <views:TerminalActivityGlyphConverter x:Key="TerminalActivityGlyph" />
         <views:PreviewToFontStyleConverter x:Key="PreviewToItalic" />
         <views:TerminalActivityBrushConverter x:Key="TerminalActivityBrush" />
         <views:TerminalExitSuffixConverter x:Key="TerminalExitSuffix" />
