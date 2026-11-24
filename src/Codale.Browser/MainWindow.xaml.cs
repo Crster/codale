@@ -41,6 +41,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        InitializeTools();
         Title = "Codale Browser";
         AppWindow.Resize(new SizeInt32(1280, 850));
         ExtendsContentIntoTitleBar = true;
@@ -187,6 +188,7 @@ public sealed partial class MainWindow : Window
             UpdateNavigationButtons();
         };
         core.HistoryChanged += (_, _) => UpdateNavigationButtons();
+        WireTools(tab, core);
         core.DocumentTitleChanged += (_, _) =>
         {
             tab.RefreshHeader();
@@ -225,9 +227,14 @@ public sealed partial class MainWindow : Window
     private void SelectTab(BrowserTab tab)
     {
         if (!_tabs.Contains(tab)) return;
+        var previous = _active;
         _active = tab;
         if (!ReferenceEquals(Tabs.SelectedItem, tab.Item)) Tabs.SelectedItem = tab.Item;
+
+        // The picker belongs to the page it started in; switching pages ends it there.
+        if (PickToggle.IsChecked == true && !ReferenceEquals(previous, tab)) StopPick(previous);
         SyncAddress();
+        OnActiveTabChanged();
         RelayoutAll();
         UpdateTitle();
         UpdateNavigationButtons();
@@ -415,8 +422,26 @@ public sealed partial class MainWindow : Window
     {
         var width = Math.Max(1, Stage.ActualWidth);
         var height = Math.Max(1, Stage.ActualHeight);
-        Canvas.SetLeft(tab.View, ReferenceEquals(tab, _active) ? 0 : -(width + 64));
-        Canvas.SetTop(tab.View, 0);
+        var active = ReferenceEquals(tab, _active);
+        var left = active ? 0 : -(width + 64);
+        var top = 0.0;
+        if (tab.Breakpoint is { } size)
+        {
+            // A breakpoint shows the page at its device size, centred; a window smaller than the device shows its top-left part.
+            var w = Math.Min(size.Width, width);
+            var h = Math.Min(size.Height, height);
+            if (active)
+            {
+                left = (width - w) / 2;
+                top = (height - h) / 2;
+            }
+
+            width = w;
+            height = h;
+        }
+
+        Canvas.SetLeft(tab.View, left);
+        Canvas.SetTop(tab.View, top);
         tab.View.Width = width;
         tab.View.Height = height;
     }

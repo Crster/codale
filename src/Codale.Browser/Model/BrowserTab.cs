@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
+using Microsoft.Web.WebView2.Core;
 using Windows.UI;
 
 namespace Codale.Browser;
@@ -53,6 +54,15 @@ public sealed class BrowserTab
 
     /// <summary>The page's DevTools target id, which the agent looks up on the debugging port.</summary>
     public string? TargetId { get; set; }
+
+    /// <summary>The device size the page is previewed at, or null for the window's own size.</summary>
+    public Breakpoint? Breakpoint { get; set; }
+
+    /// <summary>The network requests and console output the page has produced.</summary>
+    public DevToolsLog Log { get; } = new();
+
+    /// <summary>The DevTools event subscriptions for this page; kept so they live as long as the tab.</summary>
+    internal List<CoreWebView2DevToolsProtocolEventReceiver> Receivers { get; } = [];
 
     /// <summary>Completes when the tab's WebView2 is initialised (or fails/is closed), so a second agent request can wait for it.</summary>
     public TaskCompletionSource Ready { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

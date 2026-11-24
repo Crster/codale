@@ -197,28 +197,18 @@ public sealed class BrowserSession : IAsyncDisposable
             ?? throw new McpToolException("Codale Browser is not installed with this build. Open it from Codale (Open browser) and try again.");
         try
         {
-            var startInfo = new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe) };
-            startInfo.Environment["CODALE_APP_THEME"] = ReadAppTheme();
-            Process.Start(startInfo)?.Dispose();
+            // Same launch as the app's Open browser: the data root goes over by file (the shell cannot pass env), and
+            // Explorer starts the browser. A direct child of the packaged app inherits its package identity, which the
+            // unpackaged browser cannot start under.
+            var handoff = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codale", "browser-launch.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(handoff)!);
+            File.WriteAllText(handoff, JsonSerializer.Serialize(new Dictionary<string, string> { ["dataRoot"] = CodalePaths.DataRoot }));
+
+            using var process = Process.Start(new ProcessStartInfo("explorer.exe") { Arguments = $"\"{exe}\"", UseShellExecute = false });
         }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or FileNotFoundException)
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException)
         {
             throw new McpToolException($"Could not start Codale Browser ({exe}): {ex.Message}");
-        }
-    }
-
-    private static string ReadAppTheme()
-    {
-        try
-        {
-            var folder = CodalePaths.DataRoot;
-            using var database = new ApplicationDatabase(folder);
-            var value = database.GetSetting("app.theme");
-            return value is "Light" or "System" ? value : "Dark";
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            return "System";
         }
     }
 

@@ -2,13 +2,15 @@
 <Window
     x:Class="Codale.Browser.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Codale.Browser">
 
     <Grid x:Name="Root" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <Grid x:Name="TitleRow" Height="48">
@@ -35,6 +37,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <StackPanel Orientation="Horizontal" Spacing="2">
                 <Button x:Name="BackButton" Style="{StaticResource ToolButton}" Content="&#xE72B;" Click="Back_Click" AutomationProperties.Name="Back" ToolTipService.ToolTip="Back" IsEnabled="False" />
@@ -60,8 +63,197 @@
                     </TextBox.Resources>
                 </TextBox>
             </Border>
+
+            <!-- Page tools, to the right of the address: pick a selector, view a breakpoint, open Network or Console. -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                <ToggleButton x:Name="PickToggle" Style="{StaticResource ToolToggle}" Content="&#xE7C9;" Click="Pick_Click"
+                              AutomationProperties.Name="Pick an element" ToolTipService.ToolTip="Pick an element and copy its CSS selector (Esc cancels)" />
+                <DropDownButton x:Name="BreakpointButton" Height="36" MinWidth="40" Padding="10,0" Background="Transparent" BorderThickness="0" CornerRadius="6"
+                                AutomationProperties.Name="View breakpoint" ToolTipService.ToolTip="View breakpoint">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE7F4;" FontSize="14" />
+                        <TextBlock x:Name="BreakpointLabel" FontSize="12" VerticalAlignment="Center" Visibility="Collapsed" />
+                    </StackPanel>
+                </DropDownButton>
+                <Rectangle Width="1" Height="20" Margin="4,0" VerticalAlignment="Center" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                <ToggleButton x:Name="NetworkToggle" Style="{StaticResource ToolToggle}" Content="&#xE703;" Click="NetworkToggle_Click"
+                              AutomationProperties.Name="Network" ToolTipService.ToolTip="Network requests" />
+                <Grid>
+                    <ToggleButton x:Name="ConsoleToggle" Style="{StaticResource ToolToggle}" Content="&#xE756;" Click="ConsoleToggle_Click"
+                                  AutomationProperties.Name="Console" ToolTipService.ToolTip="Console" />
+                    <InfoBadge x:Name="ConsoleBadge" Style="{ThemeResource CriticalValueInfoBadgeStyle}" Visibility="Collapsed" IsHitTestVisible="False"
+                               HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,1,1,0" />
+                </Grid>
+                <TeachingTip x:Name="SelectorTip" Title="Selector copied" Target="{x:Bind PickToggle}" IsLightDismissEnabled="True" />
+            </StackPanel>
         </Grid>
 
         <Canvas x:Name="Stage" Grid.Row="2" SizeChanged="Stage_SizeChanged" />
+
+        <!-- Network and Console: the active tab's requests or messages, opened from the toolbar. Drag the top edge to resize. -->
+        <Grid x:Name="DevToolsPanel" Grid.Row="3" Height="300" Visibility="Collapsed"
+              Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+            <Grid.Resources>
+                <DataTemplate x:Key="NetworkRowTemplate" x:DataType="local:NetworkRequest">
+                    <Grid Height="26" Padding="0,0,12,0" ColumnSpacing="10" Background="{x:Bind RowBackground, Mode=OneWay}"
+                          ToolTipService.ToolTip="{x:Bind Url}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="3" />
+                            <ColumnDefinition Width="84" />
+                            <ColumnDefinition Width="70" />
+                            <ColumnDefinition Width="56" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="84" />
+                            <ColumnDefinition Width="80" />
+                            <ColumnDefinition Width="64" />
+                        </Grid.ColumnDefinitions>
+                        <Rectangle Fill="{x:Bind MethodBrush}" Margin="0,3" RadiusX="1.5" RadiusY="1.5" />
+                        <TextBlock Grid.Column="1" Style="{StaticResource Cell}" Text="{x:Bind TimeText}" Opacity="0.55" FontFamily="Cascadia Mono, Consolas" FontSize="11" />
+                        <TextBlock Grid.Column="2" Style="{StaticResource Cell}" Text="{x:Bind StatusLabel, Mode=OneWay}" Foreground="{x:Bind StatusBrush, Mode=OneWay}"
+                                   FontWeight="SemiBold" FontFamily="Cascadia Mono, Consolas" ToolTipService.ToolTip="{x:Bind StatusTooltip, Mode=OneWay}" />
+                        <TextBlock Grid.Column="3" Style="{StaticResource Cell}" Text="{x:Bind Method}" Foreground="{x:Bind MethodBrush}"
+                                   FontWeight="SemiBold" FontFamily="Cascadia Mono, Consolas" />
+                        <Grid Grid.Column="4" ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" MaxWidth="460" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Style="{StaticResource Cell}" Text="{x:Bind Name}" />
+                            <TextBlock Grid.Column="1" Style="{StaticResource Cell}" Text="{x:Bind Location}" Opacity="0.45" />
+                        </Grid>
+                        <TextBlock Grid.Column="5" Style="{StaticResource Cell}" Text="{x:Bind TypeLabel, Mode=OneWay}" Opacity="0.75" />
+                        <TextBlock Grid.Column="6" Style="{StaticResource Cell}" Text="{x:Bind SizeText, Mode=OneWay}" HorizontalAlignment="Right" Opacity="0.8" />
+                        <TextBlock Grid.Column="7" Style="{StaticResource Cell}" Text="{x:Bind DurationText, Mode=OneWay}" HorizontalAlignment="Right" Opacity="0.8" />
+                    </Grid>
+                </DataTemplate>
+
+                <DataTemplate x:Key="ConsoleRowTemplate" x:DataType="local:ConsoleLine">
+                    <Grid Padding="10,4,12,4" ColumnSpacing="10" Background="{x:Bind RowBackground}"
+                          BorderBrush="{x:Bind DividerBrush}" BorderThickness="0,0,0,1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="14" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="{x:Bind Glyph}" Foreground="{x:Bind IconBrush}" FontSize="12" VerticalAlignment="Top" Margin="0,2,0,0" />
+                        <TextBlock Grid.Column="1" Text="{x:Bind TimeText, Mode=OneWay}" FontFamily="Cascadia Mono, Consolas" FontSize="11"
+                                   Opacity="0.5" VerticalAlignment="Top" Margin="0,1,0,0" />
+                        <TextBlock Grid.Column="2" Margin="{x:Bind Indent}" Foreground="{x:Bind TextBrush}" local:RichText.Segments="{x:Bind Segments}"
+                                   FontFamily="Cascadia Mono, Consolas" FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                        <Border Grid.Column="3" Visibility="{x:Bind CountVisibility, Mode=OneWay}" Background="{x:Bind CountBackground}"
+                                CornerRadius="8" MinWidth="18" Height="16" Padding="5,0" VerticalAlignment="Top" Margin="0,1,0,0">
+                            <TextBlock Text="{x:Bind CountText, Mode=OneWay}" FontSize="10" FontWeight="SemiBold" Foreground="White"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Grid.Column="4" Text="{x:Bind Source}" Visibility="{x:Bind SourceVisibility}" ToolTipService.ToolTip="{x:Bind SourceTooltip}"
+                                   FontSize="11" Opacity="0.55" VerticalAlignment="Top" Margin="0,1,0,0" MaxWidth="260" TextTrimming="CharacterEllipsis" />
+                    </Grid>
+                </DataTemplate>
+            </Grid.Resources>
+
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- The top edge: drag to resize the panel, double-click to restore its height. -->
+            <local:PanelSizer x:Name="PanelSizer" Height="7" Background="Transparent"
+                              PointerPressed="PanelSizer_PointerPressed" PointerMoved="PanelSizer_PointerMoved"
+                              PointerReleased="PanelSizer_PointerReleased" PointerCaptureLost="PanelSizer_PointerCaptureLost"
+                              DoubleTapped="PanelSizer_DoubleTapped">
+                <Rectangle Height="1" VerticalAlignment="Top" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                <Border Width="36" Height="3" CornerRadius="1.5" VerticalAlignment="Center" HorizontalAlignment="Center"
+                        Background="{ThemeResource ControlStrongFillColorDisabledBrush}" />
+            </local:PanelSizer>
+
+            <!-- Header: which view, what it holds, and the panel actions. -->
+            <Grid Grid.Row="1" Padding="6,0,6,0" ColumnSpacing="4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <SelectorBar x:Name="PanelTabs" SelectionChanged="PanelTabs_SelectionChanged">
+                    <SelectorBarItem x:Name="NetworkTabItem" Text="Network">
+                        <SelectorBarItem.Icon>
+                            <FontIcon Glyph="&#xE703;" />
+                        </SelectorBarItem.Icon>
+                    </SelectorBarItem>
+                    <SelectorBarItem x:Name="ConsoleTabItem" Text="Console">
+                        <SelectorBarItem.Icon>
+                            <FontIcon Glyph="&#xE756;" />
+                        </SelectorBarItem.Icon>
+                    </SelectorBarItem>
+                </SelectorBar>
+                <TextBlock x:Name="PanelSummary" Grid.Column="2" Margin="0,0,8,0" VerticalAlignment="Center" FontSize="12" Opacity="0.65" />
+                <ToggleButton x:Name="PreserveToggle" Grid.Column="3" Style="{StaticResource PanelToggle}" Content="&#xE718;" Click="PreserveToggle_Click"
+                              AutomationProperties.Name="Preserve log" ToolTipService.ToolTip="Preserve log (keep entries when the page navigates)" />
+                <Button Grid.Column="4" Style="{StaticResource PanelButton}" Content="&#xE74D;" Click="PanelClear_Click"
+                        AutomationProperties.Name="Clear" ToolTipService.ToolTip="Clear" />
+                <Button Grid.Column="5" Style="{StaticResource PanelButton}" Content="&#xE711;" Click="PanelClose_Click"
+                        AutomationProperties.Name="Close panel" ToolTipService.ToolTip="Close panel" />
+            </Grid>
+
+            <!-- Filter: text, then the request types or the console levels. -->
+            <Grid Grid.Row="2" Padding="10,2,10,6" ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="240" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="PanelFilter" PlaceholderText="Filter" Height="30" MinHeight="0" Padding="10,5,6,0" FontSize="12"
+                         TextChanged="PanelFilter_TextChanged" AutomationProperties.Name="Filter"
+                         ToolTipService.ToolTip="Words separated by spaces must all match; start a word with - to hide matches (e.g. -favicon)" />
+                <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled"
+                              HorizontalScrollMode="Enabled" VerticalScrollMode="Disabled">
+                    <Grid>
+                        <StackPanel x:Name="NetworkFilters" Orientation="Horizontal" Spacing="4" />
+                        <StackPanel x:Name="ConsoleFilters" Orientation="Horizontal" Spacing="4" Visibility="Collapsed" />
+                    </Grid>
+                </ScrollViewer>
+            </Grid>
+
+            <!-- Network column headings, lined up with the row template. -->
+            <Grid x:Name="NetworkColumns" Grid.Row="3" Height="24" Padding="0,0,12,0" ColumnSpacing="10"
+                  BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,1"
+                  Background="{ThemeResource LayerFillColorDefaultBrush}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="3" />
+                    <ColumnDefinition Width="84" />
+                    <ColumnDefinition Width="70" />
+                    <ColumnDefinition Width="56" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="84" />
+                    <ColumnDefinition Width="80" />
+                    <ColumnDefinition Width="64" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="1" Style="{StaticResource ColumnHeader}" Text="Time" />
+                <TextBlock Grid.Column="2" Style="{StaticResource ColumnHeader}" Text="Status" />
+                <TextBlock Grid.Column="3" Style="{StaticResource ColumnHeader}" Text="Method" />
+                <TextBlock Grid.Column="4" Style="{StaticResource ColumnHeader}" Text="Name" />
+                <TextBlock Grid.Column="5" Style="{StaticResource ColumnHeader}" Text="Type" />
+                <TextBlock Grid.Column="6" Style="{StaticResource ColumnHeader}" Text="Size" HorizontalAlignment="Right" />
+                <TextBlock Grid.Column="7" Style="{StaticResource ColumnHeader}" Text="Duration" HorizontalAlignment="Right" />
+            </Grid>
+
+            <ListView x:Name="NetworkList" Grid.Row="4" SelectionMode="None" IsItemClickEnabled="True" ItemClick="NetworkList_ItemClick"
+                      ItemTemplate="{StaticResource NetworkRowTemplate}" ItemContainerStyle="{StaticResource PanelRow}" Padding="0" />
+            <ListView x:Name="ConsoleList" Grid.Row="3" Grid.RowSpan="2" SelectionMode="None" Visibility="Collapsed"
+                      ItemTemplate="{StaticResource ConsoleRowTemplate}" ItemContainerStyle="{StaticResource PanelRow}" Padding="0"
+                      BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" />
+
+            <StackPanel x:Name="PanelEmpty" Grid.Row="4" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed">
+                <FontIcon x:Name="PanelEmptyIcon" FontSize="28" Opacity="0.35" />
+                <TextBlock x:Name="PanelEmptyText" Opacity="0.6" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420" />
+                <Button x:Name="PanelEmptyReload" Content="Reload page" HorizontalAlignment="Center" Click="Reload_Click" />
+            </StackPanel>
+        </Grid>
     </Grid>
 </Window>

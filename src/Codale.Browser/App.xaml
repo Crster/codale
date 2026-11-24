@@ -21,6 +21,75 @@
                 <Setter Property="FontSize" Value="14" />
                 <Setter Property="CornerRadius" Value="6" />
             </Style>
+
+            <!-- The same look for the toolbar's on/off buttons (element picker, Network, Console). -->
+            <Style x:Key="ToolToggle" TargetType="ToggleButton">
+                <Setter Property="Width" Value="40" />
+                <Setter Property="Height" Value="36" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="FontFamily" Value="Segoe Fluent Icons" />
+                <Setter Property="FontSize" Value="14" />
+                <Setter Property="CornerRadius" Value="6" />
+            </Style>
+
+            <!-- The smaller buttons in the Network/Console panel header. -->
+            <Style x:Key="PanelButton" TargetType="Button">
+                <Setter Property="Width" Value="32" />
+                <Setter Property="Height" Value="30" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="FontFamily" Value="Segoe Fluent Icons" />
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="CornerRadius" Value="5" />
+            </Style>
+
+            <Style x:Key="PanelToggle" TargetType="ToggleButton">
+                <Setter Property="Width" Value="32" />
+                <Setter Property="Height" Value="30" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="FontFamily" Value="Segoe Fluent Icons" />
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="CornerRadius" Value="5" />
+            </Style>
+
+            <!-- The filter chips (request types, console levels). -->
+            <Style x:Key="Chip" TargetType="ToggleButton">
+                <Setter Property="Height" Value="26" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="Padding" Value="11,0,11,1" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="CornerRadius" Value="13" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+
+            <!-- Flat, full-width rows for the panel lists. -->
+            <Style x:Key="PanelRow" TargetType="ListViewItem">
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="CornerRadius" Value="0" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="VerticalContentAlignment" Value="Stretch" />
+            </Style>
+
+            <Style x:Key="ColumnHeader" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="11" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Opacity" Value="0.6" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+
+            <Style x:Key="Cell" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                <Setter Property="TextWrapping" Value="NoWrap" />
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

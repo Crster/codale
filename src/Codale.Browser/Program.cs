@@ -71,9 +71,9 @@ public static class Program
         {
             return Windows.ApplicationModel.Package.Current.Id.Name == CodalePackageName;
         }
-        catch (COMException)
+        catch (Exception ex) when (ex is COMException or InvalidOperationException)
         {
-            // Unpackaged: there is no package identity at all.
+            // Unpackaged: there is no package identity at all (APPMODEL_ERROR_NO_PACKAGE, which WinRT surfaces as InvalidOperationException).
             return false;
         }
     }

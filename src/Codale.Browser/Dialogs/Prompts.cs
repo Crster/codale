@@ -17,11 +17,17 @@ internal static class Prompts
             Content = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap },
             CloseButtonText = "OK",
         };
+        await ShowAsync(dialog, root);
+    }
+
+    /// <summary>Shows any dialog once the one before it has closed.</summary>
+    public static async Task<ContentDialogResult> ShowAsync(ContentDialog dialog, XamlRoot root)
+    {
         await Gate.WaitAsync();
         try
         {
             dialog.XamlRoot = root;
-            await dialog.ShowAsync();
+            return await dialog.ShowAsync();
         }
         finally
         {
