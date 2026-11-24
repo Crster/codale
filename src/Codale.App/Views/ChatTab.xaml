@@ -2033,23 +2033,35 @@
             HorizontalScrollMode="Disabled"
             HorizontalScrollBarVisibility="Disabled"
             HorizontalContentAlignment="Stretch"
+            VerticalAnchorRatio="1"
             VerticalScrollBarVisibility="Auto">
-            <!--  Virtualized: only the messages on screen (plus a small buffer) are realized. A plain
-                  ItemsControl kept every message's visual tree alive for the whole session, so memory
-                  grew with each turn. Unloaded rows release their images and native text.  -->
+            <!--  History stays virtualized. The live row and the bottom anchor are measured
+                  outside the repeater so finding the end does not depend on the row estimates.  -->
             <Border
                 Width="{Binding ViewportWidth, ElementName=ChatScroller}"
                 HorizontalAlignment="Center"
                 MaxWidth="920"
-                Padding="12,16,16,16">
-                <ItemsRepeater
-                    x:Name="Transcript"
-                    ItemTemplate="{StaticResource TranscriptRowTemplate}"
-                    ItemsSource="{x:Bind ViewModel.Items}">
-                    <ItemsRepeater.Layout>
-                        <StackLayout />
-                    </ItemsRepeater.Layout>
-                </ItemsRepeater>
+                Padding="12,16,16,0">
+                <StackPanel>
+                    <ItemsRepeater
+                        x:Name="Transcript"
+                        ItemTemplate="{StaticResource TranscriptRowTemplate}">
+                        <ItemsRepeater.Layout>
+                            <StackLayout />
+                        </ItemsRepeater.Layout>
+                    </ItemsRepeater>
+                    <ContentControl
+                        x:Name="LatestTranscriptRow"
+                        Padding="0"
+                        HorizontalContentAlignment="Stretch"
+                        VerticalContentAlignment="Top"
+                        ContentTemplateSelector="{StaticResource ChatTemplateSelector}" />
+                    <Border
+                        x:Name="TranscriptEnd"
+                        Height="16"
+                        CanBeScrollAnchor="True"
+                        IsHitTestVisible="False" />
+                </StackPanel>
             </Border>
         </ScrollViewer>
 

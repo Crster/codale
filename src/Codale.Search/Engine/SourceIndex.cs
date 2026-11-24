@@ -194,7 +194,7 @@ public sealed class SourceIndex : IDisposable
     private bool IsFresh(SourceSnapshot? snapshot) =>
         snapshot is not null &&
         snapshot.Version == Interlocked.Read(ref _version) &&
-        (_watcher is not null || DateTime.UtcNow - snapshot.BuiltAt < _options.MaxAge);
+        (_watcher is not null || DateTime.UtcNow - snapshot.CheckedAt < _options.MaxAge);
 
     /// <summary>One scan at a time; callers arriving meanwhile share it.</summary>
     private Task<SourceSnapshot> StartRefresh()
@@ -305,6 +305,15 @@ public sealed class SourceIndex : IDisposable
         });
 
         var indexed = files.OfType<SourceFile>().OrderBy(f => f.RelativePath, StringComparer.OrdinalIgnoreCase).ToList();
+        if (previous is not null && indexed.SequenceEqual(previous.Files) && listed.SequenceEqual(previous.AllFiles))
+        {
+            // The scan verified the same files. Keep the built index and the profiles and
+            // graph derived from it, while marking it current for this watcher version.
+            var verified = previous.Revalidate(version);
+            Volatile.Write(ref _current, verified);
+            return verified;
+        }
+
         var snapshot = new SourceSnapshot(listed, indexed, version, read);
 
         Volatile.Write(ref _current, snapshot);
@@ -445,8 +454,8 @@ public sealed class SourceIndex : IDisposable
             watcher.Deleted += OnChanged;
             watcher.Renamed += OnChanged;
 
-            // Lost events: assume anything changed.
-            watcher.Error += (_, _) => Invalidate();
+            // An explicit watcher failure can hide changes even when file metadata matches.
+            watcher.Error += (_, _) => Invalidate(reloadAll: true);
             watcher.EnableRaisingEvents = true;
             _watcher = watcher;
         }

@@ -53,7 +53,7 @@ public sealed class SourceSnapshot
         Files = files;
         Version = version;
         FilesRead = filesRead;
-        BuiltAt = DateTime.UtcNow;
+        BuiltAt = CheckedAt = DateTime.UtcNow;
 
         _byPath = new Dictionary<string, int>(files.Count, StringComparer.OrdinalIgnoreCase);
         _termIds = [with(StringComparer.Ordinal)];
@@ -132,12 +132,24 @@ public sealed class SourceSnapshot
     public IReadOnlyList<SourceFile> Files { get; }
 
     /// <summary>The index's change counter when this scan started; a later change makes it stale.</summary>
-    public long Version { get; }
+    public long Version { get; private set; }
 
     public DateTime BuiltAt { get; }
 
+    internal DateTime CheckedAt { get; private set; }
+
     /// <summary>How many files this scan had to read - all of them the first time, only the changed ones after.</summary>
-    public int FilesRead { get; }
+    public int FilesRead { get; private set; }
+
+    /// <summary>A new watcher version with the same file listing and parsed contents.</summary>
+    internal SourceSnapshot Revalidate(long version)
+    {
+        var snapshot = (SourceSnapshot)MemberwiseClone();
+        snapshot.Version = version;
+        snapshot.CheckedAt = DateTime.UtcNow;
+        snapshot.FilesRead = 0;
+        return snapshot;
+    }
 
     internal double AverageTokens { get; }
 

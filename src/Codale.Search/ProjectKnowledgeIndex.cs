@@ -64,9 +64,10 @@ public sealed partial class ProjectKnowledgeIndex : IDisposable
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, DateTime>> _contentChanges = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>More changed files than this in one refresh is a checkout, pull or formatter run, not a session's edits.</summary>
     private const int MaxRecordedChanges = 40;
-    private const int RefreshCooldownMs = 3_000;
-    /// <summary>A scan this old is rebuilt even if the watcher saw nothing, in case it dropped events.</summary>
-    private const int MaxTrustedWatcherMs = 30_000;
+    private static readonly TimeSpan RefreshCooldown = TimeSpan.FromSeconds(3);
+    /// <summary>Recheck the file list and metadata at this age, even if the watcher saw nothing.</summary>
+    private static readonly TimeSpan MaxTrustedWatcherAge = TimeSpan.FromSeconds(30);
+    internal TimeProvider RefreshClock { get; init; } = TimeProvider.System;
     private readonly ConcurrentDictionary<string, long> _lastRefresh = new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
     private int _indexing;
@@ -82,7 +83,7 @@ public sealed partial class ProjectKnowledgeIndex : IDisposable
             if (_refreshes.TryGetValue(worktree, out var running) && !running.IsCompleted) return running;
             // Every search, ghost-text lookup and chat turn asks for a refresh; one that just finished is still current,
             // and the file watcher marks the scan stale on a real change. Rescanning on each ask is CPU spent for nothing.
-            return _lastRefresh.TryGetValue(worktree, out var finished) && Environment.TickCount64 - finished < RefreshCooldownMs
+            return _lastRefresh.TryGetValue(worktree, out var finished) && RefreshClock.GetElapsedTime(finished) < RefreshCooldown
                 && _sources.For(worktree).IsUpToDate
                 && _revisions.TryGetValue(worktree, out var knownRevision) && knownRevision == Revision(worktree)
                 ? Task.CompletedTask
@@ -98,13 +99,18 @@ public sealed partial class ProjectKnowledgeIndex : IDisposable
                     IndexingChanged?.Invoke();
                     _stopping.Token.ThrowIfCancellationRequested();
                     var index = _sources.For(worktree);
-                    // HEAD changes and lost watcher events must not leave a branch's snapshot reusable forever.
                     var revision = Revision(worktree);
                     var watched = _revisions.TryGetValue(worktree, out var previousRevision);
-                    var stale = !watched || previousRevision != revision
-                        || Environment.TickCount64 - _lastRefresh.GetValueOrDefault(worktree) > MaxTrustedWatcherMs;
-                    // Otherwise the index's own watcher has already marked it stale if anything changed.
-                    if (stale) index.Invalidate(true);
+                    if (!watched || previousRevision != revision)
+                    {
+                        index.Invalidate(reloadAll: true);
+                    }
+                    else if (_lastRefresh.TryGetValue(worktree, out var last) && RefreshClock.GetElapsedTime(last) > MaxTrustedWatcherAge)
+                    {
+                        // A long turn can reach this check without writing a file. Reuse parsed
+                        // source when its size and write time still match.
+                        index.Invalidate();
+                    }
                     _revisions[worktree] = revision;
                     var snapshot = await index.GetSnapshotAsync().ConfigureAwait(false);
                     var changed = RefreshCompact(worktree, snapshot);
@@ -122,7 +128,7 @@ public sealed partial class ProjectKnowledgeIndex : IDisposable
                 finally
                 {
                     try { thread.Priority = priority; } catch (Exception) { }
-                    _lastRefresh[worktree] = Environment.TickCount64;
+                    _lastRefresh[worktree] = RefreshClock.GetTimestamp();
                     Interlocked.Decrement(ref _indexing);
                     IndexingChanged?.Invoke();
                 }

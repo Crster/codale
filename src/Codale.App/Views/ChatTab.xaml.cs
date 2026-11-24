@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using System.Windows.Input;
 
 using Codale.App.Controls;
@@ -123,13 +124,13 @@ public sealed partial class ChatTab : UserControl
     /// <summary>CLI update was requested from the session panel.</summary>
     public event EventHandler<string>? UpdateCliRequested;
 
-    /// <summary>Whether the transcript should ride the bottom. Only scroll events may
-    /// change it: content growth is answered by following, so it must never count as
-    /// "the reader moved away".</summary>
-    private bool _pinnedToBottom = true;
+    // The repeater sees all but the last item. The last row always participates in measure,
+    // even while its height changes too quickly for the history's estimates to settle.
+    private readonly RangeObservableCollection<ChatItem> _transcriptHistory = [];
 
-    /// <summary>A ride-to-bottom is already queued for this layout pass.</summary>
-    private bool _followQueued;
+    /// <summary>The conversation has just been opened or replaced and should start at its latest row.</summary>
+    private bool _showLatestTranscript = true;
+    private bool _showLatestQueued;
 
     /// <summary>Question cards whose visibility is already watched; a card can load more than once.</summary>
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, object> _hookedCards = [];
@@ -174,21 +175,11 @@ public sealed partial class ChatTab : UserControl
             }
         });
 
-        // Following is about size, not item count: streaming text grows the last row
-        // by deltas, and a finished tool call grows its own row when its output lands
-        // - neither adds an item, so an items-added hook would never fire for the
-        // cases where following matters most.
-        Transcript.SizeChanged += OnTranscriptSizeChanged;
-        ChatScroller.ViewChanged += OnScrollerViewChanged;
+        Transcript.ItemsSource = _transcriptHistory;
+        TranscriptEnd.Loaded += (_, _) => QueueInitialTranscriptPosition();
 
         // Only Esc presses nothing else claimed (a popup, a question card) reach this.
         KeyDown += OnChatKeyDown;
-
-        Loaded += (_, _) =>
-        {
-            _pinnedToBottom = true;
-            FollowTranscriptEnd();
-        };
     }
 
     private static readonly TimeSpan DoubleEscapeWindow = TimeSpan.FromMilliseconds(600);
@@ -243,10 +234,11 @@ public sealed partial class ChatTab : UserControl
             _viewModel.Suggestions.CollectionChanged += OnSuggestionsChanged;
             _viewModel.Attachments.CollectionChanged += OnAttachmentsChanged;
             ShowViewModelDraft();
-            _pinnedToBottom = true;
+            _showLatestTranscript = true;
+            UpdateTranscriptRows(value);
             SessionPanel.Session = value;
             Bindings.Update();
-            FollowTranscriptEnd();
+            QueueInitialTranscriptPosition();
         }
     }
 
@@ -272,36 +264,28 @@ public sealed partial class ChatTab : UserControl
         }
     }
 
-    private void OnScrollerViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
+    private void QueueInitialTranscriptPosition()
     {
-        // Only the reader moves the view away; our own snap lands within the threshold.
-        if (!e.IsIntermediate || !_followQueued)
-            _pinnedToBottom = ChatScroller.ScrollableHeight - ChatScroller.VerticalOffset < 40;
-    }
-
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Style", "IDE0060", Justification = "Event handler: the signature is fixed by the event delegate.")]
-    private void OnTranscriptSizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        // Streaming text and finished tool output grow rows without adding items, so follow
-        // by size. The transcript is virtualized: rows that have not been realized yet are
-        // estimated, so the extent can shift as they come on screen. Each shift is one more
-        // snap to the end while the reader is pinned there.
-        if (e.NewSize.Height == e.PreviousSize.Height || !_pinnedToBottom) return;
-        FollowTranscriptEnd();
-    }
-
-    private void FollowTranscriptEnd()
-    {
-        if (_followQueued) return;
-        // Low priority: the new row has to be measured first. Coalesced per pass, so a burst
-        // of streaming deltas needs one scroll.
-        _followQueued = true;
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        if (!_showLatestTranscript || _showLatestQueued || !TranscriptEnd.IsLoaded ||
+            _viewModel is not { Items.Count: > 0 })
         {
-            _followQueued = false;
-            if (!_pinnedToBottom || !IsLoaded) return;
-            ChatScroller.UpdateLayout();
-            ChatScroller.ChangeView(null, ChatScroller.ScrollableHeight, null, disableAnimation: true);
+            return;
+        }
+
+        // History is replayed as a batch. Bring the measured end into view once all rows
+        // are bound, then let the scroller anchor the streaming tail or the history in view.
+        _showLatestQueued = DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            _showLatestQueued = false;
+            if (!TranscriptEnd.IsLoaded || _viewModel is not { Items.Count: > 0 }) return;
+
+            _showLatestTranscript = false;
+            TranscriptEnd.UpdateLayout();
+            TranscriptEnd.StartBringIntoView(new BringIntoViewOptions
+            {
+                AnimationDesired = false,
+                VerticalAlignmentRatio = 1,
+            });
         });
     }
 
@@ -1333,15 +1317,57 @@ public sealed partial class ChatTab : UserControl
     private bool _contextDirty = true;
     private long _contextFedAt;
 
-    private void OnTranscriptChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    private void OnTranscriptChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
+        if (e.Action == NotifyCollectionChangedAction.Reset)
         {
             _fedContext.Clear();
             _predictor?.ResetSession();
+            _showLatestTranscript = true;
+        }
+
+        if (_viewModel is { } chat)
+        {
+            UpdateTranscriptRows(chat, e);
+            QueueInitialTranscriptPosition();
         }
 
         _contextDirty = true;
+    }
+
+    private void UpdateTranscriptRows(ChatViewModel chat, NotifyCollectionChangedEventArgs? change = null)
+    {
+        var items = chat.Items;
+        var historyCount = Math.Max(0, items.Count - 1);
+
+        // Preserve realized history rows during ordinary adds, removals and replacements.
+        // The boundary row moves between history and the live slot as the tail changes.
+        switch (change)
+        {
+            case { Action: NotifyCollectionChangedAction.Add, NewItems.Count: 1 }:
+                if (change.NewStartingIndex < _transcriptHistory.Count)
+                    _transcriptHistory.Insert(change.NewStartingIndex, items[change.NewStartingIndex]);
+                break;
+            case { Action: NotifyCollectionChangedAction.Remove, OldItems.Count: 1 }:
+                if (change.OldStartingIndex < _transcriptHistory.Count)
+                    _transcriptHistory.RemoveAt(change.OldStartingIndex);
+                break;
+            case { Action: NotifyCollectionChangedAction.Replace, NewItems.Count: 1, OldItems.Count: 1 }:
+                if (change.NewStartingIndex < _transcriptHistory.Count)
+                    _transcriptHistory[change.NewStartingIndex] = items[change.NewStartingIndex];
+                break;
+            default:
+                _transcriptHistory.ReplaceAll(items.Take(historyCount));
+                break;
+        }
+
+        // Move the old tail into history on append, or promote the last history row on removal.
+        if (_transcriptHistory.Count < historyCount)
+            _transcriptHistory.Add(items[_transcriptHistory.Count]);
+        else if (_transcriptHistory.Count > historyCount)
+            _transcriptHistory.RemoveAt(_transcriptHistory.Count - 1);
+
+        LatestTranscriptRow.Content = items.Count == 0 ? null : items[^1];
     }
 
     private void OnSessionFilesChanged(object? sender, EventArgs e) => _contextDirty = true;
