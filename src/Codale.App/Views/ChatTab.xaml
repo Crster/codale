@@ -1860,6 +1860,17 @@
             ToolTemplate="{StaticResource ToolTemplate}"
             UserTemplate="{StaticResource UserTemplate}" />
 
+        <!--  Each transcript row: the item's template picked by the selector below.  -->
+        <DataTemplate x:Key="TranscriptRowTemplate">
+            <ContentControl
+                Padding="0"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch"
+                VerticalContentAlignment="Top"
+                Content="{Binding}"
+                ContentTemplateSelector="{StaticResource ChatTemplateSelector}" />
+        </DataTemplate>
+
         <!--  Quiet icon button used inside the composer.  -->
         <Style x:Key="ComposerIconButton" TargetType="Button">
             <Setter Property="Background" Value="Transparent" />
@@ -2010,14 +2021,23 @@
             HorizontalScrollBarVisibility="Disabled"
             HorizontalContentAlignment="Stretch"
             VerticalScrollBarVisibility="Auto">
-            <ItemsControl
-                x:Name="Transcript"
+            <!--  Virtualized: only the messages on screen (plus a small buffer) are realized. A plain
+                  ItemsControl kept every message's visual tree alive for the whole session, so memory
+                  grew with each turn. Unloaded rows release their images and native text.  -->
+            <Border
                 Width="{Binding ViewportWidth, ElementName=ChatScroller}"
                 HorizontalAlignment="Center"
                 MaxWidth="920"
-                Padding="12,16,16,16"
-                ItemTemplateSelector="{StaticResource ChatTemplateSelector}"
-                ItemsSource="{x:Bind ViewModel.Items}" />
+                Padding="12,16,16,16">
+                <ItemsRepeater
+                    x:Name="Transcript"
+                    ItemTemplate="{StaticResource TranscriptRowTemplate}"
+                    ItemsSource="{x:Bind ViewModel.Items}">
+                    <ItemsRepeater.Layout>
+                        <StackLayout />
+                    </ItemsRepeater.Layout>
+                </ItemsRepeater>
+            </Border>
         </ScrollViewer>
 
         <!--  Shown until the first message arrives: a quiet welcome with quick
