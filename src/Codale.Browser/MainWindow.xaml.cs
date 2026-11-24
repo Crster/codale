@@ -1,16 +1,16 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Text.Json;
 
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.Web.WebView2.Core;
 
 using Windows.Graphics;
 using Windows.System;
 using Windows.UI;
-using WinRT.Interop;
 
 namespace Codale.Browser;
 
@@ -32,26 +32,15 @@ public sealed partial class MainWindow : Window
     private readonly List<BrowserTab> _tabs = [];
     private readonly Dictionary<string, Color> _agentColors = [];
     private readonly ControlPipe _pipe;
-    private readonly IntPtr _hwnd;
     private Task<CoreWebView2Environment>? _environment;
     private BrowserTab? _active;
     private bool _addressEdited;
     private bool _settingAddress;
     private bool _started;
 
-    [DllImport("user32.dll")]
-    private static extern bool SetForegroundWindow(IntPtr window);
-
-    [DllImport("user32.dll")]
-    private static extern bool ShowWindow(IntPtr window, int command);
-
-    [DllImport("user32.dll")]
-    private static extern bool IsIconic(IntPtr window);
-
     public MainWindow()
     {
         InitializeComponent();
-        _hwnd = WindowNative.GetWindowHandle(this);
         Title = "Codale Browser";
         AppWindow.Resize(new SizeInt32(1280, 850));
         ExtendsContentIntoTitleBar = true;
@@ -90,7 +79,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            Program.Log("error", ex);
+            // Nothing to report: the failed operation is dropped and the window keeps running.
         }
     }
 
@@ -208,7 +197,6 @@ public sealed partial class MainWindow : Window
 
     private void OnProcessFailed(BrowserTab tab, CoreWebView2ProcessFailedEventArgs e)
     {
-        Program.Log("webview-process-failed", e.ProcessFailedKind);
         if (tab.IsClosed) return;
         switch (e.ProcessFailedKind)
         {
@@ -227,7 +215,7 @@ public sealed partial class MainWindow : Window
                 }
                 catch (Exception ex) when (ex is COMException or InvalidOperationException)
                 {
-                    Program.Log("webview-reload-after-failure", ex);
+                    // The view is already gone; the next navigation recreates it.
                 }
 
                 break;
@@ -292,6 +280,14 @@ public sealed partial class MainWindow : Window
         try
         {
             var op = request.GetProperty("op").GetString();
+            // A second launch only asks for the window to come forward; no session is involved.
+            if (op == "show")
+            {
+                BringToFront();
+                done.TrySetResult(new { ok = true });
+                return;
+            }
+
             var session = request.GetProperty("session").GetString() ?? throw new InvalidOperationException("Missing session.");
             var tab = _tabs.FirstOrDefault(t => t.AgentKey == session);
             switch (op)
@@ -322,9 +318,7 @@ public sealed partial class MainWindow : Window
 
                 case "focus":
                     if (tab is not null) SelectTab(tab);
-                    if (IsIconic(_hwnd)) ShowWindow(_hwnd, 9);
-                    Activate();
-                    SetForegroundWindow(_hwnd);
+                    BringToFront();
                     done.TrySetResult(new { ok = tab is not null });
                     break;
 
@@ -337,6 +331,13 @@ public sealed partial class MainWindow : Window
         {
             done.TrySetResult(new { error = ex.Message });
         }
+    }
+
+    /// <summary>Shows the window: restored when minimized, then brought to the front.</summary>
+    private void BringToFront()
+    {
+        if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter) presenter.Restore();
+        Activate();
     }
 
     private void Back_Click(object sender, RoutedEventArgs e)
@@ -389,11 +390,8 @@ public sealed partial class MainWindow : Window
         if (_active?.View.CoreWebView2 is not { } core) return;
         var text = input.Trim();
         if (text.Length == 0) return;
-        if (text.Contains("://", StringComparison.Ordinal) && OriginOf(text) is null)
-        {
-            Program.Log("info", $"Not navigating to {text}: only http and https addresses open.");
-            return;
-        }
+        // Only http and https addresses open.
+        if (text.Contains("://", StringComparison.Ordinal) && OriginOf(text) is null) return;
 
         core.Navigate(ToUrl(text));
     }
