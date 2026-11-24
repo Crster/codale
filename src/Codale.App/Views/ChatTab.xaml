@@ -373,8 +373,21 @@
                         IsEnabled="{x:Bind CanPeekParameter}"
                         Style="{StaticResource ToolFileChip}"
                         Tag="{x:Bind}"
-                        ToolTipService.ToolTip="{x:Bind ParameterToolTip, Mode=OneWay}"
                         Visibility="{x:Bind HasParameter, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                        <!--  A shell command reads as words, not escapes: program, flags, strings and paths each coloured.  -->
+                        <ToolTipService.ToolTip>
+                            <ToolTip MaxWidth="640">
+                                <TextBlock
+                                    FontFamily="Cascadia Mono, Consolas"
+                                    FontSize="12"
+                                    LineHeight="19"
+                                    TextWrapping="Wrap"
+                                    views:CommandText.Dialect="{x:Bind ShellDialect}"
+                                    views:CommandText.IsCommand="{x:Bind IsShellTool}"
+                                    views:CommandText.MaxLines="24"
+                                    views:CommandText.Command="{x:Bind ParameterToolTip, Mode=OneWay}" />
+                            </ToolTip>
+                        </ToolTipService.ToolTip>
                         <TextBlock FontFamily="Cascadia Mono, Consolas"
                                    FontSize="{x:Bind S12_5, Mode=OneWay}"
                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"

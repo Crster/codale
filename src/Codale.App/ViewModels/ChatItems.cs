@@ -1310,6 +1310,9 @@ public sealed partial class ToolCallItem : ChatItem
 
     public string ParameterToolTip => IsShellTool ? Command : Target;
 
+    /// <summary>The shell the tool names, so the tooltip reads its quoting right; empty lets it guess.</summary>
+    public string ShellDialect => ToolKinds.ActionName(ToolName) == "PowerShell" ? "powershell" : "";
+
     public ToolFileRef? PrimaryFile => Files.Count > 0 ? Files[0] : null;
 
     [ObservableProperty]

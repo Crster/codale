@@ -102,7 +102,7 @@ public sealed partial class TaskPeekPane : UserControl
         var reason = task.RiskReason.Length > 0 ? task.RiskReason : baseline.Reason;
 
         TitleText.Text = description.Length > 0 ? description : task.DisplayTitle;
-        RunText.Text = command;
+        CommandText.SetCommand(RunText, command);
         DescriptionText.Text = description;
         AssessmentText.Text = reason.Length > 0 ? $"{risk} - {reason}" : risk.ToString();
         AssessmentText.Foreground = (Brush)Application.Current.Resources[risk switch

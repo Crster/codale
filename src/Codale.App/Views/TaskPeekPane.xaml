@@ -107,15 +107,21 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="#767676" Text="Run:" />
-            <TextBlock
-                x:Name="RunText"
+            <!--  The command as words: one command per line, program / flags / strings / paths coloured.  -->
+            <ScrollViewer
                 Grid.Column="1"
-                FontFamily="Cascadia Mono, Consolas"
-                FontSize="12"
-                Foreground="#F2F2F2"
-                IsTextSelectionEnabled="True"
-                MaxHeight="140"
-                TextWrapping="Wrap" />
+                MaxHeight="220"
+                HorizontalScrollBarVisibility="Disabled"
+                VerticalScrollBarVisibility="Auto">
+                <TextBlock
+                    x:Name="RunText"
+                    FontFamily="Cascadia Mono, Consolas"
+                    FontSize="12"
+                    Foreground="#E6E6E6"
+                    IsTextSelectionEnabled="True"
+                    LineHeight="19"
+                    TextWrapping="Wrap" />
+            </ScrollViewer>
             <TextBlock
                 Grid.Row="1"
                 FontSize="12"
