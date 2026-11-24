@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 
@@ -24,17 +24,15 @@ namespace Codale.App.ViewModels;
 public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
 {
     private readonly McpServerSettings _settings;
-    private readonly AppSettingsStore _appSettings;
     private readonly FolderServerHost _servers;
     private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
 
     /// <summary>Set while values load from the store, so the round-trip does not rewrite them.</summary>
     private bool _loading;
 
-    public McpToolsViewModel(McpServerSettings settings, AppSettingsStore appSettings, FolderServerHost servers, string projectPath)
+    public McpToolsViewModel(McpServerSettings settings, FolderServerHost servers, string projectPath)
     {
         _settings = settings;
-        _appSettings = appSettings;
         _servers = servers;
         ProjectPath = projectPath;
         _servers.Changed += OnServersChanged;
@@ -188,14 +186,13 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            // Hand the data root and theme over by file: the browser is started through the shell (below), which cannot
+            // Hand the data root over by file: the browser is started through the shell (below), which cannot
             // pass env. The user profile root is not virtualised for packaged apps, so both sides see the same file.
             var handoff = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codale", "browser-launch.json");
             Directory.CreateDirectory(Path.GetDirectoryName(handoff)!);
             File.WriteAllText(handoff, System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string>
             {
                 ["dataRoot"] = Codale.Core.Projects.CodalePaths.DataRoot,
-                ["theme"] = _appSettings.Theme ?? "",
             }));
 
             // When Codale runs packaged (dotnet run does that) a direct child inherits its package identity, which the
