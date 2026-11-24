@@ -357,7 +357,13 @@ public sealed partial class MainWindow : Window
         if (_active?.View.CoreWebView2 is { CanGoForward: true } core) core.GoForward();
     }
 
-    private void Reload_Click(object sender, RoutedEventArgs e) => _active?.View.CoreWebView2?.Reload();
+    /// <summary>Hard reload: bypasses the HTTP cache so the page and its resources are fetched fresh.</summary>
+    private void Reload_Click(object sender, RoutedEventArgs e)
+    {
+        var core = _active?.View.CoreWebView2;
+        if (core is null) return;
+        RunSafe(async () => await core.CallDevToolsProtocolMethodAsync("Page.reload", "{\"ignoreCache\":true}"));
+    }
 
     private void UpdateNavigationButtons()
     {

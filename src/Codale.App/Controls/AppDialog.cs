@@ -100,7 +100,36 @@ public static class AppDialog
                 "DialogToneWarningBrush", "DialogToneWarningBrush", "DialogToneWarningBrush");
         }
 
+        if (tone == DialogTone.Warning && hasPrimary && dialog.DefaultButton != ContentDialogButton.Primary)
+        {
+            // A non-default primary (Cancel is the default) still takes the amber tone, using the danger
+            // button style with its colour keys pointed at the warning brushes.
+            dialog.PrimaryButtonStyle = (Style)Application.Current.Resources["DialogDangerButtonStyle"];
+            SetPrimaryColors(dialog, light,
+                background: "DialogToneWarningBrush",
+                foreground: light ? "TextOnAccentFillColorPrimaryBrush" : "ContentDialogBackground");
+        }
+
         return dialog;
+    }
+
+    /// <summary>Points the danger-style primary button's brushes at the given theme brushes (bg, fg; border matches bg).</summary>
+    private static void SetPrimaryColors(ContentDialog dialog, bool light, string background, string foreground)
+    {
+        var theme = light ? "Light" : "Default";
+        var bg = FindThemeBrush(Application.Current.Resources, theme, background);
+        var fg = FindThemeBrush(Application.Current.Resources, theme, foreground);
+        if (bg is null || fg is null)
+        {
+            return;
+        }
+
+        dialog.Resources["DialogDangerButtonBackground"] = bg;
+        dialog.Resources["DialogDangerButtonBackgroundPointerOver"] = bg;
+        dialog.Resources["DialogDangerButtonBackgroundPressed"] = bg;
+        dialog.Resources["DialogDangerButtonBorderBrush"] = bg;
+        dialog.Resources["DialogDangerButtonForeground"] = fg;
+        dialog.Resources["DialogDangerButtonForegroundPressed"] = fg;
     }
 
     /// <summary>Points the dialog's accent-button brushes at existing theme brushes (bg, fg, border; normal/hover/pressed).</summary>
@@ -147,24 +176,16 @@ public static class AppDialog
     /// <summary>Replaces the header, e.g. when an assessment that arrives later changes the dialog's tone.</summary>
     public static void SetHeader(ContentDialog dialog, string title, DialogTone tone, string? glyph = null)
     {
-        var key = tone.ToString();
-        var badge = new Border
+        // Title text only: no tinted icon disc. The tone and glyph still drive the colours of the
+        // primary button and list rows; the header itself is plain text.
+        var text = new TextBlock
         {
-            Style = Resource<Style>($"DialogBadge{key}Style"),
-            Child = Icon(glyph ?? DefaultGlyph(tone), Resource<Style>($"DialogGlyph{key}Style"), 15),
+            Text = title,
+            Style = Resource<Style>("DialogTitleTextStyle"),
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 500,
         };
-        var text = new TextBlock { Text = title, Style = Resource<Style>("DialogTitleTextStyle") };
-        Grid.SetColumn(text, 1);
-
-        var header = new Grid { ColumnSpacing = 12, MinHeight = 34 };
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        header.Children.Add(badge);
-        header.Children.Add(text);
-
-        // The template's title host is left-aligned and sized to its content; long titles must wrap.
-        header.MaxWidth = 500;
-        dialog.Title = header;
+        dialog.Title = text;
     }
 
     /// <summary>
@@ -278,14 +299,6 @@ public static class AppDialog
             DefaultButton = ContentDialogButton.Close,
         }, tone, glyph).ShowAsync();
     }
-
-    private static string DefaultGlyph(DialogTone tone) => tone switch
-    {
-        DialogTone.Warning => Glyphs.Warning,
-        DialogTone.Danger => Glyphs.Error,
-        DialogTone.Success => Glyphs.Success,
-        _ => Glyphs.Info,
-    };
 
     private static T Resource<T>(string key) => (T)Application.Current.Resources[key];
 }
