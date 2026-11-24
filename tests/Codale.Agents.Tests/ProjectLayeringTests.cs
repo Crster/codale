@@ -20,7 +20,7 @@ public sealed class ProjectLayeringTests
         ["Codale.Workspace"] = ["Codale.Core", "Codale.Db"],
         ["Codale.Agents"] = ["Codale.Core", "Codale.Workspace"],
         ["Codale.Commands"] = ["Codale.Workspace"],
-        ["Codale.Search"] = ["Codale.Core", "Codale.Db", "Codale.Smart", "Codale.Workspace"],
+        ["Codale.Search"] = ["Codale.Core", "Codale.Db", "Codale.Workspace"],
         ["Codale.Settings"] = ["Codale.Agents", "Codale.Db", "Codale.Workspace"],
         ["Codale.Mcp.Common"] = [],
         ["Codale.Browser"] = [],
