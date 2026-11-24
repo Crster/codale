@@ -2,18 +2,15 @@
 <Window
     x:Class="Codale.Browser.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:Codale.Browser">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <Grid x:Name="Root" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- The tab strip is the title bar: its empty part (DragRegion) drags the window; the caption buttons sit in the inset. -->
         <Grid x:Name="TitleRow" Height="48">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
@@ -34,63 +31,37 @@
             </TabView>
         </Grid>
 
-        <!-- Toolbar: navigation, address, then the page and developer tools. -->
-        <Grid x:Name="Toolbar" Grid.Row="1" Padding="8,2" ColumnSpacing="2">
+        <Grid Grid.Row="1" Padding="8,2" ColumnSpacing="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-
-            <!-- Navigation. Reload with Shift+click is a hard reload (no HTTP cache). -->
             <StackPanel Orientation="Horizontal" Spacing="2">
                 <Button x:Name="BackButton" Style="{StaticResource ToolButton}" Content="&#xE72B;" Click="Back_Click" AutomationProperties.Name="Back" ToolTipService.ToolTip="Back" IsEnabled="False" />
                 <Button x:Name="ForwardButton" Style="{StaticResource ToolButton}" Content="&#xE72A;" Click="Forward_Click" AutomationProperties.Name="Forward" ToolTipService.ToolTip="Forward" IsEnabled="False" />
-                <Button Style="{StaticResource ToolButton}" Content="&#xE72C;" Click="Reload_Click" AutomationProperties.Name="Reload" ToolTipService.ToolTip="Reload (Shift+click: hard reload)" />
+                <Button Style="{StaticResource ToolButton}" Content="&#xE72C;" Click="Reload_Click" AutomationProperties.Name="Reload" ToolTipService.ToolTip="Reload" />
             </StackPanel>
 
-            <!-- Flat address field. -->
             <Border Grid.Column="1" Margin="6,5" Height="34" CornerRadius="6" Padding="10,0,4,0" VerticalAlignment="Center"
                     Background="{ThemeResource ControlFillColorDefaultBrush}">
-                <Grid ColumnSpacing="8" VerticalAlignment="Stretch">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <FontIcon x:Name="SecurityIcon" Glyph="&#xE72E;" FontSize="12" VerticalAlignment="Center" Opacity="0.6" ToolTipService.ToolTip="Connection" />
-                    <TextBox x:Name="Address" Grid.Column="1" PlaceholderText="Search or enter an address"
-                             Height="34" MinHeight="0" Padding="0,7,0,0" VerticalAlignment="Stretch" VerticalContentAlignment="Center"
-                             BorderThickness="0" Background="Transparent"
-                             KeyDown="Address_KeyDown" GotFocus="Address_GotFocus" TextChanged="Address_TextChanged" AutomationProperties.Name="Address">
-                        <TextBox.Resources>
-                            <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
-                            <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
-                            <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
-                            <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
-                            <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
-                            <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
-                            <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#80808080" />
-                        </TextBox.Resources>
-                    </TextBox>
-                </Grid>
+                <TextBox x:Name="Address" PlaceholderText="Enter a website address"
+                         Height="34" MinHeight="0" Padding="0,7,0,0" VerticalAlignment="Stretch" VerticalContentAlignment="Center"
+                         BorderThickness="0" Background="Transparent"
+                         KeyDown="Address_KeyDown" GotFocus="Address_GotFocus" TextChanged="Address_TextChanged"
+                         AutomationProperties.Name="Address">
+                    <TextBox.Resources>
+                        <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#80808080" />
+                    </TextBox.Resources>
+                </TextBox>
             </Border>
-
-            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Spacing="2">
-                <!-- Page: pick an element (copies its path), preview a breakpoint. -->
-                <Button Style="{StaticResource ToolButton}" Content="&#xE7C9;" Click="Pick_Click" AutomationProperties.Name="Pick an element" ToolTipService.ToolTip="Pick an element and copy its path" />
-                <Button x:Name="BreakpointButton" Style="{StaticResource ToolButton}" Content="&#xE7F4;" AutomationProperties.Name="View breakpoint" ToolTipService.ToolTip="View breakpoint: fill window" />
-
-                <Rectangle Width="1" Height="18" Margin="6,0" VerticalAlignment="Center" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
-
-                <!-- Developer tools: console and requests, shown under the page. -->
-                <Button x:Name="ConsoleButton" Style="{StaticResource ToolButton}" Content="&#xE756;" Click="Console_Click" AutomationProperties.Name="Console" ToolTipService.ToolTip="Console" />
-                <Button x:Name="RequestsButton" Style="{StaticResource ToolButton}" Content="&#xE968;" Click="Requests_Click" AutomationProperties.Name="Requests" ToolTipService.ToolTip="Requests" />
-            </StackPanel>
         </Grid>
 
-        <!-- The page stage: each tab's WebView2 is positioned here; breakpoints are centred on it. -->
         <Canvas x:Name="Stage" Grid.Row="2" SizeChanged="Stage_SizeChanged" />
-
-        <local:DiagnosticsPanel x:Name="Diagnostics" Grid.Row="3" Visibility="Collapsed" />
     </Grid>
 </Window>

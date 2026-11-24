@@ -12,17 +12,32 @@ namespace Codale.Browser;
 /// </summary>
 public static class Program
 {
-    /// <summary>The Windows App Runtime major.minor this build was compiled against (Microsoft.WindowsAppSDK 2.5).</summary>
-    private const uint RuntimeMajorMinor = 0x00020005;
+    /// <summary>The Windows App Runtime major.minor this build was compiled against (Microsoft.WindowsAppSDK 2.7).</summary>
+    private const uint RuntimeMajorMinor = 0x00020007;
+    private const string CodalePackageName = "BB9ADD6B-2E64-46A7-ADF5-885B70F99D51";
+    private const int ErrorInsufficientBuffer = 122;
+    private const int AppModelErrorNoPackage = 15700;
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetCurrentPackageFullName(ref int length, System.Text.StringBuilder? name);
 
-    /// <summary>True when launched from a packaged Codale.App: children inherit its package identity and runtime dependency.</summary>
-    private static bool HasPackageIdentity()
+    /// <summary>True only when launched from Codale.App; other packaged parents (such as the IDE) need their own runtime bootstrap.</summary>
+    private static bool HasCodalePackageIdentity()
+    {
+        var packageFullName = CurrentPackageFullName();
+        return packageFullName.StartsWith(CodalePackageName + "_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string CurrentPackageFullName()
     {
         var length = 0;
-        return GetCurrentPackageFullName(ref length, null) != 15700; // APPMODEL_ERROR_NO_PACKAGE
+        var result = GetCurrentPackageFullName(ref length, null);
+        if (result == AppModelErrorNoPackage) return "";
+        if (result != ErrorInsufficientBuffer || length <= 0) return $"<GetCurrentPackageFullName returned {result}>";
+
+        var fullName = new System.Text.StringBuilder(length);
+        result = GetCurrentPackageFullName(ref length, fullName);
+        return result == 0 ? fullName.ToString() : $"<GetCurrentPackageFullName returned {result}>";
     }
 
     [DllImport("user32.dll")]
@@ -68,14 +83,15 @@ public static class Program
             return 0;
         }
 
-        var packaged = HasPackageIdentity();
+        var packaged = HasCodalePackageIdentity();
         try
         {
             if (!packaged) Bootstrap.Initialize(RuntimeMajorMinor, null, default);
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or DllNotFoundException or EntryPointNotFoundException)
         {
-            MessageBoxW(IntPtr.Zero, "Codale Browser needs the Windows App Runtime 2.5. Install it from https://aka.ms/windowsappsdk and try again.\n\n" + ex.Message, "Codale Browser", 0x10);
+            Log("bootstrap-failed", $"{ex.GetType().FullName}; HRESULT=0x{ex.HResult:X8}; package={CurrentPackageFullName()}{Environment.NewLine}{ex}");
+            MessageBoxW(IntPtr.Zero, "Codale Browser needs the Windows App Runtime 2.7. Install it from https://aka.ms/windowsappsdk and try again.\n\n" + ex.Message + $"\n\n0x{ex.HResult:X8} ({ex.GetType().Name})", "Codale Browser", 0x10);
             return 1;
         }
 

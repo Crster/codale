@@ -3,14 +3,12 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
-using Microsoft.Web.WebView2.Core;
 using Windows.UI;
 
 namespace Codale.Browser;
 
 /// <summary>
-/// One page in the window: its WebView2, its tab, its own console and request history, its breakpoint and -
-/// for a tab an agent asked for - the agent session that owns it and the colour that marks it.
+/// One page in the window: a basic WebView2 and tab, plus the agent session key used by the automation pipe.
 /// </summary>
 public sealed class BrowserTab
 {
@@ -44,8 +42,6 @@ public sealed class BrowserTab
 
     public TabViewItem Item { get; }
 
-    public DiagnosticsFeed Diagnostics { get; } = new();
-
     /// <summary>The agent session this tab belongs to; null for a tab the user opened.</summary>
     public string? AgentKey { get; }
 
@@ -55,11 +51,6 @@ public sealed class BrowserTab
 
     public bool IsAgent => AgentKey is not null;
 
-    public Breakpoint? Breakpoint { get; set; }
-
-    /// <summary>The scale the breakpoint was last emulated at; -1 when it has not been applied since the breakpoint changed.</summary>
-    public double AppliedFit { get; set; } = -1;
-
     /// <summary>The page's DevTools target id, which the agent looks up on the debugging port.</summary>
     public string? TargetId { get; set; }
 
@@ -68,11 +59,6 @@ public sealed class BrowserTab
 
     /// <summary>True once the tab was closed; async work that resumes afterwards must stop touching it.</summary>
     public bool IsClosed { get; private set; }
-
-    /// <summary>Breakpoint emulation runs one pass at a time per tab; a request during a pass asks for another.</summary>
-    public bool EmulationBusy { get; set; }
-    public bool EmulationDirty { get; set; }
-    public bool EmulationReload { get; set; }
 
     public string Url => View.CoreWebView2?.Source ?? "about:blank";
 

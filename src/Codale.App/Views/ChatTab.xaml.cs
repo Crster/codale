@@ -1835,39 +1835,79 @@ public sealed partial class ChatTab : UserControl
     private void OnDraftPaste(object sender, TextControlPasteEventArgs e)
     {
         if (!_draftBox.IsEnabled) { e.Handled = true; return; }
-        DataPackageView content;
-        bool files, text, image;
-        try
-        {
-            content = Clipboard.GetContent();
 
-            // Contains reads the clipboard like GetContent does - it throws under the
-            // same lock contention, so it stays inside the same guard. An exception
-            // leaving this handler is a stowed one: no managed handler ever sees it.
-            files = content.Contains(StandardDataFormats.StorageItems);
-            text = !files && content.Contains(StandardDataFormats.Text);
-            image = !files && !text && content.Contains(StandardDataFormats.Bitmap);
-        }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException)
+        // Plain text is the common case, including text copied from rich editors that also
+        // publish HTML/RTF. Read it through Win32: Clipboard.GetContent called inside this
+        // Paste event has an intermittent native crash in WinUI that managed catches cannot
+        // intercept. Defer both the clipboard read and document rewrite until XAML unwinds.
+        var files = ClipboardReader.ContainsFiles;
+        var text = ClipboardReader.ContainsText;
+        var image = ClipboardReader.ContainsBitmap;
+        if (!files && text)
         {
-            // The clipboard is briefly locked by whoever wrote it; let the native paste try.
+            e.Handled = true;
+            _ = DispatcherQueue.TryEnqueue(() => _ = PasteTextFromClipboardAsync());
             return;
         }
 
-        if (!files && !text && !image)
+        if (!files && !image)
         {
             return;
         }
 
         e.Handled = true;
 
-        // Nothing touches the TextBox from inside this event: XAML is still unwinding
-        // the paste here, and a mutation in that window - the SelectedText insert, or
-        // the suggestion popup that TextChanged opens - stows an exception in XAML
-        // internals and takes the process down with 0xC000027B, before any managed
-        // handler could log it. The next dispatcher pass is past the paste; the async
-        // reads below then complete in frames of their own.
-        _ = DispatcherQueue.TryEnqueue(() => _ = files ? PasteFilesAsync(content) : image ? PasteImageAsync(content) : PasteTextAsync(content));
+        // Leave the native paste event before calling even the WinRT clipboard API.
+        // XAML/WinUI has an open intermittent crash report for GetContent from Paste.
+        _ = DispatcherQueue.TryEnqueue(() => _ = PasteSpecialClipboardAsync());
+    }
+
+    private async Task PasteSpecialClipboardAsync()
+    {
+        DataPackageView content;
+        bool files, text, image;
+        try
+        {
+            content = Clipboard.GetContent();
+            files = content.Contains(StandardDataFormats.StorageItems);
+            text = !files && content.Contains(StandardDataFormats.Text);
+            image = !files && !text && content.Contains(StandardDataFormats.Bitmap);
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException)
+        {
+            return;
+        }
+
+        if (files)
+        {
+            await PasteFilesAsync(content);
+        }
+        else if (text)
+        {
+            await PasteTextAsync(content);
+        }
+        else if (image)
+        {
+            await PasteImageAsync(content);
+        }
+    }
+
+    private async Task PasteTextFromClipboardAsync()
+    {
+        for (var attempt = 0; attempt < 6; attempt++)
+        {
+            if (ClipboardReader.TryGetText(out var text))
+            {
+                if (text.Length > 0)
+                {
+                    await PasteTextAsync(text);
+                }
+
+                return;
+            }
+
+            await Task.Delay(20 * (attempt + 1));
+        }
     }
 
     /// <summary>Longest clipboard text, in characters, that goes straight into the composer.</summary>
@@ -1882,28 +1922,30 @@ public sealed partial class ChatTab : UserControl
     {
         try
         {
-            var text = await content.GetTextAsync();
-            if (string.IsNullOrEmpty(text))
-            {
-                return;
-            }
-
-            if (text.Length <= MaxInlinePasteChars)
-            {
-                // Not SelectedText: setting it while the TextBox is anywhere near paste
-                // processing crashes XAML internally (a stowed 0xC000027B, unloggable).
-                // The caret insert composes the new string in managed code instead.
-                InsertAtCaret(text);
-                return;
-            }
-
-            var path = Path.Combine(PasteDirectory(), $"pasted-{Guid.NewGuid().ToString("N")[..6]}.txt");
-            await File.WriteAllTextAsync(path, text);
-            ViewModel.TryAddAttachment(path);
+            await PasteTextAsync(await content.GetTextAsync());
         }
         catch (Exception)
         {
         }
+    }
+
+    private async Task PasteTextAsync(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
+        if (text.Length <= MaxInlinePasteChars)
+        {
+            // Compose the replacement in managed code and rewrite after the native paste event.
+            InsertAtCaret(text);
+            return;
+        }
+
+        var path = Path.Combine(PasteDirectory(), $"pasted-{Guid.NewGuid().ToString("N")[..6]}.txt");
+        await File.WriteAllTextAsync(path, text);
+        ViewModel.TryAddAttachment(path);
     }
 
     /// <summary>Attachable files become chips; anything else goes in as an @path mention.</summary>

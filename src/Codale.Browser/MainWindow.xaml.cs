@@ -1,14 +1,12 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+
 using Microsoft.UI;
-using Microsoft.UI.Input;
-using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.Web.WebView2.Core;
-using Windows.ApplicationModel.DataTransfer;
+
 using Windows.Graphics;
 using Windows.System;
 using Windows.UI;
@@ -17,36 +15,29 @@ using WinRT.Interop;
 namespace Codale.Browser;
 
 /// <summary>
-/// Codale Browser: tabs over one shared WebView2 profile. Each agent session gets a tab of its own,
-/// marked with the session's colour (see <see cref="ControlPipe"/>); tabs the user opens are plain.
-/// The toolbar - address, back, forward, reload, element picker, breakpoint, console, requests - acts on the
-/// selected tab. Everything else (logins, permissions, downloads) is left to WebView2.
+/// A small tabbed WebView2 host. Automation connects to WebView2's built-in DevTools endpoint;
+/// this window only creates tabs, exposes target IDs, and lets a person navigate and focus pages.
 /// </summary>
 public sealed partial class MainWindow : Window
 {
-    /// <summary>The DevTools port agents attach to (McpDefaults.BrowserAttachPort in Codale.Mcp.Common).</summary>
+    /// <summary>The local DevTools port the automation client attaches to.</summary>
     internal const int DebuggingPort = 9333;
 
-    /// <summary>Session colours, from the app's palette; each open agent tab gets one no other agent tab is using.</summary>
     private static readonly Color[] AgentPalette =
     [
-        Hex(0x0EA5E9), Hex(0xF59E0B), Hex(0x10B981), Hex(0x8B5CF6), Hex(0xEC4899), Hex(0xF97316), Hex(0x6366F1), Hex(0x14B8A6),
+        Hex(0x0EA5E9), Hex(0xF59E0B), Hex(0x10B981), Hex(0x8B5CF6),
+        Hex(0xEC4899), Hex(0xF97316), Hex(0x6366F1), Hex(0x14B8A6),
     ];
 
     private readonly List<BrowserTab> _tabs = [];
     private readonly Dictionary<string, Color> _agentColors = [];
-    private readonly List<(Breakpoint? Choice, ToggleMenuFlyoutItem Item)> _breakpointItems = [];
-    private readonly MenuFlyout _breakpointMenu = new();
     private readonly ControlPipe _pipe;
     private readonly IntPtr _hwnd;
     private Task<CoreWebView2Environment>? _environment;
     private BrowserTab? _active;
-    private string? _diagnosticsMode;
-    private bool _picking;
     private bool _addressEdited;
     private bool _settingAddress;
     private bool _started;
-    private bool _fullScreen;
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr window);
@@ -63,25 +54,15 @@ public sealed partial class MainWindow : Window
         _hwnd = WindowNative.GetWindowHandle(this);
         Title = "Codale Browser";
         AppWindow.Resize(new SizeInt32(1280, 850));
-
-        // The tab strip is the title bar; the caption buttons keep their place on the right.
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(DragRegion);
 
-        BuildBreakpointMenu();
-        Diagnostics.CloseRequested += () =>
-        {
-            _diagnosticsMode = null;
-            Diagnostics.Show(null);
-        };
-
         _pipe = new ControlPipe(HandleControlAsync);
-
         Root.SizeChanged += (_, _) => UpdateCaptionInset();
         Root.Loaded += (_, _) =>
         {
             UpdateCaptionInset();
-            if (_started) return; // Loaded can fire again when the tree is re-attached; set up once
+            if (_started) return;
             _started = true;
             RunSafe(StartAsync);
         };
@@ -97,7 +78,6 @@ public sealed partial class MainWindow : Window
         _tabs.Clear();
     }
 
-    /// <summary>Runs work started from an event; a failure is logged rather than crashing the window (and every agent's tab).</summary>
     private async void RunSafe(Func<Task> work)
     {
         try
@@ -106,7 +86,7 @@ public sealed partial class MainWindow : Window
         }
         catch (OperationCanceledException)
         {
-            // The tab it belonged to was closed.
+            // The tab the operation belonged to was closed.
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -118,19 +98,17 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            // An agent that started this window asks for its own tab right away; the user's blank tab is only for an empty window.
+            // Let an agent's open request arrive before creating a user-only blank tab.
             await Task.Delay(300);
             if (_tabs.Count == 0) await OpenUserTabAsync(null, focusAddress: true);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             await Prompts.MessageAsync(Root.XamlRoot, "Could not start WebView2",
-                ex.Message + "\n\nWebView2 is part of Windows 11 and Microsoft Edge; install the WebView2 Runtime if it is missing.");
+                ex.Message + "\n\nInstall the WebView2 Runtime and Windows App Runtime 2.7, then try again.");
             Close();
         }
     }
-
-    // ---- Window chrome --------------------------------------------------------------------
 
     private void UpdateCaptionInset()
     {
@@ -138,22 +116,7 @@ public sealed partial class MainWindow : Window
         if (inset > 0) CaptionInset.Width = new GridLength(inset);
     }
 
-    private void SetFullScreen(bool on)
-    {
-        if (on == _fullScreen) return;
-        _fullScreen = on;
-        AppWindow.SetPresenter(on ? AppWindowPresenterKind.FullScreen : AppWindowPresenterKind.Overlapped);
-        TitleRow.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
-        Toolbar.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
-    }
-
-    private void UpdateTitle()
-    {
-        Title = _active is null ? "Codale Browser"
-            : $"{(_picking ? "Select an element — " : "")}{_active.Title} — Codale Browser";
-    }
-
-    // ---- Tabs ----------------------------------------------------------------------------
+    private void UpdateTitle() => Title = _active is null ? "Codale Browser" : $"{_active.Title} — Codale Browser";
 
     private Color ColorFor(string agentKey)
     {
@@ -164,7 +127,8 @@ public sealed partial class MainWindow : Window
         return _agentColors[agentKey] = color;
     }
 
-    private Task<BrowserTab> OpenUserTabAsync(string? url, bool focusAddress) => CreateTabAsync(null, null, activate: true, url, focusAddress);
+    private Task<BrowserTab> OpenUserTabAsync(string? url, bool focusAddress) =>
+        CreateTabAsync(null, null, activate: true, url, focusAddress);
 
     private async Task<BrowserTab> CreateTabAsync(string? agentKey, string? agentLabel, bool activate, string? url = null, bool focusAddress = false)
     {
@@ -177,14 +141,11 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            // A WebView2 that never initialises must not hang the caller (or leave a dead tab) forever.
             await tab.View.EnsureCoreWebView2Async(await EnvironmentAsync()).AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-            if (tab.IsClosed || tab.View.CoreWebView2 is not { } core) throw new OperationCanceledException("The tab was closed.");
+            if (tab.IsClosed || tab.View.CoreWebView2 is not { } core)
+                throw new OperationCanceledException("The tab was closed.");
 
             WireCore(tab, core);
-            await core.CallDevToolsProtocolMethodAsync("Runtime.enable", "{}");
-            await core.CallDevToolsProtocolMethodAsync("Network.enable", "{}");
-            if (tab.Breakpoint is not null) await ApplyBreakpointAsync(tab, reload: false);
             using (var info = JsonDocument.Parse(await core.CallDevToolsProtocolMethodAsync("Target.getTargetInfo", "{}")))
             {
                 tab.TargetId = info.RootElement.GetProperty("targetInfo").GetProperty("targetId").GetString();
@@ -211,10 +172,7 @@ public sealed partial class MainWindow : Window
         return tab;
     }
 
-    /// <summary>
-    /// The one WebView2 environment every tab shares: the profile (logins, cookies) and the DevTools port that
-    /// agents attach to. Created on first use; a failed attempt is forgotten so the next tab can try again.
-    /// </summary>
+    /// <summary>One persistent WebView2 profile and a local DevTools endpoint shared by every tab.</summary>
     private async Task<CoreWebView2Environment> EnvironmentAsync()
     {
         _environment ??= CoreWebView2Environment.CreateWithOptionsAsync(null, BrowserPaths.Profile,
@@ -245,27 +203,12 @@ public sealed partial class MainWindow : Window
             tab.RefreshHeader();
             if (ReferenceEquals(tab, _active)) UpdateTitle();
         };
-        core.NavigationStarting += (_, _) =>
-        {
-            if (ReferenceEquals(tab, _active))
-            {
-                _picking = false;
-                UpdateTitle();
-            }
-        };
-        core.WebMessageReceived += (_, e) => OnPageMessage(tab, e);
         core.NewWindowRequested += (_, e) => OnNewWindow(tab, e);
-        core.ContainsFullScreenElementChanged += (_, _) => { if (ReferenceEquals(tab, _active)) SetFullScreen(core.ContainsFullScreenElement); };
-        tab.Diagnostics.Attach(core);
     }
 
-    /// <summary>
-    /// WebView2 processes die (crash, out of memory, killed). A dead page process is reloaded; a dead browser
-    /// process takes every tab with it, so the shared environment is dropped and the window starts over -
-    /// agents get fresh tabs the next time they ask.
-    /// </summary>
     private void OnProcessFailed(BrowserTab tab, CoreWebView2ProcessFailedEventArgs e)
     {
+        Program.Log("webview-process-failed", e.ProcessFailedKind);
         if (tab.IsClosed) return;
         switch (e.ProcessFailedKind)
         {
@@ -284,7 +227,7 @@ public sealed partial class MainWindow : Window
                 }
                 catch (Exception ex) when (ex is COMException or InvalidOperationException)
                 {
-                    Debug.WriteLine(ex);
+                    Program.Log("webview-reload-after-failure", ex);
                 }
 
                 break;
@@ -295,14 +238,8 @@ public sealed partial class MainWindow : Window
     {
         if (!_tabs.Contains(tab)) return;
         _active = tab;
-        _picking = false;
-        // Fullscreen belongs to the page that asked for it; switching away (or closing it) must not strand the window in it.
-        SetFullScreen(tab.View.CoreWebView2?.ContainsFullScreenElement == true);
         if (!ReferenceEquals(Tabs.SelectedItem, tab.Item)) Tabs.SelectedItem = tab.Item;
-        Diagnostics.Bind(tab.Diagnostics);
-        Diagnostics.Show(_diagnosticsMode);
         SyncAddress();
-        ShowBreakpoint(tab.Breakpoint);
         RelayoutAll();
         UpdateTitle();
         UpdateNavigationButtons();
@@ -342,19 +279,11 @@ public sealed partial class MainWindow : Window
 
     private void Tabs_AddTabButtonClick(TabView sender, object args) => RunSafe(() => OpenUserTabAsync(null, focusAddress: true));
 
-    /// <summary>
-    /// Requests from agents (see <see cref="ControlPipe"/>), run on the UI thread. A new agent tab is
-    /// selected only when the user is not looking at a page of their own, so an agent never pulls the
-    /// window away from what the user is doing.
-    /// </summary>
     private Task<object> HandleControlAsync(JsonElement request)
     {
         var done = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!DispatcherQueue.TryEnqueue(() => _ = HandleOnUiAsync(request, done)))
-        {
             done.TrySetResult(new { error = "Codale Browser is closing." });
-        }
-
         return done.Task;
     }
 
@@ -378,7 +307,6 @@ public sealed partial class MainWindow : Window
                     }
                     else
                     {
-                        // A second request for a tab that is still starting waits for it rather than failing.
                         await tab.Ready.Task.WaitAsync(TimeSpan.FromSeconds(30));
                         if (label is not null)
                         {
@@ -411,8 +339,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    // ---- Toolbar: navigation and address ---------------------------------------------------
-
     private void Back_Click(object sender, RoutedEventArgs e)
     {
         if (_active?.View.CoreWebView2 is { CanGoBack: true } core) core.GoBack();
@@ -423,13 +349,7 @@ public sealed partial class MainWindow : Window
         if (_active?.View.CoreWebView2 is { CanGoForward: true } core) core.GoForward();
     }
 
-    private void Reload_Click(object sender, RoutedEventArgs e)
-    {
-        // Shift+click is a hard reload.
-        var shift = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
-        if (shift) RunSafe(HardReloadAsync);
-        else _active?.View.CoreWebView2?.Reload();
-    }
+    private void Reload_Click(object sender, RoutedEventArgs e) => _active?.View.CoreWebView2?.Reload();
 
     private void UpdateNavigationButtons()
     {
@@ -438,23 +358,16 @@ public sealed partial class MainWindow : Window
         ForwardButton.IsEnabled = core?.CanGoForward == true;
     }
 
-    /// <summary>Shows the selected tab's address and its connection state.</summary>
     private void SyncAddress()
     {
         if (_active is null) return;
-        var url = _active.Url;
-        var secure = url.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
-        SecurityIcon.Glyph = url == "about:blank" ? "" : secure ? "" : "";
-        ToolTipService.SetToolTip(SecurityIcon, url == "about:blank" ? "New tab" : secure ? "Connection is secure (https)" : "Connection is not secure (http)");
-        // While the user is typing in the address, keep their text; otherwise follow the page.
         if (Address.FocusState != FocusState.Unfocused && _addressEdited) return;
         _settingAddress = true;
-        Address.Text = url == "about:blank" ? "" : url;
+        Address.Text = _active.Url == "about:blank" ? "" : _active.Url;
         _settingAddress = false;
         _addressEdited = false;
     }
 
-    /// <summary>The address field stopped being edited by the user (Enter or Escape): it follows the page again.</summary>
     private void Address_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (!_settingAddress && Address.FocusState != FocusState.Unfocused) _addressEdited = true;
@@ -485,267 +398,43 @@ public sealed partial class MainWindow : Window
         core.Navigate(ToUrl(text));
     }
 
-    /// <summary>
-    /// What the address bar means: an address as typed (https unless it is a local development host), or a
-    /// search when the text is not an address.
-    /// </summary>
     internal static string ToUrl(string text)
     {
         if (text == "about:blank" || text.Contains("://", StringComparison.Ordinal)) return text;
-        if (text.StartsWith("localhost", StringComparison.OrdinalIgnoreCase) || text.StartsWith("127.0.0.1", StringComparison.Ordinal) || text.StartsWith("[::1]", StringComparison.Ordinal))
+        if (text.StartsWith("localhost", StringComparison.OrdinalIgnoreCase) || text.StartsWith("127.0.0.1", StringComparison.OrdinalIgnoreCase) || text.StartsWith("[::1]", StringComparison.OrdinalIgnoreCase))
             return "http://" + text;
         if (!text.Contains(' ') && text.Contains('.')) return "https://" + text;
         return "https://duckduckgo.com/?q=" + Uri.EscapeDataString(text);
     }
 
-    /// <summary>Reloads the page and everything it loads straight from the server, skipping the HTTP cache.</summary>
-    private async Task HardReloadAsync()
-    {
-        if (_active?.View.CoreWebView2 is not { } core) return;
-        try
-        {
-            // ignoreCache only skips the HTTP cache; a service worker or Cache Storage can still serve a stale UI.
-            await core.Profile.ClearBrowsingDataAsync(
-                CoreWebView2BrowsingDataKinds.DiskCache | CoreWebView2BrowsingDataKinds.CacheStorage | CoreWebView2BrowsingDataKinds.ServiceWorkers);
-            await core.CallDevToolsProtocolMethodAsync("Page.reload", "{\"ignoreCache\":true}");
-        }
-        catch (Exception ex) when (ex is COMException or InvalidOperationException)
-        {
-            core.Reload();
-        }
-    }
-
-    // ---- Diagnostics: console and requests ----------------------------------------------------
-
-    private void Console_Click(object sender, RoutedEventArgs e) => ToggleDiagnostics("console");
-
-    private void Requests_Click(object sender, RoutedEventArgs e) => ToggleDiagnostics("requests");
-
-    private void ToggleDiagnostics(string mode)
-    {
-        _diagnosticsMode = _diagnosticsMode == mode ? null : mode;
-        Diagnostics.Show(_diagnosticsMode);
-    }
-
-    // ---- Breakpoints and layout --------------------------------------------------------------
-
-    private void BuildBreakpointMenu()
-    {
-        AddBreakpointItem(null);
-        _breakpointMenu.Items.Add(new MenuFlyoutSeparator());
-        foreach (var breakpoint in Breakpoint.All) AddBreakpointItem(breakpoint);
-        BreakpointButton.Flyout = _breakpointMenu;
-    }
-
-    private void AddBreakpointItem(Breakpoint? breakpoint)
-    {
-        var item = new ToggleMenuFlyoutItem { Text = breakpoint?.Label ?? "Fill window" };
-        item.Click += (_, _) => ChooseBreakpoint(breakpoint);
-        _breakpointMenu.Items.Add(item);
-        _breakpointItems.Add((breakpoint, item));
-    }
-
-    private void ChooseBreakpoint(Breakpoint? choice)
-    {
-        if (_active is not { } tab) return;
-        var reload = choice?.UserAgent != tab.Breakpoint?.UserAgent;
-        tab.Breakpoint = choice;
-        tab.AppliedFit = -1;
-        ShowBreakpoint(choice);
-        RunSafe(() => ApplyBreakpointAsync(tab, reload));
-    }
-
-    private void ShowBreakpoint(Breakpoint? choice)
-    {
-        foreach (var (breakpoint, item) in _breakpointItems) item.IsChecked = breakpoint == choice;
-        ToolTipService.SetToolTip(BreakpointButton, choice is null ? "View breakpoint: fill window" : $"View breakpoint: {choice.Label}");
-    }
-
-    /// <summary>
-    /// Where a tab's page sits on the stage, and how much a breakpoint is shrunk to fit. Without a
-    /// breakpoint the page fills the stage; with one it is centred on the backdrop.
-    /// </summary>
-    private (double X, double Y, double Width, double Height, double Fit) Frame(BrowserTab tab)
-    {
-        var width = Stage.ActualWidth;
-        var height = Stage.ActualHeight;
-        if (tab.Breakpoint is not { } b) return (0, 0, width, height, 1);
-        const double margin = 16;
-        var fit = Math.Clamp(Math.Min((width - 2 * margin) / b.Width, (height - 2 * margin) / b.Height), 0.1, 1);
-        var w = b.Width * fit;
-        var h = b.Height * fit;
-        return (Math.Max(0, (width - w) / 2), Math.Max(0, (height - h) / 2), w, h, fit);
-    }
-
-    /// <summary>
-    /// Places a tab's page: the selected one on the stage, the rest just off it at their full size.
-    /// Background pages stay rendered, so an agent working in a tab the user is not looking at keeps
-    /// full-speed rendering, timers and screenshots.
-    /// </summary>
-    private double LayoutTab(BrowserTab tab)
-    {
-        var (x, y, width, height, fit) = Frame(tab);
-        if (!ReferenceEquals(tab, _active)) x = -(x + width + 64);
-        Canvas.SetLeft(tab.View, x);
-        Canvas.SetTop(tab.View, y);
-        tab.View.Width = Math.Max(1, width);
-        tab.View.Height = Math.Max(1, height);
-        return fit;
-    }
-
     private void RelayoutAll()
     {
-        foreach (var tab in _tabs)
-        {
-            var fit = LayoutTab(tab);
-            // Only re-emulate when the scale actually changed, so resizing the window does not flood DevTools.
-            if (tab.Breakpoint is not null && Math.Abs(fit - tab.AppliedFit) > 0.001) RunSafe(() => ApplyBreakpointAsync(tab, reload: false));
-        }
-
+        foreach (var tab in _tabs) LayoutTab(tab);
         if (_active is not null) Canvas.SetZIndex(_active.View, 1);
     }
 
+    private void LayoutTab(BrowserTab tab)
+    {
+        var width = Math.Max(1, Stage.ActualWidth);
+        var height = Math.Max(1, Stage.ActualHeight);
+        Canvas.SetLeft(tab.View, ReferenceEquals(tab, _active) ? 0 : -(width + 64));
+        Canvas.SetTop(tab.View, 0);
+        tab.View.Width = width;
+        tab.View.Height = height;
+    }
+
     private void Stage_SizeChanged(object sender, SizeChangedEventArgs e) => RelayoutAll();
-
-    /// <summary>
-    /// Emulates the tab's breakpoint on its page: CSS size, pixel ratio, touch and (for phone and tablet)
-    /// user agent, shrunk to fit the window when bigger than the view. A new user agent only reaches the
-    /// page's scripts and server after a reload.
-    /// </summary>
-    private async Task ApplyBreakpointAsync(BrowserTab tab, bool reload)
-    {
-        // One pass at a time per tab: overlapping DevTools calls (a window being dragged) can finish out of order
-        // and leave a stale scale. A request during a pass just asks for one more pass afterwards.
-        if (tab.EmulationBusy)
-        {
-            tab.EmulationDirty = true;
-            tab.EmulationReload |= reload;
-            return;
-        }
-
-        tab.EmulationBusy = true;
-        try
-        {
-            do
-            {
-                reload |= tab.EmulationReload;
-                tab.EmulationReload = false;
-                tab.EmulationDirty = false;
-                await ApplyBreakpointOnceAsync(tab, reload);
-                reload = false;
-            }
-            while (tab.EmulationDirty && !tab.IsClosed);
-        }
-        finally
-        {
-            tab.EmulationBusy = false;
-        }
-    }
-
-    private async Task ApplyBreakpointOnceAsync(BrowserTab tab, bool reload)
-    {
-        if (tab.IsClosed) return;
-        var fit = LayoutTab(tab);
-        if (tab.View.CoreWebView2 is not { } core) return;
-        var applied = tab.Breakpoint is null ? 1 : fit;
-        if (!reload && Math.Abs(applied - tab.AppliedFit) < 0.001) return;
-        tab.AppliedFit = applied;
-        try
-        {
-            if (tab.Breakpoint is { } b)
-            {
-                await core.CallDevToolsProtocolMethodAsync("Emulation.setDeviceMetricsOverride", JsonSerializer.Serialize(new { width = b.Width, height = b.Height, deviceScaleFactor = b.Scale, mobile = b.Mobile, scale = fit }));
-            }
-            else
-            {
-                await core.CallDevToolsProtocolMethodAsync("Emulation.clearDeviceMetricsOverride", "{}");
-            }
-
-            var touch = tab.Breakpoint?.Mobile == true;
-            await core.CallDevToolsProtocolMethodAsync("Emulation.setTouchEmulationEnabled", JsonSerializer.Serialize(new { enabled = touch, maxTouchPoints = touch ? 5 : 1 }));
-            await core.CallDevToolsProtocolMethodAsync("Emulation.setUserAgentOverride", JsonSerializer.Serialize(new { userAgent = tab.Breakpoint?.UserAgent ?? "" }));
-            if (reload && !core.Source.StartsWith("about:", StringComparison.Ordinal)) core.Reload();
-        }
-        catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException)
-        {
-            Debug.WriteLine(ex);
-            tab.AppliedFit = -1;
-        }
-    }
-
-    // ---- Element picker -----------------------------------------------------------------------
-
-    private void Pick_Click(object sender, RoutedEventArgs e) => RunSafe(PickAsync);
-
-    private async Task PickAsync()
-    {
-        if (_active?.View.CoreWebView2 is not { } core) return;
-        _picking = true;
-        UpdateTitle();
-        await core.ExecuteScriptAsync(PageScripts.Pick);
-    }
-
-    private void OnPageMessage(BrowserTab tab, CoreWebView2WebMessageReceivedEventArgs e)
-    {
-        try
-        {
-            using var data = JsonDocument.Parse(e.WebMessageAsJson);
-            var root = data.RootElement;
-            switch (root.GetProperty("type").GetString())
-            {
-                case "codale-pick" when ReferenceEquals(tab, _active) && _picking:
-                    FinishPick(root);
-                    break;
-
-                case "codale-pick-cancel" when ReferenceEquals(tab, _active):
-                    _picking = false;
-                    UpdateTitle();
-                    break;
-            }
-        }
-        catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
-        {
-            Debug.WriteLine(ex);
-        }
-    }
-
-    /// <summary>Copies the picked element's path to the clipboard (the title bar stops saying "Select an element").</summary>
-    private void FinishPick(JsonElement root)
-    {
-        _picking = false;
-        UpdateTitle();
-        try
-        {
-            var selectors = root.GetProperty("selectors").EnumerateArray().Select(x => x.GetString()).Where(x => !string.IsNullOrEmpty(x)).ToArray();
-            var hosts = root.GetProperty("shadowHosts").EnumerateArray().Select(x => x.GetString() ?? "").ToArray();
-            var selector = selectors.FirstOrDefault() ?? throw new InvalidOperationException("Could not find a unique path for this element.");
-            CopyText(string.Join(" >> ", hosts.Append(selector)));
-        }
-        catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
-        {
-            Program.Log("error", ex);
-        }
-    }
-
-    private static void CopyText(string text)
-    {
-        var package = new DataPackage();
-        package.SetText(text);
-        Clipboard.SetContent(package);
-    }
-
-    private static string? OriginOf(string? url) =>
-        Uri.TryCreate(url, UriKind.Absolute, out var uri) && (uri.Scheme is "http" or "https") ? uri.GetLeftPart(UriPartial.Authority) : null;
-
-    // ---- New windows and full screen ------------------------------------------------------------
 
     private void OnNewWindow(BrowserTab tab, CoreWebView2NewWindowRequestedEventArgs e)
     {
         e.Handled = true;
         if (OriginOf(e.Uri) is null) return;
-
-        // An agent's pop-up stays in its tab, so the agent keeps driving it; the user's opens a new tab.
         if (tab.IsAgent) tab.View.CoreWebView2?.Navigate(e.Uri);
         else RunSafe(() => OpenUserTabAsync(e.Uri, focusAddress: false));
     }
+
+    private static string? OriginOf(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
+            ? uri.GetLeftPart(UriPartial.Authority)
+            : null;
 }
