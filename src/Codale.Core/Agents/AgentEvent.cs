@@ -56,6 +56,8 @@ public sealed record AssistantMessageCompleted : AgentEvent
 {
     public required string MessageId { get; init; }
     public required string Model { get; init; }
+    /// <summary>The reasoning effort used for this reply, when available.</summary>
+    public string? Effort { get; init; }
     public string Text { get; init; } = "";
     public bool HasThinking { get; init; }
 

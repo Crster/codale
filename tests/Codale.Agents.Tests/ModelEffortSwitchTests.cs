@@ -1,6 +1,7 @@
 using System.Text.Json;
 
 using Codale.Agents.Claude;
+using Codale.Agents.Codex;
 
 namespace Codale.Agents.Tests;
 
@@ -12,6 +13,34 @@ public sealed class ModelEffortSwitchTests
 {
     private static JsonElement Parse(object frame) =>
         JsonDocument.Parse(ClaudeAgentSession.SerializeFrame(frame)).RootElement;
+
+    [Fact]
+    public async Task Codex_turn_uses_the_latest_model_effort_and_mode()
+    {
+        await using var session = new CodexAgentSession(new CodexSessionOptions { WorkingDirectory = "." });
+        Assert.True(await session.TrySetModelEffortAsync("fast-model", "low"));
+        Assert.True(await session.TrySetPermissionModeAsync("plan"));
+        Assert.True(await session.TrySetModelEffortAsync("capable-model", "high"));
+        Assert.True(await session.TrySetPermissionModeAsync("manual"));
+
+        var parameters = new Dictionary<string, object?>();
+        session.ApplyTurnOverrides(parameters, askOnly: false);
+        var turn = JsonSerializer.SerializeToElement(parameters);
+        var collaboration = turn.GetProperty("collaborationMode");
+        Assert.Equal("default", collaboration.GetProperty("mode").GetString());
+        Assert.Equal("capable-model", collaboration.GetProperty("settings").GetProperty("model").GetString());
+        Assert.Equal("high", collaboration.GetProperty("settings").GetProperty("reasoning_effort").GetString());
+        Assert.Equal("capable-model", turn.GetProperty("model").GetString());
+        Assert.Equal("high", turn.GetProperty("effort").GetString());
+    }
+
+    [Fact]
+    public async Task Codex_reset_requires_reconnect_instead_of_silently_keeping_an_override()
+    {
+        await using var session = new CodexAgentSession(new CodexSessionOptions { WorkingDirectory = "." });
+        Assert.True(await session.TrySetModelEffortAsync("picked-model", "high"));
+        Assert.False(await session.TrySetModelEffortAsync(null, null));
+    }
 
     [Fact]
     public async Task Claude_live_switch_declines_spawn_only_efforts()

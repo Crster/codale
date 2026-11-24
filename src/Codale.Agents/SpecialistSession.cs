@@ -7,7 +7,11 @@ using Codale.Core.Shell;
 namespace Codale.Agents;
 
 /// <summary>One turn of a specialist conversation; <paramref name="Answers"/> is set when the user turn answers the planner's questions.</summary>
-public sealed record SpecialistMessage(string Role, string Text, IReadOnlyList<SpecialistAnswer>? Answers = null);
+public sealed record SpecialistMessage(string Role, string Text, IReadOnlyList<SpecialistAnswer>? Answers = null)
+{
+    public string? Model { get; init; }
+    public string? Effort { get; init; }
+}
 public sealed record SpecialistAnswer(string Question, string Answer);
 public sealed record SpecialistQuestion(string Id, string Text, string[] Options, bool MultiSelect = false);
 
@@ -140,7 +144,7 @@ public sealed class SpecialistSession(IAgentSessionFactory factory, AgentSession
                 switch (item)
                 {
                     case AssistantMessageCompleted { ParentToolUseId: null, Text.Length: > 0 } message:
-                        Snapshot.Messages.Add(new("assistant", message.Text));
+                        Snapshot.Messages.Add(new("assistant", message.Text) { Model = message.Model, Effort = message.Effort });
                         if (Snapshot.Planner && ExtractPlan(message.Text) is { } proposed) SetPlan(proposed);
                         break;
                     case ApprovalRequested approval:

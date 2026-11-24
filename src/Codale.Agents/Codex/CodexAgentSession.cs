@@ -55,6 +55,8 @@ public sealed partial class CodexAgentSession(CodexSessionOptions options) : IAg
 
     /// <summary>The model codex reported for the thread; null until it says, so the CLI default is never guessed.</summary>
     private string? _threadModel;
+    private string? _threadEffort;
+    private string? _turnEffort;
 
     private sealed record PendingApproval(string ThreadId, string Method, string ToolName, JsonElement Input, string? ToolUseId);
 
@@ -155,7 +157,36 @@ public sealed partial class CodexAgentSession(CodexSessionOptions options) : IAg
             var method = _options.ResumeSessionId is { Length: > 0 } resume ? "thread/resume" : "thread/start";
             if (_options.ResumeSessionId is { Length: > 0 } id)
             {
+                if (_liveModel is null && _liveEffort is null && _options.CustomProvider is null)
+                {
+                    // A cold resume with no model overrides restores the old model and
+                    // effort. Resolve the CLI's current default in an ephemeral thread.
+                    var defaults = await SendRequestAsync("thread/start", request =>
+                    {
+                        request["cwd"] = _options.WorkingDirectory;
+                        request["ephemeral"] = true;
+                    }, startTimeout.Token).ConfigureAwait(false);
+                    threadParams["model"] = defaults.Str("model") ?? defaults.Prop("thread")?.Str("model")
+                        ?? throw new InvalidOperationException("Codex did not report its default model.");
+                    if (defaults.Prop("thread")?.Str("id") is { Length: > 0 } defaultsId)
+                    {
+                        try
+                        {
+                            await SendRequestAsync("thread/unsubscribe", request => request["threadId"] = defaultsId,
+                                startTimeout.Token).ConfigureAwait(false);
+                        }
+                        catch (InvalidOperationException)
+                        {
+                            // Older servers keep the ephemeral thread until this process exits.
+                        }
+                    }
+                }
+
                 threadParams["threadId"] = id;
+                if (_liveEffort is { } reasoningEffort)
+                {
+                    threadParams["config"] = new Dictionary<string, string> { ["model_reasoning_effort"] = reasoningEffort };
+                }
             }
 
             var thread = await SendRequestAsync(method, request => CopyParams(request, threadParams), startTimeout.Token)
@@ -174,6 +205,7 @@ public sealed partial class CodexAgentSession(CodexSessionOptions options) : IAg
             // the real thing instead of the "codex default" placeholder.
             var threadBody = thread.Prop("thread") ?? thread;
             _threadModel = (thread.Str("model") ?? threadBody.Str("model")) is { Length: > 0 } reported ? reported : null;
+            _threadEffort = CodexSessionOptions.ClampEffort(thread.Str("reasoningEffort"));
 
             await _events.Writer.WriteAsync(new SessionInitialized
             {
@@ -316,7 +348,7 @@ public sealed partial class CodexAgentSession(CodexSessionOptions options) : IAg
 
         var parameters = new Dictionary<string, object?> { ["threadId"] = threadId, ["input"] = input };
         _proposedPlan = null;
-        ApplyTurnOverrides(parameters, turn.AskOnly, turn.PlanOnly);
+        _turnEffort = ApplyTurnOverrides(parameters, turn.AskOnly, turn.PlanOnly);
 
         var started = await SendRequestAsync("turn/start", request => CopyParams(request, parameters), ct)
             .ConfigureAwait(false);
@@ -324,14 +356,14 @@ public sealed partial class CodexAgentSession(CodexSessionOptions options) : IAg
     }
 
     /// <summary>Folds the live model, effort and permission mode into a turn's parameters.</summary>
-    internal void ApplyTurnOverrides(Dictionary<string, object?> parameters, bool askOnly, bool planOnly = false)
+    internal string? ApplyTurnOverrides(Dictionary<string, object?> parameters, bool askOnly, bool planOnly = false)
     {
         if (_predictionOnly)
         {
             parameters["approvalPolicy"] = "untrusted";
             parameters["sandboxPolicy"] = new { type = "readOnly" };
             parameters["effort"] = "low";
-            return;
+            return "low";
         }
         if (_liveModel is { Length: > 0 } model)
         {
@@ -352,6 +384,7 @@ public sealed partial class CodexAgentSession(CodexSessionOptions options) : IAg
 
         // Collaboration mode persists on the thread, so explicitly leave it on work turns.
         // Null developer_instructions selects Codex's built-in planning instructions.
+        var effectiveEffort = _liveEffort ?? _threadEffort;
         if ((_liveModel ?? _threadModel) is { Length: > 0 })
         {
             parameters["collaborationMode"] = new
@@ -360,7 +393,7 @@ public sealed partial class CodexAgentSession(CodexSessionOptions options) : IAg
                 settings = new
                 {
                     model = _liveModel ?? _threadModel,
-                    reasoning_effort = _liveEffort,
+                    reasoning_effort = effectiveEffort,
                     developer_instructions = (string?)null,
                 },
             };
@@ -369,6 +402,7 @@ public sealed partial class CodexAgentSession(CodexSessionOptions options) : IAg
         {
             throw new InvalidOperationException("Codex did not report its model. Select a model before starting a plan turn.");
         }
+        return effectiveEffort;
     }
 
     private IReadOnlyList<string> ExtraFolders() => _options.AdditionalDirectoriesSource?.Invoke() ?? [];
@@ -433,22 +467,20 @@ public sealed partial class CodexAgentSession(CodexSessionOptions options) : IAg
 
     /// <summary>
     /// Same per-turn story for model and effort: recorded and applied from the next
-    /// turn/start on. Never false, so the host does not restart the session for a
-    /// change codex can carry across turns.
+    /// turn/start on. Returning to CLI defaults requires a restart because omitting
+    /// an override on an existing thread can retain its previous value.
     /// </summary>
     public Task<bool> TrySetModelEffortAsync(string? model, string? effort, CancellationToken ct = default)
     {
-        if (model is not null)
+        model = string.IsNullOrEmpty(model) ? null : model;
+        effort = CodexSessionOptions.ClampEffort(effort);
+        if ((model is null && _liveModel is not null) || (effort is null && _liveEffort is not null))
         {
-            _liveModel = model.Length > 0 ? model : null;
-            // The model resolved at thread startup no longer describes subsequent turns.
-            _threadModel = null;
+            return Task.FromResult(false);
         }
 
-        if (effort is not null)
-        {
-            _liveEffort = CodexSessionOptions.ClampEffort(effort);
-        }
+        _liveModel = model;
+        _liveEffort = effort;
 
         return Task.FromResult(true);
     }
@@ -1301,7 +1333,8 @@ public sealed partial class CodexAgentSession(CodexSessionOptions options) : IAg
                     await EmitAsync(parent, new AssistantMessageCompleted
                     {
                         MessageId = itemId,
-                        Model = item.Str("model") ?? _threadModel ?? _liveModel ?? "CLI",
+                        Model = item.Str("model") ?? _liveModel ?? _threadModel ?? "CLI",
+                        Effort = parent is null ? _turnEffort : null,
                         Text = item.Str("text") ?? "",
                     }).ConfigureAwait(false);
                 }

@@ -162,7 +162,13 @@ public sealed partial class SpecialistItem : ChatItem
             var message = state.Messages[_projectedMessages++];
             ChatItem projected = message.Role == "user"
                 ? SpecialistAnswersItem.From(message) is { } answered ? answered : new UserMessageItem { Text = message.Text }
-                : new AssistantMessageItem { Text = SpecialistSession.ExtractPlan(message.Text) ?? message.Text, Model = ModelLabel, IsStreaming = false };
+                : new AssistantMessageItem
+                {
+                    Text = SpecialistSession.ExtractPlan(message.Text) ?? message.Text,
+                    Model = message.Model ?? ModelLabel,
+                    Effort = message.Effort,
+                    IsStreaming = false,
+                };
             Messages.Add(projected);
             _messageItems.Add(projected);
         }

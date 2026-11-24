@@ -14,7 +14,7 @@ public sealed class CodexPlanModeTests
     {
         await using var session = Create(mode);
         var parameters = new Dictionary<string, object?>();
-        session.ApplyTurnOverrides(parameters, false, planOnly);
+        Assert.Equal("high", session.ApplyTurnOverrides(parameters, false, planOnly));
         var json = JsonSerializer.SerializeToElement(parameters);
         // No sandbox in any mode: Codale's approval policy keeps planning read-only.
         Assert.Equal("untrusted", json.GetProperty("approvalPolicy").GetString());

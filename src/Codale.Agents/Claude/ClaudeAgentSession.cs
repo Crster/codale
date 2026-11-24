@@ -18,6 +18,7 @@ public sealed class ClaudeAgentSession(ClaudeSessionOptions options) : IAgentSes
 
     private readonly ClaudeSessionOptions _options = options;
     private readonly ClaudeStreamParser _parser = new();
+    private volatile string? _liveEffort = ClaudeSessionOptions.ClampEffort(options.Effort);
     private readonly Channel<AgentEvent> _events =
         Channel.CreateUnbounded<AgentEvent>(new UnboundedChannelOptions { SingleReader = false, SingleWriter = true });
 
@@ -175,13 +176,16 @@ public sealed class ClaudeAgentSession(ClaudeSessionOptions options) : IAgentSes
     /// </summary>
     public async Task<bool> TrySetPermissionModeAsync(string mode, CancellationToken ct = default)
     {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
         try
         {
-            await SendControlRequestAsync("set_permission_mode", request => request["mode"] = mode, ct)
+            await SendControlRequestAsync("set_permission_mode", request => request["mode"] = mode, timeout.Token)
                 .ConfigureAwait(false);
             return true;
         }
-        catch (Exception ex) when (ex is InvalidOperationException or IOException)
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or TimeoutException ||
+            ex is OperationCanceledException && !ct.IsCancellationRequested)
         {
             // Older CLI without the subtype, or the process is gone; the caller phrases the request instead.
             return false;
@@ -220,6 +224,7 @@ with(StringComparer.Ordinal),         "low", "medium", "high", "xhigh",
             {
                 await SendControlRequestAsync(id => BuildApplyEffortFrame(id, effort), timeout.Token)
                     .ConfigureAwait(false);
+                _liveEffort = effort;
             }
 
             return true;
@@ -542,7 +547,10 @@ with(StringComparer.Ordinal),         "low", "medium", "high", "xhigh",
                         SessionId = id;
                     }
 
-                    await _events.Writer.WriteAsync(e).ConfigureAwait(false);
+                    var published = e is AssistantMessageCompleted { ParentToolUseId: null } reply
+                        ? reply with { Effort = _liveEffort }
+                        : e;
+                    await _events.Writer.WriteAsync(published).ConfigureAwait(false);
                 }
             }
 

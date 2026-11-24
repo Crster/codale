@@ -624,9 +624,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
     public string WorkingDirectory => ProjectPath;
 
     /// <summary>
-    /// A reused empty chat may still carry the last session's temporary picks; mode goes
-    /// back to Settings' default. Model and effort keep the CLI default for new sessions.
-    /// A chat with a conversation is left alone.
+    /// Applies the latest defaults to a blank chat reused for a new conversation.
     /// </summary>
     public async Task ApplyDefaultsToEmptyChatAsync(ChatViewModel chat)
     {
@@ -639,6 +637,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         {
             // Settings' CLI provider may have changed since this blank chat connected.
             await chat.SetEndpointAsync(Smart.Settings.CliProviderFor(chat.CliId));
+            await chat.ApplyDefaultModelSelectionAsync();
 
             if (Smart.Settings.DefaultModeFor(chat.CliId) is { Length: > 0 } mode)
             {

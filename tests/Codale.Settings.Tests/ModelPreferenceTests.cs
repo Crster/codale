@@ -3,6 +3,30 @@ namespace Codale.Settings.Tests;
 public sealed class ModelPreferenceTests
 {
     [Fact]
+    public void SavingATierPublishesOneCompleteSelectionAndKeepsTheLatestChoice()
+    {
+        var root = Directory.CreateTempSubdirectory("codale-tier-preference-").FullName;
+        using (var settings = new AppSettingsStore(root))
+        {
+            settings.SetModelTierPreference("codex", "plus", "capable-model", "high");
+            var changes = 0;
+            settings.Changed += (_, _) =>
+            {
+                changes++;
+                Assert.Equal("cli", settings.DefaultTierFor("codex"));
+                Assert.Equal((true, (string?)null, (string?)null), settings.ModelPreferenceFor("codex"));
+            };
+            settings.SetModelTierPreference("codex", "cli", null, null);
+            settings.SetModelTierPreference("codex", "cli", null, null);
+            Assert.Equal(1, changes);
+        }
+
+        using var reopened = new AppSettingsStore(root);
+        Assert.Equal("cli", reopened.DefaultTierFor("codex"));
+        Assert.Equal((true, (string?)null, (string?)null), reopened.ModelPreferenceFor("codex"));
+    }
+
+    [Fact]
     public void ExplicitChoiceSurvivesReopenAndProfileChanges()
     {
         var root = Directory.CreateTempSubdirectory("codale-model-preference-").FullName;

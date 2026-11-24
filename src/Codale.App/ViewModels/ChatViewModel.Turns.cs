@@ -119,7 +119,7 @@ public sealed partial class ChatViewModel
         // Mid-turn there is nothing to restart without killing the running turn: the
         // request still goes out in plan mode, and the effort lands on the next turn.
         if (!IsBusy && !string.Equals(_liveEffort, planEffort, StringComparison.OrdinalIgnoreCase) &&
-            !await TryApplyModelEffortLiveAsync(_effectiveModel ?? (Status.HasModel ? Status.Model : null), planEffort))
+            !await TryApplyModelEffortLiveAsync(RequestedModel, planEffort))
         {
             await RestartWithCurrentConfigAsync();
         }
@@ -163,7 +163,7 @@ public sealed partial class ChatViewModel
     /// on "manual" so every action comes to the host, which turns it down - and the
     /// plan-turn restore hands Automatic back when it finishes.
     /// </summary>
-    private async Task<bool> EnterAskTurnAsync()
+    private bool EnterAskTurn()
     {
         var session = _session;
         if (session is null || !IsConnected)
@@ -173,15 +173,7 @@ public sealed partial class ChatViewModel
 
         _modeRestore.Begin(session, PermissionMode, DefaultMode);
 
-        try
-        {
-            await session.TrySetPermissionModeAsync("manual");
-        }
-        catch (Exception)
-        {
-            // The turn still carries the explain-only instruction.
-        }
-
+        // Auto and Ask use the same CLI permission mode.
         PermissionMode = AskMode;
         _modeRestore.AskTurnFromAuto = _modeRestore.RestoreMode == AutomaticMode;
         return true;
@@ -202,16 +194,7 @@ public sealed partial class ChatViewModel
         _modeRestore.Clear();
         PermissionMode = AutomaticMode;
 
-        if (_session is { } session && IsConnected)
-        {
-            try
-            {
-                await session.TrySetPermissionModeAsync(CliMode(AutomaticMode));
-            }
-            catch (Exception)
-            {
-            }
-        }
+        await QueuePermissionModeSwitch(AutomaticMode);
     }
 
     /// <summary>Planning is done: restores the original tier's effort without changing saved defaults.</summary>
@@ -225,13 +208,8 @@ public sealed partial class ChatViewModel
         var effort = _planEffort.Restore();
         RequestedEffort = effort;
 
-        if (_session is null || !IsConnected)
-        {
-            return;
-        }
-
-        // When the live switch is refused the next spawn picks the effort up.
-        _ = Task.Run(() => TryApplyModelEffortLiveAsync(_effectiveModel ?? (Status.HasModel ? Status.Model : null), effort));
+        var model = RequestedModel;
+        _ = QueueSessionConfigurationAsync(async _ => { await TryApplyModelEffortLiveAsync(model, effort); });
     }
 
     /// <summary>Ends a plan turn: hands the session back its previous permission mode.</summary>
@@ -254,15 +232,6 @@ public sealed partial class ChatViewModel
 
         PermissionMode = pending.Mode;
 
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await pending.Session.TrySetPermissionModeAsync(CliMode(pending.Mode));
-            }
-            catch (Exception)
-            {
-            }
-        });
+        _ = QueuePermissionModeSwitch(pending.Mode);
     }
 }

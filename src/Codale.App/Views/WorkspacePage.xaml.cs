@@ -2677,8 +2677,7 @@ public sealed partial class WorkspacePage : Page
         };
 
         var next = ModeCycle[(Array.IndexOf(ModeCycle, current) + 1) % ModeCycle.Length];
-        chat.RememberModeAsDefault(next);
-        await chat.SetPermissionModeAsync(next);
+        await chat.SetPermissionModeAsync(next, remember: true);
     }
 
     private void ShowGitPanel()

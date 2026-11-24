@@ -362,12 +362,11 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     public void ShowModelPicker(FrameworkElement anchor, bool above)
     {
         var sender = anchor;
-        if (Session is null)
+        if (Session is not { CanPickModel: true } chat)
         {
             return;
         }
 
-        var chat = Session;
         var panel = new StackPanel { Spacing = 2, MinWidth = PickerWidth(sender) };
         var flyout = PickerFlyout(panel);
 
@@ -436,11 +435,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
         void Add(string mode, string glyph, string title, string detail, bool isCurrent) =>
             panel.Children.Add(PickOption(OptionContent(glyph, title, detail), isCurrent, "mode",
-                () =>
-                {
-                    chat.RememberModeAsDefault(mode);
-                    _ = chat.SetPermissionModeAsync(mode);
-                }, flyout));
+                () => _ = chat.SetPermissionModeAsync(mode, remember: true), flyout));
 
         Add(ChatViewModel.AutomaticMode, "\uE82F", "Auto",
             "Runs reads, builds and project edits; asks before writes, deletes, risky or unknown commands",

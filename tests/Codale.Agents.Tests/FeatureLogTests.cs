@@ -75,16 +75,19 @@ public sealed class FeatureLogTests : IDisposable
     }
 
     [Fact]
-    public void Legacy_context_records_are_ignored_when_reading_history()
+    public void Legacy_history_ignores_context_and_reads_replies_without_effort()
     {
         var store = new Codale.Workspace.HistoryStore(_directory);
         store.Append("legacy", "{\"type\":\"user\",\"text\":\"saved request\"}");
         store.Append("legacy", "{\"type\":\"context\",\"summary\":\"Context gathered\",\"details\":\"old hint\"}");
+        store.Append("legacy", """{"type":"assistant","id":"old","model":"old-model","text":"old reply"}""");
 
         var events = new FeatureLog(store, "legacy").ReadTail(10, out var hasMore);
 
         Assert.False(hasMore);
-        Assert.Collection(events, item => Assert.Equal("saved request", Assert.IsType<UserMessageRecorded>(item).Text));
+        Assert.Collection(events,
+            item => Assert.Equal("saved request", Assert.IsType<UserMessageRecorded>(item).Text),
+            item => Assert.Null(Assert.IsType<AssistantMessageCompleted>(item).Effort));
     }
 
     private FeatureLog Recorded()
@@ -94,7 +97,7 @@ public sealed class FeatureLogTests : IDisposable
         log.AppendUser("fix the build");
         log.Append(new ToolCallStarted { ToolUseId = "t1", ToolName = "Edit", Input = Json("{\"file_path\":\"a.cs\"}") });
         log.Append(new ToolCallCompleted { ToolUseId = "t1" });
-        log.Append(new AssistantMessageCompleted { MessageId = "m1", Model = "m", Text = "done" });
+        log.Append(new AssistantMessageCompleted { MessageId = "m1", Model = "m", Effort = "high", Text = "done" });
         return log;
     }
 
@@ -108,6 +111,7 @@ public sealed class FeatureLogTests : IDisposable
             [typeof(UserMessageRecorded), typeof(ToolCallStarted), typeof(ToolCallCompleted), typeof(AssistantMessageCompleted)],
             events.Select(e => e.GetType()).ToArray());
         Assert.Equal("a.cs", ((ToolCallStarted)events[1]).Input.GetProperty("file_path").GetString());
+        Assert.Equal("high", Assert.IsType<AssistantMessageCompleted>(events[3]).Effort);
     }
 
     [Fact]

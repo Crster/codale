@@ -87,11 +87,14 @@ public sealed class SpecialistSessionTests
         Assert.Equal("parent", child.Snapshot.ParentId);
         await child.SendAsync("Revise the scope");
         Assert.False(child.ClaimPlan(2));
-        await factory.Last.Emit(new AssistantMessageCompleted { MessageId = "reply", Model = "pro", Text = "<proposed_plan>new plan</proposed_plan>" });
+        await factory.Last.Emit(new AssistantMessageCompleted { MessageId = "reply", Model = "actual-model", Effort = "high", Text = "<proposed_plan>new plan</proposed_plan>" });
         await factory.Last.Emit(new TurnCompleted { Subtype = "success" });
         await Eventually(() => !child.IsRunning);
         Assert.Equal("new plan", child.Snapshot.Plan);
         Assert.True(child.Snapshot.PlanVersion > 2);
+        var reply = Assert.Single(child.Snapshot.Messages, message => message.Role == "assistant");
+        Assert.Equal("actual-model", reply.Model);
+        Assert.Equal("high", reply.Effort);
         await child.StopAsync();
         Assert.Null(child.Snapshot.Plan);
         Assert.False(child.ClaimPlan(child.Snapshot.PlanVersion));

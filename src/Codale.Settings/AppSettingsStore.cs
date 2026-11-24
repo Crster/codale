@@ -351,6 +351,19 @@ public sealed class AppSettingsStore : IDisposable
         WriteDefault(cli, "modelChosen", "true");
     }
 
+    public void SetModelTierPreference(string cli, string tier, string? model, string? effort)
+    {
+        lock (_gate)
+        {
+            var changed = Write(DefaultsKey(cli, "tier"), IsTier(tier) ? tier : "");
+            changed |= Write(DefaultsKey(cli, "model"), model);
+            changed |= Write(DefaultsKey(cli, "effort"), effort);
+            changed |= Write(DefaultsKey(cli, "modelChosen"), "true");
+            if (!changed) return;
+        }
+        OnChanged();
+    }
+
     /// <summary>The provider new chats of a CLI connect through: a name from <see cref="ByokProviders"/>, or "" for the CLI's own login.</summary>
     public string CliProviderFor(string cli) =>
         ReadDefault(cli, "provider") is { } name && FindByok(name)?.Supports(cli) == true ? name : "";

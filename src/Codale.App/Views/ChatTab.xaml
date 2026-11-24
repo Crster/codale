@@ -1402,7 +1402,7 @@
                         FontSize="{x:Bind S10_5, Mode=OneWay}"
                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                         Text="{x:Bind ModelLabel, Mode=OneWay}"
-                        ToolTipService.ToolTip="Model used for this response"
+                        ToolTipService.ToolTip="Model and reasoning effort used for this response"
                         Visibility="{x:Bind HasModel, Mode=OneWay}" />
                     <Button
                         Width="20"
@@ -2058,7 +2058,7 @@
                         ContentTemplateSelector="{StaticResource ChatTemplateSelector}" />
                     <Border
                         x:Name="TranscriptEnd"
-                        Height="16"
+                        Height="28"
                         CanBeScrollAnchor="True"
                         IsHitTestVisible="False" />
                 </StackPanel>

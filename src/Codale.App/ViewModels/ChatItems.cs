@@ -194,9 +194,15 @@ public sealed partial class AssistantMessageItem : ChatItem
     [NotifyPropertyChangedFor(nameof(HasModel))]
     public partial string? Model { get; set; }
 
-    public string ModelLabel => Model is null or "" or "unknown" or "CLI" or "<synthetic>" ? "" : Model;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ModelLabel))]
+    public partial string? Effort { get; set; }
 
-    public bool HasModel => ModelLabel.Length > 0;
+    public string ModelLabel => HasModel
+        ? string.IsNullOrWhiteSpace(Effort) ? Model! : $"{Model} · {Effort}"
+        : "";
+
+    public bool HasModel => Model is not (null or "" or "unknown" or "CLI" or "<synthetic>");
 
     /// <summary>Grows as deltas arrive, then is replaced by the authoritative message.</summary>
     [ObservableProperty]

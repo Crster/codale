@@ -143,7 +143,7 @@ public sealed class FeatureLog(HistoryStore store, string featureId, string? cha
         switch (e)
         {
             case AssistantMessageCompleted { ParentToolUseId: null, Text.Length: > 0 } reply:
-                Append(new { type = "assistant", id = reply.MessageId, model = reply.Model, text = reply.Text, thinking = reply.Thinking, at = DateTimeOffset.Now });
+                Append(new { type = "assistant", id = reply.MessageId, model = reply.Model, effort = reply.Effort, text = reply.Text, thinking = reply.Thinking, at = DateTimeOffset.Now });
                 break;
 
             case ToolCallStarted { ParentToolUseId: null } started:
@@ -388,6 +388,7 @@ public sealed class FeatureLog(HistoryStore store, string featureId, string? cha
         {
             MessageId = record.Str("id") ?? "",
             Model = record.Str("model") ?? "unknown",
+            Effort = record.Str("effort"),
             Text = record.Str("text") ?? "",
             Thinking = record.Str("thinking"),
             HasThinking = record.Str("thinking") is { Length: > 0 },

@@ -79,7 +79,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private DateTimeOffset _turnStarted;
     private string? _preparingTask;
 
-    /// <summary>Effort the running session was actually started with; spawn-time, so a change means a restart.</summary>
+    /// <summary>The effort override applied to the running session.</summary>
     private string? _liveEffort;
 
     /// <summary>
@@ -88,6 +88,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     private readonly TemporaryModeRestore<IAgentSession> _modeRestore = new();
     private readonly PlanEffortOverride _planEffort = new();
+    private int _modeSelectionVersion;
 
     /// <summary>Relative workspace paths for @-references, built on first use per connect.</summary>
     private IReadOnlyList<string>? _workspaceFiles;
@@ -165,15 +166,26 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     }
 
     private string _selectedTier = "cli";
-    private string? _effectiveModel;
 
     private void RestoreModelPreference()
     {
-        _selectedTier = _smart.Settings.DefaultTierFor(CliId);
+        (_selectedTier, RequestedModel, RequestedEffort) = DefaultModelSelection();
+        NotifyModelDisplays();
+    }
+
+    private (string Tier, string? Model, string? Effort) DefaultModelSelection()
+    {
+        var tier = _smart.Settings.DefaultTierFor(CliId);
         var saved = _smart.Settings.ModelPreferenceFor(CliId);
-        (RequestedModel, RequestedEffort) = saved.HasValue
-            ? (saved.Model, saved.Effort)
-            : TierConfig(_selectedTier);
+        var (model, effort) = tier == "cli" && saved.HasValue ? (saved.Model, saved.Effort) : TierConfig(tier);
+        return (tier, model, effort);
+    }
+
+    public Task ApplyDefaultModelSelectionAsync()
+    {
+        if (!CanChangeMode) return Task.CompletedTask;
+        var (tier, model, effort) = DefaultModelSelection();
+        return UpdateTierAsync(tier, model, effort);
     }
 
     /// <summary>The CLI descriptor behind <see cref="CliId"/>.</summary>
@@ -188,7 +200,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _agentSessions = agentSessions;
         _smart = smart;
         _cliId = smart.Settings.DefaultChatCli;
-        PermissionMode = smart.Settings.DefaultChatMode;
+        PermissionMode = smart.Settings.DefaultModeFor(CliId);
         _decider = decider;
         ProjectPath = projectPath;
         _artifactsDirectory = artifactsDirectory;
@@ -1418,6 +1430,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     [NotifyPropertyChangedFor(nameof(ShowStatusLine))]
     [NotifyPropertyChangedFor(nameof(ShowStop))]
     [NotifyPropertyChangedFor(nameof(CanChangeMode))]
+    [NotifyPropertyChangedFor(nameof(CanPickModel))]
     [NotifyPropertyChangedFor(nameof(HasConversation))]
     public partial bool IsBusy { get; set; }
 
@@ -1433,8 +1446,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>True for a terminal CLI's session, which gets the simple panel.</summary>
     public bool IsTerminalSession => TerminalCli is not null;
 
-    /// <summary>The model, effort, mode and provider are locked while a turn is running or for a terminal CLI's session.</summary>
-    public bool CanChangeMode => !IsBusy && !IsTerminalSession;
+    /// <summary>Chat configuration can change between turns and outside connection setup.</summary>
+    public bool CanChangeMode => !IsBusy && !IsTerminalSession && !IsConnecting && !IsPreparingTurn;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanChangeMode))]
+    [NotifyPropertyChangedFor(nameof(CanPickModel))]
+    public partial bool IsPreparingTurn { get; private set; }
 
     /// <summary>
     /// True once a CLI-reported model catalogue is in hand. The model and effort pickers
@@ -1582,31 +1600,69 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>
-    /// The user picked a permission mode. A connected session switches live over the
-    /// CLI's control channel, the same switch plan mode uses; anything else (not
-    /// connected yet, a CLI without the switch) keeps the pick for the next spawn, where
-    /// <see cref="ConnectAsync"/> passes it and the session's own report confirms it.
+    /// Records a permission mode and applies it to the current CLI when connected.
     /// </summary>
-    public async Task SetPermissionModeAsync(string mode)
+    public Task SetPermissionModeAsync(string mode, bool remember = false)
     {
+        if (!CanChangeMode) return Task.CompletedTask;
         mode = IsHostMode(mode) ? mode : AgentModePolicy.ToSupported(AgentPermissionMode.Normalize(mode));
 
-        // Any pick is the user's own: picking Ask while Auto had borrowed it makes it stick.
+        // An explicit pick supersedes any pending restore, even when the chip already shows it.
+        _modeSelectionVersion++;
+        _modeRestore.Clear();
         _modeRestore.AskTurnFromAuto = false;
-        if (mode == PermissionMode)
-        {
-            return;
-        }
+        if (remember) _smart.Settings.SetDefaultMode(CliId, mode);
 
-        // Only the CLI half needs a switch: leaving ask mode for manual, or automatic
-        // for auto, or the reverse, is purely the host's business.
-        var cliMode = CliMode(mode);
-        if (IsConnected && _session is { } session && cliMode != CliMode(PermissionMode))
-        {
-            await session.TrySetPermissionModeAsync(cliMode);
-        }
-
+        var previous = CliMode(PermissionMode);
         PermissionMode = mode;
+        return previous == CliMode(mode) ? Task.CompletedTask : QueuePermissionModeSwitch(mode);
+    }
+
+    private Task QueuePermissionModeSwitch(string mode, bool restartOnFailure = true) => QueueSessionConfigurationAsync(async session =>
+    {
+        var cliMode = CliMode(mode);
+        if (cliMode != CliMode(PermissionMode)) return;
+        try
+        {
+            if (await session.TrySetPermissionModeAsync(cliMode)) return;
+        }
+        catch (Exception)
+        {
+            // Reconnect with the selected mode when the live control request fails.
+        }
+        if (restartOnFailure && !IsBusy && ReferenceEquals(session, _session) && cliMode == CliMode(PermissionMode))
+        {
+            await RestartWithCurrentConfigAsync();
+        }
+    });
+
+    private Task _sessionConfiguration = Task.CompletedTask;
+
+    // All callers run on the UI thread. Keep provider control requests in selection order.
+    private Task QueueSessionConfigurationAsync(Func<IAgentSession, Task> apply)
+    {
+        var session = _session;
+        if (!IsConnected || session is null) return Task.CompletedTask;
+        return _sessionConfiguration = ApplyAsync(_sessionConfiguration);
+
+        async Task ApplyAsync(Task previous)
+        {
+            await previous;
+            if (!ReferenceEquals(session, _session)) return;
+            try
+            {
+                await apply(session);
+            }
+            catch (Exception ex)
+            {
+                ShowCliNotice(new NoticeItem { Text = $"Could not update the session: {ex.Message}", Severity = NoticeSeverity.Error });
+            }
+        }
+    }
+
+    private async Task WaitForSessionConfigurationAsync()
+    {
+        while (_sessionConfiguration is { IsCompleted: false } pending) await pending;
     }
 
     /// <summary>
@@ -1639,8 +1695,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private static string? LaunchValue(string? requested) =>
         requested is { Length: > 0 } ? requested : null;
 
-    /// <summary>Records the user's permission-mode pick as this CLI's new default.</summary>
-    public void RememberModeAsDefault(string mode) => _smart.Settings.SetDefaultMode(CliId, mode);
+    private string? ClampEffort(string? effort) => IsCodexSession
+        ? Codale.Agents.Codex.CodexSessionOptions.ClampEffort(effort)
+        : ClaudeSessionOptions.ClampEffort(effort);
 
     /// <summary>Models the session reports, for the session card's picker.</summary>
     public IReadOnlyList<AgentModelInfo> AvailableModels { get; private set; } = [];
@@ -1724,36 +1781,37 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// Applies a tier pick: the model/effort it resolves to goes to the running session
     /// live when it can, a restart when it cannot, and it becomes this CLI's new default.
     /// </summary>
-    public async Task ApplyTierAsync(string tier)
+    public Task ApplyTierAsync(string tier)
     {
-        if (IsBusy || IsConnecting) return;
+        if (!CanChangeMode) return Task.CompletedTask;
+        if (_planEffort.IsRaised) _planEffort.Restore();
         var (model, effort) = TierConfig(tier);
+        _smart.Settings.SetModelTierPreference(CliId, tier, model, effort);
+        return UpdateTierAsync(tier, model, effort);
+    }
+
+    private Task UpdateTierAsync(string tier, string? model, string? effort)
+    {
         if (_selectedTier == tier && RequestedModel == model && RequestedEffort == effort)
         {
-            return;
+            return Task.CompletedTask;
         }
 
         Status.PrepareCache(CacheContinuationPlan.Create(CliId, EndpointName, "", CliId, EndpointName, "", modelChanged: true).Explanation);
         _selectedTier = tier;
         RequestedModel = model;
         RequestedEffort = effort;
-        _smart.Settings.SetModelPreference(CliId, model, effort);
         NotifyModelDisplays();
-        _smart.Settings.SetDefaultTier(CliId, tier);
 
-        if (!IsConnected)
+        return QueueSessionConfigurationAsync(async session =>
         {
-            return;
-        }
-
-        // Tier models come from settings (real names/aliases), so they are sent as-is: filtering
-        // them by the catalogue would turn a valid pick into "keep the current model".
-        if (await TryApplyModelEffortLiveAsync(model, effort))
-        {
-            return;
-        }
-
-        await RestartWithCurrentConfigAsync();
+            if (RequestedModel != model || RequestedEffort != effort) return;
+            if (await TryApplyModelEffortLiveAsync(model, effort)) return;
+            if (ReferenceEquals(session, _session) && RequestedModel == model && RequestedEffort == effort)
+            {
+                await RestartWithCurrentConfigAsync();
+            }
+        });
     }
 
     private bool _tierRefreshQueued;
@@ -1767,10 +1825,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             try
             {
                 // Wait out a running turn or connect; give up after a minute.
-                for (var i = 0; i < 60 && (IsBusy || IsConnecting); i++) await Task.Delay(1000);
-                _tierRefreshQueued = false;
-                if (_selectedTier == "cli" || IsBusy || IsConnecting) return;
-                await ApplyTierAsync(_selectedTier);
+                for (var i = 0; i < 60 && !CanChangeMode && !IsTerminalSession; i++) await Task.Delay(1000);
+                if (_selectedTier == "cli" || !CanChangeMode || _planEffort.IsRaised) return;
+                var (model, effort) = TierConfig(_selectedTier);
+                _ = UpdateTierAsync(_selectedTier, model, effort);
             }
             catch (Exception)
             {
@@ -1977,6 +2035,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         IsConnecting = true;
         OnPropertyChanged(nameof(IsConnecting));
+        OnPropertyChanged(nameof(CanChangeMode));
+        OnPropertyChanged(nameof(CanPickModel));
         try
         {
             await ConnectCoreAsync();
@@ -1985,6 +2045,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             IsConnecting = false;
             OnPropertyChanged(nameof(IsConnecting));
+            OnPropertyChanged(nameof(CanChangeMode));
+            OnPropertyChanged(nameof(CanPickModel));
         }
     }
 
@@ -2128,13 +2190,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // otherwise Claude starts on its own default (often Opus) while the UI says Lite.
         // The tier is the source of truth: settings hold the real model names, so a chosen tier
         // is re-resolved from them at every launch instead of trusting a stale saved model.
-        var hasSavedModelPreference = _smart.Settings.ModelPreferenceFor(CliId).HasValue;
         var tierDriven = _selectedTier != "cli";
-        if (!hasSavedModelPreference || tierDriven)
+        if (tierDriven)
         {
-            (RequestedModel, RequestedEffort) = TierConfig(_selectedTier);
-            if (RequestedModel is not null || RequestedEffort is not null || _selectedTier == "cli")
-                _smart.Settings.SetModelPreference(CliId, RequestedModel, RequestedEffort);
+            var (tierModel, tierEffort) = TierConfig(_selectedTier);
+            RequestedModel = tierModel;
+            if (!_planEffort.IsRaised) RequestedEffort = tierEffort;
         }
         var configuredTierModel = tierDriven ? RequestedModel : null;
         var model = LaunchValue(RequestedModel);
@@ -2152,15 +2213,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         {
             model = null;
         }
-        _effectiveModel = model;
         NotifyModelDisplays();
 
-        // A custom endpoint's models are unknown to the effort tables, so they get only a pick.
-        var effort = IsCodexSession
-            ? Codale.Agents.Codex.CodexSessionOptions.ClampEffort(endpointEnv is not null ? RequestedEffort : LaunchValue(RequestedEffort))
-            : ClaudeSessionOptions.ClampEffort(endpointEnv is not null ? RequestedEffort : LaunchValue(RequestedEffort));
-
-
+        var effort = ClampEffort(RequestedEffort);
         _liveEffort = effort;
         _workspaceFiles = null;
 
@@ -2514,10 +2569,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 // The selection belongs to the chat. A CLI's startup report must
                 // not replace it when switching providers or reconnecting.
                 if (!RidesOn(PermissionMode, init.PermissionMode) &&
-                    CliMode(PermissionMode) != CliMode(init.PermissionMode) &&
-                    _session is { } live)
+                    CliMode(PermissionMode) != CliMode(init.PermissionMode) && !IsBusy && !IsPreparingTurn)
                 {
-                    _ = live.TrySetPermissionModeAsync(CliMode(PermissionMode));
+                    _ = QueuePermissionModeSwitch(PermissionMode, restartOnFailure: false);
                 }
 
                 NotifyModelDisplays();
@@ -3881,17 +3935,20 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             PermissionMode = mode;
         }
 
-        if (_session is not null)
+        var approvalSession = _session;
+        var approvalModeVersion = _modeSelectionVersion;
+        if (approvalSession is not null)
         {
             // The session gets the CLI half of the chosen mode: codex starts implementing an approved
             // plan inside this answer, and the host id for Full ("auto") would run it on-request -
             // asking about every command - instead of never.
-            await _session.RespondToApprovalAsync(approval.RequestId, decision.SwitchToMode is { Length: > 0 } switchTo
+            await approvalSession.RespondToApprovalAsync(approval.RequestId, decision.SwitchToMode is { Length: > 0 } switchTo
                 ? decision with { SwitchToMode = CliMode(switchTo) }
                 : decision);
         }
 
-        if (decision.SwitchToMode is { Length: > 0 } chosen)
+        if (decision.SwitchToMode is { Length: > 0 } chosen && approvalModeVersion == _modeSelectionVersion &&
+            ReferenceEquals(approvalSession, _session))
         {
             // An Auto-routed plan uses the chosen work mode for this turn, then
             // returns to Auto. Other starting modes keep the user's chosen mode.
@@ -3904,19 +3961,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             PermissionMode = chosen;
             RestorePlanEffort();
 
-            var cliChosen = CliMode(chosen);
-            if (_session is { } live)
-            {
-                try
-                {
-                    // The CLI is on "plan" while the plan turn runs, so the work mode
-                    // always differs; the only no-op case is a session already gone.
-                    await live.TrySetPermissionModeAsync(cliChosen);
-                }
-                catch (Exception)
-                {
-                }
-            }
+            await QueuePermissionModeSwitch(chosen, restartOnFailure: false);
         }
     }
 
@@ -4189,7 +4234,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         var text = Draft.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
         var attachments = Attachments.Select(a => a.ToTurnAttachment()).ToList();
 
-        if ((text.Length == 0 && attachments.Count == 0) || _session is null || !IsConnected || IsConnecting || _briefing is not null)
+        if (text.Length == 0 && attachments.Count == 0) return;
+        await WaitForSessionConfigurationAsync();
+        if (_session is null || !IsConnected || IsConnecting || IsPreparingTurn || _briefing is not null)
         {
             return;
         }
@@ -4336,11 +4383,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
 
             case RouteIntent.Ask:
-                if (!await EnterAskTurnAsync())
-                {
-                    return;
-                }
-
                 await SendTurnAsync(text, attachments, planOnly: false, askOnly: true, preparationToken);
                 break;
 
@@ -4368,6 +4410,46 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    private async Task<bool> PrepareSessionForTurnAsync(bool planOnly, bool askOnly)
+    {
+        if (IsPreparingTurn) return false;
+        IsPreparingTurn = true;
+        try
+        {
+            await WaitForSessionConfigurationAsync();
+            await _browserViewportRestore;
+            if (_selectedTier != "cli" && !_planEffort.IsRaised)
+            {
+                var (model, effort) = TierConfig(_selectedTier);
+                await UpdateTierAsync(_selectedTier, model, effort);
+            }
+
+            // MCP settings and Claude's extra directories are read when the CLI starts.
+            var toolsChanged = _mcpSettings is not null &&
+                (_sessionToolModes != _mcpSettings.ModesKey() ||
+                !_sessionMcpServers.Where(s => s.Name is McpServerSettings.BrowserName or McpServerSettings.ComputerName or McpServerSettings.PhoneName)
+                    .Select(s => s.Name).OrderBy(n => n, StringComparer.Ordinal)
+                    .SequenceEqual(_mcpSettings.Servers().Select(s => s.Name).OrderBy(n => n, StringComparer.Ordinal), StringComparer.Ordinal));
+            var effortChanged = _liveEffort != ClampEffort(RequestedEffort);
+            if (_session is not null && (toolsChanged ||
+                (!IsCodexSession && !_connectedFolders.SequenceEqual(ExtraRoots, StringComparer.OrdinalIgnoreCase)) ||
+                (effortChanged && !await TryApplyModelEffortLiveAsync(RequestedModel, RequestedEffort))))
+            {
+                await RestartWithCurrentConfigAsync();
+            }
+
+            _preparingTask = null;
+            if (planOnly && _activeTurn is { } planning) planning.LiveStage = "Entering plan mode";
+            if (planOnly) return await EnterPlanModeAsync();
+            if (askOnly && IsAutomaticMode) return EnterAskTurn();
+            return true;
+        }
+        finally
+        {
+            IsPreparingTurn = false;
+        }
+    }
+
     private async Task SendTurnAsync(string text, IReadOnlyList<TurnAttachment> attachments, bool planOnly, bool askOnly, CancellationToken preparationToken = default, string? displayText = null)
     {
         _idleCompactTimer.Stop();
@@ -4387,36 +4469,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        // MCP servers are configured at process start. Refresh them before the next
-        // turn, preserving the conversation and leaving a running turn uninterrupted.
-        // Claude also reads --add-dir only at spawn; Codex reads it on every turn.
-        await _browserViewportRestore;
-        // CLI Default and Block change the CLI's own flags without touching Codale's servers.
-        var toolsChanged = _mcpSettings is not null &&
-            (_sessionToolModes != _mcpSettings.ModesKey() ||
-            !_sessionMcpServers.Where(s => s.Name is McpServerSettings.BrowserName or McpServerSettings.ComputerName or McpServerSettings.PhoneName)
-                .Select(s => s.Name).OrderBy(n => n, StringComparer.Ordinal)
-                .SequenceEqual(_mcpSettings.Servers().Select(s => s.Name).OrderBy(n => n, StringComparer.Ordinal), StringComparer.Ordinal));
-        if (_session is not null && (toolsChanged ||
-            (!IsCodexSession && !_connectedFolders.SequenceEqual(ExtraRoots, StringComparer.OrdinalIgnoreCase))))
-        {
-            await RestartWithCurrentConfigAsync();
-        }
-
-        // Plan setup can restart the session (for the effort change), so it runs before
-        // the draft is cleared - a failed setup must leave the message in place.
-        _preparingTask = null;
-        if (planOnly && _activeTurn is { } planning) planning.LiveStage = "Entering plan mode";
-        if (planOnly && !await EnterPlanModeAsync())
-        {
-            return;
-        }
-
+        if (!await PrepareSessionForTurnAsync(planOnly, askOnly)) return;
         var session = _session;
-        if (session is null)
-        {
-            return;
-        }
+        if (session is null || !IsConnected) return;
 
         var pre = _preShown;
         _preShown = null;
@@ -4694,12 +4749,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     return false;
                 }
             }
-            effort = LaunchValue(effort);
-            var applied = await session.TrySetModelEffortAsync(model ?? "", effort);
+            effort = ClampEffort(effort);
+            // Claude's effort control only accepts explicit levels. Spawn without the
+            // override when resetting to the configured CLI default.
+            if (!IsCodexSession && effort is null && _liveEffort is not null) return false;
+            var applied = await session.TrySetModelEffortAsync(model, effort);
 
-            if (applied)
+            if (applied && ReferenceEquals(session, _session))
             {
-                _effectiveModel = model;
                 _liveEffort = effort;
                 if (_endpointSettings?.ContextWindowFor(EndpointName, model) is { } window && window > 0)
                 {
@@ -4727,6 +4784,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         // The session only: a dev server Codale runs for the agent outlives a model switch.
         await DisposeSessionAsync();
+        IsConnected = false;
         // The transcript stays: the CLI resumes the same conversation, so the view must too.
         EndTurn(TurnOutcome.Stopped);
         _streaming = null;
@@ -4743,9 +4801,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async Task SetProfileAsync(string cli, string name)
     {
-        if (IsBusy || IsTerminalSession || IsConnecting) return;
+        await WaitForSessionConfigurationAsync();
+        if (!CanChangeMode) return;
         if (cli == CliId) { await SetEndpointAsync(name); return; }
-        var mode = PermissionMode;
         var continuation = CacheContinuationPlan.Create(CliId, EndpointName, "", cli, name, "");
         Status.PrepareCache(continuation.Explanation);
         CaptureHandoff();
@@ -4757,13 +4815,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         CliId = cli;
         EndpointName = name;
         OnPropertyChanged(nameof(EndpointName));
-        // Each CLI retains its own explicit model preference across profile switches.
+        // CliId loaded this CLI's last model pick; ConnectAsync resolves it against the new profile.
         var accountId = _smart.Settings.FindByok(name)?.AccountId;
         AvailableModels = KnownCatalogue(cli, accountId)
             ?? await FetchCatalogueAsync(_agentSessions, cli, accountId);
         HasModelCatalog = AvailableModels.Count > 0;
-        RestoreModelPreference();
-        PermissionMode = mode;
         OnPropertyChanged(nameof(AvailableModels));
         OnPropertyChanged(nameof(HasModelCatalog));
         OnPropertyChanged(nameof(CanPickModel));
@@ -4773,9 +4829,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     public async Task SetEndpointAsync(string name)
     {
-        if (IsConnecting || IsTerminalSession) return;
+        await WaitForSessionConfigurationAsync();
+        if (!CanChangeMode) return;
         name = name.Trim();
-        if (string.Equals(EndpointName, name, StringComparison.OrdinalIgnoreCase) || IsBusy)
+        if (string.Equals(EndpointName, name, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
@@ -5224,6 +5281,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         var item = _streaming ?? Streaming();
         item.Model = done.Model;
+        item.Effort = done.Effort;
         item.Complete(done.Text);
         item.HasThinking = done.HasThinking;
         _streaming = null;
