@@ -210,6 +210,7 @@ public sealed partial class CodexAgentSession(CodexSessionOptions options) : IAg
             await _events.Writer.WriteAsync(new SessionInitialized
             {
                 Model = _threadModel ?? _liveModel ?? "CLI",
+                Effort = _threadEffort,
                 WorkingDirectory = _options.WorkingDirectory,
                 PermissionMode = _permissionMode,
                 Version = thread.Prop("thread")?.Str("version") ?? thread.Str("version"),

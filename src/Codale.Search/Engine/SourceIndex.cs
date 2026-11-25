@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 
 using Codale.Core.Projects;
 using Codale.Core.Syntax;
@@ -44,8 +45,8 @@ public sealed record SourceIndexOptions
 }
 
 /// <summary>
-/// The project's source, scanned once and kept current: the whole tree is listed with
-/// the workspace listing (so .gitignore holds), every text file is read and tokenised in parallel, and a
+/// The project's tracked source, scanned once and kept current: Git lists the files,
+/// every text file is read and tokenised in parallel, and a
 /// file watcher marks the snapshot stale so the next search re-reads only what changed.
 /// </summary>
 /// <remarks>
@@ -69,6 +70,8 @@ public sealed class SourceIndex : IDisposable
     /// <summary>Files found binary, by size and write time, so a refresh does not read them again.</summary>
     private readonly ConcurrentDictionary<string, (long Length, DateTime Written)> _binary = new(StringComparer.OrdinalIgnoreCase);
     private FileSystemWatcher? _watcher;
+    private FileSystemWatcher? _gitWatcher;
+    private HashSet<string>? _trackedPaths;
     private SourceSnapshot? _current;
     private Task<SourceSnapshot>? _refresh;
     private long _version;
@@ -139,11 +142,10 @@ public sealed class SourceIndex : IDisposable
 
     /// <summary>
     /// The names to offer at the cursor: the model's suggestions for <paramref name="prefix"/>, ranked with the
-    /// word before the cursor. Starts a scan when one is due; empty until the first scan has loaded the model.
+    /// word before the cursor. Uses the existing model without starting work while the user types.
     /// </summary>
     public IReadOnlyList<WorkspaceSuggestion> Suggest(string prefix, string? previousWord = null)
     {
-        Warm();
         return Model.Suggest(prefix, previousWord);
     }
 
@@ -429,9 +431,67 @@ public sealed class SourceIndex : IDisposable
         return new SourceFile(relative, full, info.Length, info.LastWriteTimeUtc, null, keys, counts, total, []) { IsLarge = true };
     }
 
-    /// <summary>The workspace listing, .gitignore applied.</summary>
-    private Task<IReadOnlyList<string>> ListAsync() =>
-        new WorkspaceSearch(Root).ListFilesAsync(CodeDiscovery.NoiseGlobs, _options.MaxFiles);
+    /// <summary>Only files in Git's index belong to the source index.</summary>
+    private async Task<IReadOnlyList<string>> ListAsync()
+    {
+        var gitDirectory = ProjectPaths.RepositoryIdentity(Root);
+        if (gitDirectory.Equals(Root, StringComparison.OrdinalIgnoreCase) ||
+            !Directory.Exists(Path.Combine(gitDirectory, "objects")))
+        {
+            Volatile.Write(ref _trackedPaths, null);
+            return await new WorkspaceSearch(Root).ListFilesAsync(CodeDiscovery.NoiseGlobs, _options.MaxFiles).ConfigureAwait(false);
+        }
+
+        EnsureGitWatcher();
+        var start = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = Root,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        start.ArgumentList.Add("ls-files");
+        start.ArgumentList.Add("-z");
+        start.ArgumentList.Add("--cached");
+        start.ArgumentList.Add("--");
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start Git.");
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync().ConfigureAwait(false);
+        var paths = await output.ConfigureAwait(false);
+        var message = await error.ConfigureAwait(false);
+        if (process.ExitCode != 0) throw new InvalidOperationException($"Git could not list tracked files: {message}");
+        var tracked = paths.Split('\0', StringSplitOptions.RemoveEmptyEntries)
+            .Select(path => path.Replace('/', Path.DirectorySeparatorChar))
+            .Distinct(StringComparer.OrdinalIgnoreCase).Take(_options.MaxFiles).ToArray();
+        Volatile.Write(ref _trackedPaths, tracked.ToHashSet(StringComparer.OrdinalIgnoreCase));
+        return tracked;
+    }
+
+    private void EnsureGitWatcher()
+    {
+        if (!_options.Watch || _disposed || _gitWatcher is not null ||
+            ProjectPaths.GitDirectory(Root) is not { } directory) return;
+
+        try
+        {
+            var watcher = new FileSystemWatcher(directory)
+            {
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite,
+            };
+            watcher.Filters.Add("index");
+            watcher.Filters.Add("HEAD");
+            watcher.Changed += (_, _) => Invalidate();
+            watcher.Created += (_, _) => Invalidate();
+            watcher.Deleted += (_, _) => Invalidate();
+            watcher.Renamed += (_, _) => Invalidate();
+            watcher.Error += (_, _) => Invalidate(reloadAll: true);
+            watcher.EnableRaisingEvents = true;
+            _gitWatcher = watcher;
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException or PlatformNotSupportedException or UnauthorizedAccessException) { }
+    }
 
     private void EnsureWatcher()
     {
@@ -471,6 +531,7 @@ public sealed class SourceIndex : IDisposable
         var relative = e.Name ?? "";
         if (relative.StartsWith(".git", StringComparison.OrdinalIgnoreCase) && (relative.Length == 4 || relative[4] is '\\' or '/'))
         {
+            if (relative.Length == 4) Invalidate();
             return;
         }
 
@@ -478,6 +539,9 @@ public sealed class SourceIndex : IDisposable
         {
             return;
         }
+
+        if (e is not RenamedEventArgs && Volatile.Read(ref _trackedPaths) is { } tracked &&
+            !tracked.Contains(relative) && File.Exists(e.FullPath)) return;
 
         Invalidate();
     }
@@ -496,6 +560,7 @@ public sealed class SourceIndex : IDisposable
         _disposed = true;
         _syntaxStore.Changed -= GrammarsChanged;
         _watcher?.Dispose();
+        _gitWatcher?.Dispose();
         _watcher = null;
         lock (_gate)
         {

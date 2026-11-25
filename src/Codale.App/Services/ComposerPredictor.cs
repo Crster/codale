@@ -293,7 +293,6 @@ internal sealed class ComposerPredictor(string projectRoot)
         try
         {
             var index = SourceIndex.For(projectRoot);
-            index.Warm();
             return index.Model;
         }
         catch (Exception)

@@ -1,6 +1,8 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
+using Codale.Agents.History;
 using Codale.Commands;
 using Codale.Core.Tasks;
 using Codale.Workspace;
@@ -196,6 +198,60 @@ public static class TaskTools
             }),
     ];
 
+    private static Dictionary<(string Session, string Turn), (string? Request, string? Reply)> ReadRecallExcerpts(
+        string directory, IReadOnlyList<Codale.Search.ProjectKnowledgeIndex.SessionRecall> matches)
+    {
+        var excerpts = new Dictionary<(string, string), (string?, string?)>();
+        foreach (var session in matches.GroupBy(match => match.Session))
+        {
+            var wanted = session.Select(match => match.Turn).ToHashSet(StringComparer.Ordinal);
+            var log = new FeatureLog(directory, session.Key);
+            var pending = new Dictionary<string, (string? Request, string? Reply)>(StringComparer.Ordinal);
+            var position = default(LogPosition);
+            for (var page = 0; page < 64 && wanted.Count > 0; page++)
+            {
+                var (next, records) = log.ReadIndexPage(position, 128);
+                foreach (var record in records)
+                {
+                    var chat = ReadText(record, "chat") ?? "";
+                    var turn = pending.GetValueOrDefault(chat);
+                    switch (ReadText(record, "type"))
+                    {
+                        case "user":
+                            var request = RecallExcerpt(ReadText(record, "text"), 400);
+                            if (record.TryGetProperty("steer", out var steer) && steer.ValueKind == JsonValueKind.True)
+                                pending[chat] = (turn.Request ?? request, turn.Reply);
+                            else
+                                pending[chat] = (request, null);
+                            break;
+                        case "assistant":
+                            var reply = RecallExcerpt(ReadText(record, "text"), 1200);
+                            if (reply is not null) pending[chat] = (turn.Request, reply);
+                            break;
+                        case "turnEnd":
+                            if (ReadText(record, "turnId") is { } id && wanted.Remove(id))
+                                excerpts[(session.Key, id)] = turn;
+                            pending.Remove(chat);
+                            break;
+                    }
+                }
+                if (next == position) break;
+                position = next;
+            }
+        }
+        return excerpts;
+    }
+
+    private static string? ReadText(JsonElement record, string key) =>
+        record.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static string? RecallExcerpt(string? text, int limit)
+    {
+        if (string.IsNullOrWhiteSpace(text) || MemoryCapture.ContainsSecret(text)) return null;
+        text = text.Trim();
+        return text.Length <= limit ? text : text[..limit].TrimEnd() + "…";
+    }
+
     /// <summary>
     /// The workspace database's memory and secrets. The database is Codale's own, outside the project, and one
     /// process at a time opens it, so a busy answer is reported rather than waited on forever.
@@ -218,8 +274,17 @@ public static class TaskTools
             }
         }
 
-        static string Show(MemoryNote note) =>
-            $"[{note.Id}] {note.Title}{(note.Tags.Count > 0 ? $"  ({string.Join(", ", note.Tags)})" : "")}\n{note.Text}";
+        static string Show(MemoryNote note)
+        {
+            var kind = note.Category switch
+            {
+                "preference" => "User preference",
+                "decision" => "Project decision",
+                "project-fact" => "Project fact",
+                _ => "Saved note",
+            };
+            return $"{note.Title}\n{kind}\n\n{note.Text.Trim()}\n\nNote ID: {note.Id}";
+        }
 
         return
         [
@@ -254,19 +319,41 @@ public static class TaskTools
 
             new McpTool(
                 "memory_search",
-                "Look up what was remembered about this workspace (memory_save). Pass a question or a few specific keywords (a topic, a command, a tool name), " +
+                "Look up saved memories in this workspace. If none match, search indexed chat turns for historical context. Pass a few specific keywords (a topic, a command, a tool name), " +
                 "not a whole sentence of the task. Check it at the start of a task that depends on project conventions, and before asking the user " +
                 "something they may already have told you. If nothing comes back, try one different keyword before concluding nothing is known.",
                 McpTool.Schema(
                     [
                         ("query", "string", "What you want to recall."),
-                        ("limit", "integer", "How many notes at most (default 5)."),
+                        ("limit", "integer", "Maximum matches to return (default 5)."),
                     ],
                     "query"),
                 (a, _) => Guarded(() =>
                 {
-                    var found = memory.Search(a.RequiredString("query"), Math.Clamp(a.Int("limit") ?? 5, 1, 20));
-                    return found.Count == 0 ? "Nothing remembered about that." : string.Join("\n\n", found.Select(Show));
+                    var query = a.RequiredString("query");
+                    var limit = Math.Clamp(a.Int("limit") ?? 5, 1, 20);
+                    var found = memory.Search(query, limit);
+                    if (found.Count > 0) return "Saved memories\n" + string.Join("\n\n", found.Select(Show));
+
+                    var sessions = WorkspaceDb.Use(directory, db =>
+                    {
+                        using var knowledge = new Codale.Search.ProjectKnowledgeIndex(db);
+                        return knowledge.RecallSessions(projectRoot, query, limit);
+                    });
+                    if (sessions.Count == 0) return "No matching saved memories or indexed chat turns.";
+
+                    var excerpts = ReadRecallExcerpts(directory, sessions);
+                    return "Indexed chat history (historical context)\n" + string.Join("\n\n", sessions.Select(turn =>
+                    {
+                        var (request, reply) = excerpts.GetValueOrDefault((turn.Session, turn.Turn));
+                        reply ??= turn.Reply;
+                        return
+                        $"[Session {turn.Session}, turn {turn.Turn}]\n" +
+                        (request is null ? "" : $"User asked: {request}\n") +
+                        (reply is null ? "" : $"Assistant reported: {reply}\n") +
+                        (turn.Files.Length == 0 ? "" : "\nFiles: " + string.Join(", ", turn.Files.Take(8)
+                            .Select(file => $"{file.Path} ({(file.Edited ? "edited" : "read")})")));
+                    }));
                 })),
 
             new McpTool(

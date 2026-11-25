@@ -541,7 +541,9 @@ public sealed partial class TurnActivityItem : ChatItem
 
     public bool HasSteps => Steps.Count > 0;
 
-    public string StatusGlyph => Outcome switch
+    public string StatusGlyph => GetStatusGlyph(Outcome);
+
+    internal static string GetStatusGlyph(TurnOutcome outcome) => outcome switch
     {
         TurnOutcome.Completed => "",                          // check mark
         TurnOutcome.Failed or TurnOutcome.NotSent => "",      // error

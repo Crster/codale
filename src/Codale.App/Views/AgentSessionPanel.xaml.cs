@@ -390,8 +390,8 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
             var detail = tier switch
             {
                 "lite" => "Fast model, low effort. Quickest useful answers",
-                "flash" => "Fast model, medium effort. Balanced everyday work",
-                "pro" => "Capable model, medium effort. Most coding tasks",
+                "flash" => "Fast model, high effort. Balanced everyday work",
+                "pro" => "Capable model, low effort. Most coding tasks",
                 "plus" => "Capable model, high effort. Hard problems",
                 _ => $"Whatever {chat.ProviderName} starts with",
             };

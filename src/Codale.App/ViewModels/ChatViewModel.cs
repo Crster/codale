@@ -81,6 +81,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>The effort override applied to the running session.</summary>
     private string? _liveEffort;
+    private string? _sessionModel;
+    private string? _reportedEffort;
 
     /// <summary>
     /// Plan turns restore the previous permission mode when they finish. The session is
@@ -259,64 +261,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         };
 
         Attachments.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasAttachments));
-
-        _idleCompactTimer = _dispatcher.CreateTimer();
-        _idleCompactTimer.IsRepeating = false;
-        _idleCompactTimer.Tick += (_, _) => RunInBackgroundOnUi(CompactWhileCacheWarmAsync);
-    }
-
-    /// <summary>Fires once the chat has sat idle almost as long as the prompt cache lives.</summary>
-    private readonly DispatcherQueueTimer _idleCompactTimer;
-
-    /// <summary>The running turn is an idle compaction the app started, not one the reader asked for.</summary>
-    private bool _idleCompacting;
-
-    /// <summary>The context was compacted after the last prompt: compacting it again would only lose detail.</summary>
-    private bool _compactedSinceLastPrompt;
-
-    /// <summary>
-    /// Arms the idle compaction after a finished turn. The API's prompt cache lives about five
-    /// minutes from its last read: a reader who comes back later pays to re-write the whole
-    /// history. Compacting just before that reads the history at the cache-hit price and leaves
-    /// a summary small enough that the re-write costs little.
-    /// </summary>
-    private void ArmIdleCompaction()
-    {
-        _idleCompactTimer.Stop();
-        if (_smart.Settings.IdleCompact && !_compactedSinceLastPrompt &&
-            Status.ContextTokens >= _smart.Settings.IdleCompactMinTokens)
-        {
-            _idleCompactTimer.Interval = TimeSpan.FromSeconds(_smart.Settings.IdleCompactSeconds);
-            _idleCompactTimer.Start();
-        }
-    }
-
-    private async Task CompactWhileCacheWarmAsync()
-    {
-        // A draft in the composer means the reader is about to send, which reads the warm cache anyway.
-        if (_session is null || !IsConnected || IsBusy || Draft.Length > 0 || Attachments.Count > 0 ||
-            !_smart.Settings.IdleCompact || _compactedSinceLastPrompt || Status.ContextTokens < _smart.Settings.IdleCompactMinTokens)
-        {
-            return;
-        }
-
-        _compactItem = new CompactItem
-        {
-            Reason = _smart.Settings.IdleCompactSeconds is var idle && idle >= 3600
-                ? $"Idle for {idle / 3600.0:0.#} hr"
-                : $"Idle for {idle / 60.0:0.#} min",
-            BeforeTokens = Status.ContextTokens,
-        };
-        Add(_compactItem);
-
-        _idleCompacting = true;
-        await CompactAsync();
-        if (!IsBusy)
-        {
-            // Never started (the session went away in between).
-            _idleCompacting = false;
-            DropCompactItem();
-        }
     }
 
     /// <summary>The transcript entry for the compaction under way, finished by <see cref="ConversationCompacted"/>.</summary>
@@ -330,18 +274,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             _compactItem = null;
             Items.Remove(item);
             Reflow();
-        }
-    }
-
-    /// <summary>A UI-thread callback that starts async work; a failure is logged, never left unobserved.</summary>
-    private static async void RunInBackgroundOnUi(Func<Task> work)
-    {
-        try
-        {
-            await work();
-        }
-        catch (Exception)
-        {
         }
     }
 
@@ -1683,10 +1615,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public partial string? RequestedEffort { get; set; }
 
     /// <summary>
-    /// The model chip: the tier the user picked, else what the CLI reported it connected
-    /// with - the CLI's own pick is not guessed before it connects.
+    /// Shows the model and effort configured for the next turn.
     /// </summary>
-    public string ModelDisplay => TierTitle(CurrentTier);
+    public string ModelDisplay => FormatModelSelection(
+        _session is null ? RequestedModel : _sessionModel,
+        _session is null ? ClampEffort(RequestedEffort) : _liveEffort ?? _reportedEffort);
+
+    private static string FormatModelSelection(string? model, string? effort) =>
+        $"{(string.IsNullOrWhiteSpace(model) ? "CLI" : model)} · {(string.IsNullOrWhiteSpace(effort) ? "CLI effort" : effort)}";
 
     /// <summary>
     /// The model or effort to hand the CLI: the pick, else null so the CLI uses its own
@@ -1776,6 +1712,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>The user's tier choice, independent of temporary planning effort or profile fallback.</summary>
     public string CurrentTier => _selectedTier;
+    public string ModelTierDisplay => TierTitle(CurrentTier);
 
     /// <summary>
     /// Applies a tier pick: the model/effort it resolves to goes to the running session
@@ -1846,6 +1783,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         OnPropertyChanged(nameof(ModelDisplay));
         OnPropertyChanged(nameof(CurrentTier));
+        OnPropertyChanged(nameof(ModelTierDisplay));
         OnPropertyChanged(nameof(FlashModel));
         OnPropertyChanged(nameof(ProModel));
     }
@@ -2217,6 +2155,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
         var effort = ClampEffort(RequestedEffort);
         _liveEffort = effort;
+        _sessionModel = model;
+        _reportedEffort = null;
         _workspaceFiles = null;
 
         IAgentSession? starting = null;
@@ -2295,6 +2235,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             await session.StartAsync();
 
             IsConnected = true;
+            NotifyModelDisplays();
             RestoreSpecialists();
             if (_loginNotice is not null) { Items.Remove(_loginNotice); _loginNotice = null; }
 
@@ -2332,6 +2273,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             if (ReferenceEquals(_session, starting))
             {
                 _session = null;
+                OnPropertyChanged(nameof(ModelDisplay));
             }
 
             if (starting is not null)
@@ -2561,6 +2503,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             case SessionInitialized init:
                 BindHistoryProvider();
                 Status.Model = init.Model;
+                if (init.Model is not ("" or "CLI" or "unknown"))
+                {
+                    _sessionModel = init.Model;
+                }
+                _reportedEffort = init.Effort;
                 if (init.ContextWindow is int contextWindow && contextWindow > 0)
                 {
                     Status.ContextWindow = contextWindow;
@@ -2892,17 +2839,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 _autoModeUnavailable = false;
                 EndTurn(outcome);
 
-                // The reader asked for nothing, so an idle compaction finishing is no reason to call them back.
-                var idleCompaction = _idleCompacting;
-                _idleCompacting = false;
                 DropCompactItem();
-                if (outcome == TurnOutcome.Completed)
-                {
-                    ArmIdleCompaction();
-                }
 
                 // The agent is done and the next move is the reader's.
-                if (!idleCompaction && (outcome is TurnOutcome.Completed or TurnOutcome.Failed || turnEnd.Notice == TurnNotice.Paused))
+                if (outcome is TurnOutcome.Completed or TurnOutcome.Failed || turnEnd.Notice == TurnNotice.Paused)
                 {
                     var answer = Items.OfType<AssistantMessageItem>().LastOrDefault()?.Text;
                     AttentionNeeded?.Invoke(this, outcome == TurnOutcome.Completed
@@ -3023,8 +2963,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 // ends with no assistant message: the stale pre-compact reading below would
                 // otherwise be re-applied at turn end and the meter would never drop.
                 _lastMessageUsage = null;
-                _compactedSinceLastPrompt = true;
-                _idleCompactTimer.Stop();
                 if (compacted.PostTokens is { } post and > 0)
                 {
                     Status.Apply(new UsageSnapshot { InputTokens = (int)Math.Min(post, int.MaxValue) });
@@ -4400,6 +4338,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        Features?.Knowledge.Warm(ProjectPath);
         var draft = Draft;
         var attachments = Attachments.ToList();
         await SendTurnAsync("/compact", [], planOnly: false, askOnly: false);
@@ -4452,13 +4391,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private async Task SendTurnAsync(string text, IReadOnlyList<TurnAttachment> attachments, bool planOnly, bool askOnly, CancellationToken preparationToken = default, string? displayText = null)
     {
-        _idleCompactTimer.Stop();
         var compact = IsCompactCommand(text);
-        if (!compact)
-        {
-            _compactedSinceLastPrompt = false;
-            _idleCompacting = false;
-        }
 
         // A message sent while a turn runs steers it: the CLI folds it into the running
         // turn (one result closes both), so it must not stop or restart anything here.
@@ -4490,8 +4423,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // displayText: what the chat and its history show when the prompt is long machine text (an approved plan).
         var sent = pre?.Item ?? new UserMessageItem { Text = displayText ?? text, Attachments = attachments };
         sent.SentAsPlan = planOnly;
-        var silent = compact && _idleCompacting;
-        if (!silent && pre is null)
+        if (pre is null)
         {
             Add(sent);
             TrimTranscript();
@@ -4544,12 +4476,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // "/compact" is housekeeping, not part of the conversation a resumed history replays.
         _preparingTask = null;
         if (_activeTurn is { } ready) ready.LiveStage = "";
-        if (silent && _activeTurn is { } hidden)
-        {
-            // The compaction has its own entry; the turn behind it needs no timeline of its own.
-            Items.Remove(hidden);
-            Reflow();
-        }
 
         try
         {
@@ -4758,6 +4684,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             if (applied && ReferenceEquals(session, _session))
             {
                 _liveEffort = effort;
+                _sessionModel = model ?? _sessionModel;
+                OnPropertyChanged(nameof(ModelDisplay));
                 if (_endpointSettings?.ContextWindowFor(EndpointName, model) is { } window && window > 0)
                 {
                     Status.ContextWindow = window;
@@ -5373,9 +5301,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             if (Items[i] is TurnActivityItem { Loaded: false } or ToolCallItem)
             {
                 var calls = ToolsOf(Items[i]).ToList();
-                var summary = Items[i] is TurnActivityItem activity ? activity.HeaderText
-                    : calls.FirstOrDefault()?.Duration is { } duration
-                        ? $"Worked for {ToolKinds.FormatElapsed(duration)}" : "Worked";
+                var activity = Items[i] as TurnActivityItem;
+                var summary = activity?.HeaderText
+                    ?? (calls.FirstOrDefault()?.Duration is { } duration
+                        ? $"Worked for {ToolKinds.FormatElapsed(duration)}" : "Worked");
                 Items.RemoveAt(i);
                 removed = true;
                 if (calls.Count > 0)
@@ -5385,6 +5314,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                         FirstToolUseId = calls[0].ToolUseId,
                         Calls = calls.Count,
                         Summary = summary,
+                        Outcome = activity?.Outcome ?? TurnOutcome.Completed,
                         Timestamp = calls[0].Timestamp,
                     });
                 }
@@ -5532,8 +5462,6 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         // A tab closed mid-turn would otherwise leave the 500ms timer ticking forever,
         // keeping this view model and its whole transcript rooted.
         _turnTimer.Stop();
-        _idleCompactTimer.Stop();
-        _idleCompacting = false;
 
         // Nobody is left to answer an open question once the session goes.
         AbandonPendingApprovals();
@@ -5555,6 +5483,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             // Detach first: the dying process's SessionEnded (and its stderr, e.g. a failed
             // default-login connect) then reaches a pump that no longer owns it and is dropped.
             _session = null;
+            OnPropertyChanged(nameof(ModelDisplay));
             await session.DisposeAsync();
         }
     }

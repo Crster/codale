@@ -5,6 +5,7 @@ using Codale.Core.Features;
 using Codale.Db;
 using Codale.Git;
 using Codale.Search;
+using Codale.Workspace;
 
 namespace Codale.App.Services;
 
@@ -16,7 +17,7 @@ public sealed partial class FeatureService
     private Task? _topicWorker;
     private bool _topicsStopping;
 
-    private sealed record PartialTurn(string[] Terms, ProjectKnowledgeIndex.TurnFile[] Files);
+    private sealed record PartialTurn(string[] Terms, ProjectKnowledgeIndex.TurnFile[] Files, string? Reply = null);
     private sealed record TopicCheckpoint(LogPosition Position, Dictionary<string, PartialTurn> Pending);
 
     private static async Task<IReadOnlyList<ProjectKnowledgeIndex.FileCommit>> ReadGitFileHistoryAsync(
@@ -106,7 +107,14 @@ public sealed partial class FeatureService
             switch (kind)
             {
                 case "assistant":
-                    pending[chat] = turn with { Terms = MergeTerms(turn.Terms, Text(record, "text"), 48) };
+                    var reply = Text(record, "text");
+                    pending[chat] = turn with
+                    {
+                        Terms = MergeTerms(turn.Terms, reply, 48),
+                        Reply = !string.IsNullOrWhiteSpace(reply) && !MemoryCapture.ContainsSecret(reply)
+                            ? reply.Length <= 1200 ? reply : reply[..1200]
+                            : turn.Reply,
+                    };
                     break;
                 case "tool":
                     var name = Text(record, "name") ?? "";
@@ -125,7 +133,7 @@ public sealed partial class FeatureService
                     var worktree = Text(record, "worktree") ?? _projectPath;
                     var evidence = Paths(record, "edited", true).Concat(Paths(record, "read", false));
                     Knowledge.RecordTurnTopic(session, turnId,
-                        worktree, string.Join(' ', turn.Terms), MergeFiles(turn.Files, evidence), batch);
+                        worktree, string.Join(' ', turn.Terms), MergeFiles(turn.Files, evidence), batch, turn.Reply);
                     break;
             }
         }

@@ -85,6 +85,49 @@ public sealed class TaskToolsTests
     }
 
     [Fact]
+    public async Task Memory_search_falls_back_to_chat_only_when_no_saved_note_matches()
+    {
+        var root = Directory.CreateTempSubdirectory("codale-chat-recall-").FullName;
+        try
+        {
+            var directory = Codale.Workspace.WorkspaceDb.DirectoryFor(root);
+            var oldLog = new Codale.Agents.History.FeatureLog(directory, "older-chat", "chat-a");
+            oldLog.AppendUser("Where is the retry policy implemented?");
+            new Codale.Agents.History.FeatureLog(directory, "older-chat", "chat-b").AppendUser("Unrelated parallel request");
+            oldLog.EndTurn("completed");
+            var oldTurn = oldLog.ReadIndexPage(default, 10).Records.Single(record =>
+                record.GetProperty("type").GetString() == "turnEnd").GetProperty("turnId").GetString()!;
+            Codale.Workspace.WorkspaceDb.Use(directory, db =>
+            {
+                using var knowledge = new Codale.Search.ProjectKnowledgeIndex(db);
+                knowledge.RecordTurnTopic("earlier-chat", "turn-1", root, "retry policy", [],
+                    reply: "Retry the request after a transient timeout.");
+                knowledge.RecordTurnTopic("older-chat", oldTurn, root, "retry policy", [new("Retry.cs", true)]);
+            });
+            var server = Server(new FakeTasks(), root);
+            const string query = """{"query":"retry policy"}""";
+            await Call(server, "memory_save", """{"title":"Formatting","text":"Use four spaces for indentation."}""");
+            var result = Text(await Call(server, "memory_search", query));
+            Assert.Contains("Indexed chat history", result);
+            Assert.Contains("earlier-chat", result);
+            Assert.Contains("Retry the request after a transient timeout.", result);
+            Assert.Contains("Retry.cs (edited)", result);
+            Assert.Contains("User asked: Where is the retry policy implemented?", result);
+            Assert.DoesNotContain("Unrelated parallel request", result);
+            Assert.DoesNotContain("Topics:", result);
+
+            await Call(server, "memory_save", """{"title":"Retry policy","text":"Use a single retry for transient errors."}""");
+            var saved = Text(await Call(server, "memory_search", query));
+            Assert.Contains("Use a single retry for transient errors.", saved);
+            Assert.DoesNotContain("Indexed chat history", saved);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Memory_tools_share_deduplicated_notes_and_refuse_secrets()
     {
         var root = Directory.CreateTempSubdirectory("codale-memory-tools-").FullName;

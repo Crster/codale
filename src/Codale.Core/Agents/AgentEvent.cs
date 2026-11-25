@@ -18,6 +18,7 @@ public abstract record AgentEvent
 public sealed record SessionInitialized : AgentEvent
 {
     public required string Model { get; init; }
+    public string? Effort { get; init; }
     public required string WorkingDirectory { get; init; }
     public required string PermissionMode { get; init; }
     public IReadOnlyList<string> Tools { get; init; } = [];

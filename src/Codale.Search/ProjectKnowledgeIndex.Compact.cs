@@ -19,7 +19,8 @@ public sealed partial class ProjectKnowledgeIndex
     public sealed record TurnFile(string Path, bool Edited);
     private sealed record CompactFile(long Id, string Path, string Hash, SourceSymbol[] Symbols, string[] Subjects, long Length = -1, long Written = 0);
     private sealed record ProfileVector(string Path, string Hash);
-    private sealed record IndexedTurn(string Worktree, string Session, string Turn, string[] Terms, TurnFile[] Files);
+    private sealed record IndexedTurn(string Worktree, string Session, string Turn, string[] Terms, TurnFile[] Files, string? Reply = null);
+    public sealed record SessionRecall(string Session, string Turn, string[] Terms, TurnFile[] Files, string? Reply);
     private sealed record GitSummary(string Hash, string Revision, FileCommit[] Commits);
     private readonly ConcurrentDictionary<(string Root, string Path), GitSummary> _gitSummaries = new();
     private readonly ConcurrentDictionary<(string Root, string Path), byte> _gitPending = new();
@@ -69,7 +70,7 @@ public sealed partial class ProjectKnowledgeIndex
     }
 
     public void RecordTurnTopic(string session, string turn, string worktree, string topic, IEnumerable<TurnFile> evidence,
-        CodaleDatabase.RecordBatch? batch = null)
+        CodaleDatabase.RecordBatch? batch = null, string? reply = null)
     {
         worktree = ProjectPaths.Normalize(worktree);
         // Normalize paths while preserving the action attached to each file.
@@ -85,8 +86,8 @@ public sealed partial class ProjectKnowledgeIndex
             if (Eligible(path)) normalized[path] = file.Edited || normalized.GetValueOrDefault(path);
         }
         var terms = TopicTerms(topic);
-        if (terms.Length == 0 || normalized.Count == 0) return;
-        var record = new IndexedTurn(worktree, session, turn, terms, [.. normalized.Select(f => new TurnFile(f.Key, f.Value))]);
+        if (terms.Length == 0 || (normalized.Count == 0 && reply is null)) return;
+        var record = new IndexedTurn(worktree, session, turn, terms, [.. normalized.Select(f => new TurnFile(f.Key, f.Value))], reply);
         if (batch is null) Use(db => db.WriteBatch(write => StageTurn(write, record)));
         else StageTurn(batch, record);
     }
@@ -117,6 +118,10 @@ public sealed partial class ProjectKnowledgeIndex
     /// <summary>The files earlier Codale turns on the same topic read or edited: evidence beside the source's own words.</summary>
     internal IEnumerable<string> TurnEvidence(string root, string prompt) =>
         MatchTurns(ProjectPaths.Normalize(root), prompt).SelectMany(t => t.Files.Take(12)).Select(f => f.Path);
+
+    public IReadOnlyList<SessionRecall> RecallSessions(string worktree, string query, int limit) =>
+        [.. MatchTurns(ProjectPaths.Normalize(worktree), query).Take(limit)
+            .Select(t => new SessionRecall(t.Session, t.Turn, t.Terms, t.Files, t.Reply))];
 
     /// <summary>Brings the profiles in line with the snapshot; returns the files whose content changed since they were last profiled.</summary>
     private List<string> RefreshCompact(string root, SourceSnapshot snapshot)

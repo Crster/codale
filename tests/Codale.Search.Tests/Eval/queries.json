@@ -13,7 +13,7 @@
   { "query": "route a message to ask plan or act without a model", "path": "src/Codale.Core/Helper/MessageRouting.cs", "symbol": "RouteWithoutModel" },
   { "query": "send a routed prompt as plan ask or act", "path": "src/Codale.App/ViewModels/ChatViewModel.cs", "symbol": "SendRoutedAsync" },
   { "query": "mid-turn message steers the running turn", "path": "src/Codale.App/ViewModels/ChatViewModel.cs", "symbol": "SteerTurnAsync" },
-  { "query": "compact an idle chat before the prompt cache expires", "path": "src/Codale.App/ViewModels/ChatViewModel.cs", "symbol": "CompactWhileCacheWarmAsync" },
+  { "query": "manually summarize a chat without losing the composer draft", "path": "src/Codale.App/ViewModels/ChatViewModel.cs", "symbol": "CompactAsync" },
   { "query": "lend score to files linked to the leading results in the file graph", "path": "src/Codale.Search/Engine/ProjectSearchFusion.cs", "symbol": "FollowGraph" },
   { "query": "same branch check when HEAD moves between refreshes", "path": "src/Codale.Search/ProjectKnowledgeIndex.cs", "symbol": "SameBranch" },
   { "query": "which files are eligible for indexing", "path": "src/Codale.Search/ProjectKnowledgeIndex.cs", "symbol": "Eligible" },

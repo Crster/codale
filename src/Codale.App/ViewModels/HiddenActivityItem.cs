@@ -23,5 +23,9 @@ public sealed class HiddenActivityItem : ChatItem
     /// <summary>The finished turn summary, retained without its tool rows or outputs.</summary>
     public string Summary { get; init; } = "Worked";
 
+    public TurnOutcome Outcome { get; init; } = TurnOutcome.Completed;
+
+    public string StatusGlyph => TurnActivityItem.GetStatusGlyph(Outcome);
+
     public string Title => Calls == 1 ? "1 tool call" : $"{Calls} tool calls";
 }

@@ -150,12 +150,12 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
         "Uses the CLI's own browser");
 
     public string ComputerNote => Note(ComputerMode, ComputerAvailable,
-        "Codale's desktop control: mouse and keyboard",
-        "Uses the CLI's own computer use");
+        "On for agents",
+        "Uses the CLI's own tool");
 
     public string PhoneNote => Note(PhoneMode, PhoneAvailable,
-        "Codale's adb tools: an Android device or emulator",
-        "Neither CLI has phone tools of its own");
+        "On for agents",
+        "Not available natively");
 
     private static string Note(int mode, bool available, string allow, string cliDefault) => (AgentToolMode)mode switch
     {

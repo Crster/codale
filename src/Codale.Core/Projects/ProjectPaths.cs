@@ -82,6 +82,13 @@ public static class ProjectPaths
     /// <summary>The common git directory identifies a repository across linked worktrees.</summary>
     public static string RepositoryIdentity(string projectPath)
     {
+        if (GitDirectory(projectPath) is not { } git) return Normalize(projectPath);
+        var common = Path.Combine(git, "commondir");
+        return Normalize(File.Exists(common) ? Path.GetFullPath(File.ReadAllText(common).Trim(), git) : git);
+    }
+
+    public static string? GitDirectory(string projectPath)
+    {
         for (var dir = new DirectoryInfo(Normalize(projectPath)); dir is not null; dir = dir.Parent)
         {
             var git = Path.Combine(dir.FullName, ".git");
@@ -96,11 +103,10 @@ public static class ProjectPaths
             }
             if (Directory.Exists(git))
             {
-                var common = Path.Combine(git, "commondir");
-                return Normalize(File.Exists(common) ? Path.GetFullPath(File.ReadAllText(common).Trim(), git) : git);
+                return Normalize(git);
             }
         }
-        return Normalize(projectPath);
+        return null;
     }
 
     public static string WorkspaceName(string projectPath)

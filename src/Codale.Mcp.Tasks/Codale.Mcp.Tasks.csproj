@@ -5,6 +5,8 @@
     <ProjectReference Include="..\Codale.Core\Codale.Core.csproj" />
     <ProjectReference Include="..\Codale.Commands\Codale.Commands.csproj" />
     <ProjectReference Include="..\Codale.Workspace\Codale.Workspace.csproj" />
+    <ProjectReference Include="..\Codale.Search\Codale.Search.csproj" />
+    <ProjectReference Include="..\Codale.Agents\Codale.Agents.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

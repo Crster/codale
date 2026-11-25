@@ -109,7 +109,7 @@ public sealed partial class ChatViewModel
     }
 
     /// <summary>The activity block of one turn, built from what its history recorded: its steps, outputs, diffs and time.</summary>
-    private TurnActivityItem BuildActivity(IReadOnlyList<AgentEvent> turn)
+    private TurnActivityItem BuildActivity(IReadOnlyList<AgentEvent> turn, TurnOutcome outcome)
     {
         var lastTool = turn.ToList().FindLastIndex(e => e is ToolCallStarted t && !IsQuietCall(t.ToolName));
         var first = turn.Select(e => e.Timestamp).FirstOrDefault(t => t is not null);
@@ -172,7 +172,7 @@ public sealed partial class ChatViewModel
             unfinished.Status = ToolCallStatus.Failed;
         }
 
-        activity.Finish(TurnOutcome.Completed);
+        activity.Finish(outcome);
         return activity;
     }
 
@@ -191,6 +191,7 @@ public sealed partial class ChatViewModel
             FirstToolUseId = tools[0].ToolUseId,
             Calls = tools.Count,
             Summary = activity.HeaderText,
+            Outcome = activity.Outcome,
             Timestamp = activity.Timestamp,
         };
 
@@ -234,7 +235,7 @@ public sealed partial class ChatViewModel
             return;
         }
 
-        var activity = BuildActivity(turn);
+        var activity = BuildActivity(turn, placeholder.Outcome);
         activity.IsExpanded = false;
         Items[at] = activity;
         Reflow();

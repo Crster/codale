@@ -830,8 +830,7 @@
 
                     <!--  The result as a terminal page: monospaced, columns intact, scrollable.  -->
                     <Border
-                        x:Name="OutputBlock"
-                        x:Load="{x:Bind ShowOutputBody, Mode=OneWay}"
+                        Visibility="{x:Bind ShowOutputBody, Mode=OneWay}"
                         Background="{StaticResource CodeSurfaceBrush}"
                         BorderBrush="{StaticResource DetailStrokeBrush}"
                         BorderThickness="1"
@@ -877,8 +876,7 @@
                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                     IsTextSelectionEnabled="True"
                                     TextWrapping="Wrap"
-                                    views:CodeText.Code="{x:Bind Output, Mode=OneWay}"
-                                    views:CodeText.Syntax="text" />
+                                    Text="{x:Bind Output, Mode=OneWay}" />
                             </ScrollViewer>
                         </StackPanel>
                     </Border>
@@ -1305,8 +1303,7 @@
                             VerticalAlignment="Center"
                             FontSize="{x:Bind S11, Mode=OneWay}"
                             Foreground="{x:Bind Outcome, Mode=OneWay, Converter={StaticResource TurnOutcomeBrush}}"
-                            Glyph="{x:Bind StatusGlyph, Mode=OneWay}"
-                            Visibility="{x:Bind Loaded, Converter={StaticResource InverseBoolToVisibility}}" />
+                            Glyph="{x:Bind StatusGlyph, Mode=OneWay}" />
                         <TextBlock
                             VerticalAlignment="Center"
                             FontSize="{x:Bind S12, Mode=OneWay}"
@@ -1437,6 +1434,11 @@
                         Style="{StaticResource ToolToggle}" Tag="{x:Bind}"
                         ToolTipService.ToolTip="Show or hide the steps of this turn">
                     <StackPanel Orientation="Horizontal" Spacing="8" views:TextBaseline.IsAligned="True">
+                        <FontIcon
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind S11, Mode=OneWay}"
+                            Foreground="{x:Bind Outcome, Converter={StaticResource TurnOutcomeBrush}}"
+                            Glyph="{x:Bind StatusGlyph}" />
                         <TextBlock Text="{x:Bind Summary}" FontSize="{x:Bind S12, Mode=OneWay}" VerticalAlignment="Center"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <TextBlock VerticalAlignment="Center" FontSize="{x:Bind S11_5, Mode=OneWay}"
@@ -1664,10 +1666,10 @@
                     Orientation="Horizontal"
                     Spacing="4">
                     <HyperlinkButton
-                        Padding="6,2"
-                        VerticalAlignment="Center"
                         Click="OnComposerNoticeAction"
+                        Padding="6,2"
                         Content="{x:Bind ActionText}"
+                        VerticalAlignment="Center"
                         FontSize="{x:Bind S12, Mode=OneWay}"
                         Visibility="{x:Bind HasAction, Converter={StaticResource BoolToVisibility}}" />
                     <HyperlinkButton
@@ -2677,12 +2679,12 @@
                                 Click="OnComposerModelClick"
                                 IsEnabled="{x:Bind ViewModel.CanChangeMode, Mode=OneWay}"
                                 Style="{StaticResource ShellTextButton}"
-                                ToolTipService.ToolTip="Model">
+                                ToolTipService.ToolTip="{x:Bind ViewModel.ModelDisplay, Mode=OneWay}">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <FontIcon FontSize="11" Glyph="&#xE99A;" />
                                     <TextBlock
                                         MaxWidth="140"
-                                        Text="{x:Bind ViewModel.ModelDisplay, Mode=OneWay}"
+                                        Text="{x:Bind ViewModel.ModelTierDisplay, Mode=OneWay}"
                                         TextTrimming="CharacterEllipsis" />
                                     <FontIcon FontSize="8" Glyph="&#xE70D;" Opacity="0.7" />
                                 </StackPanel>
