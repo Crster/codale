@@ -19,6 +19,32 @@ public static partial class CliVersionCheck
         : NpmPackage(cli) is { } package ? $"npm i -g {package}@latest"
         : null;
 
+    /// <summary>
+    /// <see cref="UpdateCommand"/> preceded by stopping every running process of the CLI. Windows locks a running
+    /// executable, so an update fails to overwrite it while one is alive; the stop releases it and waits until the
+    /// processes are gone. Null when there is no update command.
+    /// </summary>
+    public static string? UpdateCommandStoppingSessions(CliDescriptor cli) =>
+        UpdateCommand(cli) is { } update ? StopThenUpdate(cli.Executable, update) : null;
+
+    internal static string StopThenUpdate(string executable, string update)
+    {
+        var name = executable.Replace("'", "''");
+        var script = string.Join("\n",
+            $"$name = '{name}'",
+            "$running = @(Get-Process -Name $name -ErrorAction SilentlyContinue)",
+            "if ($running.Count -gt 0) {",
+            "    Write-Host \"Stopping $($running.Count) running $name process(es) before the update.\"",
+            "    $running | Stop-Process -Force -ErrorAction SilentlyContinue",
+            "    $deadline = (Get-Date).AddSeconds(20)",
+            "    while (@(Get-Process -Name $name -ErrorAction SilentlyContinue).Count -gt 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 300 }",
+            "}",
+            update);
+
+        return "powershell.exe -NoProfile -NonInteractive -EncodedCommand " +
+               Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
+    }
+
     /// <summary>The npm package a CLI is published as; null when it is not an npm install.</summary>
     public static string? NpmPackage(CliDescriptor cli) =>
         cli.Id == "claude" ? "@anthropic-ai/claude-code"

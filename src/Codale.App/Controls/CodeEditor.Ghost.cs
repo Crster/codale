@@ -8,21 +8,21 @@ namespace Codale.App.Controls;
 
 /// <summary>
 /// Ghost text: the local Smart model proposes the rest of the line by fill-in-the-middle, drawn dimmed after the caret.
-/// It is asked after a short pause in typing when the caret ends its line's code, or on demand with Ctrl+Space (again
-/// for a different proposal). Tab accepts it as one undo step; Escape, any other key, a click or a caret move drops it.
+/// It is asked on demand only, with Ctrl+Space (again for a different proposal); nothing is requested while typing.
+/// Tab accepts it as one undo step; Escape, any other key, a click or a caret move drops it.
 /// </summary>
 public sealed partial class CodeEditor
 {
     private const int GhostPrefixChars = 3000;
     private const int GhostSuffixChars = 1500;
-    private static readonly TimeSpan GhostDelay = TimeSpan.FromMilliseconds(300);
 
     private string _ghostText = "";
     private DocumentPosition _ghostAt;
     private CancellationTokenSource? _ghostCts;
     private readonly List<string> _ghostSeen = [];
     private DocumentPosition _ghostSeenAt;
-    private DispatcherTimer? _ghostTimer;
+    private bool _ghostPending;
+    private DocumentPosition _ghostPendingAt;
 
     /// <summary>
     /// The one line to insert at the caret, from the code before and after it and the proposals already passed over
@@ -30,17 +30,30 @@ public sealed partial class CodeEditor
     /// </summary>
     public Func<string, string, IReadOnlyList<string>, CancellationToken, Task<string?>>? InlineCompleter { get; set; }
 
-    /// <summary>Whether ghost text is asked for after a pause in typing (Ctrl+Space always asks).</summary>
-    public bool AutomaticInlineCompletions { get; set; } = true;
+    /// <summary>Whether the editor hints at Ctrl+Space after the code at the end of the caret's line. Set by the owner from the settings.</summary>
+    public bool ShowInlineHint { get; set; }
 
     private bool GhostVisible => _ghostText.Length > 0 && !_model.HasMultipleSelections && _ghostAt == caret && _model.Primary.IsEmpty;
 
+    /// <summary>The hint shows only where Ctrl+Space would act: focused, caret after code at the end of its line, nothing else shown.</summary>
+    private bool GhostHintVisible => ShowInlineHint && InlineCompleter is not null && _ghostText.Length == 0 && !CompletionOpen
+        && FocusState != FocusState.Unfocused && !HasSelection && !_model.HasMultipleSelections && _model.Primary.IsEmpty
+        && AtEndOfCodeLine();
+
+    /// <summary>True when code precedes the caret on its line and only whitespace follows it.</summary>
+    private bool AtEndOfCodeLine()
+    {
+        var line = doc.GetLine(caret.Line);
+        return line[..caret.Col].Trim().Length > 0 && line[caret.Col..].Trim().Length == 0;
+    }
+
     private void ClearGhost()
     {
-        _ghostTimer?.Stop();
         _ghostCts?.Cancel();
         _ghostSeen.Clear();
-        if (_ghostText.Length > 0)
+        var wasPending = _ghostPending;
+        _ghostPending = false;
+        if (_ghostText.Length > 0 || wasPending)
         {
             _ghostText = "";
             Invalidate();
@@ -61,42 +74,9 @@ public sealed partial class CodeEditor
         return true;
     }
 
-    /// <summary>After a typed character: ask once typing pauses, when the caret ends the code on its line.</summary>
-    private void ScheduleGhost()
-    {
-        if (InlineCompleter is null || !AutomaticInlineCompletions || HasSelection || _model.HasMultipleSelections)
-        {
-            return;
-        }
-
-        if (_ghostTimer is null)
-        {
-            _ghostTimer = new DispatcherTimer { Interval = GhostDelay };
-            _ghostTimer.Tick += (_, _) =>
-            {
-                _ghostTimer.Stop();
-                if (!CompletionOpen && FocusState != FocusState.Unfocused && AtLineEndOfCode())
-                {
-                    RequestGhost();
-                }
-            };
-        }
-
-        _ghostTimer.Stop();
-        _ghostTimer.Start();
-    }
-
-    /// <summary>True when only whitespace or closing punctuation follows the caret on its line.</summary>
-    private bool AtLineEndOfCode()
-    {
-        var rest = doc.GetLine(caret.Line)[caret.Col..];
-        return rest.All(c => char.IsWhiteSpace(c) || c is ')' or ']' or '}' or ';' or ',' or '"' or '\'' or '>');
-    }
-
-    /// <summary>Asks for a one-line proposal at the caret; asking again at the same spot asks for a different one.</summary>
+    /// <summary>Asks for a one-line proposal at the caret (Ctrl+Space); asking again at the same spot asks for a different one.</summary>
     private void RequestGhost()
     {
-        _ghostTimer?.Stop();
         _ghostCts?.Cancel();
         if (InlineCompleter is not { } complete || !_model.Primary.IsEmpty || _model.HasMultipleSelections)
         {
@@ -123,6 +103,9 @@ public sealed partial class CodeEditor
 
         var suffix = SuffixAfter(at);
         var cts = _ghostCts = new CancellationTokenSource();
+        _ghostPending = true;
+        _ghostPendingAt = at;
+        Invalidate();
         _ = RunGhostAsync(complete, prefix, suffix, at, cts);
     }
 
@@ -148,7 +131,19 @@ public sealed partial class CodeEditor
         {
             // A completion is optional: a failure shows nothing.
         }
+        finally
+        {
+            // A superseded request must not clear the status of the one that replaced it.
+            if (ReferenceEquals(_ghostCts, cts))
+            {
+                _ghostPending = false;
+                Invalidate();
+            }
+        }
     }
+
+    /// <summary>True while a proposal is being asked for at the caret.</summary>
+    private bool GhostPendingVisible => _ghostPending && _ghostPendingAt == caret && _model.Primary.IsEmpty;
 
     /// <summary>The buffer's text before <paramref name="at"/>, at most <see cref="GhostPrefixChars"/> characters, whole lines where it can.</summary>
     private string PrefixBefore(DocumentPosition at)
@@ -176,6 +171,41 @@ public sealed partial class CodeEditor
         }
 
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// Draws, after the caret's line end, either the "Completing…" status while a proposal is being asked for or the
+    /// Ctrl+Space hint otherwise. Both are dimmer than a proposal and never accepted by Tab.
+    /// </summary>
+    private void DrawGhostHint(Microsoft.Graphics.Canvas.CanvasDrawingSession session)
+    {
+        if (_textFormat is null)
+        {
+            return;
+        }
+
+        string text;
+        double alpha;
+        if (GhostPendingVisible)
+        {
+            text = "Completing…";
+            alpha = 0.5;
+        }
+        else if (GhostHintVisible)
+        {
+            text = "Ctrl+Space for a suggestion";
+            alpha = 0.3;
+        }
+        else
+        {
+            return;
+        }
+
+        var (row, x) = Locate(caret);
+        var color = _baseText;
+        color.A = (byte)(color.A * alpha);
+        using var layout = new Microsoft.Graphics.Canvas.Text.CanvasTextLayout(Device, text, _textFormat, 0f, (float)_lineHeight);
+        session.DrawTextLayout(layout, (float)(TextLeft + x - _scrollX + 16), RowY(row), color);
     }
 
     /// <summary>Draws the proposal after the caret, in the base text colour at low opacity.</summary>

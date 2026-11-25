@@ -231,7 +231,6 @@ public sealed partial class CodeEditor
         _pendingHighSurrogate = null;
         _model.Type(text);
         OnCharacterTyped(ch);
-        ScheduleGhost();
     }
 
     private char? _pendingHighSurrogate;

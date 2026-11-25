@@ -105,7 +105,6 @@ public sealed partial class CodeEditor : UserControl
             _caretTimer.Stop();
             _autoScrollTimer?.Stop();
             _occurrenceTimer?.Stop();
-            _ghostTimer?.Stop();
             StopRenderLoop();
         };
 
@@ -139,7 +138,6 @@ public sealed partial class CodeEditor : UserControl
         _caretTimer.Stop();
         _autoScrollTimer?.Stop();
         _occurrenceTimer?.Stop();
-        _ghostTimer?.Stop();
         _ghostCts?.Cancel();
         CloseCompletion();
         StopRenderLoop();
