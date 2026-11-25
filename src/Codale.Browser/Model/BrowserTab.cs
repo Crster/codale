@@ -58,6 +58,9 @@ public sealed class BrowserTab
     /// <summary>The device size the page is previewed at, or null for the window's own size.</summary>
     public Breakpoint? Breakpoint { get; set; }
 
+    /// <summary>The scale the breakpoint was last drawn at in the page (1 = actual size); 0 when it has not been sent yet.</summary>
+    public double BreakpointScale { get; set; }
+
     /// <summary>The network requests and console output the page has produced.</summary>
     public DevToolsLog Log { get; } = new();
 

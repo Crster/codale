@@ -180,6 +180,9 @@ public sealed partial class MainWindow : Window
 
     private void WireCore(BrowserTab tab, CoreWebView2 core)
     {
+        // Pages stay at 100%: no Ctrl+wheel, Ctrl+plus/minus or pinch zoom (it would also skew breakpoint previews).
+        core.Settings.IsZoomControlEnabled = false;
+        core.Settings.IsPinchZoomEnabled = false;
         core.ProcessFailed += (_, e) => OnProcessFailed(tab, e);
         core.SourceChanged += (_, _) =>
         {
@@ -433,17 +436,26 @@ public sealed partial class MainWindow : Window
         var top = 0.0;
         if (tab.Breakpoint is { } size)
         {
-            // A breakpoint shows the page at its device size, centred; a window smaller than the device shows its top-left part.
-            var w = Math.Min(size.Width, width);
-            var h = Math.Min(size.Height, height);
+            // A breakpoint shows the whole device, centred: at its actual size when it fits, scaled down to fit when it doesn't.
+            const double gutter = 16;
+            var scale = Math.Min(1, Math.Min((width - 2 * gutter) / size.Width, (height - 2 * gutter) / size.Height));
+            scale = Math.Max(0.05, Math.Round(scale, 3));
+            var w = Math.Max(1, Math.Floor(size.Width * scale));
+            var h = Math.Max(1, Math.Floor(size.Height * scale));
             if (active)
             {
-                left = (width - w) / 2;
-                top = (height - h) / 2;
+                left = Math.Floor((width - w) / 2);
+                top = Math.Floor((height - h) / 2);
             }
 
             width = w;
             height = h;
+            if (tab.BreakpointScale != scale)
+            {
+                tab.BreakpointScale = scale;
+                RunSafe(() => EmulateBreakpointAsync(tab, size, scale));
+                if (active) UpdateBreakpointLabel();
+            }
         }
 
         Canvas.SetLeft(tab.View, left);

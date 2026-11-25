@@ -125,7 +125,8 @@ public sealed partial class MainWindow
             item.Click += (_, _) => RunSafe(() => ApplyBreakpointAsync(_active, chosen));
             sizes.Add((item, size));
             flyout.Items.Add(item);
-            if (size is null) flyout.Items.Add(new MenuFlyoutSeparator());
+            // Separators set off "Fill window" and the touch devices from the desktop screens.
+            if (size is null || size == Breakpoint.TabletLandscape) flyout.Items.Add(new MenuFlyoutSeparator());
         }
 
         flyout.Opening += (_, _) =>
@@ -140,6 +141,8 @@ public sealed partial class MainWindow
     {
         if (tab is not { IsClosed: false } || tab.View.CoreWebView2 is not { } core) return;
 
+        tab.Breakpoint = size;
+        tab.BreakpointScale = 0;
         if (size is null)
         {
             await core.CallDevToolsProtocolMethodAsync("Emulation.clearDeviceMetricsOverride", "{}");
@@ -148,29 +151,52 @@ public sealed partial class MainWindow
         }
         else
         {
-            await core.CallDevToolsProtocolMethodAsync("Emulation.setDeviceMetricsOverride", JsonSerializer.Serialize(new
-            {
-                width = size.Width,
-                height = size.Height,
-                deviceScaleFactor = 1,
-                mobile = size.Mobile,
-            }));
             await core.CallDevToolsProtocolMethodAsync("Emulation.setUserAgentOverride",
                 JsonSerializer.Serialize(new { userAgent = size.UserAgent ?? core.Settings.UserAgent }));
         }
 
-        tab.Breakpoint = size;
-        UpdateBreakpointLabel();
+        // Laying the tab out sends the device metrics at the scale that fits the stage.
         RelayoutAll();
+        UpdateBreakpointLabel();
+    }
+
+    /// <summary>
+    /// Lays the page out at the device's full size and draws it at <paramref name="scale"/>, so a device larger than the
+    /// window is shown whole (as in DevTools' device mode) instead of spilling out of the stage.
+    /// </summary>
+    private async Task EmulateBreakpointAsync(BrowserTab tab, Breakpoint size, double scale)
+    {
+        if (tab.IsClosed || tab.View.CoreWebView2 is not { } core) return;
+        await core.CallDevToolsProtocolMethodAsync("Emulation.setDeviceMetricsOverride", JsonSerializer.Serialize(new
+        {
+            width = size.Width,
+            height = size.Height,
+            // 0 keeps the screen's own pixel density, so a scaled-down page stays sharp.
+            deviceScaleFactor = 0,
+            mobile = size.Mobile,
+            scale,
+            screenWidth = size.Width,
+            screenHeight = size.Height,
+            // screen.orientation and orientationchange match the device: a turned phone or tablet reports 90°.
+            screenOrientation = new
+            {
+                type = size.Landscape ? "landscapePrimary" : "portraitPrimary",
+                angle = size.Mobile && size.Landscape ? 90 : 0,
+            },
+            // The view keeps the size the stage gives it; without this the page's view is resized to the device and overflows.
+            dontSetVisibleSize = true,
+        }));
     }
 
     /// <summary>Names the emulated device beside the breakpoint icon, so it is clear the page is not at the window's size.</summary>
     private void UpdateBreakpointLabel()
     {
         var size = _active?.Breakpoint;
-        BreakpointLabel.Text = size?.Name ?? "";
+        var scale = _active?.BreakpointScale ?? 1;
+        var zoom = scale is > 0 and < 0.995 ? $" · {Math.Round(scale * 100)}%" : "";
+        BreakpointLabel.Text = size is null ? "" : size.Name + zoom;
         BreakpointLabel.Visibility = size is null ? Visibility.Collapsed : Visibility.Visible;
-        ToolTipService.SetToolTip(BreakpointButton, size is null ? "View breakpoint" : $"View breakpoint: {size.Label}");
+        ToolTipService.SetToolTip(BreakpointButton, size is null ? "View breakpoint" : $"View breakpoint: {size.Label}{zoom}");
     }
 
     // ---- DevTools protocol ----------------------------------------------------------
