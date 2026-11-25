@@ -319,19 +319,18 @@ public static class TaskTools
 
             new McpTool(
                 "memory_search",
-                "Look up saved memories in this workspace. If none match, search indexed chat turns for historical context. Pass a few specific keywords (a topic, a command, a tool name), " +
+                "Look up saved memories in this workspace. Returns the three best matches; if no saved memory matches, returns the three best indexed chat turns instead. Pass a few specific keywords (a topic, a command, a tool name), " +
                 "not a whole sentence of the task. Check it at the start of a task that depends on project conventions, and before asking the user " +
                 "something they may already have told you. If nothing comes back, try one different keyword before concluding nothing is known.",
                 McpTool.Schema(
                     [
                         ("query", "string", "What you want to recall."),
-                        ("limit", "integer", "Maximum matches to return (default 5)."),
                     ],
                     "query"),
                 (a, _) => Guarded(() =>
                 {
                     var query = a.RequiredString("query");
-                    var limit = Math.Clamp(a.Int("limit") ?? 5, 1, 20);
+                    const int limit = 3;
                     var found = memory.Search(query, limit);
                     if (found.Count > 0) return "Saved memories\n" + string.Join("\n\n", found.Select(Show));
 

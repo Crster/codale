@@ -116,12 +116,11 @@ public sealed partial class TabStateToBrushConverter : IValueConverter
         throw new NotSupportedException();
 }
 
-/// <summary>Terminal tab glyph by activity: spinner while busy, cross when failed, check once exited; otherwise the parameter glyph.</summary>
+/// <summary>Terminal tab glyph by activity: cross when failed, check once exited; otherwise the parameter glyph (busy pulses instead).</summary>
 public sealed partial class TerminalActivityGlyphConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, string language) => value switch
     {
-        TerminalActivity.Busy => "\uE895",
         TerminalActivity.Error => "\uEA39",
         TerminalActivity.Terminated => "\uE73E",
         _ => parameter as string ?? "\uE756",
@@ -665,26 +664,6 @@ public sealed partial class CurrentToFontWeightConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, string language) =>
         value is true ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
-
-    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
-        throw new NotSupportedException();
-}
-
-/// <summary>Tints the terminal tab's icon by state: working blue, idle grey, done green, failed red.</summary>
-public sealed partial class TerminalActivityBrushConverter : IValueConverter
-{
-    private static readonly Dictionary<TerminalActivity, SolidColorBrush> BrushesByActivity = new()
-    {
-        [TerminalActivity.Busy] = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 86, 156, 214)),
-        [TerminalActivity.Terminated] = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 115, 201, 145)),
-        [TerminalActivity.Error] = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 241, 76, 76)),
-        [TerminalActivity.Idle] = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 154, 162)),
-    };
-
-    public object Convert(object value, Type targetType, object parameter, string language) =>
-        value is TerminalActivity activity && BrushesByActivity.TryGetValue(activity, out var brush)
-            ? brush
-            : BrushesByActivity[TerminalActivity.Idle];
 
     public object ConvertBack(object value, Type targetType, object parameter, string language) =>
         throw new NotSupportedException();

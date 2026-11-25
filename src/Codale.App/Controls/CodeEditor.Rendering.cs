@@ -416,6 +416,7 @@ public sealed partial class CodeEditor
         }
 
         DrawGhost(ds);
+        DrawGhostHint(ds);
     }
 
     private void DrawCarets(CanvasDrawingSession ds, int firstLine, int lastLine)

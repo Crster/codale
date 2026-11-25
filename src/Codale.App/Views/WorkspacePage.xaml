@@ -36,7 +36,6 @@
         <views:TabStateToFontFamilyConverter x:Key="TabStateToFontFamily" />
         <views:TerminalActivityGlyphConverter x:Key="TerminalActivityGlyph" />
         <views:PreviewToFontStyleConverter x:Key="PreviewToItalic" />
-        <views:TerminalActivityBrushConverter x:Key="TerminalActivityBrush" />
         <views:TerminalExitSuffixConverter x:Key="TerminalExitSuffix" />
         <views:RelativeTimeConverter x:Key="RelativeTime" />
         <views:NullableBoolToVisibilityConverter x:Key="NullableBoolToVisibility" />

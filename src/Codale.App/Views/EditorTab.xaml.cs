@@ -152,7 +152,7 @@ public sealed partial class EditorTab : UserControl
     public void ApplyAppSettings()
     {
         FileEditor.ApplyAppSettings(_smart.Settings);
-        FileEditor.AutomaticInlineCompletions = _smart.Settings.SmartCompletions;
+        FileEditor.ShowInlineHint = _smart.Settings.SmartExperience && _smart.Settings.SmartCompletions;
         RenderHighlights();
     }
 
@@ -373,6 +373,7 @@ public sealed partial class EditorTab : UserControl
         ViewModel.Saved += (_, _) => _ = RefreshDiffMarkersAsync(refetchHead: true);
         FileEditor.WorkspaceSuggest = ProjectSuggestions;
         FileEditor.InlineCompleter = CompleteInlineAsync;
+        FileEditor.ShowInlineHint = _smart.Settings.SmartExperience && _smart.Settings.SmartCompletions;
         return this;
     }
 

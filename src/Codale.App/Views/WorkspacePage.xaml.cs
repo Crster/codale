@@ -466,7 +466,81 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
-    private Task UpdateCliAsync(string command) => RunInNewTerminalAsync(command);
+    /// <summary>
+    /// Updates a CLI. Its chats and terminal sessions close first, and any process still running is stopped, since
+    /// Windows will not overwrite a running executable. A busy session asks first; idle ones close without asking.
+    /// </summary>
+    private async Task UpdateCliAsync(string command)
+    {
+        if (CliLocator.KnownClis.FirstOrDefault(known => CliVersionCheck.UpdateCommand(known) == command) is not { } cli)
+        {
+            AddTerminalTab(ViewModel.CreateTerminal(command, "Update CLI"));
+            return;
+        }
+
+        var chats = ViewModel.Chats.Where(chat => chat.CliId == cli.Id).ToList();
+        var sessions = ViewModel.TerminalSessions.Where(session => session.CliId == cli.Id).ToList();
+        var terminals = _terminalTabs.Where(entry => entry.Terminal.CliId == cli.Id).ToList();
+
+        var busy = chats.Where(chat => chat.IsBusyWorking).Select(chat => $"Chat: {chat.TabTitle}")
+            .Concat(sessions.Where(session => session.IsBusyWorking).Select(session => $"Chat: {session.TabTitle}"))
+            .Concat(terminals.Where(entry => entry.Terminal.Activity == TerminalActivity.Busy)
+                .Select(entry => $"Terminal: {entry.Terminal.CommandName ?? cli.DisplayName}"))
+            .ToList();
+        if (busy.Count > 0 && !await Codale.App.Controls.RunningWorkPrompt.ConfirmAsync(XamlRoot, busy, $"Updating {cli.DisplayName}"))
+        {
+            return;
+        }
+
+        foreach (var entry in terminals)
+        {
+            CloseTerminalTab(entry);
+        }
+
+        foreach (var session in sessions)
+        {
+            _ = RemoveCliSessionAsync(session);
+        }
+
+        foreach (var chat in chats)
+        {
+            if (_chatTabs.FirstOrDefault(t => ReferenceEquals(t.Chat, chat)) is { } tab)
+            {
+                RemoveTab(tab.Item);
+                DetachChatTab(tab);
+            }
+            else
+            {
+                _ = ViewModel.CloseChatAsync(chat);
+            }
+        }
+
+        UpdateEmptyState();
+        UpdateSessionPanelForActiveTab();
+
+        // The command is an encoded wrapper, so the tab is named rather than titled with it.
+        AddTerminalTab(ViewModel.CreateTerminal(CliVersionCheck.UpdateCommandStoppingSessions(cli), "Update CLI"));
+    }
+
+    /// <summary>Ends one chat's tab bookkeeping and closes its conversation. The caller removes the tab item.</summary>
+    private void DetachChatTab(ChatTabEntry chatEntry)
+    {
+        // Closing a chat ends that conversation only - the others keep running -
+        // and it stays reachable through the session list. Fire and forget: a tab
+        // close cannot await.
+        _chatTabs.Remove(chatEntry);
+        chatEntry.Chat.LoginRequired -= OnChatLoginRequired;
+        chatEntry.Chat.AttentionNeeded -= OnChatAttentionNeeded;
+        chatEntry.Chat.PlanProposed -= OnChatPlanProposed;
+        chatEntry.Chat.SpecialistDetailsRequested -= OnChatSpecialistOpenRequested;
+        chatEntry.Chat.PropertyChanged -= OnChatPropertyChanged;
+
+        if (ReferenceEquals(_attentionChat, chatEntry.Chat))
+        {
+            _attentionChat = null;
+        }
+        _ = ViewModel.CloseChatAsync(chatEntry.Chat);
+    }
 
     /// <summary>MCP commands run hidden and appear in their chat's background task tray.</summary>
     private void OnAgentTerminalOpened(object? sender, TerminalViewModel terminal) =>
@@ -658,17 +732,21 @@ public sealed partial class WorkspacePage : Page
             chat.SpecialistDetailsRequested += OnChatSpecialistOpenRequested;
             chat.PropertyChanged += OnChatPropertyChanged;
 
-            var title = ChatTabHeader(chat);
+            // A composed header rather than IconSource: the icon has to be a live element to pulse.
+            var icon = new FontIcon { FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
             var item = new TabViewItem
             {
                 IsClosable = true,
-                IconSource = new FontIconSource { Glyph = "\uE8BD" },
-                Header = title,
+                Header = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 6,
+                    Children = { icon, ChatTabHeader(chat) },
+                },
                 Content = tab,
             };
-            entry = new ChatTabEntry(item, tab, chat, title);
+            entry = new ChatTabEntry(item, tab, chat, icon);
             RefreshChatTabIcon(entry);
-            RefreshChatTabTitle(entry);
             _chatTabs.Add(entry);
             AddTab(item);
             UpdateEmptyState();
@@ -694,63 +772,40 @@ public sealed partial class WorkspacePage : Page
             case nameof(ChatViewModel.ComposerNotice):
                 if (_chatTabs.FirstOrDefault(t => ReferenceEquals(t.Chat, sender)) is { } statusTab)
                 {
-                    RefreshChatTabTitle(statusTab);
                     RefreshChatTabIcon(statusTab);
                 }
                 break;
         }
     }
 
-    private void RefreshChatTabIcon(ChatTabEntry entry)
+    /// <summary>
+    /// The chat tab's icon is the provider glyph in the provider's colour. Needs-you and
+    /// failed swap in a status glyph; working keeps the provider glyph and pulses it. The
+    /// tab's text is never recoloured.
+    /// </summary>
+    private static void RefreshChatTabIcon(ChatTabEntry entry)
     {
         var chat = entry.Chat;
-        var provider = CliEndpointViewModel.ProfileBrush(chat.CliId, false);
-        static FontIconSource Swapped(string glyph, Brush brush) => new() { Glyph = glyph, Foreground = brush };
+        var icon = entry.Icon;
+        var failed = chat.ComposerNotice is { Severity: NoticeSeverity.Error or NoticeSeverity.Warning };
 
-        // Needs-you / failed / working swap the provider glyph, as a VS Code tab swaps its icon for state.
-        // Replace the source: mutating Foreground on the live one doesn't re-render the tab icon.
         if (chat.IsWaitingForYou)
         {
-            entry.Item.IconSource = Swapped("", ChatPaletteTheme.Brush("StatusWarnBrush"));
-            return;
+            icon.Glyph = "\uE7BA";
+            icon.Foreground = ChatPaletteTheme.Brush("StatusWarnBrush");
+        }
+        else if (failed)
+        {
+            icon.Glyph = "\uEA39";
+            icon.Foreground = ChatPaletteTheme.Brush("StatusFailedBrush");
+        }
+        else
+        {
+            icon.Glyph = "\uE8BD";
+            icon.Foreground = CliEndpointViewModel.ProfileBrush(chat.CliId, false);
         }
 
-        if (chat.ComposerNotice is { Severity: NoticeSeverity.Error or NoticeSeverity.Warning })
-        {
-            entry.Item.IconSource = Swapped("", ChatPaletteTheme.Brush("StatusFailedBrush"));
-            return;
-        }
-
-        if (chat.IsBusyWorking)
-        {
-            entry.Item.IconSource = Swapped("", ChatPaletteTheme.Brush("StatusRunningBrush"));
-            return;
-        }
-
-        entry.Item.IconSource = new FontIconSource
-        {
-            Glyph = "",
-            Foreground = provider,
-        };
-    }
-
-    private static void RefreshChatTabTitle(ChatTabEntry entry)
-    {
-        switch (entry.Chat)
-        {
-            case { IsWaitingForYou: true }:
-                entry.Title.Foreground = ChatPaletteTheme.Brush("StatusWarnBrush");
-                break;
-            case { ComposerNotice.Severity: NoticeSeverity.Error or NoticeSeverity.Warning }:
-                entry.Title.Foreground = ChatPaletteTheme.Brush("StatusFailedBrush");
-                break;
-            case { IsBusyWorking: true }:
-                entry.Title.Foreground = ChatPaletteTheme.Brush("StatusRunningBrush");
-                break;
-            default:
-                entry.Title.ClearValue(TextBlock.ForegroundProperty);
-                break;
-        }
+        Pulse.SetIsActive(icon, chat.IsBusyWorking && !chat.IsWaitingForYou && !failed);
     }
 
     private static TextBlock ChatTabHeader(ChatViewModel chat)
@@ -1088,10 +1143,9 @@ public sealed partial class WorkspacePage : Page
     /// <summary>
 
     /// <summary>
-    /// Tab chrome for a terminal: the terminal glyph, tinted by state (working, idle,
-    /// exited, failed) so it still reads as a terminal tab, plus a "Terminal" title. The
-    /// tint binds to the terminal's own view model. A command tab titles itself with the
-    /// command's name and wears the play glyph instead.
+    /// Tab chrome for a terminal: the terminal glyph, plus a "Terminal" title. While busy the
+    /// glyph pulses; it turns red only when the shell failed. A command tab titles itself with
+    /// the command's name and wears the play glyph instead.
     /// </summary>
     private object BuildTerminalHeader(TerminalViewModel terminal)
     {
@@ -1099,8 +1153,6 @@ public sealed partial class WorkspacePage : Page
         {
             FontSize = 12,
             VerticalAlignment = VerticalAlignment.Center,
-            RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
-            RenderTransform = new RotateTransform(),
         };
         icon.SetBinding(FontIcon.GlyphProperty, new Binding
         {
@@ -1110,44 +1162,29 @@ public sealed partial class WorkspacePage : Page
             ConverterParameter = terminal.IsCommandTerminal ? "\uE768" : "\uE756",
         });
 
-        // Busy = the glyph spins, like VS Code's task spinner.
-        var spin = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
-        var turn = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
+        // Set in code rather than bound: a bound converter cannot hand the colour back once
+        // a failed shell is replaced, and the pulse is driven the same way.
+        void SyncActivity()
         {
-            From = 0,
-            To = 360,
-            Duration = TimeSpan.FromSeconds(1.1),
-            RepeatBehavior = Microsoft.UI.Xaml.Media.Animation.RepeatBehavior.Forever,
-        };
-        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(turn, icon.RenderTransform);
-        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(turn, "Angle");
-        spin.Children.Add(turn);
-        void SyncSpin()
-        {
-            if (terminal.Activity == TerminalActivity.Busy)
+            Pulse.SetIsActive(icon, terminal.Activity == TerminalActivity.Busy);
+            if (terminal.Activity == TerminalActivity.Error)
             {
-                spin.Begin();
+                icon.Foreground = ChatPaletteTheme.Brush("StatusFailedBrush");
             }
             else
             {
-                spin.Stop();
+                icon.ClearValue(FontIcon.ForegroundProperty);
             }
         }
 
-        SyncSpin();
+        SyncActivity();
         terminal.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(TerminalViewModel.Activity))
             {
-                SyncSpin();
+                SyncActivity();
             }
         };
-        icon.SetBinding(FontIcon.ForegroundProperty, new Binding
-        {
-            Path = new PropertyPath("Activity"),
-            Source = terminal,
-            Converter = (IValueConverter)Resources["TerminalActivityBrush"],
-        });
 
         var name = new TextBlock
         {
@@ -2145,21 +2182,7 @@ public sealed partial class WorkspacePage : Page
 
         if (_chatTabs.FirstOrDefault(t => ReferenceEquals(t.Item, args.Item)) is { } chatEntry)
         {
-            // Closing a chat ends that conversation only - the others keep running -
-            // and it stays reachable through the session list. Fire and forget: a tab
-            // close cannot await.
-            _chatTabs.Remove(chatEntry);
-            chatEntry.Chat.LoginRequired -= OnChatLoginRequired;
-            chatEntry.Chat.AttentionNeeded -= OnChatAttentionNeeded;
-            chatEntry.Chat.PlanProposed -= OnChatPlanProposed;
-            chatEntry.Chat.SpecialistDetailsRequested -= OnChatSpecialistOpenRequested;
-            chatEntry.Chat.PropertyChanged -= OnChatPropertyChanged;
-
-            if (ReferenceEquals(_attentionChat, chatEntry.Chat))
-            {
-                _attentionChat = null;
-            }
-            _ = ViewModel.CloseChatAsync(chatEntry.Chat);
+            DetachChatTab(chatEntry);
         }
         else if (ReferenceEquals(args.Item, _diffTabItem))
         {
@@ -4019,7 +4042,7 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>One open chat tab: its <see cref="TabViewItem"/>, its transcript view and its conversation.</summary>
-    private sealed class ChatTabEntry(TabViewItem item, ChatTab tab, ChatViewModel chat, TextBlock title)
+    private sealed class ChatTabEntry(TabViewItem item, ChatTab tab, ChatViewModel chat, FontIcon icon)
     {
         public TabViewItem Item { get; } = item;
 
@@ -4027,7 +4050,8 @@ public sealed partial class WorkspacePage : Page
 
         public ChatViewModel Chat { get; } = chat;
 
-        public TextBlock Title { get; } = title;
+        /// <summary>The state icon in the tab header; pulses while the chat is working.</summary>
+        public FontIcon Icon { get; } = icon;
     }
 
     /// <summary>
