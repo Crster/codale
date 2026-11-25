@@ -132,6 +132,16 @@ public sealed partial class ChatTab : UserControl
     private bool _showLatestTranscript = true;
     private bool _showLatestQueued;
 
+    /// <summary>The reader is at the end of the transcript, so growth (streaming text, tool output)
+    /// keeps the view on the end. Anchoring alone preserves whatever gap the reader left, so a
+    /// reader a few pixels short of the end could never catch a stream that is still growing.</summary>
+    private bool _followTail = true;
+    private bool _followQueued;
+    private double _lastScrollOffset;
+
+    /// <summary>How close to the end counts as "at the end"; a little more than the end spacer.</summary>
+    private const double FollowThreshold = 40;
+
     /// <summary>Question cards whose visibility is already watched; a card can load more than once.</summary>
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, object> _hookedCards = [];
 
@@ -177,6 +187,14 @@ public sealed partial class ChatTab : UserControl
 
         Transcript.ItemsSource = _transcriptHistory;
         TranscriptEnd.Loaded += (_, _) => QueueInitialTranscriptPosition();
+
+        // Rows grow without adding items, so follow by size rather than by collection changes.
+        TranscriptContent.SizeChanged += (_, _) => FollowTail();
+        ChatScroller.ViewChanged += OnChatScrollerViewChanged;
+        // A wheel notch up must win over a stream update that lands mid-animation.
+        ChatScroller.AddHandler(PointerWheelChangedEvent, new PointerEventHandler(OnChatScrollerWheel), handledEventsToo: true);
+        // Runs before the scroller's own wheel handling (the event bubbles from the content up).
+        TranscriptContent.PointerWheelChanged += OnTranscriptWheel;
 
         // Only Esc presses nothing else claimed (a popup, a question card) reach this.
         KeyDown += OnChatKeyDown;
@@ -280,12 +298,69 @@ public sealed partial class ChatTab : UserControl
             if (!TranscriptEnd.IsLoaded || _viewModel is not { Items.Count: > 0 }) return;
 
             _showLatestTranscript = false;
+            _followTail = true;
             TranscriptEnd.UpdateLayout();
             TranscriptEnd.StartBringIntoView(new BringIntoViewOptions
             {
                 AnimationDesired = false,
                 VerticalAlignmentRatio = 1,
             });
+        });
+    }
+
+    private void OnChatScrollerViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
+    {
+        var offset = ChatScroller.VerticalOffset;
+        if (ChatScroller.ScrollableHeight - offset <= FollowThreshold)
+        {
+            // Reaching the end (by wheel, drag or keyboard) re-engages following.
+            _followTail = true;
+        }
+        else if (offset < _lastScrollOffset - 0.5)
+        {
+            // Only moving up leaves the end. Growth below the view never lowers the offset.
+            _followTail = false;
+        }
+
+        _lastScrollOffset = offset;
+    }
+
+    private void OnChatScrollerWheel(object sender, PointerRoutedEventArgs e)
+    {
+        if (e.GetCurrentPoint(ChatScroller).Properties.MouseWheelDelta > 0)
+        {
+            _followTail = false;
+        }
+    }
+
+    private void OnTranscriptWheel(object sender, PointerRoutedEventArgs e)
+    {
+        var props = e.GetCurrentPoint(ChatScroller).Properties;
+        if (props.IsHorizontalMouseWheel || props.MouseWheelDelta >= 0) return;
+
+        // A wheel notch animates toward an offset fixed when it starts. While the reply
+        // grows, that target falls behind the new end and the animation drags the view
+        // back up. Near the end there is nothing to animate through: land on it and follow.
+        var remaining = ChatScroller.ScrollableHeight - ChatScroller.VerticalOffset;
+        if (_followTail || remaining <= FollowThreshold + Math.Abs(props.MouseWheelDelta))
+        {
+            e.Handled = true;
+            _followTail = true;
+            ChatScroller.ChangeView(null, ChatScroller.ScrollableHeight, null, disableAnimation: true);
+        }
+    }
+
+    private void FollowTail()
+    {
+        if (!_followTail || _followQueued || _showLatestTranscript) return;
+
+        // Low priority so the grown row is measured first; one snap per burst of deltas.
+        _followQueued = DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            _followQueued = false;
+            if (!_followTail || !ChatScroller.IsLoaded) return;
+            if (ChatScroller.ScrollableHeight - ChatScroller.VerticalOffset < 0.5) return;
+            ChatScroller.ChangeView(null, ChatScroller.ScrollableHeight, null, disableAnimation: true);
         });
     }
 

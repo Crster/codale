@@ -2046,7 +2046,7 @@
                 HorizontalAlignment="Center"
                 MaxWidth="920"
                 Padding="12,16,16,0">
-                <StackPanel>
+                <StackPanel x:Name="TranscriptContent">
                     <ItemsRepeater
                         x:Name="Transcript"
                         ItemTemplate="{StaticResource TranscriptRowTemplate}">
