@@ -52,7 +52,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
 
     private void OnChatPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(ChatViewModel.IsBusy) or nameof(ChatViewModel.IsConnecting))
+        if (e.PropertyName is nameof(ChatViewModel.IsBusy) or nameof(ChatViewModel.IsConnecting) or nameof(ChatViewModel.IsSwitchingProfile))
         {
             OnPropertyChanged(nameof(CanSwitch));
             OnPropertyChanged(nameof(RouteText));
@@ -66,7 +66,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
     private ByokProvider? ActiveProvider => _settings.FindByok(_chat?.EndpointName);
 
     /// <summary>False while the chat in front runs a turn (a switch restarts its CLI and would cut the turn off), and for a terminal CLI's session, which has no provider of its own to switch.</summary>
-    public bool CanSwitch { get => !field && _chat is not { IsBusy: true } and not { IsTerminalSession: true } and not { IsConnecting: true }; private set; }
+    public bool CanSwitch { get => !field && _chat is not { IsBusy: true } and not { IsTerminalSession: true } and not { IsConnecting: true } and not { IsSwitchingProfile: true }; private set; }
 
     /// <summary>True when a BYOK provider (not Default) is in use.</summary>
     public bool IsActive => ActiveProvider is { IsAccount: false };
@@ -211,9 +211,9 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
         _loading = true;
         try
         {
-            if (_chat is not null)
+            if (_chat is { } chat)
             {
-                _ = SwitchAsync(value);
+                _ = SwitchAsync(chat, value);
             }
         }
         finally
@@ -226,18 +226,15 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(RouteText));
     }
 
-    private async Task SwitchAsync(ProviderChoice choice)
+    private async Task SwitchAsync(ChatViewModel chat, ProviderChoice choice)
     {
         CanSwitch = true;
         OnPropertyChanged(nameof(CanSwitch));
         try
         {
-            if (_chat is not null)
-            {
-                await _chat.SetProfileAsync(choice.CliId, choice.Name);
-                if (_chat.CliId == choice.CliId && _chat.EndpointName == choice.Name)
-                    _settings.RememberProfile(choice.CliId, choice.Name);
-            }
+            await chat.SetProfileAsync(choice.CliId, choice.Name);
+            if (chat.CliId == choice.CliId && chat.EndpointName == choice.Name)
+                _settings.RememberProfile(choice.CliId, choice.Name);
         }
         finally
         {

@@ -13,7 +13,6 @@
     <UserControl.Resources>
         <views:BoolToVisibilityConverter x:Key="BoolToVisibility" />
         <views:UsageToBrushConverter x:Key="UsageToBrush" />
-        <views:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility" />
         <views:NullToVisibilityConverter x:Key="NullToVisibility" />
         <views:CountToInverseVisibilityConverter x:Key="CountToInverseVisibility" />
         <views:CountToVisibilityConverter x:Key="CountToVisibility" />
@@ -330,15 +329,16 @@
                         </Flyout>
                     </Button.Flyout>
                 </Button>
-                <Button Style="{StaticResource CompactAction}" AutomationProperties.Name="Usage"
+                <Button Style="{StaticResource CompactAction}" AutomationProperties.Name="{x:Bind UsageLabel, Mode=OneWay}"
                         ToolTipService.ToolTip="{x:Bind UsageSummary, Mode=OneWay}"
                         Visibility="{x:Bind HasUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                     <Grid Width="34" Height="34">
-                        <ProgressRing x:Name="QuotaRing" Width="34" Height="34" IsIndeterminate="False" Minimum="0" Maximum="100"
+                        <ProgressRing x:Name="QuotaRing" Width="34" Height="34" Minimum="0" Maximum="100"
+                                      IsIndeterminate="{x:Bind IsUsageLoading, Mode=OneWay}"
                                       Value="{x:Bind UsagePercent, Mode=OneWay}"
                                       Foreground="{x:Bind UsagePercent, Mode=OneWay, Converter={StaticResource UsageToBrush}}" />
                         <TextBlock Text="{x:Bind UsagePercentText, Mode=OneWay}" FontSize="9" FontWeight="SemiBold"
-                                   Visibility="{x:Bind ShowCompactIcon, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}"
+                                   Visibility="{x:Bind ShowUsagePercent, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"
                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
                         <FontIcon Glyph="&#xF133;" FontSize="12"
                                   Visibility="{x:Bind ShowCompactIcon, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"
@@ -356,7 +356,11 @@
                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                                 </StackPanel>
 
-                                <StackPanel Spacing="3" Visibility="{x:Bind Session.Status.HasFiveHour, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="Loading account usage…" FontSize="12"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           Visibility="{x:Bind IsUsageLoading, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+
+                                <StackPanel Spacing="3" Visibility="{x:Bind UsageVisibility(IsUsageLoading, Session.Status.HasFiveHour), Mode=OneWay}">
                                     <Grid>
                                         <TextBlock Text="5-hour limit" FontSize="12" VerticalAlignment="Bottom" />
                                         <TextBlock HorizontalAlignment="Right" FontSize="13" FontWeight="SemiBold"
@@ -384,7 +388,7 @@
                                     </Grid>
                                 </StackPanel>
 
-                                <StackPanel Spacing="3" Visibility="{x:Bind Session.Status.HasSevenDay, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel Spacing="3" Visibility="{x:Bind UsageVisibility(IsUsageLoading, Session.Status.HasSevenDay), Mode=OneWay}">
                                     <Grid>
                                         <TextBlock Text="{x:Bind Session.Status.LongWindowLabel, Mode=OneWay}" FontSize="12" VerticalAlignment="Bottom" />
                                         <TextBlock HorizontalAlignment="Right" FontSize="13" FontWeight="SemiBold"
@@ -404,9 +408,9 @@
                                 <TextBlock Text="{x:Bind Session.Status.SubscriptionUsageStatus, Mode=OneWay}"
                                            FontSize="12" TextWrapping="Wrap"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                           Visibility="{x:Bind Session.Status.ShowSubscriptionUsageStatus, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                           Visibility="{x:Bind UsageVisibility(IsUsageLoading, Session.Status.ShowSubscriptionUsageStatus), Mode=OneWay}" />
 
-                                <StackPanel Spacing="3" Visibility="{x:Bind Session.Status.HasFallbackUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel Spacing="3" Visibility="{x:Bind UsageVisibility(IsUsageLoading, Session.Status.HasFallbackUsage), Mode=OneWay}">
                                     <Grid>
                                         <TextBlock Text="Usage budget ($10)" FontSize="12" />
                                         <TextBlock HorizontalAlignment="Right" FontSize="11"
@@ -423,7 +427,7 @@
                                     </Grid>
                                 </StackPanel>
 
-                                <StackPanel Spacing="3" Visibility="{x:Bind Session.Status.HasFallbackUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel Spacing="3" Visibility="{x:Bind UsageVisibility(IsUsageLoading, Session.Status.HasFallbackUsage), Mode=OneWay}">
                                     <Grid>
                                         <TextBlock Text="Maximum budget ($100)" FontSize="12" />
                                         <TextBlock HorizontalAlignment="Right" FontSize="11"
@@ -443,7 +447,7 @@
                                 <TextBlock Text="$2 input / $10 output per 1M tokens"
                                            ToolTipService.ToolTip="Click a budget bar to set current spending. Further session costs add to it."
                                            FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                           Visibility="{x:Bind Session.Status.HasFallbackUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                           Visibility="{x:Bind UsageVisibility(IsUsageLoading, Session.Status.HasFallbackUsage), Mode=OneWay}" />
 
                                 <StackPanel Spacing="3">
                                     <Grid>
@@ -480,6 +484,7 @@
                                 <StackPanel Spacing="4">
                                     <Border Height="1" Margin="0,0,0,2" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
                                     <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                               Visibility="{x:Bind UsageVisibility(IsUsageLoading, HasUsage), Mode=OneWay}"
                                                Text="{x:Bind SessionTotalsText, Mode=OneWay}" TextWrapping="Wrap" />
                                     <Button HorizontalAlignment="Right" Style="{StaticResource ShellTextButton}" Click="OnUsageDetailsClick"
                                             ToolTipService.ToolTip="Open the usage page in your browser">

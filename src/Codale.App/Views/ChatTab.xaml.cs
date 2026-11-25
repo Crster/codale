@@ -124,23 +124,17 @@ public sealed partial class ChatTab : UserControl
     /// <summary>CLI update was requested from the session panel.</summary>
     public event EventHandler<string>? UpdateCliRequested;
 
-    // The repeater sees all but the last item. The last row always participates in measure,
-    // even while its height changes too quickly for the history's estimates to settle.
-    private readonly RangeObservableCollection<ChatItem> _transcriptHistory = [];
-
     /// <summary>The conversation has just been opened or replaced and should start at its latest row.</summary>
     private bool _showLatestTranscript = true;
     private bool _showLatestQueued;
 
-    /// <summary>The reader is at the end of the transcript, so growth (streaming text, tool output)
-    /// keeps the view on the end. Anchoring alone preserves whatever gap the reader left, so a
-    /// reader a few pixels short of the end could never catch a stream that is still growing.</summary>
     private bool _followTail = true;
     private bool _followQueued;
+    private bool _draggingScrollBar;
+    private bool _panningTranscript;
     private double _lastScrollOffset;
 
-    /// <summary>How close to the end counts as "at the end"; a little more than the end spacer.</summary>
-    private const double FollowThreshold = 40;
+    private const double FollowThreshold = 4;
 
     /// <summary>Question cards whose visibility is already watched; a card can load more than once.</summary>
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, object> _hookedCards = [];
@@ -185,16 +179,34 @@ public sealed partial class ChatTab : UserControl
             }
         });
 
-        Transcript.ItemsSource = _transcriptHistory;
-        TranscriptEnd.Loaded += (_, _) => QueueInitialTranscriptPosition();
+        Transcript.Layout = new TranscriptLayout();
+        TranscriptEnd.Loaded += (_, _) =>
+        {
+            QueueInitialTranscriptPosition();
+            FollowTail();
+        };
 
         // Rows grow without adding items, so follow by size rather than by collection changes.
         TranscriptContent.SizeChanged += (_, _) => FollowTail();
+        ChatScroller.SizeChanged += (_, _) => FollowTail();
         ChatScroller.ViewChanged += OnChatScrollerViewChanged;
-        // A wheel notch up must win over a stream update that lands mid-animation.
         ChatScroller.AddHandler(PointerWheelChangedEvent, new PointerEventHandler(OnChatScrollerWheel), handledEventsToo: true);
-        // Runs before the scroller's own wheel handling (the event bubbles from the content up).
-        TranscriptContent.PointerWheelChanged += OnTranscriptWheel;
+        ChatScroller.AddHandler(PointerPressedEvent, new PointerEventHandler(OnChatScrollerPointerPressed), handledEventsToo: true);
+        ChatScroller.AddHandler(PointerReleasedEvent, new PointerEventHandler(OnChatScrollerPointerReleased), handledEventsToo: true);
+        ChatScroller.AddHandler(PointerCanceledEvent, new PointerEventHandler(OnChatScrollerPointerReleased), handledEventsToo: true);
+        ChatScroller.AddHandler(PointerCaptureLostEvent, new PointerEventHandler(OnChatScrollerPointerReleased), handledEventsToo: true);
+        ChatScroller.DirectManipulationStarted += (_, _) =>
+        {
+            _panningTranscript = true;
+            SetFollowTail(false);
+        };
+        ChatScroller.DirectManipulationCompleted += (_, _) =>
+        {
+            _panningTranscript = false;
+            ResumeFollowAtEnd();
+        };
+        ChatScroller.Unloaded += (_, _) => _draggingScrollBar = _panningTranscript = false;
+        ChatScroller.AddHandler(KeyDownEvent, new KeyEventHandler(OnChatScrollerKeyDown), handledEventsToo: true);
 
         // Only Esc presses nothing else claimed (a popup, a question card) reach this.
         KeyDown += OnChatKeyDown;
@@ -253,7 +265,7 @@ public sealed partial class ChatTab : UserControl
             _viewModel.Attachments.CollectionChanged += OnAttachmentsChanged;
             ShowViewModelDraft();
             _showLatestTranscript = true;
-            UpdateTranscriptRows(value);
+            Transcript.ItemsSource = value.Items;
             SessionPanel.Session = value;
             Bindings.Update();
             QueueInitialTranscriptPosition();
@@ -298,7 +310,7 @@ public sealed partial class ChatTab : UserControl
             if (!TranscriptEnd.IsLoaded || _viewModel is not { Items.Count: > 0 }) return;
 
             _showLatestTranscript = false;
-            _followTail = true;
+            SetFollowTail(true);
             TranscriptEnd.UpdateLayout();
             TranscriptEnd.StartBringIntoView(new BringIntoViewOptions
             {
@@ -311,43 +323,83 @@ public sealed partial class ChatTab : UserControl
     private void OnChatScrollerViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
     {
         var offset = ChatScroller.VerticalOffset;
-        if (ChatScroller.ScrollableHeight - offset <= FollowThreshold)
-        {
-            // Reaching the end (by wheel, drag or keyboard) re-engages following.
-            _followTail = true;
-        }
-        else if (offset < _lastScrollOffset - 0.5)
-        {
-            // Only moving up leaves the end. Growth below the view never lowers the offset.
-            _followTail = false;
-        }
-
+        if (offset > _lastScrollOffset)
+            ResumeFollowAtEnd();
         _lastScrollOffset = offset;
     }
 
     private void OnChatScrollerWheel(object sender, PointerRoutedEventArgs e)
     {
-        if (e.GetCurrentPoint(ChatScroller).Properties.MouseWheelDelta > 0)
+        var wheel = e.GetCurrentPoint(ChatScroller).Properties;
+        if (wheel.IsHorizontalMouseWheel || wheel.MouseWheelDelta <= 0) return;
+
+        for (var element = e.OriginalSource as DependencyObject; element is not null; element = VisualTreeHelper.GetParent(element))
         {
-            _followTail = false;
+            if (ReferenceEquals(element, ChatScroller))
+            {
+                SetFollowTail(false);
+                return;
+            }
+
+            if (element is ScrollViewer { VerticalScrollMode: not ScrollMode.Disabled, VerticalOffset: > 0.5 })
+                return;
         }
     }
 
-    private void OnTranscriptWheel(object sender, PointerRoutedEventArgs e)
+    private void OnChatScrollerPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        var props = e.GetCurrentPoint(ChatScroller).Properties;
-        if (props.IsHorizontalMouseWheel || props.MouseWheelDelta >= 0) return;
-
-        // A wheel notch animates toward an offset fixed when it starts. While the reply
-        // grows, that target falls behind the new end and the animation drags the view
-        // back up. Near the end there is nothing to animate through: land on it and follow.
-        var remaining = ChatScroller.ScrollableHeight - ChatScroller.VerticalOffset;
-        if (_followTail || remaining <= FollowThreshold + Math.Abs(props.MouseWheelDelta))
+        ScrollBar? bar = null;
+        for (var element = e.OriginalSource as DependencyObject; element is not null; element = VisualTreeHelper.GetParent(element))
         {
-            e.Handled = true;
-            _followTail = true;
-            ChatScroller.ChangeView(null, ChatScroller.ScrollableHeight, null, disableAnimation: true);
+            bar ??= element as ScrollBar;
+            if (element is ScrollViewer viewer)
+            {
+                if (ReferenceEquals(viewer, ChatScroller) && bar is not null)
+                {
+                    _draggingScrollBar = true;
+                    SetFollowTail(false);
+                }
+
+                return;
+            }
         }
+    }
+
+    private void OnChatScrollerPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_draggingScrollBar) return;
+        _draggingScrollBar = false;
+        ResumeFollowAtEnd();
+    }
+
+    private void OnChatScrollerKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key is not (VirtualKey.Up or VirtualKey.PageUp or VirtualKey.Home)) return;
+
+        for (var element = e.OriginalSource as DependencyObject; element is not null; element = VisualTreeHelper.GetParent(element))
+        {
+            if (element is ScrollViewer viewer)
+            {
+                if (ReferenceEquals(viewer, ChatScroller)) SetFollowTail(false);
+                return;
+            }
+        }
+    }
+
+    private void ResumeFollowAtEnd()
+    {
+        if (!_draggingScrollBar && !_panningTranscript && ChatScroller.ScrollableHeight - ChatScroller.VerticalOffset <= FollowThreshold)
+        {
+            SetFollowTail(true);
+            FollowTail();
+        }
+    }
+
+    private void SetFollowTail(bool follow)
+    {
+        if (_followTail == follow) return;
+        _followTail = follow;
+        ChatScroller.VerticalAnchorRatio = follow ? 1 : 0;
     }
 
     private void FollowTail()
@@ -358,7 +410,7 @@ public sealed partial class ChatTab : UserControl
         _followQueued = DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             _followQueued = false;
-            if (!_followTail || !ChatScroller.IsLoaded) return;
+            if (!_followTail || _showLatestTranscript || !ChatScroller.IsLoaded) return;
             if (ChatScroller.ScrollableHeight - ChatScroller.VerticalOffset < 0.5) return;
             ChatScroller.ChangeView(null, ChatScroller.ScrollableHeight, null, disableAnimation: true);
         });
@@ -1401,48 +1453,9 @@ public sealed partial class ChatTab : UserControl
             _showLatestTranscript = true;
         }
 
-        if (_viewModel is { } chat)
-        {
-            UpdateTranscriptRows(chat, e);
-            QueueInitialTranscriptPosition();
-        }
+        QueueInitialTranscriptPosition();
 
         _contextDirty = true;
-    }
-
-    private void UpdateTranscriptRows(ChatViewModel chat, NotifyCollectionChangedEventArgs? change = null)
-    {
-        var items = chat.Items;
-        var historyCount = Math.Max(0, items.Count - 1);
-
-        // Preserve realized history rows during ordinary adds, removals and replacements.
-        // The boundary row moves between history and the live slot as the tail changes.
-        switch (change)
-        {
-            case { Action: NotifyCollectionChangedAction.Add, NewItems.Count: 1 }:
-                if (change.NewStartingIndex < _transcriptHistory.Count)
-                    _transcriptHistory.Insert(change.NewStartingIndex, items[change.NewStartingIndex]);
-                break;
-            case { Action: NotifyCollectionChangedAction.Remove, OldItems.Count: 1 }:
-                if (change.OldStartingIndex < _transcriptHistory.Count)
-                    _transcriptHistory.RemoveAt(change.OldStartingIndex);
-                break;
-            case { Action: NotifyCollectionChangedAction.Replace, NewItems.Count: 1, OldItems.Count: 1 }:
-                if (change.NewStartingIndex < _transcriptHistory.Count)
-                    _transcriptHistory[change.NewStartingIndex] = items[change.NewStartingIndex];
-                break;
-            default:
-                _transcriptHistory.ReplaceAll(items.Take(historyCount));
-                break;
-        }
-
-        // Move the old tail into history on append, or promote the last history row on removal.
-        if (_transcriptHistory.Count < historyCount)
-            _transcriptHistory.Add(items[_transcriptHistory.Count]);
-        else if (_transcriptHistory.Count > historyCount)
-            _transcriptHistory.RemoveAt(_transcriptHistory.Count - 1);
-
-        LatestTranscriptRow.Content = items.Count == 0 ? null : items[^1];
     }
 
     private void OnSessionFilesChanged(object? sender, EventArgs e) => _contextDirty = true;

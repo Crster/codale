@@ -2039,8 +2039,6 @@
             HorizontalContentAlignment="Stretch"
             VerticalAnchorRatio="1"
             VerticalScrollBarVisibility="Auto">
-            <!--  History stays virtualized. The live row and the bottom anchor are measured
-                  outside the repeater so finding the end does not depend on the row estimates.  -->
             <Border
                 Width="{Binding ViewportWidth, ElementName=ChatScroller}"
                 HorizontalAlignment="Center"
@@ -2049,17 +2047,7 @@
                 <StackPanel x:Name="TranscriptContent">
                     <ItemsRepeater
                         x:Name="Transcript"
-                        ItemTemplate="{StaticResource TranscriptRowTemplate}">
-                        <ItemsRepeater.Layout>
-                            <StackLayout />
-                        </ItemsRepeater.Layout>
-                    </ItemsRepeater>
-                    <ContentControl
-                        x:Name="LatestTranscriptRow"
-                        Padding="0"
-                        HorizontalContentAlignment="Stretch"
-                        VerticalContentAlignment="Top"
-                        ContentTemplateSelector="{StaticResource ChatTemplateSelector}" />
+                        ItemTemplate="{StaticResource TranscriptRowTemplate}" />
                     <Border
                         x:Name="TranscriptEnd"
                         Height="28"

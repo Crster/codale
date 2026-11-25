@@ -84,8 +84,11 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     // The rail button shows whenever there is a session, so context is always one click away.
     public bool HasUsage => Session is not null;
 
+    public bool IsUsageLoading => Session is { IsSwitchingProfile: true } or { IsLoadingSubscriptionUsage: true };
+    public string UsageLabel => IsUsageLoading ? "Loading account usage" : "Usage";
+
     /// <summary>The shortest reported quota window, or the $10 fallback budget.</summary>
-    public double UsagePercent => Session?.Status is not { } s ? 0 :
+    public double UsagePercent => IsUsageLoading || Session?.Status is not { } s ? 0 :
         s.HasFiveHour ? s.FiveHourPercent :
         s.HasLongWindowOnly ? s.SevenDayPercent : s.HasFallbackUsage ? s.FallbackUsagePercent : 0;
 
@@ -93,10 +96,13 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         s.HasFiveHour ? s.FiveHourSummary : s.HasLongWindowOnly ? s.SevenDaySummary :
         s.ShowSubscriptionUsageStatus ? s.SubscriptionUsageStatus : s.FallbackUsageSummary;
 
-    public string UsageSummary => Session?.Status is not { } s ? "" :
+    public string UsageSummary => IsUsageLoading ? "Loading account usage…" : Session?.Status is not { } s ? "" :
         string.Join("\n", new[] { $"Context {s.ContextSummary}", QuotaSummary }.Where(t => t.Length > 0));
 
-    public bool ShowCompactIcon => CanCompact && Session?.Status.ContextPercent >= 80;
+    public bool ShowCompactIcon => !IsUsageLoading && CanCompact && Session?.Status.ContextPercent >= 80;
+    public bool ShowUsagePercent => !IsUsageLoading && !ShowCompactIcon;
+
+    public Visibility UsageVisibility(bool loading, bool available) => !loading && available ? Visibility.Visible : Visibility.Collapsed;
 
     public string UsagePercentText => Session?.Status.ShowSubscriptionUsageStatus == true ? "—" : $"{UsagePercent:0}%";
 
@@ -120,8 +126,15 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void OnStatusPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        foreach (var property in new[] { nameof(HasUsage), nameof(UsagePercent), nameof(UsageSummary), nameof(UsagePercentText), nameof(ShowCompactIcon), nameof(CurrentPromptText), nameof(SessionTotalsText), nameof(CanCompact) })
+        foreach (var property in new[] { nameof(HasUsage), nameof(UsagePercent), nameof(UsageSummary), nameof(UsagePercentText), nameof(ShowUsagePercent), nameof(ShowCompactIcon), nameof(CurrentPromptText), nameof(SessionTotalsText), nameof(CanCompact) })
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
+    }
+
+    private void NotifyUsageLoading()
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsUsageLoading)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(UsageLabel)));
+        OnStatusPropertyChanged(this, new PropertyChangedEventArgs(null));
     }
 
     /// <summary>Compact is offered once there is context to free and no turn is running.</summary>
@@ -210,7 +223,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     private void NotifySessionProperties()
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Session)));
-        OnStatusPropertyChanged(this, new PropertyChangedEventArgs(null));
+        NotifyUsageLoading();
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EndpointLabel)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowSessionPickers)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(WorkingDirectory)));
@@ -218,6 +231,11 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void OnSessionPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName is nameof(ChatViewModel.IsSwitchingProfile) or nameof(ChatViewModel.IsLoadingSubscriptionUsage))
+        {
+            NotifyUsageLoading();
+        }
+
         if (e.PropertyName is nameof(ChatViewModel.IsTerminalSession) or
             nameof(ChatViewModel.TerminalCli))
         {
@@ -233,6 +251,7 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanCompact)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowCompactIcon)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUsagePercent)));
         }
     }
 

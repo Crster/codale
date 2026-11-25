@@ -1953,6 +1953,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     public bool IsConnecting { get; private set; }
 
+    [ObservableProperty]
+    public partial bool IsSwitchingProfile { get; private set; }
+
+    [ObservableProperty]
+    public partial bool IsLoadingSubscriptionUsage { get; private set; }
+
     /// <summary>The BYOK provider the live session was spawned with ("" for Default); null before the first connect.</summary>
     private string? _connectedProvider;
 
@@ -2253,7 +2259,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             // The usage endpoint is Claude's; Codex reports its own windows through its session.
             if (!overrideCli && !IsCodexSession)
             {
-                RunInBackground(LoadUsageAsync);
+                RefreshSubscriptionUsage(session, initialLoad: true);
             }
         }
         catch (Exception ex)
@@ -2302,29 +2308,45 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// Reads the subscription usage of the account this chat signed in with: shown as soon as the
     /// chat is open, and refreshed after each turn, since a turn's rate_limit_event often carries no windows.
     /// </summary>
-    private async Task LoadUsageAsync()
+    private void RefreshSubscriptionUsage(IAgentSession session, bool initialLoad = false)
     {
         // The CLI runs under the selected profile's folder; the default folder may hold no login at all.
         var accountId = _smart.Settings.FindByok(EndpointName)?.AccountId;
         var home = CodaleAccount.ProfileHome("claude", accountId);
-        var limits = await ClaudeUsageClient.FetchAsync(home).ConfigureAwait(false);
-        var signedOut = limits is null && !await CodaleAccountCli.IsSignedInAsync("claude", accountId: accountId).ConfigureAwait(false);
-        _dispatcher.TryEnqueue(() =>
+        if (initialLoad) IsLoadingSubscriptionUsage = true;
+
+        RunInBackground(async () =>
         {
-            // A response for a previous account/provider must not update the current chat.
-            if (!IsCodexSession && Status.ExpectsSubscriptionUsage &&
-                (_smart.Settings.FindByok(EndpointName)?.AccountId ?? "") == (accountId ?? ""))
+            RateLimitSnapshot? limits = null;
+            bool? signedOut = null;
+            try
             {
-                Status.IsAccountSignedOut = signedOut;
-                if (limits is { } reading)
+                limits = await ClaudeUsageClient.FetchAsync(home).ConfigureAwait(false);
+                signedOut = limits is null && !await CodaleAccountCli.IsSignedInAsync("claude", accountId: accountId).ConfigureAwait(false);
+            }
+            finally
+            {
+                _dispatcher.TryEnqueue(() =>
                 {
-                    Status.Apply(reading);
-                }
-                else if (signedOut)
-                {
-                    Status.FiveHourUtilization = null;
-                    Status.SevenDayUtilization = null;
-                }
+                    if (!ReferenceEquals(_session, session)) return;
+
+                    if (signedOut is { } isSignedOut && Status.ExpectsSubscriptionUsage &&
+                        (_smart.Settings.FindByok(EndpointName)?.AccountId ?? "") == (accountId ?? ""))
+                    {
+                        Status.IsAccountSignedOut = isSignedOut;
+                        if (limits is { } reading)
+                        {
+                            Status.Apply(reading);
+                        }
+                        else if (isSignedOut)
+                        {
+                            Status.FiveHourUtilization = null;
+                            Status.SevenDayUtilization = null;
+                        }
+                    }
+
+                    if (initialLoad) IsLoadingSubscriptionUsage = false;
+                });
             }
         });
     }
@@ -2777,9 +2799,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 RestoreAfterPlanTurn();
                 Status.Apply(turn);
 
-                if (!IsCodexSession && !Status.IsOverrideCli)
+                if (!IsCodexSession && !Status.IsOverrideCli && _session is { } session)
                 {
-                    RunInBackground(LoadUsageAsync);
+                    RefreshSubscriptionUsage(session);
                 }
 
                 // The context window reading comes from the last assistant message, not
@@ -4729,13 +4751,35 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public async Task SetProfileAsync(string cli, string name)
     {
-        await WaitForSessionConfigurationAsync();
-        if (!CanChangeMode) return;
-        if (cli == CliId) { await SetEndpointAsync(name); return; }
+        name = name.Trim();
+        if (IsSwitchingProfile || (cli == CliId && string.Equals(EndpointName, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        IsSwitchingProfile = true;
+        try
+        {
+            // Let the picker close and publish its loading state before preparing the handoff.
+            await Task.Yield();
+            await WaitForSessionConfigurationAsync();
+            if (!CanChangeMode) return;
+            if (cli == CliId) await SetEndpointCoreAsync(name);
+            else await SwitchCliAsync(cli, name);
+        }
+        finally
+        {
+            IsSwitchingProfile = false;
+        }
+    }
+
+    private async Task SwitchCliAsync(string cli, string name)
+    {
         var continuation = CacheContinuationPlan.Create(CliId, EndpointName, "", cli, name, "");
         Status.PrepareCache(continuation.Explanation);
         CaptureHandoff();
         await DisposeSessionAsync();
+        Status.ResetCliReadings();
         IsConnected = false;
         EndTurn(TurnOutcome.Stopped);
         _streaming = null;
@@ -4755,16 +4799,10 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         await ConnectAsync();
     }
 
-    public async Task SetEndpointAsync(string name)
-    {
-        await WaitForSessionConfigurationAsync();
-        if (!CanChangeMode) return;
-        name = name.Trim();
-        if (string.Equals(EndpointName, name, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
+    public Task SetEndpointAsync(string name) => SetProfileAsync(CliId, name);
 
+    private async Task SetEndpointCoreAsync(string name)
+    {
         var continuation = CacheContinuationPlan.Create(CliId, EndpointName,
             _smart.Settings.FindByok(EndpointName)?.AccountId ?? "", CliId, name,
             _smart.Settings.FindByok(name)?.AccountId ?? "");
@@ -5483,6 +5521,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             // Detach first: the dying process's SessionEnded (and its stderr, e.g. a failed
             // default-login connect) then reaches a pump that no longer owns it and is dropped.
             _session = null;
+            IsLoadingSubscriptionUsage = false;
             OnPropertyChanged(nameof(ModelDisplay));
             await session.DisposeAsync();
         }
