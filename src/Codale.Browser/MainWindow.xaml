@@ -5,7 +5,9 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:Codale.Browser">
 
-    <Grid x:Name="Root" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <Grid x:Name="Root"
+          Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+          KeyboardAcceleratorPlacementMode="Hidden">
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="P" Modifiers="Control,Shift" Invoked="NewPrivateTab_Invoked" />
         </Grid.KeyboardAccelerators>
@@ -35,7 +37,9 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <Button Style="{StaticResource ToolButton}" Content="&#xE710;" VerticalAlignment="Center"
+                        <Button Style="{StaticResource PanelButton}" Content="&#xE710;"
+                                Width="28" Height="28" MinWidth="0" MinHeight="0"
+                                Margin="2,8,0,0" VerticalAlignment="Center"
                                 AutomationProperties.Name="Add tab" ToolTipService.ToolTip="Add tab">
                             <Button.Flyout>
                                 <MenuFlyout Placement="BottomEdgeAlignedLeft">
