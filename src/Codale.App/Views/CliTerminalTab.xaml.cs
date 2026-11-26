@@ -29,7 +29,7 @@ public sealed partial class CliTerminalTab : UserControl, ITerminalHost
         Loaded += OnLoaded;
 
         Terminal.Response += (_, text) => _ = _viewModel?.WriteAsync(text);
-        Terminal.SubmitRewriter = line => _viewModel?.RewriteSubmitted(line);
+        Terminal.SubmitRewriter = line => _viewModel?.AgentSession is not null ? _viewModel.RewriteSubmitted(line) : null;
         Terminal.Resized += (_, size) => _viewModel?.Resize((short)size.Cols, (short)size.Rows);
         Terminal.LinkActivated += (_, link) => LinkActivated?.Invoke(this, link);
         Terminal.TitleChanged += (_, title) => SessionPanel.ObserveTerminalTitle(title);
@@ -75,7 +75,8 @@ public sealed partial class CliTerminalTab : UserControl, ITerminalHost
             UnsubscribeFromViewModel();
             _viewModel = value;
             SessionPanel.ClaudeContextPath = value.ClaudeContextPath;
-            SessionPanel.Session = _viewModel?.AgentSession;
+            SessionPanel.Session = value.AgentSession;
+            SessionPanel.Visibility = value.AgentSession is null ? Visibility.Collapsed : Visibility.Visible;
         }
     }
 
@@ -121,6 +122,13 @@ public sealed partial class CliTerminalTab : UserControl, ITerminalHost
         if (_viewModel.StartupError is { Length: > 0 } error)
         {
             Terminal.Write($"\x1b[31m{error}\x1b[0m\r\n\x1b[90m[session ended]\x1b[0m\r\n");
+        }
+        else if (_viewModel.AgentSession is null)
+        {
+            // The sign-in process can print its browser or code prompt before the tab finishes loading.
+            var (output, _) = _viewModel.Transcript.Read();
+            if (output.Length > 0) Terminal.Write(output.Replace("\n", "\r\n"));
+            if (_viewModel.ExitCode is not null) OnExited(_viewModel, EventArgs.Empty);
         }
     }
 

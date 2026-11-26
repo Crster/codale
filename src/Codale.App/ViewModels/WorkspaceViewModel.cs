@@ -403,10 +403,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
             return snapshot.State == "idle" ? snapshot with { State = "exited" } : snapshot;
         }
 
-        public IReadOnlyList<TaskSnapshot> List() => [.. workspace.TerminalsSnapshot().Select(t => Snapshot(t, null, 0))];
+        // Interactive authentication can print a one-time code. Keep its terminal out of agent tools.
+        private IEnumerable<TerminalViewModel> VisibleTerminals() =>
+            workspace.TerminalsSnapshot().Where(t => !t.IsCliTerminal || t.AgentSession is not null);
+
+        public IReadOnlyList<TaskSnapshot> List() => [.. VisibleTerminals().Select(t => Snapshot(t, null, 0))];
 
         public TaskSnapshot? Read(string id, long? since, int? tailChars) =>
-            workspace.TerminalsSnapshot().FirstOrDefault(t => t.Id == id) is { } terminal ? Snapshot(terminal, since, tailChars) : null;
+            VisibleTerminals().FirstOrDefault(t => t.Id == id) is { } terminal ? Snapshot(terminal, since, tailChars) : null;
 
         private static TaskSnapshot Snapshot(TerminalViewModel t, long? since, int? tailChars)
         {

@@ -1884,6 +1884,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     public event EventHandler<string?>? LoginRequired;
     private NoticeItem? _loginNotice;
 
+    // The CLI's local status can still report a login after the server rejects its token.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string Cli, string Account), byte> RejectedAccounts = new();
+
+    internal static bool IsAccountRejected(string cli, string accountId) => RejectedAccounts.ContainsKey((cli, accountId));
+    internal static void ClearAccountRejection(string cli, string accountId) => RejectedAccounts.TryRemove((cli, accountId), out _);
+
     /// <summary>
     /// The conversation needs the reader: a question or permission is open, or the turn
     /// ended. The page decides whether that is worth a taskbar flash and a notification
@@ -1906,6 +1912,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             text.Contains("refresh token was already used", StringComparison.OrdinalIgnoreCase) ||
             (IsCodexSession && text.Contains("Missing bearer or basic authentication", StringComparison.OrdinalIgnoreCase)))
         {
+            RejectedAccounts.TryAdd((CliId, _smart.Settings.FindByok(EndpointName)?.AccountId ?? ""), 0);
             Status.IsAccountSignedOut = true;
             Status.FiveHourUtilization = null;
             Status.SevenDayUtilization = null;

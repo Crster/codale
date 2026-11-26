@@ -34,7 +34,7 @@ public sealed partial class SettingsPanel : UserControl
     public event EventHandler? CloseRequested;
 
     /// <summary>The owning window runs interactive sign-in in its workspace terminal.</summary>
-    public Func<string, string?, Task>? SignInAsync { get; set; }
+    public Func<string, string?, Task<bool>>? SignInAsync { get; set; }
 
     private KeyboardShortcuts _shortcuts = null!;
     private SyntaxSelection _syntax = null!;
@@ -645,7 +645,7 @@ public sealed partial class SettingsPanel : UserControl
 
     private bool _refreshingAccounts;
     private readonly HashSet<string> _removingAccounts = [];
-    private readonly Dictionary<string, bool> _accountStates = [];
+    private readonly HashSet<string> _signingInAccounts = [];
     private string? _expandedAccountKey;
     private static string AccountKey(string cli, string accountId) => cli + ":" + accountId;
 
@@ -662,13 +662,10 @@ public sealed partial class SettingsPanel : UserControl
                 try
                 {
                     var accounts = await CodaleAccountCli.DiscoverAccountsAsync(cli);
-                    foreach (var profile in _providers.Where(p => p.IsAccount && p.CliId == cli))
-                        _accountStates[AccountKey(cli, profile.AccountId)] = accounts.Any(a => a.AccountId == profile.AccountId);
                     foreach (var account in accounts)
                     {
                         var key = AccountKey(cli, account.AccountId);
                         if (_removingAccounts.Contains(key)) continue;
-                        _accountStates[key] = true;
                         var profile = _providers.FirstOrDefault(p => p.IsAccount && p.CliId == cli && p.AccountId == account.AccountId);
                         if (profile is null)
                         {
@@ -710,8 +707,9 @@ public sealed partial class SettingsPanel : UserControl
         {
             if (SignInAsync is null) throw new InvalidOperationException("Account setup is unavailable in this window.");
             status.Text = "Connecting account…";
-            await SignInAsync(cli, id);
-            var (signedIn, email) = await CodaleAccountCli.GetAccountAsync(cli, accountId: id);
+            var (signedIn, email) = await SignInAsync(cli, id)
+                ? await CodaleAccountCli.GetAccountAsync(cli, accountId: id)
+                : (false, null);
             if (!signedIn) { status.Text = "Account setup did not complete. No account was added."; return; }
             if (!_providers.Any(p => p.IsAccount && p.CliId == cli && p.AccountId == id))
                 _providers.Add(new ByokProvider
@@ -723,7 +721,6 @@ public sealed partial class SettingsPanel : UserControl
                     AccountId = id,
                     Email = email
                 });
-            _accountStates[AccountKey(cli, id)] = true;
             _expandedAccountKey = _providers.First(p => p.IsAccount && p.CliId == cli && p.AccountId == id).Key;
             SaveProviders();
             BuildProviderEditors();
@@ -747,6 +744,7 @@ public sealed partial class SettingsPanel : UserControl
                 p => _providers.RemoveAll(candidate => candidate.IsAccount && candidate.CliId == cli && candidate.AccountId == p.AccountId)))
             { status.Text = "Could not sign out. The account was kept; try removing it again."; return; }
             if (provider.AccountId.Length == 0) WriteSettings(() => _settings.SetAccountLabel(cli, null));
+            ChatViewModel.ClearAccountRejection(cli, provider.AccountId);
             SaveProviders();
             BuildProviderEditors();
             await RefreshAccountsAsync();
@@ -806,15 +804,11 @@ public sealed partial class SettingsPanel : UserControl
         if (!provider.IsAccount && cli == "codex") Field("OpenAI-compatible base URL", "https://api.example.com/v1 (used by Codex CLI)", provider.BaseUrl, v => provider.BaseUrl = v);
         else if (!provider.IsAccount) Field("Anthropic-compatible base URL", "https://api.example.com (used by Claude CLI)", provider.AnthropicBaseUrl, v => provider.AnthropicBaseUrl = v);
 
+        TextBlock? accountStatus = null;
         if (provider.IsAccount)
         {
-            var status = new TextBlock
-            {
-                Text = _accountStates.GetValueOrDefault(AccountKey(cli, provider.AccountId), true)
-                ? provider.Email ?? "Connected account" : "Not connected. Remove this account and add it again to reconnect.",
-                TextWrapping = TextWrapping.Wrap
-            };
-            panel.Children.Add(status);
+            accountStatus = new TextBlock { TextWrapping = TextWrapping.Wrap };
+            panel.Children.Add(accountStatus);
         }
         if (!provider.IsAccount)
         {
@@ -842,12 +836,105 @@ public sealed partial class SettingsPanel : UserControl
         ModelField("Flash model", provider.IsAccount ? "CLI default" : "Select or enter a model ID", provider.FlashModel, v => provider.FlashModel = v);
         ModelField("Pro model", "Flash model when blank", provider.ProModel, v => provider.ProModel = v);
 
-        if (provider.IsAccount)
+        if (accountStatus is not null)
         {
-            var accountStatus = panel.Children.OfType<TextBlock>().First();
+            var accountId = provider.AccountId;
+            var key = AccountKey(cli, accountId);
             var removeAccount = new Button { Content = "Remove account" };
-            removeAccount.Click += async (_, _) => await RemoveAccountAsync(provider, cli, removeAccount, accountStatus);
-            panel.Children.Add(removeAccount);
+            var signIn = new Button { Content = "Sign in", Visibility = Visibility.Collapsed };
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+            actions.Children.Add(removeAccount);
+            actions.Children.Add(signIn);
+            panel.Children.Add(actions);
+
+            void ShowStatus(bool signedIn, string? email, string? message = null)
+            {
+                accountStatus.Text = message ?? (signedIn
+                    ? (email is null ? "Signed in" : $"Signed in as {email}")
+                    : "Sign-in required. Your session may have expired.");
+                signIn.Visibility = signedIn ? Visibility.Collapsed : Visibility.Visible;
+            }
+
+            bool checking = false;
+            async Task CheckAccountAsync()
+            {
+                if (checking || _removingAccounts.Contains(key)) return;
+                if (_signingInAccounts.Contains(key))
+                {
+                    accountStatus.Text = "Signing in…";
+                    removeAccount.IsEnabled = false;
+                    return;
+                }
+                checking = true;
+                accountStatus.Text = "Checking sign-in…";
+                signIn.Visibility = Visibility.Collapsed;
+                removeAccount.IsEnabled = false;
+                try
+                {
+                    var (signedIn, email) = await CodaleAccountCli.GetAccountAsync(cli, accountId: accountId);
+                    ShowStatus(signedIn && !ChatViewModel.IsAccountRejected(cli, accountId), email ?? provider.Email);
+                }
+                catch (Exception ex) { ShowStatus(false, null, $"Could not check sign-in: {ex.Message}"); }
+                finally { checking = false; removeAccount.IsEnabled = true; }
+            }
+
+            expander.Expanding += async (_, _) =>
+            {
+                _expandedAccountKey = provider.Key;
+                await CheckAccountAsync();
+            };
+            expander.Collapsed += (_, _) =>
+            {
+                if (_expandedAccountKey == provider.Key) _expandedAccountKey = null;
+            };
+            expander.Loaded += async (_, _) =>
+            {
+                if (expander.IsExpanded) await CheckAccountAsync();
+            };
+            removeAccount.Click += async (_, _) =>
+            {
+                if (_signingInAccounts.Contains(key)) return;
+                signIn.IsEnabled = false;
+                try { await RemoveAccountAsync(provider, cli, removeAccount, accountStatus); }
+                finally { signIn.IsEnabled = true; }
+            };
+            signIn.Click += async (_, _) =>
+            {
+                if (_removingAccounts.Contains(key) || !_signingInAccounts.Add(key)) return;
+                signIn.IsEnabled = removeAccount.IsEnabled = false;
+                try
+                {
+                    if (SignInAsync is null) throw new InvalidOperationException("Account setup is unavailable in this window.");
+                    accountStatus.Text = "Signing in…";
+                    var (signedIn, email) = await SignInAsync(cli, accountId)
+                        ? await CodaleAccountCli.GetAccountAsync(cli, accountId: accountId)
+                        : (false, null);
+                    if (!signedIn)
+                    {
+                        ShowStatus(false, null, "Sign-in did not complete. Try again.");
+                        return;
+                    }
+
+                    ChatViewModel.ClearAccountRejection(cli, accountId);
+                    if (accountId.Length == 0 && email is not null)
+                        WriteSettings(() => _settings.SetAccountLabel(cli, email));
+                    if (email is not null && _providers.FirstOrDefault(p => p.IsAccount && p.CliId == cli && p.AccountId == accountId) is { } saved)
+                    {
+                        saved.Email = email;
+                        header.Text = email;
+                        SaveProviders();
+                    }
+                    await ReloadCatalogueAfterAccountChangeAsync(cli);
+                    ShowStatus(true, email ?? provider.Email);
+                }
+                catch (Exception ex) { ShowStatus(false, null, $"Could not sign in: {ex.Message}"); }
+                finally
+                {
+                    _signingInAccounts.Remove(key);
+                    signIn.IsEnabled = removeAccount.IsEnabled = true;
+                    if (expander.Parent is null) BuildProviderEditors();
+                }
+            };
             expander.Content = panel;
             return expander;
         }

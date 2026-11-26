@@ -432,11 +432,12 @@ public sealed partial class WorkspacePage : Page
         await RunInNewTerminalAsync(command);
     }
 
-    /// <summary>Runs the CLI login in a temporary terminal and reports whether it completed successfully.</summary>
+    /// <summary>Runs interactive CLI login and keeps failed output visible for troubleshooting.</summary>
     public async Task<bool> RunAccountSignInAsync(string cliId, string? accountId = null)
     {
         var cli = CliLocator.KnownClis.First(known => known.Id == cliId);
         var terminal = ViewModel.CreateTerminal(CodaleAccountCli.LoginCommand(cliId, accountId), $"{cli.DisplayName} sign in", cliId);
+        var keepTerminal = false;
         try
         {
             AddTerminalTab(terminal);
@@ -450,19 +451,17 @@ public sealed partial class WorkspacePage : Page
             {
                 await Task.Delay(500);
             }
+            keepTerminal = IsLoaded && terminal.ExitCode is not null and not 0;
             return terminal.ExitCode == 0;
         }
         finally
         {
-            // Account setup is temporary: release its process and tab before Settings
-            // checks the credentials and the user starts or returns to a chat.
-            if (_terminalTabs.FirstOrDefault(entry => ReferenceEquals(entry.Terminal, terminal)) is { } entry)
+            if (!keepTerminal)
             {
-                CloseTerminalTab(entry);
-            }
-            else
-            {
-                terminal.Close();
+                if (_terminalTabs.FirstOrDefault(entry => ReferenceEquals(entry.Terminal, terminal)) is { } entry)
+                    CloseTerminalTab(entry);
+                else
+                    terminal.Close();
             }
         }
     }
@@ -572,11 +571,13 @@ public sealed partial class WorkspacePage : Page
             if (!IsLoaded) return;
             if (!signedIn)
             {
-                await AppDialog.AlertAsync(XamlRoot, "Sign-in incomplete", "Open the account picker to try again.");
+                await AppDialog.AlertAsync(XamlRoot, "Sign-in incomplete",
+                    "Complete the browser sign-in and follow any instructions in the sign-in terminal. Open the account picker to retry.");
                 return;
             }
 
             var settings = ViewModel.Smart.Settings;
+            ChatViewModel.ClearAccountRejection(cliId, accountId);
             if (accountId.Length == 0) settings.SetAccountLabel(cliId, email);
             ChatViewModel.ForgetCatalogue(cliId);
             var currentProfile = settings.FindByok(chat.EndpointName);
@@ -901,7 +902,7 @@ public sealed partial class WorkspacePage : Page
         terminal.LaunchRewriter ??= OnTerminalLaunchTyped;
 
         ITerminalHost tab;
-        if (terminal.AgentSession is not null)
+        if (terminal.IsCliTerminal)
         {
             // An agent CLI: its TUI in a rounded card beside the session panel.
             var cli = new CliTerminalTab(ViewModel.Smart.Settings) { ViewModel = terminal, Workspace = ViewModel };

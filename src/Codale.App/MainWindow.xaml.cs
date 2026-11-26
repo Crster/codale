@@ -292,13 +292,12 @@ public sealed partial class MainWindow : Window, IWindowOwner
 
     private void OnSettingsCloseRequested(object? sender, EventArgs e) => SetSettingsOpen(false);
 
-    private async Task RunAccountSignInAsync(string cliId, string? accountId = null)
+    private async Task<bool> RunAccountSignInAsync(string cliId, string? accountId = null)
     {
         if (RootFrame.Content is WorkspacePage workspace)
         {
             SetSettingsOpen(false);
-            await workspace.RunAccountSignInAsync(cliId, accountId);
-            return;
+            return await workspace.RunAccountSignInAsync(cliId, accountId);
         }
 
         // The project picker has no embedded terminal. Shell execution gives login
@@ -310,6 +309,7 @@ public sealed partial class MainWindow : Window, IWindowOwner
                 WindowStyle = System.Diagnostics.ProcessWindowStyle.Normal,
             }) ?? throw new InvalidOperationException("The sign-in console did not start.");
         await login.WaitForExitAsync();
+        return login.ExitCode == 0;
     }
 
     /// <summary>A configured keyboard shortcut was pressed; the open workspace runs it.</summary>
