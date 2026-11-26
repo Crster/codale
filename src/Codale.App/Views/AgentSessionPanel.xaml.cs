@@ -210,6 +210,12 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void OnProfileItemClick(object sender, ItemClickEventArgs e) => ProfileFlyout.Hide();
 
+    private async void OnProfileFlyoutOpening(object sender, object e)
+    {
+        OnDetailFlyoutOpening(sender, e);
+        if (Workspace is { } workspace) await workspace.CliEndpoint.RefreshSignInStatusAsync();
+    }
+
     public event EventHandler<ProviderChoice>? AccountSignInRequested;
 
     private void OnAccountSignInClick(object sender, RoutedEventArgs e)

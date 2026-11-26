@@ -1,5 +1,7 @@
 using System.ComponentModel;
 
+using Codale.Agents;
+
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Codale.App.ViewModels;
@@ -10,6 +12,7 @@ public sealed record ProviderChoice(string Name, string Label, string Detail, st
     public bool IsAccount => AccountId is not null;
     public bool HasDetail => Detail.Length > 0;
     public string SignInLabel => $"Sign in to {Label}";
+    public bool RequiresSignIn { get; init; }
 }
 
 /// <summary>
@@ -21,6 +24,8 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
     /// <summary>Set while the list rebuilds, so re-selecting the current row is not a write.</summary>
     private bool _loading;
     private readonly AppSettingsStore _settings;
+    private HashSet<(string Cli, string Account)> _signedOut = [];
+    private int _accountCheck;
 
     public CliEndpointViewModel(AppSettingsStore settings)
     {
@@ -30,6 +35,34 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
     }
 
     public RangeObservableCollection<ProviderChoice> Choices { get; } = [];
+
+    public async Task RefreshSignInStatusAsync()
+    {
+        var check = ++_accountCheck;
+        _signedOut.Clear();
+        Reload();
+
+        var accounts = Choices.Where(choice => choice.AccountId is not null)
+            .Select(choice => (Cli: choice.CliId, Account: choice.AccountId!)).Distinct().ToArray();
+        var results = await Task.WhenAll(accounts.Select(async account =>
+        {
+            try
+            {
+                return !await CodaleAccountCli.IsSignedInAsync(account.Cli, accountId: account.Account);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                return false;
+            }
+        }));
+
+        if (check != _accountCheck) return;
+        _signedOut = accounts.Where((_, index) => results[index]).ToHashSet();
+        Reload();
+    }
+
+    private bool RequiresSignIn(string cli, string account) =>
+        _signedOut.Contains((cli, account)) || ChatViewModel.IsAccountRejected(cli, account);
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(AvatarInitials))]
@@ -138,7 +171,10 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
             ProviderChoice? defaultRow = null;
             if (defaultEmail is not null || defaultAccount is not null || accounts.Count == 0)
             {
-                defaultRow = new("", label + ": " + (defaultEmail ?? "Default account"), "", cli, "");
+                defaultRow = new("", label + ": " + (defaultEmail ?? "Default account"), "", cli, "")
+                {
+                    RequiresSignIn = RequiresSignIn(cli, ""),
+                };
                 wanted.Add(defaultRow);
             }
 
@@ -153,7 +189,10 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
 
                 var detail = provider.IsAccount ? "" : cli == "codex" ? provider.BaseUrl : provider.AnthropicBaseUrl;
                 var row = new ProviderChoice(provider.Key, label + ": " + (provider.IsAccount ? provider.Email ?? name : name),
-                    detail, cli, provider.IsAccount ? provider.AccountId : null);
+                    detail, cli, provider.IsAccount ? provider.AccountId : null)
+                {
+                    RequiresSignIn = provider.IsAccount && RequiresSignIn(cli, provider.AccountId),
+                };
                 wanted.Add(row);
                 if (provider.IsAccount && defaultRow is null)
                 {
@@ -260,6 +299,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _accountCheck++;
         _settings.Changed -= OnSettingsChanged;
         _chat?.PropertyChanged -= OnChatPropertyChanged;
     }

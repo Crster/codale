@@ -276,7 +276,7 @@
                     </Border>
                     <Button.Flyout>
                         <Flyout x:Name="ProfileFlyout" AreOpenCloseAnimationsEnabled="False"
-                                Opening="OnDetailFlyoutOpening" Closed="OnDetailFlyoutClosed" Placement="LeftEdgeAlignedTop" FlyoutPresenterStyle="{StaticResource DetailFlyout}">
+                                Opening="OnProfileFlyoutOpening" Closed="OnDetailFlyoutClosed" Placement="LeftEdgeAlignedTop" FlyoutPresenterStyle="{StaticResource DetailFlyout}">
                             <StackPanel Width="320" Spacing="10">
                                 <Grid ColumnSpacing="12">
                                     <Grid.ColumnDefinitions>
@@ -326,7 +326,7 @@
                                                     </StackPanel>
                                                     <Button Grid.Column="1" Content="Sign in" FontSize="11" Padding="8,4"
                                                             AutomationProperties.Name="{x:Bind SignInLabel}"
-                                                            Visibility="{x:Bind IsAccount, Converter={StaticResource BoolToVisibility}}"
+                                                            Visibility="{x:Bind RequiresSignIn, Converter={StaticResource BoolToVisibility}}"
                                                             Tag="{x:Bind}" Click="OnAccountSignInClick" />
                                                 </Grid>
                                             </DataTemplate>
