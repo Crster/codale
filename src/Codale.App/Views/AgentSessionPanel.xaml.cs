@@ -84,7 +84,8 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
     // The rail button shows whenever there is a session, so context is always one click away.
     public bool HasUsage => Session is not null;
 
-    public bool IsUsageLoading => Session is { IsSwitchingProfile: true } or { IsLoadingSubscriptionUsage: true };
+    public bool IsUsageLoading => Session is { IsConnecting: true } or { IsSwitchingProfile: true }
+        or { IsLoadingSubscriptionUsage: true };
     public string UsageLabel => IsUsageLoading ? "Loading account usage" : "Usage";
 
     /// <summary>The shortest reported quota window, or the $10 fallback budget.</summary>
@@ -231,7 +232,8 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void OnSessionPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(ChatViewModel.IsSwitchingProfile) or nameof(ChatViewModel.IsLoadingSubscriptionUsage))
+        if (e.PropertyName is nameof(ChatViewModel.IsConnecting) or nameof(ChatViewModel.IsSwitchingProfile) or
+            nameof(ChatViewModel.IsLoadingSubscriptionUsage))
         {
             NotifyUsageLoading();
         }

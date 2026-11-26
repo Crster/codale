@@ -217,7 +217,7 @@ public sealed class McpServerSettings(string projectPath, ApplicationDatabase da
                 // Uploads and script evaluation reach beyond the sandbox, so these still ask.
                 AskTools = ["browser_upload", "browser_evaluate"],
 
-                // browser_upload is confined to this folder and refuses without it.
+                // The project root selects the browser profile and confines browser_upload to that folder.
                 Env = new Dictionary<string, string> { ["CODALE_PROJECT_DIR"] = _projectPath, [CodalePaths.DataRootVariable] = CodaleDataRoot() },
             });
         }

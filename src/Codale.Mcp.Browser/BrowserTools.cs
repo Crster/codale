@@ -241,7 +241,7 @@ internal static class BrowserTools
                 Schema([("url", "string", "Page to open for the user; defaults to the current page."), ("untilUrl", "string", "Done when the address contains this fragment, e.g. /dashboard."), ("untilText", "string", "Done when this text is visible, e.g. \"Sign out\"."), ("timeoutSeconds", "number", "How long to wait for the user (default 300, max 900).")]),
                 (a, ct) => Text(b.HandoffAsync(a.String("url"), a.String("untilUrl"), a.String("untilText"), a.Int("timeoutSeconds") ?? 300, ct))),
 
-            Tool("browser_session", "Manage the logins Codale Browser keeps between runs: info lists the domains with cookies, clear signs out of everything (save is accepted but unnecessary: logins are kept as they happen). Use info to check whether a site is already signed in before navigating.",
+            Tool("browser_session", "Manage the current project’s browser cookies. Info lists domains with cookies, clear removes those cookies, and Codale Browser saves sign-ins automatically. Use info to check for existing cookies before navigating.",
                 Schema([("action", "string", "info | save | clear")], "action"),
                 (a, _) => Text(b.SessionAsync(a.RequiredKeyword("action")))),
 

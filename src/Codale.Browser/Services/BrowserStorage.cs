@@ -18,7 +18,8 @@ internal static class LaunchHandoff
     {
         try
         {
-            return File.Exists(FilePath) ? JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(FilePath)) ?? [] : [];
+            using var file = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(file) ?? [];
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
@@ -34,8 +35,8 @@ internal static class BrowserPaths
         ? root
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale");
 
-    /// <summary>The WebView2 profile every tab shares: logins, cookies and page storage (WebView2 keeps these itself).</summary>
-    public static string Profile => Environment.GetEnvironmentVariable("CODALE_WEBVIEW_PROFILE") is { Length: > 0 } profile
+    /// <summary>The WebView2 user data folder containing the default profile and each project's profile.</summary>
+    public static string UserDataFolder => Environment.GetEnvironmentVariable("CODALE_WEBVIEW_PROFILE") is { Length: > 0 } profile
         ? profile
         : Path.Combine(DataRoot, "webview-browser-profile");
 }

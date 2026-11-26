@@ -92,7 +92,7 @@ public sealed partial class MainWindow : Window
             await Task.Delay(300);
             if (_tabs.Count == 0) await OpenUserTabAsync(null, focusAddress: true);
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        catch (Exception ex) when (ex is not (OutOfMemoryException or OperationCanceledException) && _tabs.Count == 0)
         {
             await Prompts.MessageAsync(Root.XamlRoot, "Could not start WebView2",
                 ex.Message + "\n\nInstall the WebView2 Runtime and Windows App Runtime 2.7, then try again.");
@@ -106,7 +106,12 @@ public sealed partial class MainWindow : Window
         if (inset > 0) CaptionInset.Width = new GridLength(inset);
     }
 
-    private void UpdateTitle() => Title = _active is null ? "Codale Browser" : $"{_active.Title} — Codale Browser";
+    private void UpdateTitle() => Title = _active switch
+    {
+        { Project: { } project } tab => $"{tab.Title} — {project.Name} — Codale Browser",
+        { } tab => $"{tab.Title} — Codale Browser",
+        _ => "Codale Browser",
+    };
 
     private Color ColorFor(string agentKey)
     {
@@ -117,12 +122,12 @@ public sealed partial class MainWindow : Window
         return _agentColors[agentKey] = color;
     }
 
-    private Task<BrowserTab> OpenUserTabAsync(string? url, bool focusAddress) =>
-        CreateTabAsync(null, null, activate: true, url, focusAddress);
+    private Task<BrowserTab> OpenUserTabAsync(string? url, bool focusAddress, BrowserProject? project = null, bool isPrivate = false) =>
+        CreateTabAsync(project, null, null, activate: true, url, focusAddress, isPrivate);
 
-    private async Task<BrowserTab> CreateTabAsync(string? agentKey, string? agentLabel, bool activate, string? url = null, bool focusAddress = false)
+    private async Task<BrowserTab> CreateTabAsync(BrowserProject? project, string? agentKey, string? agentLabel, bool activate, string? url = null, bool focusAddress = false, bool isPrivate = false)
     {
-        var tab = new BrowserTab(agentKey, agentLabel, agentKey is null ? null : ColorFor(agentKey));
+        var tab = new BrowserTab(project, agentKey, agentLabel, agentKey is null ? null : ColorFor(agentKey), isPrivate);
         _tabs.Add(tab);
         Tabs.TabItems.Add(tab.Item);
         Stage.Children.Add(tab.View);
@@ -131,13 +136,29 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            await tab.View.EnsureCoreWebView2Async(await EnvironmentAsync()).AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+            var environment = await EnvironmentAsync();
+            if (tab.IsClosed) throw new OperationCanceledException("The tab was closed.");
+
+            CoreWebView2ControllerOptions? options = null;
+            if ((tab.PrivateProfileName ?? project?.Key) is { } profileName)
+            {
+                options = environment.CreateCoreWebView2ControllerOptions();
+                options.ProfileName = profileName;
+                options.IsInPrivateModeEnabled = tab.IsPrivate;
+            }
+            var initialize = options is null ? tab.View.EnsureCoreWebView2Async(environment)
+                : tab.View.EnsureCoreWebView2Async(environment, options);
+            await initialize.AsTask().WaitAsync(TimeSpan.FromSeconds(30));
             if (tab.IsClosed || tab.View.CoreWebView2 is not { } core)
                 throw new OperationCanceledException("The tab was closed.");
 
+            if (tab.IsPrivate && (!core.Profile.IsInPrivateModeEnabled || core.Profile.ProfileName != tab.PrivateProfileName))
+                throw new InvalidOperationException("WebView2 could not create an isolated private profile.");
+
             WireCore(tab, core);
-            using (var info = JsonDocument.Parse(await core.CallDevToolsProtocolMethodAsync("Target.getTargetInfo", "{}")))
+            if (!tab.IsPrivate)
             {
+                using var info = JsonDocument.Parse(await core.CallDevToolsProtocolMethodAsync("Target.getTargetInfo", "{}"));
                 tab.TargetId = info.RootElement.GetProperty("targetInfo").GetProperty("targetId").GetString();
             }
 
@@ -149,7 +170,7 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             tab.Ready.TrySetException(ex);
-            if (_tabs.Contains(tab)) CloseTab(tab);
+            if (_tabs.Contains(tab)) CloseTab(tab, reopen: false);
             throw;
         }
 
@@ -162,18 +183,18 @@ public sealed partial class MainWindow : Window
         return tab;
     }
 
-    /// <summary>One persistent WebView2 profile and a local DevTools endpoint shared by every tab.</summary>
+    /// <summary>One WebView2 environment and DevTools endpoint for all profiles.</summary>
     private async Task<CoreWebView2Environment> EnvironmentAsync()
     {
-        _environment ??= CoreWebView2Environment.CreateWithOptionsAsync(null, BrowserPaths.Profile,
+        var pending = _environment ??= CoreWebView2Environment.CreateWithOptionsAsync(null, BrowserPaths.UserDataFolder,
             new CoreWebView2EnvironmentOptions { AdditionalBrowserArguments = $"--remote-debugging-port={DebuggingPort}" }).AsTask();
         try
         {
-            return await _environment;
+            return await pending;
         }
         catch
         {
-            _environment = null;
+            if (ReferenceEquals(_environment, pending)) _environment = null;
             throw;
         }
     }
@@ -206,10 +227,11 @@ public sealed partial class MainWindow : Window
         switch (e.ProcessFailedKind)
         {
             case CoreWebView2ProcessFailedKind.BrowserProcessExited:
+                var project = _active is { } active ? active.Project : tab.Project;
                 _environment = null;
                 foreach (var dead in _tabs.ToList()) RemoveTab(dead);
                 _active = null;
-                RunSafe(() => OpenUserTabAsync(null, focusAddress: false));
+                RunSafe(() => OpenUserTabAsync(null, focusAddress: false, project));
                 break;
 
             case CoreWebView2ProcessFailedKind.RenderProcessExited:
@@ -234,8 +256,11 @@ public sealed partial class MainWindow : Window
         _active = tab;
         if (!ReferenceEquals(Tabs.SelectedItem, tab.Item)) Tabs.SelectedItem = tab.Item;
 
-        // The picker belongs to the page it started in; switching pages ends it there.
-        if (PickToggle.IsChecked == true && !ReferenceEquals(previous, tab)) StopPick(previous);
+        if (!ReferenceEquals(previous, tab))
+        {
+            if (PickToggle.IsChecked == true) StopPick(previous);
+            _addressEdited = false;
+        }
         SyncAddress();
         OnActiveTabChanged();
         RelayoutAll();
@@ -243,7 +268,7 @@ public sealed partial class MainWindow : Window
         UpdateNavigationButtons();
     }
 
-    private void CloseTab(BrowserTab tab)
+    private void CloseTab(BrowserTab tab, bool reopen = true)
     {
         var index = _tabs.IndexOf(tab);
         if (index < 0) return;
@@ -254,7 +279,7 @@ public sealed partial class MainWindow : Window
             if (_tabs.Count > 0) SelectTab(_tabs[Math.Min(index, _tabs.Count - 1)]);
         }
 
-        if (_tabs.Count == 0) RunSafe(() => OpenUserTabAsync(null, focusAddress: true));
+        if (reopen && _tabs.Count == 0) RunSafe(() => OpenUserTabAsync(null, focusAddress: true, tab.Project));
     }
 
     private void RemoveTab(BrowserTab tab)
@@ -275,7 +300,27 @@ public sealed partial class MainWindow : Window
         if (args.Tab.Tag is BrowserTab tab) CloseTab(tab);
     }
 
-    private void Tabs_AddTabButtonClick(TabView sender, object args) => RunSafe(() => OpenUserTabAsync(null, focusAddress: true));
+    private void NewTab_Click(object sender, RoutedEventArgs e) => RunSafe(() => OpenUserTabAsync(null, focusAddress: true, _active?.Project));
+
+    private void NewPrivateTab_Click(object sender, RoutedEventArgs e) => RunSafe(OpenPrivateTabAsync);
+
+    private void NewPrivateTab_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        RunSafe(OpenPrivateTabAsync);
+    }
+
+    private async Task OpenPrivateTabAsync()
+    {
+        try
+        {
+            await OpenUserTabAsync(null, focusAddress: true, _active?.Project, isPrivate: true);
+        }
+        catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException) && Root.XamlRoot is { } root)
+        {
+            await Prompts.MessageAsync(root, "Could not open a private tab", ex.Message);
+        }
+    }
 
     private Task<object> HandleControlAsync(JsonElement request)
     {
@@ -290,16 +335,17 @@ public sealed partial class MainWindow : Window
         try
         {
             var op = request.GetProperty("op").GetString();
-            // A second launch only asks for the window to come forward; no session is involved.
+            var project = ReadProject(request);
             if (op == "show")
             {
                 BringToFront();
-                done.TrySetResult(new { ok = true });
+                if (project is not null) await ShowProjectAsync(project);
+                done.TrySetResult(new { ok = true, project = project?.Key });
                 return;
             }
 
             var session = request.GetProperty("session").GetString() ?? throw new InvalidOperationException("Missing session.");
-            var tab = _tabs.FirstOrDefault(t => t.AgentKey == session);
+            var tab = _tabs.FirstOrDefault(t => t.Project?.Key == project?.Key && t.AgentKey == session);
             switch (op)
             {
                 case "open":
@@ -307,8 +353,8 @@ public sealed partial class MainWindow : Window
                     if (tab is null)
                     {
                         var userIsBusy = _active is { IsAgent: false } current && current.Url != "about:blank";
-                        var blank = _active is { IsAgent: false } spare && spare.Url == "about:blank" && _tabs.Count == 1 ? spare : null;
-                        tab = await CreateTabAsync(session, label ?? "Agent", activate: !userIsBusy);
+                        var blank = SpareTab(project);
+                        tab = await CreateTabAsync(project, session, label ?? "Agent", activate: !userIsBusy);
                         if (blank is not null && blank.Url == "about:blank") CloseTab(blank);
                     }
                     else
@@ -323,13 +369,32 @@ public sealed partial class MainWindow : Window
 
                     done.TrySetResult(tab.TargetId is null
                         ? new { error = "The tab is still starting; try again." }
-                        : new { targetId = tab.TargetId, port = DebuggingPort });
+                        : new { targetId = tab.TargetId, port = DebuggingPort, project = tab.Project?.Key });
                     break;
 
                 case "focus":
                     if (tab is not null) SelectTab(tab);
                     BringToFront();
                     done.TrySetResult(new { ok = tab is not null });
+                    break;
+
+                case "cookies-info":
+                case "cookies-clear":
+                    if (tab?.View.CoreWebView2 is not { } core)
+                        throw new InvalidOperationException("The browser tab is no longer open.");
+
+                    var profile = core.Profile;
+                    if (op == "cookies-clear")
+                    {
+                        await profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.Cookies);
+                        done.TrySetResult(new { ok = true });
+                    }
+                    else
+                    {
+                        var cookies = await profile.CookieManager.GetCookiesAsync("");
+                        var domains = cookies.Select(cookie => cookie.Domain.TrimStart('.')).Distinct().Order().ToArray();
+                        done.TrySetResult(new { count = cookies.Count, domains });
+                    }
                     break;
 
                 default:
@@ -342,6 +407,36 @@ public sealed partial class MainWindow : Window
             done.TrySetResult(new { error = ex.Message });
         }
     }
+
+    private static BrowserProject? ReadProject(JsonElement request)
+    {
+        if (!request.TryGetProperty("project", out var value) || value.ValueKind == JsonValueKind.Null) return null;
+        if (value.GetString() is not { Length: 64 } key || !key.All(char.IsAsciiHexDigitLower))
+            throw new InvalidOperationException("Invalid browser project key.");
+
+        var name = request.TryGetProperty("projectName", out var label) ? label.GetString() : null;
+        return new BrowserProject(key, string.IsNullOrWhiteSpace(name) ? "Project" : name);
+    }
+
+    private async Task ShowProjectAsync(BrowserProject project)
+    {
+        var tab = _active is { IsPrivate: false } active && active.Project?.Key == project.Key ? active
+            : _tabs.FirstOrDefault(t => t.Project?.Key == project.Key && !t.IsAgent && !t.IsPrivate);
+        if (tab is not null)
+        {
+            if (!ReferenceEquals(tab, _active)) SelectTab(tab);
+            await tab.Ready.Task;
+            return;
+        }
+
+        var blank = SpareTab(project);
+        await OpenUserTabAsync(null, focusAddress: true, project);
+        if (blank is not null && blank.Url == "about:blank") CloseTab(blank);
+    }
+
+    private BrowserTab? SpareTab(BrowserProject? project) =>
+        _tabs.Count == 1 && _active is { IsAgent: false, IsPrivate: false, Url: "about:blank" } blank &&
+        (blank.Project is null || blank.Project.Key == project?.Key) ? blank : null;
 
     /// <summary>Shows the window: restored when minimized, then brought to the front.</summary>
     private void BringToFront()
@@ -470,8 +565,9 @@ public sealed partial class MainWindow : Window
     {
         e.Handled = true;
         if (OriginOf(e.Uri) is null) return;
-        if (tab.IsAgent) tab.View.CoreWebView2?.Navigate(e.Uri);
-        else RunSafe(() => OpenUserTabAsync(e.Uri, focusAddress: false));
+        // A private page keeps its new-window navigation within the tab's session.
+        if (tab.IsAgent || tab.IsPrivate) tab.View.CoreWebView2?.Navigate(e.Uri);
+        else RunSafe(() => OpenUserTabAsync(e.Uri, focusAddress: false, tab.Project));
     }
 
     private static string? OriginOf(string? url) =>

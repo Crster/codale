@@ -8,8 +8,8 @@ namespace Codale.Browser;
 /// per line. Only this Windows user can connect. Requests are
 /// <c>{"op":"open","session":key,"label":text}</c> (that session's tab, created on first use;
 /// answers with its DevTools target id) and <c>{"op":"focus","session":key}</c> (show that tab).
-/// The browser MCP server (Codale.Mcp.Browser, BrowserSession) speaks the other end; the pipe name
-/// is spelled out in both, as this project references nothing.
+/// The optional project key selects the profile for these requests and for <c>show</c>,
+/// <c>cookies-info</c>, and <c>cookies-clear</c>. Codale.Core.Browser.BrowserHost is the client.
 /// </summary>
 internal sealed class ControlPipe : IDisposable
 {

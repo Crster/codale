@@ -1,7 +1,7 @@
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 
+using Codale.Core.Browser;
 using Codale.Core.Projects;
 using Codale.Settings;
 
@@ -40,7 +40,7 @@ public sealed record ViewportPreset(string Name, int Width, int Height, double S
 /// The agent's handle on Codale Browser, the app's WebView2 window. It asks the window for a tab of
 /// this session's own (marked in the session's colour) and attaches to that tab's DevTools target,
 /// starting the window first when it is not open, so the user always sees what the agent does and
-/// parallel agents never share a page. Logins live in the window's own profile. Device and media emulation belong
+/// parallel agents never share a page. Logins live in the project's profile. Device and media emulation belong
 /// to this connection: they are dropped when it closes and never outlive the agent's session.
 /// Element handles are refs stamped onto the DOM by <see cref="SnapshotScript"/>.
 /// </summary>
@@ -58,6 +58,8 @@ public sealed class BrowserSession : IAsyncDisposable
 
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(3) };
 
+    private readonly string? _project;
+    private readonly string? _projectName;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly List<string> _console = [];
     private readonly List<string> _network = [];
@@ -72,6 +74,15 @@ public sealed class BrowserSession : IAsyncDisposable
     private bool _offline;
     private bool _acceptDialogs = true;
     private string? _promptText;
+
+    public BrowserSession() : this(Environment.GetEnvironmentVariable("CODALE_PROJECT_DIR")) { }
+
+    internal BrowserSession(string? projectPath)
+    {
+        if (string.IsNullOrWhiteSpace(projectPath)) return;
+        _project = ProjectPaths.InstanceKey(projectPath);
+        _projectName = ProjectPaths.DisplayName(projectPath);
+    }
 
     private static string DownloadDirectory => Path.Combine(CodalePaths.TempDirectory, "downloads");
 
@@ -116,34 +127,13 @@ public sealed class BrowserSession : IAsyncDisposable
     /// <summary>The name on the session's tab (CODALE_BROWSER_LABEL), e.g. the CLI and chat title.</summary>
     public string SessionLabel { get; init; } = Environment.GetEnvironmentVariable("CODALE_BROWSER_LABEL") is { Length: > 0 } label ? label : "Agent";
 
-    /// <summary>Codale Browser's per-user request channel (Codale.Browser, ControlPipe): the same name is spelled out there.</summary>
-    public static string ControlPipeName => "Codale.Browser.Control." + Environment.UserName;
-
     /// <summary>
     /// Sends one request to Codale Browser's control pipe and returns the answer, or null when no
     /// Codale Browser is answering there (another Chromium on the port, or one still starting up).
     /// </summary>
-    private async Task<JsonElement?> ControlAsync(object request, TimeSpan timeout)
-    {
-        // The pipe belongs to the window on the standard port; a browser on any other port is not it.
-        if (DebuggingPort != AttachPort) return null;
-        using var cts = new CancellationTokenSource(timeout);
-        try
-        {
-            await using var pipe = new System.IO.Pipes.NamedPipeClientStream(".", ControlPipeName, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
-            await pipe.ConnectAsync(cts.Token).ConfigureAwait(false);
-            using var reader = new StreamReader(pipe, leaveOpen: true);
-            await using var writer = new StreamWriter(pipe, leaveOpen: true) { AutoFlush = true };
-            await writer.WriteLineAsync(JsonSerializer.Serialize(request).AsMemory(), cts.Token).ConfigureAwait(false);
-            if (await reader.ReadLineAsync(cts.Token).ConfigureAwait(false) is not { } line) return null;
-            using var answer = JsonDocument.Parse(line);
-            return answer.RootElement.Clone();
-        }
-        catch (Exception ex) when (ex is IOException or OperationCanceledException or TimeoutException or JsonException or UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
+    private Task<JsonElement?> ControlAsync(string op, TimeSpan timeout) => DebuggingPort == AttachPort
+        ? BrowserHost.RequestAsync(new { op, session = SessionKey, label = SessionLabel, project = _project, projectName = _projectName }, timeout)
+        : Task.FromResult<JsonElement?>(null);
 
     /// <summary>This session's own tab in Codale Browser (created on first use), or null when no tab service answers.</summary>
     private async Task<string?> RequestTabAsync(TimeSpan timeout)
@@ -153,9 +143,15 @@ public sealed class BrowserSession : IAsyncDisposable
         {
             var remaining = deadline - DateTime.UtcNow;
             if (remaining <= TimeSpan.Zero) return null;
-            var answer = await ControlAsync(new { op = "open", session = SessionKey, label = SessionLabel }, remaining);
+            var answer = await ControlAsync("open", remaining);
             if (answer is null) return null;
-            if (answer.Value.TryGetProperty("targetId", out var id) && id.GetString() is { Length: > 0 } targetId) return targetId;
+            if (answer.Value.TryGetProperty("targetId", out var id) && id.GetString() is { Length: > 0 } targetId)
+            {
+                if (_project is not null && (!answer.Value.TryGetProperty("project", out var project) || project.GetString() != _project))
+                    throw new McpToolException("Close and reopen Codale Browser to enable project sign-ins.");
+
+                return targetId;
+            }
             if (answer.Value.TryGetProperty("error", out var error) && !error.GetString()!.Contains("starting", StringComparison.Ordinal))
             {
                 throw new McpToolException($"Codale Browser could not open a tab: {error.GetString()}");
@@ -191,20 +187,13 @@ public sealed class BrowserSession : IAsyncDisposable
         return null;
     }
 
-    private void StartBrowser()
+    private static void StartBrowser()
     {
         var exe = BrowserExecutable
             ?? throw new McpToolException("Codale Browser is not installed with this build. Open it from Codale (Open browser) and try again.");
         try
         {
-            // Same launch as the app's Open browser: the data root goes over by file (the shell cannot pass env), and
-            // Explorer starts the browser. A direct child of the packaged app inherits its package identity, which the
-            // unpackaged browser cannot start under.
-            var handoff = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codale", "browser-launch.json");
-            Directory.CreateDirectory(Path.GetDirectoryName(handoff)!);
-            File.WriteAllText(handoff, JsonSerializer.Serialize(new Dictionary<string, string> { ["dataRoot"] = CodalePaths.DataRoot }));
-
-            using var process = Process.Start(new ProcessStartInfo("explorer.exe") { Arguments = $"\"{exe}\"", UseShellExecute = false });
+            BrowserHost.Launch(exe);
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException)
         {
@@ -225,9 +214,11 @@ public sealed class BrowserSession : IAsyncDisposable
             started = true;
         }
 
-        // Each session drives a tab of its own. Codale Browser hands it out over its control pipe;
-        // a plain Chromium on the port (no pipe) is driven through its first page instead.
-        var targetId = await RequestTabAsync(started ? StartupTimeout : TimeSpan.FromSeconds(3));
+        // A project session must attach to its own tab. Standalone clients also support a plain Chromium.
+        var targetId = await RequestTabAsync(started || _project is not null ? StartupTimeout : TimeSpan.FromSeconds(3));
+        if (targetId is null && _project is not null)
+            throw new McpToolException("Codale Browser did not open a tab for this project. Open it from Codale and try again.");
+
         var deadline = DateTime.UtcNow + (started ? StartupTimeout : TimeSpan.FromSeconds(5));
         Uri? address;
         while ((address = await FindPageAsync(targetId)) is null)
@@ -587,7 +578,7 @@ public sealed class BrowserSession : IAsyncDisposable
         }
 
         // Show the user this session's tab and raise the window; a plain Chromium only gets bringToFront.
-        if (await ControlAsync(new { op = "focus", session = SessionKey }, TimeSpan.FromSeconds(3)) is null)
+        if (await ControlAsync("focus", TimeSpan.FromSeconds(3)) is null)
         {
             try { await page.Cdp.SendAsync("Page.bringToFront"); } catch (CdpException) { }
         }
@@ -635,20 +626,30 @@ public sealed class BrowserSession : IAsyncDisposable
 
     public Task<string> SessionAsync(string action) => WithPageAsync(async page =>
     {
+        const string cleared = "Cleared cookies for the current browser profile. Other site storage is kept.";
+        static string Summarize(int count, string[] domains) => $"{count} cookies across {domains.Length} domains" +
+            (domains.Length > 0 ? ": " + string.Join(", ", domains.Take(30)) : "");
+
         switch (action)
         {
             case "save":
-                return "Codale Browser keeps logins in its own profile as they happen; there is nothing to save.";
+                return "Codale Browser saves sign-ins in the current browser profile automatically.";
+
+            case "info" or "clear" when _project is not null:
+                var result = await ControlAsync($"cookies-{action}", StartupTimeout)
+                    ?? throw new McpToolException("Codale Browser did not respond to the session request.");
+                if (result.TryGetProperty("error", out var error)) throw new McpToolException(error.GetString()!);
+                return action == "clear" ? cleared : Summarize(result.GetProperty("count").GetInt32(),
+                    result.GetProperty("domains").EnumerateArray().Select(domain => domain.GetString()!).ToArray());
 
             case "clear":
                 await page.Cdp.SendAsync("Network.clearBrowserCookies");
-                return "Cleared all cookies in Codale Browser. Local storage of open pages is untouched until they reload.";
+                return cleared;
 
             case "info":
                 var cookies = (await page.Cdp.SendAsync("Network.getAllCookies")).GetProperty("cookies");
-                var domains = cookies.EnumerateArray().Select(c => (c.GetProperty("domain").GetString() ?? "").TrimStart('.')).Distinct().Order().ToList();
-                return $"{cookies.GetArrayLength()} cookies across {domains.Count} domains" +
-                    (domains.Count > 0 ? ": " + string.Join(", ", domains.Take(30)) : "");
+                var domains = cookies.EnumerateArray().Select(c => (c.GetProperty("domain").GetString() ?? "").TrimStart('.')).Distinct().Order().ToArray();
+                return Summarize(cookies.GetArrayLength(), domains);
 
             default:
                 throw new McpToolException("action must be save, clear or info.");

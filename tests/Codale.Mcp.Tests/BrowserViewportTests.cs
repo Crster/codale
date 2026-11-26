@@ -80,7 +80,7 @@ public sealed class BrowserViewportTests
                 $"--headless=new --remote-debugging-port={Port} --user-data-dir=\"{_profile}\" --no-first-run --no-default-browser-check --window-size=1200,800 about:blank"))!;
         }
 
-        public BrowserSession Session() => new() { DebuggingPort = Port, StartupTimeout = TimeSpan.FromSeconds(20) };
+        public BrowserSession Session() => new(projectPath: null) { DebuggingPort = Port, StartupTimeout = TimeSpan.FromSeconds(20) };
 
         public async ValueTask DisposeAsync()
         {
@@ -106,6 +106,20 @@ public sealed class BrowserViewportTests
             try { return await call(name, args); }
             catch (McpToolException) when (attempt < 40) { await Task.Delay(250); }
         }
+    }
+
+    [Fact]
+    public async Task Project_session_requires_a_project_tab_even_when_a_debugging_port_is_open()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        await using var session = new BrowserSession(Path.GetTempPath())
+        {
+            DebuggingPort = ((IPEndPoint)listener.LocalEndpoint).Port,
+        };
+
+        var error = await Assert.ThrowsAsync<McpToolException>(() => session.SessionAsync("clear"));
+        Assert.Contains("did not open a tab for this project", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

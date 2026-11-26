@@ -4,6 +4,8 @@ using System.Diagnostics;
 
 using Codale.App.Services;
 using Codale.Core.Agents;
+using Codale.Core.Browser;
+using Codale.Core.Projects;
 using Codale.Core.Serving;
 using Codale.Core.Tasks;
 using Codale.Settings;
@@ -175,7 +177,7 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
     /// Opens Codale's WebView2 browser for the agent to attach to.
     /// </summary>
     [RelayCommand]
-    private void OpenBrowser()
+    private async Task OpenBrowserAsync()
     {
         var exe = Path.Combine(AppContext.BaseDirectory, "Codale.Browser", "Codale.Browser.exe");
         try
@@ -186,19 +188,23 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            // Hand the data root over by file: the browser is started through the shell (below), which cannot
-            // pass env. The user profile root is not virtualised for packaged apps, so both sides see the same file.
-            var handoff = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codale", "browser-launch.json");
-            Directory.CreateDirectory(Path.GetDirectoryName(handoff)!);
-            File.WriteAllText(handoff, System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string>
+            var project = ProjectPaths.InstanceKey(ProjectPath);
+            var request = new { op = "show", project, projectName = ProjectPaths.DisplayName(ProjectPath) };
+            var timeout = TimeSpan.FromSeconds(35);
+            var answer = await BrowserHost.RequestAsync(request, timeout, connectTimeout: TimeSpan.FromMilliseconds(350));
+            if (answer is null)
             {
-                ["dataRoot"] = Codale.Core.Projects.CodalePaths.DataRoot,
-            }));
+                BrowserHost.Launch(exe);
+                answer = await BrowserHost.RequestAsync(request, timeout);
+            }
 
-            // When Codale runs packaged (dotnet run does that) a direct child inherits its package identity, which the
-            // unpackaged browser cannot start under. Explorer launches it as a plain unpackaged process.
-            using var process = Process.Start(new ProcessStartInfo("explorer.exe") { Arguments = $"\"{exe}\"", UseShellExecute = false });
-            OpenBrowserError = null;
+            OpenBrowserError = answer switch
+            {
+                null => "Codale Browser did not respond. Try opening it again.",
+                { } result when result.TryGetProperty("error", out var error) => error.GetString(),
+                { } result when result.TryGetProperty("project", out var opened) && opened.GetString() == project => null,
+                _ => "Close and reopen Codale Browser to enable project sign-ins.",
+            };
         }
         catch (Exception ex)
         {

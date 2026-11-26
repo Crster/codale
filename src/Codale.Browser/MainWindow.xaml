@@ -6,6 +6,9 @@
     xmlns:local="using:Codale.Browser">
 
     <Grid x:Name="Root" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <Grid.KeyboardAccelerators>
+            <KeyboardAccelerator Key="P" Modifiers="Control,Shift" Invoked="NewPrivateTab_Invoked" />
+        </Grid.KeyboardAccelerators>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -19,16 +22,30 @@
                 <ColumnDefinition x:Name="CaptionInset" Width="144" />
             </Grid.ColumnDefinitions>
             <TabView x:Name="Tabs"
-                     IsAddTabButtonVisible="True"
+                     IsAddTabButtonVisible="False"
                      CanReorderTabs="False"
                      CanDragTabs="False"
                      CloseButtonOverlayMode="OnPointerOver"
                      Background="Transparent"
                      TabCloseRequested="Tabs_TabCloseRequested"
-                     AddTabButtonClick="Tabs_AddTabButtonClick"
                      SelectionChanged="Tabs_SelectionChanged">
                 <TabView.TabStripFooter>
-                    <Grid x:Name="DragRegion" Background="Transparent" MinWidth="48" />
+                    <Grid ColumnSpacing="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button Style="{StaticResource ToolButton}" Content="&#xE710;" VerticalAlignment="Center"
+                                AutomationProperties.Name="Add tab" ToolTipService.ToolTip="Add tab">
+                            <Button.Flyout>
+                                <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                                    <MenuFlyoutItem Text="New Tab" Click="NewTab_Click" />
+                                    <MenuFlyoutItem Text="Private Tab" Click="NewPrivateTab_Click" />
+                                </MenuFlyout>
+                            </Button.Flyout>
+                        </Button>
+                        <Grid x:Name="DragRegion" Grid.Column="1" Background="Transparent" MinWidth="48" />
+                    </Grid>
                 </TabView.TabStripFooter>
             </TabView>
         </Grid>
