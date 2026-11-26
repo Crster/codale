@@ -5,7 +5,12 @@ using CommunityToolkit.Mvvm.ComponentModel;
 namespace Codale.App.ViewModels;
 
 /// <summary>One account or compatible endpoint in the combined agent profile picker.</summary>
-public sealed record ProviderChoice(string Name, string Label, string Detail, string CliId = "claude");
+public sealed record ProviderChoice(string Name, string Label, string Detail, string CliId = "claude", string? AccountId = null)
+{
+    public bool IsAccount => AccountId is not null;
+    public bool HasDetail => Detail.Length > 0;
+    public string SignInLabel => $"Sign in to {Label}";
+}
 
 /// <summary>
 /// Chooses the CLI and its account or endpoint for the active chat. Profiles are
@@ -92,7 +97,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
             var label = Selected?.Label ?? "";
             var separator = label.IndexOf(':');
             var identity = (separator >= 0 ? label[(separator + 1)..] : label).Trim();
-            if (identity.Length == 0 || identity.Equals("Sign-in account", StringComparison.OrdinalIgnoreCase))
+            if (identity.Length == 0 || identity == "Default account")
                 identity = Selected?.CliId ?? "Agent";
             var at = identity.IndexOf('@');
             if (at >= 0) identity = identity[..at];
@@ -125,29 +130,30 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
             var label = cli == "codex" ? "Codex" : "Claude";
             var profiles = _settings.ByokProviders.Where(p => p.Supports(cli)).ToList();
             var accounts = profiles.Where(p => p.IsAccount).ToList();
+            var defaultAccount = accounts.FirstOrDefault(p => p.AccountId.Length == 0);
             var defaultEmail = _settings.AccountLabel(cli) is { } saved && saved != "Sign-in account"
                 ? saved
-                : accounts.FirstOrDefault(p => p.AccountId.Length == 0)?.Email;
+                : defaultAccount?.Email;
 
             ProviderChoice? defaultRow = null;
-            if (defaultEmail is not null || accounts.Count == 0)
+            if (defaultEmail is not null || defaultAccount is not null || accounts.Count == 0)
             {
-                defaultRow = new("", label + ": " + (defaultEmail ?? "Sign-in account"), "Sign-in account", cli);
+                defaultRow = new("", label + ": " + (defaultEmail ?? "Default account"), "", cli, "");
                 wanted.Add(defaultRow);
             }
 
             foreach (var provider in profiles)
             {
                 var name = provider.Name.Trim();
-                if (provider.IsAccount && defaultRow is not null && (provider.AccountId.Length == 0
-                    || string.Equals(provider.Email, defaultEmail, StringComparison.OrdinalIgnoreCase)))
+                if (provider.IsAccount && defaultRow is { Name: "" } && provider.AccountId.Length == 0)
                 {
                     aliases[(cli, provider.Key.ToLowerInvariant())] = defaultRow;
                     continue;
                 }
 
-                var detail = provider.IsAccount ? "Sign-in account" : cli == "codex" ? provider.BaseUrl : provider.AnthropicBaseUrl;
-                var row = new ProviderChoice(provider.Key, label + ": " + (provider.IsAccount ? provider.Email ?? name : name), detail, cli);
+                var detail = provider.IsAccount ? "" : cli == "codex" ? provider.BaseUrl : provider.AnthropicBaseUrl;
+                var row = new ProviderChoice(provider.Key, label + ": " + (provider.IsAccount ? provider.Email ?? name : name),
+                    detail, cli, provider.IsAccount ? provider.AccountId : null);
                 wanted.Add(row);
                 if (provider.IsAccount && defaultRow is null)
                 {
@@ -168,7 +174,7 @@ public sealed partial class CliEndpointViewModel : ObservableObject, IDisposable
         // Rebuild the rows only when the providers changed: replacing them under the open
         // flyout's ListView drops its selection and focus (typing in Settings fires this per keystroke).
         // One row per real login: the CLI's default login ("") and an account profile for that same
-        // login (AccountId "", or the same email) are one account, so they share a row; the aliases
+        // CLI home (AccountId "") share a row; the aliases
         // map the folded profile names back to it for the selection.
         var (wanted, aliases) = BuildChoices();
 

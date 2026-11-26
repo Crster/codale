@@ -29,6 +29,7 @@ public static class Program
 
     private static int Run()
     {
+        BrowserPaths.ReceiveLaunchDataRoot();
         using var instance = new Mutex(true, @"Local\Codale.WebViewBrowser", out var created);
         if (!created)
         {

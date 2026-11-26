@@ -311,17 +311,24 @@
                                         SelectionMode="Single">
                                         <ListView.ItemTemplate>
                                             <DataTemplate x:DataType="vm:ProviderChoice">
-                                                <StackPanel Padding="2,2" Spacing="1">
-                                                    <TextBlock
-                                                        FontSize="13"
-                                                        Text="{x:Bind Label}"
-                                                        TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock
-                                                        FontSize="11"
-                                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                        Text="{x:Bind Detail}"
-                                                        TextTrimming="CharacterEllipsis" />
-                                                </StackPanel>
+                                                <Grid Padding="2,2" ColumnSpacing="8" ColumnDefinitions="*,Auto">
+                                                    <StackPanel Spacing="1" VerticalAlignment="Center">
+                                                        <TextBlock
+                                                            FontSize="13"
+                                                            Text="{x:Bind Label}"
+                                                            TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock
+                                                            FontSize="11"
+                                                            Visibility="{x:Bind HasDetail, Converter={StaticResource BoolToVisibility}}"
+                                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                            Text="{x:Bind Detail}"
+                                                            TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+                                                    <Button Grid.Column="1" Content="Sign in" FontSize="11" Padding="8,4"
+                                                            AutomationProperties.Name="{x:Bind SignInLabel}"
+                                                            Visibility="{x:Bind IsAccount, Converter={StaticResource BoolToVisibility}}"
+                                                            Tag="{x:Bind}" Click="OnAccountSignInClick" />
+                                                </Grid>
                                             </DataTemplate>
                                         </ListView.ItemTemplate>
                                     </ListView>

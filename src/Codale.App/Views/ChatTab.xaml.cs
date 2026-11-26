@@ -123,6 +123,7 @@ public sealed partial class ChatTab : UserControl
 
     /// <summary>CLI update was requested from the session panel.</summary>
     public event EventHandler<string>? UpdateCliRequested;
+    public event EventHandler<ProviderChoice>? AccountSignInRequested;
 
     /// <summary>The conversation has just been opened or replaced and should start at its latest row.</summary>
     private bool _showLatestTranscript = true;
@@ -157,6 +158,7 @@ public sealed partial class ChatTab : UserControl
         SessionPanel.ArtifactRequested += (_, artifact) => ArtifactRequested?.Invoke(this, artifact);
         SessionPanel.TaskPeekRequested += (_, task) => RunningTaskPeekRequested?.Invoke(this, task);
         SessionPanel.UpdateCliRequested += (_, cmd) => UpdateCliRequested?.Invoke(this, cmd);
+        SessionPanel.AccountSignInRequested += (_, choice) => AccountSignInRequested?.Invoke(this, choice);
 
         // The transcript reads in the chat font from Settings; FontFamily set here
         // inherits to every row that does not pin its own (the monospaced runs do).

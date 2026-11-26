@@ -187,13 +187,13 @@ public sealed class BrowserSession : IAsyncDisposable
         return null;
     }
 
-    private static void StartBrowser()
+    private static async Task StartBrowserAsync()
     {
         var exe = BrowserExecutable
             ?? throw new McpToolException("Codale Browser is not installed with this build. Open it from Codale (Open browser) and try again.");
         try
         {
-            BrowserHost.Launch(exe);
+            await BrowserHost.LaunchAsync(exe);
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException)
         {
@@ -210,7 +210,7 @@ public sealed class BrowserSession : IAsyncDisposable
         var started = false;
         if (!await PortOpenAsync())
         {
-            StartBrowser();
+            await StartBrowserAsync();
             started = true;
         }
 

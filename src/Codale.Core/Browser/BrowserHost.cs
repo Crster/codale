@@ -31,28 +31,30 @@ public static class BrowserHost
         }
     }
 
-    public static void Launch(string executable)
+    public static async Task LaunchAsync(string executable)
     {
         // Explorer launches the unpackaged browser without inheriting the caller's package identity.
-        // The handoff file carries the data root that the shell cannot pass in the environment.
-        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codale");
-        Directory.CreateDirectory(directory);
-        var handoff = Path.Combine(directory, "browser-launch.json");
-        var pending = Path.Combine(directory, $"browser-launch-{Guid.NewGuid():N}.tmp");
-        try
-        {
-            File.WriteAllText(pending, JsonSerializer.Serialize(new { dataRoot = CodalePaths.DataRoot }));
-            File.Move(pending, handoff, overwrite: true);
-        }
-        finally
-        {
-            File.Delete(pending);
-        }
-
+        // The startup pipe carries the data root that Explorer cannot pass in the environment.
+        await using var pipe = new NamedPipeServerStream("Codale.Browser.Startup." + Environment.UserName, PipeDirection.Out,
+            NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
         using var process = Process.Start(new ProcessStartInfo("explorer.exe")
         {
             Arguments = $"\"{executable}\"",
             UseShellExecute = false,
         });
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        try
+        {
+            await pipe.WaitForConnectionAsync(timeout.Token).ConfigureAwait(false);
+            using var writer = new StreamWriter(pipe, leaveOpen: true);
+            await writer.WriteLineAsync(JsonSerializer.Serialize(CodalePaths.DataRoot).AsMemory(), timeout.Token).ConfigureAwait(false);
+            await writer.FlushAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            // Explorer may have opened an already-running instance. The caller checks its control pipe.
+        }
     }
 }

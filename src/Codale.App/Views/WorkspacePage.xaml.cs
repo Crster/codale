@@ -432,8 +432,8 @@ public sealed partial class WorkspacePage : Page
         await RunInNewTerminalAsync(command);
     }
 
-    /// <summary>Starts login with the terminal, keeping its output visible after it exits.</summary>
-    public async Task RunAccountSignInAsync(string cliId, string? accountId = null)
+    /// <summary>Runs the CLI login in a temporary terminal and reports whether it completed successfully.</summary>
+    public async Task<bool> RunAccountSignInAsync(string cliId, string? accountId = null)
     {
         var cli = CliLocator.KnownClis.First(known => known.Id == cliId);
         var terminal = ViewModel.CreateTerminal(CodaleAccountCli.LoginCommand(cliId, accountId), $"{cli.DisplayName} sign in", cliId);
@@ -450,6 +450,7 @@ public sealed partial class WorkspacePage : Page
             {
                 await Task.Delay(500);
             }
+            return terminal.ExitCode == 0;
         }
         finally
         {
@@ -554,48 +555,83 @@ public sealed partial class WorkspacePage : Page
     }
 
     private bool _loginPromptOpen;
+    private bool _accountSignInRunning;
+
+    private async Task SignInToProfileAsync(ChatViewModel chat, string cliId, string accountId)
+    {
+        if (_accountSignInRunning) return;
+        _accountSignInRunning = true;
+        try
+        {
+            var completed = await RunAccountSignInAsync(cliId, accountId);
+            if (!IsLoaded) return;
+
+            var (signedIn, email) = completed
+                ? await CodaleAccountCli.GetAccountAsync(cliId, accountId: accountId)
+                : (false, null);
+            if (!IsLoaded) return;
+            if (!signedIn)
+            {
+                await AppDialog.AlertAsync(XamlRoot, "Sign-in incomplete", "Open the account picker to try again.");
+                return;
+            }
+
+            var settings = ViewModel.Smart.Settings;
+            if (accountId.Length == 0) settings.SetAccountLabel(cliId, email);
+            ChatViewModel.ForgetCatalogue(cliId);
+            var currentProfile = settings.FindByok(chat.EndpointName);
+            if (_chatTabs.Any(entry => ReferenceEquals(entry.Chat, chat)) &&
+                chat.CanChangeMode && !chat.IsSwitchingProfile && chat.CliId == cliId &&
+                currentProfile is not { IsAccount: false } &&
+                (currentProfile?.AccountId ?? "") == accountId)
+            {
+                if (chat.IsConnected) await chat.RestartWithCurrentConfigAsync();
+                else await chat.ConnectAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            if (IsLoaded) await AppDialog.AlertAsync(XamlRoot, "Could not sign in", ex.Message);
+        }
+        finally
+        {
+            _accountSignInRunning = false;
+        }
+    }
 
     /// <summary>
-    /// The CLI has no credentials. Its login is interactive (a browser OAuth flow),
-    /// so it runs in a terminal tab; the chat works on the next message afterwards.
+    /// Offers interactive sign-in for the chat's CLI profile when its credentials are rejected.
     /// </summary>
-    private void OnChatLoginRequired(object? sender, string? cliName) =>
+    private void OnChatLoginRequired(object? sender, string? _) =>
         DispatcherQueue.TryEnqueue(async () =>
         {
-            if (_loginPromptOpen)
+            if (_loginPromptOpen || _accountSignInRunning || sender is not ChatViewModel chat || chat.IsTerminalSession)
             {
                 return;
             }
 
-            var isCodex = string.Equals(cliName, "Codex", StringComparison.OrdinalIgnoreCase) ||
-                          (sender is ChatViewModel { SessionCli.Id: "codex" });
-            var targetCli = isCodex ? "Codex" : "Claude";
+            var cliId = chat.CliId;
+            var accountId = ViewModel.Smart.Settings.FindByok(chat.EndpointName)?.AccountId ?? "";
 
             _loginPromptOpen = true;
             try
             {
-                var steps = new StackPanel { Spacing = 10, MaxWidth = 420 };
-                steps.Children.Add(new TextBlock
-                {
-                    Text = $"Codale can't find a signed-in {targetCli} account, and no other account or endpoint is available to use.",
-                    TextWrapping = TextWrapping.Wrap,
-                });
-                steps.Children.Add(new TextBlock
-                {
-                    Text = "1. Open Settings and choose AI & Providers.\n2. Under " + targetCli + " CLI, select Add account and sign in.\n3. Come back and start a new chat.",
-                    TextWrapping = TextWrapping.Wrap,
-                    Opacity = 0.8,
-                });
                 var dialog = AppDialog.Apply(new ContentDialog
                 {
                     XamlRoot = XamlRoot,
-                    Title = $"Sign in to {targetCli}",
-                    Content = steps,
-                    PrimaryButtonText = "Open Settings",
+                    Title = $"Sign in to {chat.ProviderName}",
+                    Content = AppDialog.Message("This chat needs a valid sign-in. Continue in the terminal to reconnect its account."),
+                    PrimaryButtonText = "Sign in",
+                    SecondaryButtonText = "Open Settings",
                     CloseButtonText = "Not now",
                     DefaultButton = ContentDialogButton.Primary,
                 }, DialogTone.Info, AppDialog.Glyphs.Account);
-                if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+                var result = await dialog.ShowAsync();
+                if (result == ContentDialogResult.Primary)
+                {
+                    await SignInToProfileAsync(chat, cliId, accountId);
+                }
+                else if (result == ContentDialogResult.Secondary)
                 {
                     _window?.OpenAccountSettings();
                 }
@@ -725,6 +761,8 @@ public sealed partial class WorkspacePage : Page
             tab.TaskPeekRequested += OnChatTaskPeekRequested;
             tab.ArtifactRequested += (_, artifact) => ShowArtifactFromChat(artifact);
             tab.UpdateCliRequested += (_, cmd) => _ = UpdateCliAsync(cmd);
+            tab.AccountSignInRequested += (_, choice) =>
+                _ = SignInToProfileAsync(chat, choice.CliId, choice.AccountId!);
             tab.RunningTaskPeekRequested += (_, task) => SetPeek(ReferenceEquals(PeekPane.Task, task) && PeekPane.Visibility == Visibility.Visible ? null : task);
             chat.LoginRequired += OnChatLoginRequired;
             chat.AttentionNeeded += OnChatAttentionNeeded;

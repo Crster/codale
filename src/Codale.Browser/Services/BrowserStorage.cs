@@ -1,37 +1,34 @@
+using System.IO.Pipes;
 using System.Text.Json;
 
 namespace Codale.Browser;
 
-/// <summary>
-/// What the app hands down when it starts the browser through the shell (which cannot pass env): a small file under the
-/// user profile, outside any package's virtualised AppData. Env vars still win when present.
-/// </summary>
-internal static class LaunchHandoff
-{
-    public static string FilePath { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codale", "browser-launch.json");
-
-    private static readonly Dictionary<string, string> Values = Load();
-
-    public static string? Get(string key) => Values.TryGetValue(key, out var value) && value.Length > 0 ? value : null;
-
-    private static Dictionary<string, string> Load()
-    {
-        try
-        {
-            using var file = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
-            return JsonSerializer.Deserialize<Dictionary<string, string>>(file) ?? [];
-        }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
-        {
-            return [];
-        }
-    }
-}
-
 /// <summary>Where Codale Browser keeps its state: the data root the app passes down, or %LOCALAPPDATA%\Codale.</summary>
 internal static class BrowserPaths
 {
-    public static string DataRoot { get; } = (Environment.GetEnvironmentVariable("CODALE_DATA_ROOT") is { Length: > 0 } env ? env : LaunchHandoff.Get("dataRoot")) is { } root && Path.IsPathFullyQualified(root)
+    private static string? _launchDataRoot;
+
+    public static void ReceiveLaunchDataRoot()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        try
+        {
+            using var pipe = new NamedPipeClientStream(".", "Codale.Browser.Startup." + Environment.UserName,
+                PipeDirection.In, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            pipe.ConnectAsync(timeout.Token).GetAwaiter().GetResult();
+            using var reader = new StreamReader(pipe, leaveOpen: true);
+            if (reader.ReadLineAsync(timeout.Token).AsTask().GetAwaiter().GetResult() is { } line)
+            {
+                _launchDataRoot = JsonSerializer.Deserialize<string>(line);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or OperationCanceledException or JsonException or UnauthorizedAccessException)
+        {
+            // A standalone launch uses the environment or the default folder.
+        }
+    }
+
+    private static string DataRoot => (_launchDataRoot ?? Environment.GetEnvironmentVariable("CODALE_DATA_ROOT")) is { } root && Path.IsPathFullyQualified(root)
         ? root
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codale");
 

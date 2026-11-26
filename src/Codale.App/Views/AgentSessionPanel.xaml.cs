@@ -210,6 +210,17 @@ public sealed partial class AgentSessionPanel : UserControl, INotifyPropertyChan
 
     private void OnProfileItemClick(object sender, ItemClickEventArgs e) => ProfileFlyout.Hide();
 
+    public event EventHandler<ProviderChoice>? AccountSignInRequested;
+
+    private void OnAccountSignInClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: ProviderChoice { IsAccount: true } choice })
+        {
+            ProfileFlyout.Hide();
+            AccountSignInRequested?.Invoke(this, choice);
+        }
+    }
+
     public bool ShowSessionPickers => Session is not null && !Session.IsTerminalSession;
 
     public string WorkingDirectory => Workspace?.ProjectPath ?? "";

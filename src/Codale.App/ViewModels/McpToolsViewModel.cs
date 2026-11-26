@@ -194,7 +194,7 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
             var answer = await BrowserHost.RequestAsync(request, timeout, connectTimeout: TimeSpan.FromMilliseconds(350));
             if (answer is null)
             {
-                BrowserHost.Launch(exe);
+                await BrowserHost.LaunchAsync(exe);
                 answer = await BrowserHost.RequestAsync(request, timeout);
             }
 

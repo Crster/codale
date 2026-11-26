@@ -1893,7 +1893,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     private void CheckLoginRequired(string? text)
     {
-        if (string.IsNullOrEmpty(text))
+        if (!Status.ExpectsSubscriptionUsage || string.IsNullOrEmpty(text))
         {
             return;
         }
@@ -1901,15 +1901,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         if (text.Contains("Not logged in", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("Please run /login", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("codex login", StringComparison.OrdinalIgnoreCase) ||
-            (IsCodexSession && (text.Contains("401 Unauthorized", StringComparison.OrdinalIgnoreCase) ||
-                                text.Contains("Missing bearer or basic authentication", StringComparison.OrdinalIgnoreCase))))
+            text.Contains("401 Unauthorized", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("OAuth token has expired", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("refresh token was already used", StringComparison.OrdinalIgnoreCase) ||
+            (IsCodexSession && text.Contains("Missing bearer or basic authentication", StringComparison.OrdinalIgnoreCase)))
         {
-            if (Status.ExpectsSubscriptionUsage)
-            {
-                Status.IsAccountSignedOut = true;
-                Status.FiveHourUtilization = null;
-                Status.SevenDayUtilization = null;
-            }
+            Status.IsAccountSignedOut = true;
+            Status.FiveHourUtilization = null;
+            Status.SevenDayUtilization = null;
             LoginRequired?.Invoke(this, IsCodexSession ? "Codex" : ProviderName);
         }
     }
@@ -2097,7 +2096,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             }
 
             if (_loginNotice is not null) Items.Remove(_loginNotice);
-            _loginNotice = new NoticeItem { Text = $"No signed-in account is available for {ProviderName}. Add one in Settings → AI & Providers.", Severity = NoticeSeverity.Warning };
+            _loginNotice = new NoticeItem { Text = $"Sign in to {ProviderName} from the account picker to continue.", Severity = NoticeSeverity.Warning };
             Add(_loginNotice);
             LoginRequired?.Invoke(this, IsCodexSession ? "Codex" : ProviderName);
             return;
