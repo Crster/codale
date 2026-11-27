@@ -1,9 +1,28 @@
+using Codale.Db;
 using Codale.Workspace;
 
 namespace Codale.Settings.Tests;
 
 public sealed class ApplicationStoreTests
 {
+    [Fact]
+    public void An_idle_application_store_releases_its_lock_for_another_owner()
+    {
+        var root = Directory.CreateTempSubdirectory("codale-settings-lock-");
+        try
+        {
+            using var first = new ApplicationDatabase(root.FullName);
+            first.SetSetting("test", "saved");
+
+            using (new CodaleDatabase(first.DatabasePath, new() { LockTimeout = TimeSpan.FromSeconds(1) }))
+            {
+                // Opening independently requires the original pool to give up the folder lock.
+            }
+            Assert.Equal("saved", first.GetSetting("test"));
+        }
+        finally { root.Delete(recursive: true); }
+    }
+
     [Fact]
     public void Preferences_start_fresh_and_persist_in_the_database()
     {

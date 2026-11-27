@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 
 using Codale.Core.Projects;
@@ -9,7 +10,8 @@ namespace Codale.Core.Browser;
 /// <summary>Launches and sends requests to the per-user Codale Browser window.</summary>
 public static class BrowserHost
 {
-    public static async Task<JsonElement?> RequestAsync(object request, TimeSpan timeout, TimeSpan? connectTimeout = null)
+    public static async Task<JsonElement?> RequestAsync(object request, TimeSpan timeout, TimeSpan? connectTimeout = null,
+        bool allowForegroundActivation = false)
     {
         using var cancellation = new CancellationTokenSource(connectTimeout ?? timeout);
         try
@@ -18,6 +20,13 @@ public static class BrowserHost
                 PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
             await pipe.ConnectAsync(cancellation.Token).ConfigureAwait(false);
             if (connectTimeout is not null) cancellation.CancelAfter(timeout);
+            // Grant the connected browser permission before it handles the user's show request.
+            if (allowForegroundActivation && OperatingSystem.IsWindows() &&
+                GetNamedPipeServerProcessId(pipe.SafePipeHandle, out var processId))
+            {
+                AllowSetForegroundWindow(processId);
+            }
+
             using var reader = new StreamReader(pipe, leaveOpen: true);
             using var writer = new StreamWriter(pipe, leaveOpen: true) { AutoFlush = true };
             await writer.WriteLineAsync(JsonSerializer.Serialize(request).AsMemory(), cancellation.Token).ConfigureAwait(false);
@@ -30,6 +39,14 @@ public static class BrowserHost
             return null;
         }
     }
+
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetNamedPipeServerProcessId(Microsoft.Win32.SafeHandles.SafePipeHandle pipe, out uint processId);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AllowSetForegroundWindow(uint processId);
 
     public static async Task LaunchAsync(string executable)
     {

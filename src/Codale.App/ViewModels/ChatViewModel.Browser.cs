@@ -10,6 +10,9 @@ public sealed partial class ChatViewModel
     private bool _browserViewportChanged;
     private Task _browserViewportRestore = Task.CompletedTask;
 
+    private static bool IsBrowserHandoff(AgentEvent e) => e is ToolCallStarted call &&
+        call.ToolName == McpServerSpec.PrefixOf(McpServerSettings.BrowserName) + "browser_handoff";
+
     /// <summary>
     /// Wires this chat into the browser server: the pipe that releases emulation at turn end, and the
     /// session key and label that give the chat its own colour-marked tab in Codale Browser. The key

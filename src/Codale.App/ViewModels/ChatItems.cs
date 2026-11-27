@@ -1787,13 +1787,14 @@ public enum AttentionKind
     Plan,
     TurnFinished,
     TurnFailed,
+    BrowserHandoff,
 }
 
 /// <summary>What to tell the reader when the conversation needs them: the kind, and a line of detail.</summary>
 public sealed record AttentionRequest(AttentionKind Kind, string Message)
 {
     /// <summary>True when the turn is blocked until the reader answers.</summary>
-    public bool NeedsAnswer => Kind is AttentionKind.Question or AttentionKind.Permission or AttentionKind.Plan;
+    public bool NeedsAnswer => Kind is AttentionKind.Question or AttentionKind.Permission or AttentionKind.Plan or AttentionKind.BrowserHandoff;
 }
 
 /// <summary>

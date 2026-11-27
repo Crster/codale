@@ -1967,6 +1967,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>The BYOK provider the live session was spawned with ("" for Default); null before the first connect.</summary>
     private string? _connectedProvider;
+    private string? _connectedAccountId;
 
     /// <summary>
     /// The BYOK provider this chat uses ("" for Default). Each chat has its own; a new one starts
@@ -2211,8 +2212,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             Status.CliName = cliName;
 
+            var accountId = _smart.Settings.FindByok(EndpointName)?.AccountId;
             environment[IsCodexSession ? CodaleAccount.CodexVariable : CodaleAccount.ClaudeVariable] =
-                CodaleAccount.ProfileHome(CliId, _smart.Settings.FindByok(EndpointName)?.AccountId);
+                CodaleAccount.ProfileHome(CliId, accountId);
 
             var connectedRequest = new AgentSessionRequest
             {
@@ -2242,6 +2244,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
             _connectedRequest = connectedRequest;
             IAgentSession session = starting = _agentSessions.Create(connectedRequest);
+            _connectedAccountId = accountId;
             _session = session;
 
             await session.StartAsync();
@@ -2316,8 +2319,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     private void RefreshSubscriptionUsage(IAgentSession session, bool initialLoad = false)
     {
-        // The CLI runs under the selected profile's folder; the default folder may hold no login at all.
-        var accountId = _smart.Settings.FindByok(EndpointName)?.AccountId;
+        // Usage belongs to the account that started this session, even if settings have since changed.
+        var accountId = _connectedAccountId;
         var home = CodaleAccount.ProfileHome("claude", accountId);
         if (initialLoad) IsLoadingSubscriptionUsage = true;
 
@@ -2336,8 +2339,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 {
                     if (!ReferenceEquals(_session, session)) return;
 
-                    if (signedOut is { } isSignedOut && Status.ExpectsSubscriptionUsage &&
-                        (_smart.Settings.FindByok(EndpointName)?.AccountId ?? "") == (accountId ?? ""))
+                    if (signedOut is { } isSignedOut && Status.ExpectsSubscriptionUsage)
                     {
                         Status.IsAccountSignedOut = isSignedOut;
                         if (limits is { } reading)
@@ -2462,7 +2464,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>
     /// One event's handler must not take the app down (an exception in a dispatcher
-    /// callback is unhandled): the failure is logged, the transcript says so, and the
+    /// callback is unhandled): the failure is logged and shown above the composer, and the
     /// next event is handled normally.
     /// </summary>
     private void HandleSafely(AgentEvent e)
@@ -2473,7 +2475,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Add(new NoticeItem
+            Trace.TraceWarning($"Session event {e.GetType().Name} failed: {ex}");
+            ShowCliNotice(new NoticeItem
             {
                 Text = $"Codale could not show a {e.GetType().Name} from the session: {ex.Message}",
                 Severity = NoticeSeverity.Error,
@@ -2489,6 +2492,23 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         ComposerNotice = notice;
         _retryNotice = null;
+    }
+
+    /// <summary>Optional storage work must leave the live session and transcript usable.</summary>
+    private void TrySessionStorage(Action action, string message)
+    {
+        try { action(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ReportSessionStorageError(message, ex);
+        }
+    }
+
+    private void ReportSessionStorageError(string message, Exception error)
+    {
+        Trace.TraceWarning($"{message} {error}");
+        if (ComposerNotice?.Severity != NoticeSeverity.Error)
+            ShowCliNotice(new NoticeItem { Text = message, Severity = NoticeSeverity.Warning });
     }
 
     /// <summary>
@@ -2524,12 +2544,18 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         ResumeUnpromptedTurn(e);
         ClearRetryNoticeOnProgress(e);
 
-        RecordFeatureEvent(e);
+        TrySessionStorage(() => RecordFeatureEvent(e), "Could not save this session event to history.");
+
+        var browserHandoff = IsBrowserHandoff(e);
+        if (browserHandoff)
+        {
+            AttentionNeeded?.Invoke(this, new AttentionRequest(AttentionKind.BrowserHandoff,
+                "Complete the requested step in Codale Browser so the agent can continue."));
+        }
 
         switch (e)
         {
             case SessionInitialized init:
-                BindHistoryProvider();
                 Status.Model = init.Model;
                 if (init.Model is not ("" or "CLI" or "unknown"))
                 {
@@ -2646,7 +2672,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 // Hidden calls still count as activity: the status line names them, so
                 // a turn busy with plumbing never looks like it is doing nothing.
                 SetActivity(
-                    ToolKinds.IsPlumbing(started.ToolName) ? "Loading tools"
+                    browserHandoff ? "Waiting for your input in Codale Browser"
+                    : ToolKinds.IsPlumbing(started.ToolName) ? "Loading tools"
                     : ToolKinds.IsTodo(started.ToolName) ? "Updating tasks"
                     : $"{item.Verb} {item.Target}".Trim(),
                     started.ToolUseId);
@@ -2802,13 +2829,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 _allowRestOfTurn = false;
                 SetActivity(null, toolUseId: null);
 
-                RestoreAfterPlanTurn();
                 Status.Apply(turn);
-
-                if (!IsCodexSession && !Status.IsOverrideCli && _session is { } session)
-                {
-                    RefreshSubscriptionUsage(session);
-                }
 
                 // The context window reading comes from the last assistant message, not
                 // from the result: the result's usage sums every request of the turn
@@ -2868,6 +2889,9 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 EndTurn(outcome);
 
                 DropCompactItem();
+                TrySessionStorage(RestoreAfterPlanTurn, "Could not restore the session options.");
+                if (!IsCodexSession && !Status.IsOverrideCli && _session is { } session)
+                    RefreshSubscriptionUsage(session);
 
                 // The agent is done and the next move is the reader's.
                 if (outcome is TurnOutcome.Completed or TurnOutcome.Failed || turnEnd.Notice == TurnNotice.Paused)
@@ -4292,6 +4316,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                     (decision, redirect) = await RouteSmartAsync(text, shown, routing.Token);
                 }
                 catch (OperationCanceledException) { if (stopped.IsCancellationRequested) return; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Trace.TraceWarning($"Could not load context for automatic routing: {ex}");
+                    _autoAssessment = null;
+                    OnPropertyChanged(nameof(AutoRoutingDetails));
+                }
                 finally
                 {
                     routingClock.Stop();
@@ -4410,6 +4440,11 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             if (planOnly) return await EnterPlanModeAsync();
             if (askOnly && IsAutomaticMode) return EnterAskTurn();
             return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ReportSessionStorageError("Could not read the session configuration. Try sending again.", ex);
+            return false;
         }
         finally
         {
@@ -5144,7 +5179,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(ActiveTask));
         OnPropertyChanged(nameof(StatusDetail));
 
-        TodosChanged?.Invoke(this, todos);
+        TrySessionStorage(() => TodosChanged?.Invoke(this, todos), "Could not save the session's task list.");
     }
 
     /// <summary>Raised so the workspace can persist the list.</summary>

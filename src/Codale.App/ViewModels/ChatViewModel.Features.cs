@@ -233,13 +233,19 @@ public sealed partial class ChatViewModel
     {
         if (_recording && _featureLog is { } log)
         {
-            log.EndTurn(outcome, ProjectPath, _turnEditedPaths, _turnReadPaths);
-            if (FeatureId is { } id) Features?.QueueTopicBackfill(id);
+            TrySessionStorage(() =>
+            {
+                log.EndTurn(outcome, ProjectPath, _turnEditedPaths, _turnReadPaths);
+                if (FeatureId is { } id) Features?.QueueTopicBackfill(id);
+            }, "Could not finish saving the turn to history.");
         }
         PublishFeatureActivity(false);
     }
 
-    private void RecordUserTurn(string text, bool steer = false)
+    private void RecordUserTurn(string text, bool steer = false) =>
+        TrySessionStorage(() => SaveUserTurn(text, steer), "Could not save your message to session history.");
+
+    private void SaveUserTurn(string text, bool steer)
     {
         if (Features is not { } features) return;
         if (FeatureId is null)
@@ -337,8 +343,11 @@ public sealed partial class ChatViewModel
             return;
         }
 
-        if (FeatureId is { } id && Features is { } features)
-            foreach (var path in _pendingIndexPaths) features.IndexFile(id, path);
+        if (_pendingIndexPaths.Count > 0 && FeatureId is { } id && Features is { } features)
+            TrySessionStorage(() =>
+            {
+                foreach (var path in _pendingIndexPaths) features.IndexFile(id, path);
+            }, "Could not update the session's file index.");
         _pendingIndexPaths.Clear();
         if (_heldIndex is not { } held) return;
         _heldIndex = null;

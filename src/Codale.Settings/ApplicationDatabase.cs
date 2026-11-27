@@ -5,8 +5,9 @@ namespace Codale.Settings;
 /// <summary>Reuses the application database between operations and releases its lock when idle.</summary>
 public sealed class ApplicationDatabase(string folder) : IDisposable
 {
-    private readonly CodaleDatabasePool _records = new(TimeSpan.FromSeconds(2), new() { LockTimeout = TimeSpan.FromSeconds(3) },
-        maxHold: TimeSpan.FromSeconds(2));
+    // The launcher and project windows run in separate processes and all use this directory.
+    private readonly CodaleDatabasePool _records = new(TimeSpan.FromMilliseconds(100), new() { LockTimeout = TimeSpan.FromSeconds(3) },
+        maxHold: TimeSpan.FromMilliseconds(500));
     private readonly Lock _watchGate = new();
     private readonly List<SettingsWatch> _watches = [];
     private bool _disposed;

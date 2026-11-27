@@ -191,11 +191,12 @@ public sealed partial class McpToolsViewModel : ObservableObject, IDisposable
             var project = ProjectPaths.InstanceKey(ProjectPath);
             var request = new { op = "show", project, projectName = ProjectPaths.DisplayName(ProjectPath) };
             var timeout = TimeSpan.FromSeconds(35);
-            var answer = await BrowserHost.RequestAsync(request, timeout, connectTimeout: TimeSpan.FromMilliseconds(350));
+            var answer = await BrowserHost.RequestAsync(request, timeout, connectTimeout: TimeSpan.FromMilliseconds(350),
+                allowForegroundActivation: true);
             if (answer is null)
             {
                 await BrowserHost.LaunchAsync(exe);
-                answer = await BrowserHost.RequestAsync(request, timeout);
+                answer = await BrowserHost.RequestAsync(request, timeout, allowForegroundActivation: true);
             }
 
             OpenBrowserError = answer switch

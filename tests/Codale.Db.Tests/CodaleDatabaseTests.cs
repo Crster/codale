@@ -18,6 +18,28 @@ public sealed class CodaleDatabaseTests : IDisposable
     }
 
     [Fact]
+    public async Task An_expired_lease_is_reopened_for_a_queued_caller_but_shared_with_nested_calls()
+    {
+        using var pool = new CodaleDatabasePool(TimeSpan.FromSeconds(5), maxHold: TimeSpan.Zero);
+        var queued = new TaskCompletionSource<CodaleDatabase>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var waiter = new Thread(() =>
+        {
+            try { queued.SetResult(pool.Use(_directory, db => db)); }
+            catch (Exception ex) { queued.SetException(ex); }
+        }) { IsBackground = true };
+
+        var first = pool.Use(_directory, db =>
+        {
+            waiter.Start();
+            Assert.True(SpinWait.SpinUntil(() => waiter.ThreadState.HasFlag(ThreadState.WaitSleepJoin), TimeSpan.FromSeconds(5)));
+            pool.Use(_directory, nested => Assert.Same(db, nested));
+            return db;
+        });
+
+        Assert.NotSame(first, await queued.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
     public void Typed_records_and_named_indexes_survive_reopen_and_track_updates()
     {
         using (var db = new CodaleDatabase(_directory))

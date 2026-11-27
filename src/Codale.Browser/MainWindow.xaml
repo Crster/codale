@@ -31,6 +31,11 @@
                      Background="Transparent"
                      TabCloseRequested="Tabs_TabCloseRequested"
                      SelectionChanged="Tabs_SelectionChanged">
+                <TabView.Resources>
+                    <StaticResource x:Key="TabViewSelectedItemBorderBrush" ResourceKey="AccentFillColorDefaultBrush" />
+                    <Thickness x:Key="TabViewSelectedItemBorderThickness">1</Thickness>
+                    <Thickness x:Key="TabViewSelectedItemHeaderMargin">0,0,0,1</Thickness>
+                </TabView.Resources>
                 <TabView.TabStripFooter>
                     <Grid ColumnSpacing="2">
                         <Grid.ColumnDefinitions>

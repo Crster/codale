@@ -674,20 +674,25 @@ public sealed partial class WorkspacePage : Page
     /// <summary>
     /// A chat needs the reader. When Codale is the window in front, the transcript
     /// already shows it (the question card, the amber status and tab title), so nothing
-    /// more is said. Otherwise the taskbar button flashes until the window is brought
+    /// more is said unless the reader needs to switch to Codale Browser. When Codale
+    /// is in the background, the taskbar button flashes until the window is brought
     /// forward, a notification says what is waiting - clicking it opens this project's
     /// window - and on return the chat that asked is brought to the front.
     /// </summary>
     private void OnChatAttentionNeeded(object? sender, AttentionRequest request)
     {
-        if (sender is not ChatViewModel chat ||
-            _window?.WindowHandle is not { } hwnd ||
-            Services.Attention.IsForeground(hwnd))
+        if (sender is not ChatViewModel chat || _window?.WindowHandle is not { } hwnd)
         {
             return;
         }
 
-        Services.Attention.FlashTaskbar(hwnd);
+        var isForeground = Services.Attention.IsForeground(hwnd);
+        if (isForeground && request.Kind != AttentionKind.BrowserHandoff)
+        {
+            return;
+        }
+
+        if (!isForeground) Services.Attention.FlashTaskbar(hwnd);
 
         var who = chat.ProviderName;
         var title = request.Kind switch
@@ -695,6 +700,7 @@ public sealed partial class WorkspacePage : Page
             AttentionKind.Question => $"{who} has a question for you",
             AttentionKind.Permission => $"{who} needs your permission",
             AttentionKind.Plan => $"{who} has a plan for you to review",
+            AttentionKind.BrowserHandoff => "Codale Browser needs your input",
             AttentionKind.TurnFinished => $"{who} finished",
             _ => $"{who} stopped with an error",
         };
@@ -703,6 +709,8 @@ public sealed partial class WorkspacePage : Page
             title,
             $"{request.Message}\n{chat.TabTitle} · {ViewModel.DisplayName}",
             ActivationRequest.ToUri(ViewModel.ProjectPath));
+
+        if (isForeground) return;
 
         // A turn that merely finished is not worth yanking the reader's tab around.
         if (request.NeedsAnswer)

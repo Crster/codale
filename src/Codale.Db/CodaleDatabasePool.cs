@@ -12,6 +12,13 @@ public sealed class CodaleDatabasePool(TimeSpan idle, CodaleDatabaseOptions? opt
         public int Active;
         public long OpenedAt;
         public long ExpiresAt;
+
+        public void ReleaseDatabase()
+        {
+            var database = Database;
+            Database = null;
+            database?.Dispose();
+        }
     }
 
     private readonly Lock _gate = new();
@@ -38,8 +45,13 @@ public sealed class CodaleDatabasePool(TimeSpan idle, CodaleDatabaseOptions? opt
 
         try
         {
+            var reentrant = entry.Gate.IsHeldByCurrentThread;
             lock (entry.Gate)
             {
+                // Queued callers count as active, so an idle timer alone cannot enforce the lease limit.
+                if (!reentrant && entry.Database is not null && HasReachedHoldLimit(entry, Environment.TickCount64))
+                    entry.ReleaseDatabase();
+
                 if (entry.Database is null)
                 {
                     entry.Database = new CodaleDatabase(entry.Path, options);
@@ -55,7 +67,7 @@ public sealed class CodaleDatabasePool(TimeSpan idle, CodaleDatabaseOptions? opt
                 if (--entry.Active == 0)
                 {
                     var now = Environment.TickCount64;
-                    if (_disposed || entry.Database is null || (maxHold is { } limit && now - entry.OpenedAt >= limit.TotalMilliseconds))
+                    if (_disposed || entry.Database is null || HasReachedHoldLimit(entry, now))
                         Close(entry);
                     else
                     {
@@ -68,6 +80,9 @@ public sealed class CodaleDatabasePool(TimeSpan idle, CodaleDatabaseOptions? opt
     }
 
     public void Use(string path, Action<CodaleDatabase> action) => Use(path, db => { action(db); return true; });
+
+    private bool HasReachedHoldLimit(Entry entry, long now) =>
+        maxHold is { } limit && now - entry.OpenedAt >= limit.TotalMilliseconds;
 
     private void Expire(object? state)
     {
@@ -89,7 +104,7 @@ public sealed class CodaleDatabasePool(TimeSpan idle, CodaleDatabaseOptions? opt
     {
         _entries.Remove(entry.Path);
         entry.Timer!.Dispose();
-        entry.Database?.Dispose();
+        entry.ReleaseDatabase();
     }
 
     public void Dispose()

@@ -438,12 +438,50 @@ public sealed partial class MainWindow : Window
         _tabs.Count == 1 && _active is { IsAgent: false, IsPrivate: false, Url: "about:blank" } blank &&
         (blank.Project is null || blank.Project.Key == project?.Key) ? blank : null;
 
-    /// <summary>Shows the window: restored when minimized, then brought to the front.</summary>
+    /// <summary>Restores the window and flashes its taskbar button if it stays in the background.</summary>
     private void BringToFront()
     {
         if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter) presenter.Restore();
         Activate();
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        if (GetForegroundWindow() == hwnd) return;
+
+        SetForegroundWindow(hwnd);
+        if (GetForegroundWindow() == hwnd) return;
+
+        var flash = new FlashWindowInfo
+        {
+            Size = (uint)Marshal.SizeOf<FlashWindowInfo>(),
+            Hwnd = hwnd,
+            Flags = FlashTaskbar | FlashUntilForeground,
+            Count = uint.MaxValue,
+        };
+        FlashWindowEx(ref flash);
     }
+
+    private const uint FlashTaskbar = 0x2;         // FLASHW_TRAY
+    private const uint FlashUntilForeground = 0xC; // FLASHW_TIMERNOFG
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FlashWindowInfo
+    {
+        public uint Size;
+        public IntPtr Hwnd;
+        public uint Flags;
+        public uint Count;
+        public uint Timeout;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool FlashWindowEx(ref FlashWindowInfo info);
 
     private void Back_Click(object sender, RoutedEventArgs e)
     {
