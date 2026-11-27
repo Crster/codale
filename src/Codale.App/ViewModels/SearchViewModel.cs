@@ -40,7 +40,7 @@ public sealed class SearchRangeItem
 }
 
 /// <summary>A result the editor should open, with the spans it should highlight - current one first.</summary>
-public sealed record SearchOpenRequest(string FilePath, IReadOnlyList<LineSpan> Spans, int Current = 0, string Terms = "");
+public sealed record SearchOpenRequest(string FilePath, IReadOnlyList<LineSpan> Spans, int Current = 0, string Terms = "", string Reason = "");
 
 /// <summary>One discovered file: its path and the slices that matched.</summary>
 public sealed class SearchFileItem
@@ -88,14 +88,14 @@ public sealed class SearchFileItem
             }
         }
 
-        return new(FilePath, [.. Ranges.SelectMany(r => r.MatchSpans.Count > 0 ? r.MatchSpans : [r.Span])], current, Terms);
+        return new(FilePath, [.. Ranges.SelectMany(r => r.MatchSpans.Count > 0 ? r.MatchSpans : [r.Span])], current, Terms, Source?.Reason ?? "");
     }
 
     /// <summary>True when <paramref name="file"/> would build the very item this is.</summary>
     internal bool IsSameAs(DiscoveredFile file, string terms)
     {
         if (Source is not { } source || Terms != terms || source.FilePath != file.FilePath ||
-            source.MatchCount != file.MatchCount || source.Ranges.Count != file.Ranges.Count)
+            source.Reason != file.Reason || source.MatchCount != file.MatchCount || source.Ranges.Count != file.Ranges.Count)
         {
             return false;
         }
@@ -194,51 +194,55 @@ public sealed partial class SearchViewModel : ObservableObject
     public partial bool HasFiles { get; set; }
 
     [RelayCommand]
-    private async Task RunAsync()
+    private Task RunAsync() => RunSearchAsync();
+
+    private async Task RunSearchAsync(ReferenceQuery? reference = null)
     {
-        // A new search supersedes the old one; the search and generation are both abandoned.
-        await CancelInFlightAsync();
-
-        var keywordOnly = _keywordOnly;
-        _keywordOnly = false;
-
+        var previous = _inFlight;
         var cts = new CancellationTokenSource();
         _inFlight = cts;
-
-        Files.ReplaceAll([]);
-        HasFiles = false;
-        Status = null;
-
-        if (string.IsNullOrWhiteSpace(Query))
-        {
-            return;
-        }
-
-        IsSearching = true;
+        var query = Query;
         var clock = Stopwatch.StartNew();
 
         try
         {
-            // Every global query gets immediate retrieval followed by background
-            // refinement. Explicit references stay exhaustive and use local matches.
-            var wantsEditLocation = !keywordOnly && SearchQueryIntent.WantsEditLocation(Query);
-            var naturalLanguage = !keywordOnly && SearchQueryIntent.IsNaturalLanguage(Query);
-            // Keyword generation and the review pass run on the Decision model, or General when Decision is off.
-            ISearchModel? model = !keywordOnly && _smart.Settings.SmartFeatureEnabled("keywords")
-                ? new SmartHelperModel(_projectPath, "keywords", TimeSpan.FromSeconds(20), _smart) : null;
-
+            if (previous is not null) await previous.CancelAsync();
+            if (_inFlight != cts || cts.IsCancellationRequested) return;
+            Files.ReplaceAll([]);
+            HasFiles = false;
+            Status = null;
+            if (string.IsNullOrWhiteSpace(query)) return;
+            IsSearching = true;
             Status = "Searching…";
 
+            if (reference is not null)
+            {
+                var result = await new ReferenceSearch(_index, _knowledge).RunAsync(reference, cts.Token);
+                if (_inFlight != cts || cts.IsCancellationRequested) return;
+                Show(result);
+                var locations = result.Files.Sum(f => f.MatchCount);
+                Status = locations switch
+                {
+                    0 => "Nothing found",
+                    1 => "1 location",
+                    _ => $"{locations} locations",
+                };
+                return;
+            }
+
+            var wantsEditLocation = SearchQueryIntent.WantsEditLocation(query);
+            var naturalLanguage = SearchQueryIntent.IsNaturalLanguage(query);
+            ISearchModel? model = _smart.Settings.SmartFeatureEnabled("keywords")
+                ? new SmartHelperModel(_projectPath, "keywords", TimeSpan.FromSeconds(20), _smart) : null;
             var discovery = new SourceExplorer(_index, model)
             {
-                // A references lookup lists every user, not the best few.
                 Knowledge = _knowledge,
-                UseSemanticSearch = !keywordOnly,
+                UseSemanticSearch = true,
                 // Short code or a name typed as-is is ranked by keyword likeness in chain order over the
                 // source and semantic indexes; anything else fuses their rankings by reciprocal rank.
                 ExactKeywordFirst = true,
                 FuseSemanticRanks = true,
-                MaxRankedResults = keywordOnly ? 40 : 12,
+                MaxRankedResults = 12,
                 MaxRelated = naturalLanguage ? 4 : 0,
             };
             discovery.Progress += (_, result) => _dispatcher.TryEnqueue(() =>
@@ -251,7 +255,7 @@ public sealed partial class SearchViewModel : ObservableObject
                 }
             });
 
-            var final = await discovery.RunAsync(Query, cts.Token);
+            var final = await discovery.RunAsync(query, cts.Token);
             if (_inFlight != cts || cts.IsCancellationRequested) return;
             Show(final);
 
@@ -264,7 +268,7 @@ public sealed partial class SearchViewModel : ObservableObject
                 _ => $"{count} files",
             }) +
                      $" · {clock.Elapsed.TotalSeconds:0.0}s" +
-                     (exact ? " · exact match" : !keywordOnly && model is null ? " · local search" : "") +
+                     (exact ? " · exact match" : model is null ? " · local search" : "") +
                      (wantsEditLocation && count > 0 && !final.Files.Any(f => f.Confirmed)
                          ? " · edit location not confirmed" : "");
         }
@@ -288,21 +292,10 @@ public sealed partial class SearchViewModel : ObservableObject
         }
     }
 
-    /// <summary>Set by <see cref="FindReferences"/> for the next run only.</summary>
-    private bool _keywordOnly;
-
-    /// <summary>Searches the project for usages of <paramref name="text"/> with the keyword pass alone, no model.</summary>
-    public void FindReferences(string text)
+    public void FindReferences(ReferenceQuery reference)
     {
-        Query = text.Trim();
-        _keywordOnly = true;
-        if (!RunCommand.CanExecute(null))
-        {
-            _keywordOnly = false;
-            return;
-        }
-
-        RunCommand.Execute(null);
+        Query = reference.Text;
+        _ = RunSearchAsync(reference);
     }
 
     [RelayCommand]
@@ -321,15 +314,14 @@ public sealed partial class SearchViewModel : ObservableObject
     /// </summary>
     private void Show(DiscoveryResult result)
     {
-        var current = Files.ToDictionary(item => item.FilePath, StringComparer.OrdinalIgnoreCase);
+        var current = Files.ToLookup(item => item.FilePath, StringComparer.OrdinalIgnoreCase);
 
         var items = new List<SearchFileItem>(result.Files.Count);
         foreach (var file in result.Files)
         {
             var terms = string.Join("\n", file.Keywords.Count > 0 ? file.Keywords : result.Keywords);
-            items.Add(current.TryGetValue(file.FilePath, out var existing) && existing.IsSameAs(file, terms)
-                ? existing
-                : SearchFileItem.From(file, terms, _syntax));
+            items.Add(current[file.FilePath].FirstOrDefault(item => item.IsSameAs(file, terms))
+                ?? SearchFileItem.From(file, terms, _syntax));
         }
 
         if (items.Count != Files.Count || !items.SequenceEqual(Files))
@@ -340,12 +332,4 @@ public sealed partial class SearchViewModel : ObservableObject
         HasFiles = Files.Count > 0;
     }
 
-    private async Task CancelInFlightAsync()
-    {
-        if (_inFlight is { } existing)
-        {
-            await existing.CancelAsync();
-            _inFlight = null;
-        }
-    }
 }

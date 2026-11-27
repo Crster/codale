@@ -18,7 +18,10 @@ public enum SourceSymbolKind
 /// is where it starts and <see cref="EndLine"/> where its body ends (both 1-based, equal for a
 /// variable or a declaration with no block).
 /// </summary>
-public sealed record SourceSymbol(string Name, SourceSymbolKind Kind, int Line, int EndLine);
+public sealed record SourceSymbol(string Name, SourceSymbolKind Kind, int Line, int EndLine)
+{
+    internal int Column { get; init; }
+}
 
 /// <summary>
 /// One text file of the project as the scan saw it: its identifier counts, its

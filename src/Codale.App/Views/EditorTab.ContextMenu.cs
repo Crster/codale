@@ -1,3 +1,5 @@
+using Codale.Search.Engine;
+
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -18,7 +20,7 @@ public sealed partial class EditorTab
     private MenuFlyoutItem _referencesItem = null!;
 
     /// <summary>Raised with the selection, or the word under the cursor, when the user asks for its usages across the project.</summary>
-    public event EventHandler<string>? FindReferencesRequested;
+    public event EventHandler<ReferenceQuery>? FindReferencesRequested;
 
     private bool _previewing;
 
@@ -77,7 +79,7 @@ public sealed partial class EditorTab
 
         _copyItem.IsEnabled = hasSelection;
         _pasteItem.IsEnabled = editable;
-        _referencesItem.IsEnabled = ReferenceTarget() is { } target && target.Trim().Length > 0;
+        _referencesItem.IsEnabled = ReferenceTarget() is not null;
 
 
         var kind = PreviewKind();
@@ -86,55 +88,17 @@ public sealed partial class EditorTab
         _previewItem.Text = kind == PreviewTarget.Browser ? "Preview in Browser" : "Preview";
     }
 
-    private string SelectedText()
+    private ReferenceQuery? ReferenceTarget()
     {
         var (start, end) = FileEditor.SelectionOffsets;
-        return start == end ? string.Empty : FileEditor.GetText()[start..end];
-    }
-
-    /// <summary>
-    /// What Find References looks for: the selection, or with nothing selected, the word
-    /// under the caret - either edge of it, so a caret resting after a name still finds
-    /// that name. Null when the caret sits between words with nothing selected.
-    /// </summary>
-    private string? ReferenceTarget()
-    {
-        var (start, end) = FileEditor.SelectionOffsets;
-        if (start != end)
-        {
-            return SelectedText();
-        }
-
-        var text = FileEditor.GetText();
-        bool IsWordChar(int i) =>
-            i >= 0 && i < text.Length && (char.IsLetterOrDigit(text[i]) || text[i] == '_');
-
-        var at = IsWordChar(start) ? start : start - 1;
-        if (!IsWordChar(at))
-        {
-            return null;
-        }
-
-        var first = at;
-        while (IsWordChar(first - 1))
-        {
-            first--;
-        }
-
-        var last = at + 1;
-        while (IsWordChar(last))
-        {
-            last++;
-        }
-
-        return text[first..last];
+        return ReferenceQuery.At(ViewModel?.FilePath, FileEditor.GetText(), start, end);
     }
 
     private void FindReferences()
     {
-        if (ReferenceTarget() is { } target && target.Trim() is { Length: > 0 } word)
+        if (ReferenceTarget() is { } target)
         {
-            FindReferencesRequested?.Invoke(this, word);
+            FindReferencesRequested?.Invoke(this, target);
         }
     }
 

@@ -1660,7 +1660,7 @@
                         <Border x:Name="SidePreviewHost" Grid.Row="1" Canvas.ZIndex="0" />
                     </Grid>
 
-                    <!--  Find References: every usage of the word, beside the editor.
+                    <!--  Find References: the ranked reference path beside the editor.
                           Shares the peek's column; opening one closes the other.  -->
                     <Grid
                         x:Name="ReferencesPane"

@@ -14,6 +14,41 @@ internal static class GrammarSymbols
 
     public static IEnumerable<SourceSymbol> Extract(string path, string text, StringPool? pool, SyntaxStore? syntaxStore = null)
     {
+        var (tokenizer, language) = ForFile(path, text, syntaxStore);
+        // The file's own grammar answers when it recognised anything, even with no declarations (Markdown, JSON, YAML):
+        // re-tokenising those with the C++ grammar finds only noise. The C++ fallback is for files no grammar claims,
+        // and for a grammar that failed or matched nothing at all.
+        if (language is not null && tokenizer.Supports(language) &&
+            TryExtract(language, text, pool, tokenizer, out var recognised) is { } symbols && recognised) return symbols;
+        return language != "cpp" && tokenizer.Supports("cpp")
+            ? TryExtract("cpp", text, pool, tokenizer, out _) ?? []
+            : [];
+    }
+
+    internal static IEnumerable<(int Start, int End)> NonCodeSpans(string path, string text, CancellationToken ct)
+    {
+        var (tokenizer, language) = ForFile(path, text, null);
+        if (language is null || !tokenizer.Supports(language)) yield break;
+
+        object? state = null;
+        var tokens = new List<CodeToken>();
+        var offset = 0;
+        using var reader = new StringReader(text);
+        while (reader.ReadLine() is { } line)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!tokenizer.TryTokenizeLine(language, line, state, tokens, out state)) yield break;
+            foreach (var token in tokens)
+            {
+                if (token.ScopeStack?.Split('\u001f').Any(s => IsScope(s, "comment") || IsScope(s, "string")) == true)
+                    yield return (offset + token.Start, offset + token.Start + token.Length);
+            }
+            offset += line.Length + 1;
+        }
+    }
+
+    private static (GrammarTokenizer Tokenizer, string? Language) ForFile(string path, string text, SyntaxStore? syntaxStore)
+    {
         var store = syntaxStore ?? SyntaxService.Store;
         var catalog = syntaxStore is null ? SyntaxService.Catalog : new LanguageCatalog(store,
             new TextMateSharp.Grammars.RegistryOptions(TextMateSharp.Grammars.ThemeName.DarkPlus));
@@ -29,15 +64,7 @@ internal static class GrammarSymbols
             Workers.Value = worker;
         }
 
-        var tokenizer = worker.Tokenizer!;
-        // The file's own grammar answers when it recognised anything, even with no declarations (Markdown, JSON, YAML):
-        // re-tokenising those with the C++ grammar finds only noise. The C++ fallback is for files no grammar claims,
-        // and for a grammar that failed or matched nothing at all.
-        if (language is not null && tokenizer.Supports(language) &&
-            TryExtract(language, text, pool, tokenizer, out var recognised) is { } symbols && recognised) return symbols;
-        return language != "cpp" && tokenizer.Supports("cpp")
-            ? TryExtract("cpp", text, pool, tokenizer, out _) ?? []
-            : [];
+        return (worker.Tokenizer!, language);
     }
 
     /// <summary>
@@ -69,6 +96,9 @@ internal static class GrammarSymbols
                 var leaf = scopes.LastOrDefault() ?? "";
                 if (scopes.Any(s => IsScope(s, "comment") || IsScope(s, "string") || IsScope(s, "variable.language"))) continue;
                 var kind = Kind(leaf);
+                if (scopes.Any(s => IsScope(s, "meta.definition.property")) &&
+                    (IsScope(leaf, "variable.object.property") || IsScope(leaf, "variable.other.property")))
+                    kind = SourceSymbolKind.Property;
                 // The C++ grammar leaves some declaration names as plain spans between
                 // a scoped type and assignment operator.
                 if (kind is null && language == "cpp" && token.Kind == CodeTokenKind.Plain &&
@@ -88,13 +118,16 @@ internal static class GrammarSymbols
                 // unless the grammar explicitly identifies a declaration or parameter.
                 if (kind == SourceSymbolKind.Variable && !IsScope(leaf, "entity.name.variable") && !IsScope(leaf, "variable.parameter") &&
                     !scopes.Any(s => IsScope(s, "meta.definition.variable")) &&
-                    !FollowedByAssignment(line, tokens, tokenIndex)) continue;
+                    (IsMemberCall(line, token.Start) || !FollowedByAssignment(line, tokens, tokenIndex))) continue;
 
                 var name = line.Substring(token.Start, token.Length).Trim().TrimStart('$', '@', '%');
                 if (name.Length == 0 || name.Length > SourceTokens.MaxLength ||
                     !SourceTokens.IsStart(name[0]) || !name.All(SourceTokens.IsPart) || !seen.Add(name)) continue;
                 var end = kind == SourceSymbolKind.Variable ? lineNumber : SourceSymbols.BodyEnd(lines, lineNumber);
-                symbols.Add(new SourceSymbol(pool?.Intern(name) ?? name, kind.Value, lineNumber, end));
+                symbols.Add(new SourceSymbol(pool?.Intern(name) ?? name, kind.Value, lineNumber, end)
+                {
+                    Column = token.Start + line.AsSpan(token.Start, token.Length).IndexOf(name, StringComparison.Ordinal),
+                });
             }
         }
         return [.. symbols];
@@ -115,7 +148,8 @@ internal static class GrammarSymbols
             IsScope(scope, "entity.name.struct") || IsScope(scope, "entity.name.interface") ||
             IsScope(scope, "entity.name.enum") || IsScope(scope, "entity.name.trait")) return SourceSymbolKind.Type;
         if (IsScope(scope, "entity.name.function")) return SourceSymbolKind.Function;
-        if (IsScope(scope, "entity.name.variable.property")) return SourceSymbolKind.Property;
+        if (IsScope(scope, "entity.name.variable.property") || IsScope(scope, "entity.name.variable.field") ||
+            IsScope(scope, "entity.name.field")) return SourceSymbolKind.Property;
         if (IsScope(scope, "entity.name.variable") || IsScope(scope, "variable.other") ||
             IsScope(scope, "variable.parameter")) return SourceSymbolKind.Variable;
         return null;

@@ -11,6 +11,7 @@ using Codale.Core.Agents;
 using Codale.Core.Projects;
 using Codale.Core.Syntax;
 using Codale.Git;
+using Codale.Search.Engine;
 
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -1988,13 +1989,16 @@ public sealed partial class WorkspacePage : Page
     /// <summary>A search result: open the file and mark what the search found in it.</summary>
     private async Task ShowSearchResultAsync(SearchOpenRequest request, SearchViewModel? source = null)
     {
-        var query = (source ?? ViewModel.Search).Query;
+        var query = (source ?? ViewModel.Search).Query.ReplaceLineEndings(" ");
         var entry = await ShowFileTabAsync(request.FilePath);
         var count = request.Spans.Count;
+        var label = source == ViewModel.References && request.Reason.Length > 0
+            ? request.Reason
+            : count == 1 ? "1 match" : $"{count} matches";
 
         entry.Tab.ShowHighlights(
             request.Spans,
-            count == 1 ? $"1 match · {query}" : $"{count} matches · {query}",
+            $"{label} · {query}",
             reveal: true,
             current: request.Current,
             moveCaret: true,
@@ -2013,7 +2017,7 @@ public sealed partial class WorkspacePage : Page
         // A save changes the working tree, so git re-colours the file tree now rather than on the next poll.
         editor.Saved += (_, _) => _ = ViewModel.Git.RefreshAsync();
         var tab = new EditorTab(ViewModel.Smart, ViewModel.Syntax) { ProjectRoot = ViewModel.ProjectPath, Knowledge = ViewModel.Features.Knowledge, Owner = _window }.WithViewModel(editor);
-        tab.FindReferencesRequested += (_, text) => ShowReferences(text);
+        tab.FindReferencesRequested += (_, reference) => ShowReferences(reference);
         return tab;
     }
 
@@ -2605,11 +2609,9 @@ public sealed partial class WorkspacePage : Page
     }
 
     /// <summary>
-    /// Find References: lists every usage in a split on the right, so the editor stays on
-    /// the left and a click on a result opens that file there. The file the lookup started
-    /// from is among the results, which is the way back.
+    /// Shows the reference path beside the editor, with each result opening its source.
     /// </summary>
-    private void ShowReferences(string text)
+    private void ShowReferences(ReferenceQuery reference)
     {
         if (ReferencesList.ViewModel is null)
         {
@@ -2635,8 +2637,8 @@ public sealed partial class WorkspacePage : Page
         YieldSidePreview();
         OpenSideColumn();
         ReferencesPane.Visibility = Visibility.Visible;
-        ReferencesTitle.Text = $"References · {text}";
-        ViewModel.References.FindReferences(text);
+        ReferencesTitle.Text = $"References · {reference.Text.ReplaceLineEndings(" ")}";
+        ViewModel.References.FindReferences(reference);
     }
 
     private void OnReferencesCloseClick(object sender, RoutedEventArgs e)

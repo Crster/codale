@@ -56,7 +56,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject, IAsyncDisposa
         Git = new GitViewModel(ProjectPath, gitRepositories, smart);
         Features = new FeatureService(ProjectPath, smart, Data);
         Search = new SearchViewModel(ProjectPath, smart, syntax, Features.Knowledge);
-        References = new SearchViewModel(ProjectPath, smart, syntax);
+        References = new SearchViewModel(ProjectPath, smart, syntax, Features.Knowledge);
         Diff = new DiffViewModel(gitRepositories.Create(ProjectPath));
         DiffViewer = CreateDiffViewer();
         Sessions = new SessionsViewModel(Features);
